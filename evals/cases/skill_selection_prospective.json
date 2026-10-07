@@ -1,0 +1,445 @@
+{
+  "schema": 1,
+  "description": "Agent-authored proposed prospective controls for conservative skill selection. The author read the required project-state summary but no selector source, historical case fixtures, existing reports, or model ledger. Labels await human review; no selector outcomes or model runs exist for these cases.",
+  "cases": [
+    {
+      "id": "prospective-doc-01",
+      "category": "positive",
+      "prompt": "In my uploaded compass_brief.pdf, what reasons are given for delaying the trial? Point me to the relevant passages.",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "compass_brief.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "The user requests passage-supported analysis of one explicitly named, owned, ready document."
+    },
+    {
+      "id": "prospective-doc-02",
+      "category": "positive",
+      "prompt": "En mi archivo maple_notes.txt, ¿qué limitaciones reconoce el autor y qué pruebas ofrece? Cita los fragmentos pertinentes.",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "maple_notes.txt",
+          "kind": "document",
+          "status": "ready"
+        },
+        {
+          "name": "maple_cover.png",
+          "kind": "image",
+          "status": "ready"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "The Spanish request asks for claims and supporting excerpts from the named ready document; the image is unrelated to the requested evidence."
+    },
+    {
+      "id": "prospective-doc-03",
+      "category": "positive",
+      "prompt": "Dans mon fichier cedar_outline.docx, repère les décisions encore ouvertes et donne les sections où elles apparaissent.",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "cedar_outline.docx",
+          "kind": "document",
+          "status": "ready"
+        },
+        {
+          "name": "cedar_walk.mp4",
+          "kind": "video",
+          "status": "pending"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "The French request targets unresolved decisions in one named ready document; the pending video is not a requested source."
+    },
+    {
+      "id": "prospective-doc-04",
+      "category": "positive",
+      "prompt": "私がアップロードした spruce_report.pdf では、二つの案をどのように評価していますか。判断の根拠がある箇所も示してください。",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "spruce_report.pdf",
+          "kind": "document",
+          "status": "ready"
+        },
+        {
+          "name": "spruce_draft.pdf",
+          "kind": "document",
+          "status": "pending"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "The Japanese request seeks the comparison and its evidence in the exact ready document; a similarly named pending draft does not replace that target."
+    },
+    {
+      "id": "prospective-doc-05",
+      "category": "positive",
+      "prompt": "Compare the maintenance intervals in my uploaded amber_guide.pdf and amber_revision.pdf. Call out the differences and cite each file.",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "amber_guide.pdf",
+          "kind": "document",
+          "status": "ready"
+        },
+        {
+          "name": "amber_revision.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "Both explicit targets are owned ready documents, and the requested comparison requires evidence from their contents."
+    },
+    {
+      "id": "prospective-doc-06",
+      "category": "positive",
+      "prompt": "Using my attached pebble_minutes.txt, who committed to which follow-up and by when? Include supporting lines.",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "pebble_minutes.txt",
+          "kind": "document",
+          "status": "ready"
+        },
+        {
+          "name": "pebble_demo.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "The task extracts commitments with textual support from the named ready document; the attached video is not part of the task."
+    },
+    {
+      "id": "prospective-video-01",
+      "category": "positive",
+      "prompt": "Watch my uploaded harbor_demo.mp4 and identify the points where the presenter changes the setup. Give timestamps for each change.",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "harbor_demo.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "video-analysis",
+      "reason": "The task requests observed events and timestamps from one explicitly named, owned, ready video."
+    },
+    {
+      "id": "prospective-video-02",
+      "category": "positive",
+      "prompt": "En mi vídeo river_trial.mp4, resume la secuencia de pasos y marca el momento en que se repite una prueba.",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "river_trial.mp4",
+          "kind": "video",
+          "status": "ready"
+        },
+        {
+          "name": "river_labels.txt",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "video-analysis",
+      "reason": "The Spanish request needs the sequence and a timed event from the named ready video; the document is an unrelated attachment."
+    },
+    {
+      "id": "prospective-video-03",
+      "category": "positive",
+      "prompt": "Pour ma vidéo birch_session.mp4, retrace les arguments du présentateur et indique les horodatages des exemples qui les soutiennent.",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "birch_session.mp4",
+          "kind": "video",
+          "status": "ready"
+        },
+        {
+          "name": "birch_preview.mp4",
+          "kind": "video",
+          "status": "pending"
+        }
+      ],
+      "expected": "video-analysis",
+      "reason": "The French request analyzes the named ready video with timestamped support; the similarly named pending preview is not the target."
+    },
+    {
+      "id": "prospective-video-04",
+      "category": "positive",
+      "prompt": "私がアップロードした coral_walk.mp4 の実演で、道具の使い方が変わる場面を説明し、それぞれの時刻を示してください。",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "coral_walk.mp4",
+          "kind": "video",
+          "status": "ready"
+        },
+        {
+          "name": "coral_still.png",
+          "kind": "image",
+          "status": "ready"
+        }
+      ],
+      "expected": "video-analysis",
+      "reason": "The Japanese request asks for demonstrated changes and their times in the exact ready video; the still image is not a requested source."
+    },
+    {
+      "id": "prospective-video-05",
+      "category": "positive",
+      "prompt": "Compare the order of the demonstrations in my uploaded moss_first.mp4 and moss_second.mp4. Cite the moments that show each difference.",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "moss_first.mp4",
+          "kind": "video",
+          "status": "ready"
+        },
+        {
+          "name": "moss_second.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "video-analysis",
+      "reason": "Both explicit targets are owned ready videos, and comparing their demonstrations requires video evidence."
+    },
+    {
+      "id": "prospective-video-06",
+      "category": "positive",
+      "prompt": "From my uploaded quartz_lesson.mp4, make a short outline of the explanation and attach a timestamp to each section.",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "quartz_lesson.mp4",
+          "kind": "video",
+          "status": "ready"
+        },
+        {
+          "name": "quartz_notes.pdf",
+          "kind": "document",
+          "status": "pending"
+        },
+        {
+          "name": "quartz_take.mp4",
+          "kind": "video",
+          "status": "failed"
+        }
+      ],
+      "expected": "video-analysis",
+      "reason": "The requested outline is grounded in one named ready video; the pending document and failed alternate take are unrelated targets."
+    },
+    {
+      "id": "prospective-ordinary-01",
+      "category": "ordinary",
+      "prompt": "Cambia el nombre de mi archivo willow_clip.mp4 a willow_archive.mp4; no lo leas ni lo resumas.",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "willow_clip.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The Spanish request manages a filename and explicitly excludes content reading or summarization; ready video metadata does not turn it into analysis."
+    },
+    {
+      "id": "prospective-ordinary-02",
+      "category": "ordinary",
+      "prompt": "Affiche simplement les noms et l’état de mes fichiers fern_notes.pdf et fern_clip.mp4, sans analyser leur contenu.",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "fern_notes.pdf",
+          "kind": "document",
+          "status": "ready"
+        },
+        {
+          "name": "fern_clip.mp4",
+          "kind": "video",
+          "status": "pending"
+        }
+      ],
+      "expected": "none",
+      "reason": "The French request is a metadata listing with content analysis explicitly excluded."
+    },
+    {
+      "id": "prospective-ordinary-03",
+      "category": "ordinary",
+      "prompt": "添付の dune_notes.pdf は読まずに、「打ち合わせは明日に変更しました」という文を丁寧な日本語に直してください。",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "dune_notes.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The Japanese request rewrites the supplied sentence and explicitly excludes reading the attached document."
+    },
+    {
+      "id": "prospective-ordinary-04",
+      "category": "ordinary",
+      "prompt": "A training example says: \"Review my video acorn_walk.mp4 and identify risky steps\". Add the missing punctuation inside that quotation.",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "acorn_walk.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The actual task edits punctuation in supplied quoted text; the video-analysis instruction is quoted content rather than a request to execute."
+    },
+    {
+      "id": "prospective-ordinary-05",
+      "category": "ordinary",
+      "prompt": "Rewrite only this sentence more clearly: \"The guide compares two options but chooses neither.\" Do not consult my uploaded slate_guide.pdf.",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "slate_guide.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The user supplies the complete text for rewriting and excludes consulting the attached document."
+    },
+    {
+      "id": "prospective-ordinary-06",
+      "category": "ordinary",
+      "prompt": "Describe the layout in my uploaded tulip_diagram.png and transcribe my tulip_note.wav recording.",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "tulip_diagram.png",
+          "kind": "image",
+          "status": "ready"
+        },
+        {
+          "name": "tulip_note.wav",
+          "kind": "audio",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The requested evidence consists only of image and audio files, which are outside this document/video skill catalog."
+    },
+    {
+      "id": "prospective-ambiguous-01",
+      "category": "ambiguous",
+      "prompt": "My ridge_plan.pdf is still processing. Which constraints does it impose on the setup?",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "ridge_plan.pdf",
+          "kind": "document",
+          "status": "pending"
+        },
+        {
+          "name": "ridge_walk.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The exact requested document is pending, so there is no ready evidence for its contents; the ready video is not the requested source."
+    },
+    {
+      "id": "prospective-ambiguous-02",
+      "category": "ambiguous",
+      "prompt": "From my pond_demo.mp4, point out where the assembly changes and give the times.",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "pond_demo.mp4",
+          "kind": "video",
+          "status": "failed"
+        },
+        {
+          "name": "pond_outline.txt",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The exact video target has failed processing; an unrelated ready document cannot satisfy the requested video evidence."
+    },
+    {
+      "id": "prospective-ambiguous-03",
+      "category": "ambiguous",
+      "prompt": "Could you pull the open questions from my orbit_notes.pdf? I do not see it in my files yet.",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "orbit_reference.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The named document is absent from the supplied owned-file inventory; a different ready document must not be substituted."
+    },
+    {
+      "id": "prospective-ambiguous-04",
+      "category": "ambiguous",
+      "prompt": "My teammate says their meadow_session.mp4 explains the sequence. Can you use it to outline the steps? I have not uploaded their video.",
+      "mode": "auto",
+      "files": [],
+      "expected": "none",
+      "reason": "The request refers to another owner’s video and supplies no owned ready file; ownership and available evidence cannot be assumed."
+    },
+    {
+      "id": "prospective-ambiguous-05",
+      "category": "ambiguous",
+      "prompt": "Use my silver_brief.pdf and silver_walk.mp4 together to explain how the written instructions differ from the demonstration.",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "silver_brief.pdf",
+          "kind": "document",
+          "status": "ready"
+        },
+        {
+          "name": "silver_walk.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The task jointly requires document and video evidence; under the proposed conservative single-label policy, this mixed target has no resolved skill label."
+    },
+    {
+      "id": "prospective-ambiguous-06",
+      "category": "ambiguous",
+      "prompt": "Can you tell me what the lantern upload recommends changing first?",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "lantern_notes.pdf",
+          "kind": "document",
+          "status": "ready"
+        },
+        {
+          "name": "lantern_clip.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "Both a document and a video match the informal reference; the target is unresolved, so neither ready file determines the skill."
+    }
+  ]
+}

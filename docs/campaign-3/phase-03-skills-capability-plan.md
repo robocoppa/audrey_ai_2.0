@@ -512,7 +512,11 @@ ineligible choices per study. [Slice 3D.2](phase-03-skill-selection-policy.md)
 completed its first 30-control measurement with 27/30 correct labels, 12/13
 activation precision, two misses, and one ordinary false activation.
 [Slice 3D.3](phase-03-skill-selection-terminal-results.md) repairs the three
-exposed findings and provides copyable terminal results. Automatic selection
+exposed findings and provides copyable terminal results. Its three-case Tower
+check passed with zero model calls. [Slice 3D.4](phase-03-skill-selection-protocol.md)
+freezes prospective cases, selector source, catalog, settings, budget, and
+proposed criteria before measurement; 24 fresh controls have agent review,
+with human review and the first Tower measurement pending. Automatic selection
 remains disabled. The 3C answer comparison stays passed and does not measure
 selector precision or false activation.
 

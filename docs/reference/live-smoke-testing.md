@@ -59,7 +59,7 @@ unloads models for cold samples, run it while Audrey is idle. Its exact version,
 model-install, runner, and success criteria are maintained in
 `docs/campaign-3/phase-06-system-one-routing.md`.
 
-### Skill selection study — Slices 3D.1–3D.3
+### Skill selection study — Slices 3D.1–3D.4
 
 This standalone evaluator uses synthetic file metadata and the retained
 `qwen3.5:4b` router. It runs through the direct Ollama probe runner, which also
@@ -77,12 +77,21 @@ Keep automatic selection off. Do not repeat the settled pilot or revision-1
 study. Slice 3D.2 separates firm abstention from undecided eligible requests and
 resolves scoped exclusions. Its first 30-control measurement completed with
 27/30 correct labels, two misses, and one ordinary false activation. That is
-execution-complete with quality findings. Slice 3D.3 repairs the three exposed
-regressions. Run its [targeted foreground check](../campaign-3/phase-03-skill-selection-terminal-results.md#targeted-tower-check)
-with `--summary` and copy JSON from the launching shell; no upload, token,
-rebuild, or model call is expected. The CLI now exits 1 for label mismatches as
-well as model errors. Fresh reviewed controls and workflow evidence remain
-required; automatic activation stays off.
+execution-complete with quality findings. Slice 3D.3's three-case Tower check
+passed on October 6: 3/3 labels, zero errors, model calls, or tokens. That gate
+is settled. Do not repeat it.
+
+The next check is [3D.4 plan preparation and the first frozen prospective
+measurement](../campaign-3/phase-03-skill-selection-protocol.md#tower-check--prepare-then-measure)
+on 24 new proposed controls. Use `FOREGROUND=1` and `--summary` so results return
+in the launching shell. Preparation makes no HTTP requests; measurement uses
+the saved call budget and refuses source/case/catalog/settings drift. No token,
+upload, new model, or rebuild is needed. Human label/gate attestations default
+false, so qualification remains `pending_review`; do not add approval flags just
+to make a result green. Label errors, unmet criteria, model errors, or insufficient
+evidence exit 1. Final-answer/workflow proof remains required and automatic
+activation stays off. Model tags are frozen but weight digests and cold loading
+are not independently controlled.
 
 ### Clef and Clef Flash measurement — settled 2026-10-03
 

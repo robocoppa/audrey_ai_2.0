@@ -316,7 +316,7 @@ Its first measurement completed with 27/30 hybrid labels correct, two misses,
 and one ordinary false activation. Slice 3D.3 repairs these exposed cases; the
 set now supplies regression evidence, not untouched validation. Its labels
 still need independent human review. See the [received result](../docs/campaign-3/phase-03-skill-selection-policy.md#received-result--october-6-2026)
-and [targeted foreground check](../docs/campaign-3/phase-03-skill-selection-terminal-results.md#targeted-tower-check).
+and [accepted three-case check](../docs/campaign-3/phase-03-skill-selection-terminal-results.md#received-tower-acceptance--october-6-2026).
 The direct model arms use `scripts/probes/probe-onbox.sh`, not this suite's
 PAT-backed `/v1` runner. Production auto selection remains disabled.
 
@@ -328,3 +328,27 @@ The CLI exits 1 for mismatched proposed labels or model errors, and 2 for setup
 errors. Compact `status: passed` means this requested study arm matched the
 selected synthetic labels; production activation remains a separate gate.
 `--save-json` retains the full private artifact with either output format.
+
+### Frozen prospective study — Slice 3D.4
+
+`--prepare-plan PATH` saves a private study plan without HTTP. It freezes source,
+canonical cases/catalog, retained local model tag and origin, generation settings,
+repeats, timeout, proposed criteria, and a maximum/predicted model-call count.
+`--plan PATH` rejects mismatches before constructing the model client. Frozen
+studies prohibit `--only` and nonretained-model bypasses; artifacts refuse overwrites.
+
+The new `cases/skill_selection_prospective.json` contains 24 separately authored
+proposed controls with independent agent review; human validation remains pending.
+Do not evaluate them while developing or tuning the selector. Follow the
+[preparation and first-measurement commands](../docs/campaign-3/phase-03-skill-selection-protocol.md#tower-check--prepare-then-measure)
+on Tower with `FOREGROUND=1` and `--summary`. No PAT, upload, or rebuild is needed.
+
+The compact label status stays distinct from nested `qualification`. Human
+attestations default false; a correct, adequate measurement may exit zero while
+qualification remains `pending_review`. Inadequate evidence cannot report
+`criteria_met` and exits 1. Proposed threshold failures and model/label errors
+also exit 1. Full reports retain every sample and the complete plan.
+`--labels-reviewed` and `--gates-agreed` are preparation-only operator claims,
+not automatic approval. A tag is not a verified weight digest; loading is
+uncontrolled. All outcomes keep production activation false and require
+final-answer/workflow proof.

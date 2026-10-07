@@ -447,7 +447,11 @@ Rules on the same development set: nine correct activations, zero false
 activations, five undecided positives; no model calls. First new-control result:
 27/30 hybrid labels, 12/13 precision, two misses, one ordinary false activation;
 zero model errors. Slice 3D.3 repairs those three exposed cases and adds compact
-foreground results. Its targeted Tower regression check is pending.
+foreground results. Its targeted Tower check passed 3/3 on October 6 with zero
+model calls. Slice 3D.4 is laptop-complete (3,973 backend tests): frozen
+prospective study plans and 24 separately authored, agent-reviewed controls.
+Tower preparation/measurement and human review remain pending; qualification
+stays separate from successful execution.
 [Recorded study](phase-03-skill-selection-evaluation.md) / [new-control result](phase-03-skill-selection-policy.md) / [terminal results](phase-03-skill-selection-terminal-results.md).
 
 - [x] Keep `skills.auto_select: false` during the study.
@@ -472,9 +476,15 @@ foreground results. Its targeted Tower regression check is pending.
   regressions, preserving the exposed baseline (Slice 3D.3).
 - [x] Restore foreground shell logs and compact selection results; mismatches
   now exit 1 even when model execution completed.
-- [ ] Pass the targeted three-case revision-3 Tower check in the launching shell.
-- [ ] Obtain fresh independent controls and human label review before broader
-  selection-quality conclusions; the measured fixture is now regression data.
+- [x] Pass the targeted three-case revision-3 Tower check in the launching shell
+  (3/3, zero errors or model calls, accepted 2026-10-06).
+- [x] Author 24 fresh proposed controls separately and obtain independent
+  agent label review without evaluating or tuning on them (Slice 3D.4).
+- [x] Add frozen study plans and drift/budget checks before model HTTP;
+  separate proposed criteria from human attestations and production approval.
+- [ ] Prepare the Tower plan and collect its first prospective measurement.
+- [ ] Obtain independent human label review before broader selection-quality
+  conclusions; earlier measured fixtures are now regression data.
 - [ ] Consider a separate router/System One arm only if revised policy evidence
   warrants that comparison; no new candidate probe is queued now.
 - [x] Propose separate precision, false-activation, and missed-activation

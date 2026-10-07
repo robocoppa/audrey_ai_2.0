@@ -57,8 +57,11 @@ now separates firm abstention from undecided requests and resolves scoped
 exclusions. Its first new-control measurement completed: 27/30 correct labels,
 12/13 activation precision, two missed positives, and one ordinary false
 activation. [Slice 3D.3](phase-03-skill-selection-terminal-results.md) repairs
-those exposed regressions and restores compact foreground shell results.
-Automatic selection stays disabled; human label and workflow gates remain open.
+those exposed regressions and restores compact foreground shell results; its
+three-case Tower check passed with zero model calls. [Slice 3D.4](phase-03-skill-selection-protocol.md)
+is laptop-complete (3,973 backend tests): frozen prospective study plans
+and 24 fresh proposed controls with agent review. First Tower measurement,
+human label review, and workflow gates remain open; automatic selection stays off.
 
 Phase 4 completed on 2026-09-29. Slice 4A's owner-scoped, ranged
 original-file downloads are live-settled. Slice 4B's read-only backend smoke

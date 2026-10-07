@@ -51,6 +51,21 @@ CHOICE_SCHEMA = {
     "required": ["skill_id"],
     "additionalProperties": False,
 }
+RULES_REVISION = 3
+PLAN_KIND = "skill_selection_plan"
+PLAN_GENERATION = {"max_output_tokens": 128, "temperature": 0, "serial_calls": True, "retries": 0}
+PLAN_CRITERIA = {
+    "min_activation_precision": .95,
+    "max_miss_rate": .10,
+    "max_ordinary_false_activations": 0,
+    "minimum_repeats": 3,
+    "max_response_errors": 0,
+}
+PLAN_REVIEW_BASIS = "operator_attestations_not_independent_proof"
+PLAN_LIMITATIONS = {
+    "model_tag_is_not_weight_digest": True,
+    "final_answer_and_workflow_proof_required": True,
+}
 _OWN_REFERENCE = re.compile(
     r"\b(?:attach(?:ed|ment|ments)?|upload(?:ed|s)?|my (?:file|document|pdf|video|recording)s?"
     r"|(?:this|these|that|those|the) (?:file|document|pdf|video|recording)s?)\b", re.I
@@ -541,6 +556,231 @@ def _quantile(values: list[float | int], percentile: float) -> float | None:
     return sorted(values)[max(0, math.ceil(percentile * len(values)) - 1)] if values else None
 
 
+def _canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(value, sort_keys=True, ensure_ascii=False,
+                         separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _case_set_sha256(cases: list[Case]) -> str:
+    return _canonical_sha256([asdict(case) for case in cases])
+
+
+def _catalog_sha256(catalog) -> str:
+    fields = ("id", "name", "description", "supported_modes")
+    return _canonical_sha256([{key: entry[key] for key in fields} for entry in catalog])
+
+
+def _source_sha256() -> str:
+    try:
+        return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    except OSError as exc:
+        raise EvalError(f"cannot fingerprint evaluator source: {exc}") from exc
+
+
+def _integer(value: Any, label: str, minimum: int, maximum: int) -> int:
+    if type(value) is not int or not minimum <= value <= maximum:
+        raise EvalError(f"{label} must be an integer in {minimum}..{maximum}")
+    return value
+
+
+def _timeout(value: Any) -> float:
+    if type(value) not in {int, float} or not math.isfinite(value) or not 0 < value <= 60:
+        raise EvalError("timeout must be finite and in (0, 60] seconds")
+    return float(value)
+
+
+def _origin(value: Any) -> str:
+    value = _text(value, "Ollama origin", 2_000)
+    parts = urlsplit(value)
+    if (parts.scheme not in {"http", "https"} or not parts.hostname or parts.username
+            or parts.password or parts.query or parts.fragment or parts.path not in {"", "/"}):
+        raise EvalError("base URL must be a credential-free Ollama http(s) origin")
+    return value.rstrip("/")
+
+
+def _planned_router_calls(cases: list[Case], backend: str, repeats: int, catalog) -> int:
+    calls = 0
+    for case in cases:
+        decision = select_rules(case, catalog=catalog)
+        if not decision.terminal_abstention and (backend == "router" or decision.selected == NONE):
+            calls += repeats
+    return calls
+
+
+def prepare_plan(
+    cases: list[Case], *, backend: str, model: str, repeats: int, timeout_s: float,
+    catalog, max_router_calls: int = 36, labels_reviewed: bool = False,
+    gates_agreed: bool = False, base_url: str = "http://ollama:11434",
+) -> dict:
+    """Freeze proposed criteria and operator claims without calling a model."""
+    if not isinstance(backend, str) or backend not in {"router", "hybrid"}:
+        raise EvalError("frozen plans require router or hybrid backend")
+    if not cases or len(cases) > 256:
+        raise EvalError("a frozen plan requires 1..256 cases")
+    _text(model, "model", 200)
+    if "cloud" in model.rsplit(":", 1)[-1].casefold():
+        raise EvalError("cloud models are forbidden in frozen plans")
+    repeats = _integer(repeats, "repeats", 1, 5)
+    cap = _integer(max_router_calls, "max_router_calls", 1, 768)
+    timeout = _timeout(timeout_s)
+    if type(labels_reviewed) is not bool or type(gates_agreed) is not bool:
+        raise EvalError("review attestations must be booleans")
+    calls = _planned_router_calls(cases, backend, repeats, catalog)
+    if calls > cap:
+        raise EvalError(f"planned router calls {calls} exceed the budget {cap}")
+    return {
+        "schema": 1, "kind": PLAN_KIND, "created_at": datetime.now(UTC).isoformat(),
+        "backend": backend, "model": model, "ollama_base_url": _origin(base_url),
+        "repeats": repeats, "timeout_seconds": timeout, "rules_revision": RULES_REVISION,
+        "case_count": len(cases),
+        "fingerprints": {"source_sha256": _source_sha256(),
+                         "case_set_sha256": _case_set_sha256(cases),
+                         "catalog_sha256": _catalog_sha256(catalog)},
+        "generation": dict(PLAN_GENERATION),
+        "budget": {"max_router_calls": cap, "planned_router_calls": calls},
+        "review": {"labels_reviewed": labels_reviewed, "gates_agreed": gates_agreed,
+                   "basis": PLAN_REVIEW_BASIS},
+        "criteria": dict(PLAN_CRITERIA), "production_activation": False,
+        "limitations": dict(PLAN_LIMITATIONS),
+    }
+
+
+def _fields(value: Any, fields: set[str], label: str) -> None:
+    if not isinstance(value, dict) or set(value) != fields:
+        raise EvalError(f"{label} has unexpected or missing fields")
+
+
+def _fixed(value: Any, expected: dict, label: str) -> None:
+    _fields(value, set(expected), label)
+    if any(type(value[key]) is not type(item) or value[key] != item
+           for key, item in expected.items()):
+        raise EvalError(f"{label} does not match the frozen protocol")
+
+
+def _validate_plan_shape(plan: Any) -> None:
+    _fields(plan, {
+        "schema", "kind", "created_at", "backend", "model", "ollama_base_url", "repeats",
+        "timeout_seconds", "rules_revision", "case_count", "fingerprints", "generation",
+        "budget", "review", "criteria", "production_activation", "limitations",
+    }, "plan")
+    if type(plan["schema"]) is not int or plan["schema"] != 1 or plan["kind"] != PLAN_KIND:
+        raise EvalError("plan must be a schema-1 skill_selection_plan")
+    if not isinstance(plan["backend"], str) or plan["backend"] not in {"router", "hybrid"}:
+        raise EvalError("invalid plan backend")
+    _text(plan["model"], "plan model", 200)
+    _origin(plan["ollama_base_url"])
+    _integer(plan["repeats"], "plan repeats", 1, 5)
+    _integer(plan["case_count"], "plan case_count", 1, 256)
+    _timeout(plan["timeout_seconds"])
+    if type(plan["rules_revision"]) is not int or plan["rules_revision"] != RULES_REVISION:
+        raise EvalError("plan rules_revision differs from this evaluator")
+    if plan["production_activation"] is not False:
+        raise EvalError("a plan cannot enable production activation")
+    timestamp = _text(plan["created_at"], "plan created_at", 100)
+    try:
+        if datetime.fromisoformat(timestamp).tzinfo is None:
+            raise ValueError("timestamp must include its timezone")
+    except ValueError as exc:
+        raise EvalError("plan created_at must be an ISO timestamp with timezone") from exc
+    _fields(plan["fingerprints"], {"source_sha256", "case_set_sha256", "catalog_sha256"}, "fingerprints")
+    if any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
+           for value in plan["fingerprints"].values()):
+        raise EvalError("plan fingerprints must be lowercase SHA256 values")
+    _fixed(plan["generation"], PLAN_GENERATION, "generation")
+    _fixed(plan["criteria"], PLAN_CRITERIA, "criteria")
+    _fixed(plan["limitations"], PLAN_LIMITATIONS, "limitations")
+    _fields(plan["budget"], {"max_router_calls", "planned_router_calls"}, "budget")
+    cap = _integer(plan["budget"]["max_router_calls"], "plan max_router_calls", 1, 768)
+    _integer(plan["budget"]["planned_router_calls"], "plan planned_router_calls", 0, cap)
+    _fields(plan["review"], {"labels_reviewed", "gates_agreed", "basis"}, "review")
+    if (type(plan["review"]["labels_reviewed"]) is not bool
+            or type(plan["review"]["gates_agreed"]) is not bool
+            or plan["review"]["basis"] != PLAN_REVIEW_BASIS):
+        raise EvalError("review must contain explicit boolean operator attestations")
+
+
+def validate_plan(
+    plan: dict, cases: list[Case], *, model: str, timeout_s: float, catalog,
+    base_url: str = "http://ollama:11434",
+) -> None:
+    """Fail on drift or cost changes before constructing an HTTP client."""
+    _validate_plan_shape(plan)
+    expected = prepare_plan(
+        cases, backend=plan["backend"], model=model, repeats=plan["repeats"],
+        timeout_s=timeout_s, catalog=catalog,
+        max_router_calls=plan["budget"]["max_router_calls"],
+        labels_reviewed=plan["review"]["labels_reviewed"],
+        gates_agreed=plan["review"]["gates_agreed"], base_url=base_url,
+    )
+    for key in expected:
+        if key != "created_at" and plan[key] != expected[key]:
+            raise EvalError(f"plan {key} differs from the current study")
+
+
+def load_plan(path: Path) -> dict:
+    try:
+        with path.open("rb") as handle:
+            content = handle.read(65_537)
+        if len(content) > 65_536:
+            raise EvalError("plan exceeds 64 KiB")
+        plan = json.loads(content, object_pairs_hook=_unique_object)
+    except (OSError, ValueError) as exc:
+        raise EvalError(f"cannot load frozen plan: {exc}") from exc
+    _validate_plan_shape(plan)
+    return plan
+
+
+def qualify_report(report: dict, plan: dict) -> dict:
+    """Report proposed gates separately from human review and workflow proof."""
+    backend = plan["backend"]
+    arm = report["backends"][backend]
+    summary = arm["summary"]
+    categories = {sample["category"] for sample in arm["samples"]}
+    insufficient = [f"missing_{category}" for category in ("positive", "ordinary", "ambiguous")
+                    if category not in categories]
+    if not summary["model_called"]:
+        insufficient.append("no_model_calls")
+    if not summary["activations"]:
+        insufficient.append("no_activations")
+    if report["provenance"]["repeats"] < plan["criteria"]["minimum_repeats"]:
+        insufficient.append("fewer_than_three_repeats")
+    miss_rate = summary["misses"] / summary["positives"] if summary["positives"] else None
+    timeout = report["provenance"]["timeout_seconds"]
+    comparisons = {
+        "activation_precision": {
+            "observed": summary["precision"], "limit": plan["criteria"]["min_activation_precision"],
+            "met": summary["precision"] >= .95 if summary["precision"] is not None else None,
+        },
+        "miss_rate": {"observed": miss_rate, "limit": plan["criteria"]["max_miss_rate"],
+                      "met": miss_rate <= .10 if miss_rate is not None else None},
+        "ordinary_false_activations": {
+            "observed": summary["ordinary_false_activations"], "limit": 0,
+            "met": summary["ordinary_false_activations"] == 0,
+        },
+        "response_errors": {"observed": summary["errors"], "limit": 0, "met": summary["errors"] == 0},
+        "router_calls": {"observed": summary["model_called"], "limit": plan["budget"]["max_router_calls"],
+                         "met": summary["model_called"] <= plan["budget"]["max_router_calls"]},
+        "planned_call_count": {"observed": summary["model_called"],
+                               "limit": plan["budget"]["planned_router_calls"],
+                               "met": summary["model_called"] == plan["budget"]["planned_router_calls"]},
+        "cost_timeout": {"observed": timeout, "limit": plan["timeout_seconds"],
+                         "met": timeout == plan["timeout_seconds"] and 0 < timeout <= 60},
+    }
+    findings = [key for key, comparison in comparisons.items() if comparison["met"] is False]
+    reviewed = plan["review"]["labels_reviewed"] and plan["review"]["gates_agreed"]
+    status = ("pending_review" if not reviewed else "insufficient_evidence" if insufficient
+              else "findings" if findings else "criteria_met")
+    return {
+        "status": status,
+        "criteria_status": ("findings" if findings else "insufficient_evidence" if insufficient
+                            else "criteria_met"),
+        "review": dict(plan["review"]), "comparisons": comparisons,
+        "insufficient_evidence_reasons": insufficient, "findings": findings,
+        "production_activation": False, "final_answer_and_workflow_proof_required": True,
+    }
+
+
 def summarize_samples(samples: list[dict]) -> dict:
     total = len(samples)
     valid = [sample for sample in samples if sample["valid"]]
@@ -649,11 +889,8 @@ async def evaluate(
             "case_count": len(cases), "repeats": repeats, "timeout_seconds": timeout_s,
             "router_max_output_tokens": 128, "router_temperature": 0,
             "serial_calls": True, "retries": 0, "automatic_selection_enabled_in_harness": False,
-            "catalog": catalog, "rules_revision": 3,
-            "case_set_sha256": hashlib.sha256(json.dumps(
-                [asdict(case) for case in cases], sort_keys=True, ensure_ascii=False,
-                separators=(",", ":"),
-            ).encode("utf-8")).hexdigest(),
+            "catalog": catalog, "rules_revision": RULES_REVISION,
+            "case_set_sha256": _case_set_sha256(cases),
             "evaluation_only": True, "cold_load_controlled": False,
             "latency_quantile": "nearest_rank", "latency_includes_cold_load": True,
         },
@@ -697,7 +934,7 @@ def terminal_summary(report: dict) -> dict:
                       "positives", "misses", "ordinary_false_activations", "ordinary_total")
     execution_keys = ("errors", "ineligible_choices", "model_called", "guarded",
                       "model_latency_p50_seconds", "model_latency_p95_seconds")
-    return {
+    output = {
         "schema": report["schema"],
         "status": {"matched_labels": "passed", "findings": "findings", "errors": "failed"}[check["status"]],
         "measurement_status": report["status"], "created_at": report["created_at"],
@@ -709,6 +946,19 @@ def terminal_summary(report: dict) -> dict:
                       "output_tokens": summary["output_tokens"]},
         "findings": _label_findings(report),
     }
+    if "qualification" in report:
+        qualification = report["qualification"]
+        qualification_keys = ("status", "criteria_status", "review", "findings",
+                              "insufficient_evidence_reasons", "production_activation",
+                              "final_answer_and_workflow_proof_required")
+        output["qualification"] = {
+            **{key: qualification[key] for key in qualification_keys},
+            "checks": {key: comparison["met"]
+                       for key, comparison in qualification["comparisons"].items()},
+        }
+        output["plan"] = {key: report["plan"][key]
+                          for key in ("created_at", "fingerprints", "budget")}
+    return output
 
 
 def load_catalog(root: Path) -> tuple[dict, ...]:
@@ -807,7 +1057,8 @@ def _default_config_path() -> Path:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=("rules", "router", "hybrid"), default="rules")
+    parser.add_argument("--backend", choices=("rules", "router", "hybrid"),
+                        help="default rules; a planned run uses its frozen backend")
     parser.add_argument("--cases", type=Path, default=_default_cases_path())
     parser.add_argument("--config", type=Path, default=_default_config_path())
     parser.add_argument("--model", help="local router tag; default from router.model")
@@ -818,6 +1069,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--only", help="comma-separated exact case IDs")
     parser.add_argument("--save-json", type=Path, help="new private full report file; never overwrites")
     parser.add_argument("--summary", action="store_true", help="print a compact copyable label check instead of all samples")
+    plans = parser.add_mutually_exclusive_group()
+    plans.add_argument("--prepare-plan", type=Path, help="create a private proposed study plan without HTTP")
+    plans.add_argument("--plan", type=Path, help="run only the matching frozen study")
+    parser.add_argument("--max-router-calls", type=int, help="plan request budget, default 36")
+    parser.add_argument("--labels-reviewed", action="store_true", help="prepare only: explicitly attest label review")
+    parser.add_argument("--gates-agreed", action="store_true", help="prepare only: explicitly attest the listed gates")
     return parser
 
 
@@ -831,14 +1088,38 @@ def _offline_catalog(config_path: Path) -> tuple[tuple[dict, ...], str]:
 
 
 async def _amain(args: argparse.Namespace) -> dict:
+    frozen = args.prepare_plan is not None or args.plan is not None
+    if frozen and args.only:
+        raise EvalError("--only is forbidden for a frozen plan")
+    if frozen and args.allow_nonretained_model:
+        raise EvalError("--allow-nonretained-model is forbidden for a frozen plan")
+    if (args.labels_reviewed or args.gates_agreed) and args.prepare_plan is None:
+        raise EvalError("review attestations are accepted only with --prepare-plan")
+    if args.max_router_calls is not None and not frozen:
+        raise EvalError("--max-router-calls is accepted only for frozen plans")
+    if args.prepare_plan is not None and args.save_json is not None:
+        raise EvalError("a prepared plan is saved by --prepare-plan; omit --save-json")
+    plan = load_plan(args.plan) if args.plan is not None else None
+    backend = args.backend or (plan["backend"] if plan else "rules")
+    if args.prepare_plan is not None and backend == "rules":
+        raise EvalError("--prepare-plan requires --backend router or hybrid")
+    if plan:
+        overrides = (("backend", args.backend, plan["backend"]),
+                     ("repeats", args.repeats, plan["repeats"]),
+                     ("timeout", args.timeout, plan["timeout_seconds"]),
+                     ("max-router-calls", args.max_router_calls, plan["budget"]["max_router_calls"]))
+        for name, provided, expected in overrides:
+            if provided is not None and provided != expected:
+                raise EvalError(f"--{name} conflicts with the frozen plan")
     cases = load_cases(args.cases)
     if args.only:
         ids = set(args.only.split(","))
         if ids - {case.id for case in cases}:
             raise EvalError("--only contains unknown case IDs")
         cases = [case for case in cases if case.id in ids]
-    repeats = args.repeats if args.repeats is not None else (1 if args.backend == "rules" else 3)
-    if args.backend == "rules":
+    repeats = (plan["repeats"] if plan else args.repeats if args.repeats is not None
+               else 1 if backend == "rules" else 3)
+    if backend == "rules":
         catalog, source = _offline_catalog(args.config)
         report = await evaluate(
             cases, repeats=repeats, catalog=catalog,
@@ -849,31 +1130,77 @@ async def _amain(args: argparse.Namespace) -> dict:
         return report
     settings = load_live_settings(
         args.config, model=args.model, base_url=args.base_url,
-        allow_nonretained_model=args.allow_nonretained_model,
+        allow_nonretained_model=args.allow_nonretained_model if not frozen else False,
     )
+    timeout = (plan["timeout_seconds"] if plan else args.timeout if args.timeout is not None
+               else settings["timeout_s"])
+    if args.prepare_plan is not None:
+        prepared = prepare_plan(
+            cases, backend=backend, model=settings["model"], repeats=repeats,
+            timeout_s=timeout, catalog=settings["catalog"],
+            max_router_calls=args.max_router_calls if args.max_router_calls is not None else 36,
+            labels_reviewed=args.labels_reviewed, gates_agreed=args.gates_agreed,
+            base_url=settings["base_url"],
+        )
+        save_report(args.prepare_plan, prepared)
+        reviewed = prepared["review"]["labels_reviewed"] and prepared["review"]["gates_agreed"]
+        return {
+            "schema": 1, "status": "prepared", "plan_path": str(args.prepare_plan),
+            "backend": backend, "model": prepared["model"], "case_count": len(cases),
+            "repeats": repeats, "timeout_seconds": timeout, "model_called": 0,
+            "fingerprints": prepared["fingerprints"], "budget": prepared["budget"],
+            "review": prepared["review"],
+            "review_status": "operator_attestations_recorded" if reviewed else "pending_review",
+            "production_activation": False, "limitations": prepared["limitations"],
+        }
+    if plan:
+        validate_plan(plan, cases, model=settings["model"], timeout_s=timeout,
+                      catalog=settings["catalog"], base_url=settings["base_url"])
+        if args.save_json is not None:
+            _preflight_report(args.save_json)
     async with httpx.AsyncClient(base_url=settings["base_url"], trust_env=False,
                                 follow_redirects=False) as client:
-        report = await evaluate(cases, backend=args.backend, client=client,
+        report = await evaluate(cases, backend=backend, client=client,
                                 model=settings["model"], repeats=repeats,
-                                timeout_s=args.timeout if args.timeout is not None else settings["timeout_s"],
+                                timeout_s=timeout,
                                 catalog=settings["catalog"])
     report["provenance"]["configured_auto_select"] = False
     report["provenance"]["retained_model"] = settings["retained_model"]
     report["provenance"]["cases_file"] = str(args.cases)
+    if plan:
+        report["plan"] = plan
+        report["qualification"] = qualify_report(report, plan)
     return report
+
+
+def _preflight_report(path: Path) -> None:
+    try:
+        if path.exists() or path.is_symlink():
+            raise EvalError(f"report already exists: {path}")
+        if not path.parent.is_dir():
+            raise EvalError(f"report parent directory does not exist: {path.parent}")
+    except OSError as exc:
+        raise EvalError(f"cannot check report path: {exc}") from exc
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         report = asyncio.run(_amain(args))
+        if report["status"] == "prepared":
+            print(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False))
+            return 0
         if args.save_json:
             save_report(args.save_json, report)
         output = terminal_summary(report) if args.summary else report
         if args.summary and args.save_json:
             output["full_report"] = str(args.save_json)
         print(json.dumps(output, ensure_ascii=False, indent=2, allow_nan=False))
-        return 0 if report["selection_check"]["status"] == "matched_labels" else 1
+        qualification = report.get("qualification", {})
+        failed_criteria = bool(qualification.get("findings"))
+        insufficient = qualification.get("criteria_status") == "insufficient_evidence"
+        return 0 if (report["selection_check"]["status"] == "matched_labels"
+                     and not failed_criteria and not insufficient) else 1
     except (EvalError, ValueError) as exc:
         print(json.dumps({"schema": 1, "status": "failed", "error": str(exc)}), file=sys.stderr)
         return 2

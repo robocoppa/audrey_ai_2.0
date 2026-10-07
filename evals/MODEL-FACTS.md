@@ -1251,9 +1251,14 @@ to final answers.
 **Follow-up:** [Slice 3D.3](../docs/campaign-3/phase-03-skill-selection-terminal-results.md)
 repairs the three exposed regressions in evaluation policy revision 3 and
 makes terminal results distinguish findings from successful execution. The
-three cases match offline without model calls. This is regression evidence,
-not a new Qwen measurement. The measured controls are now exposed to tuning;
+three-case Tower check passed on October 6 (report 22:23:57 UTC): all three labels
+matched, zero errors, zero model calls, zero tokens. Its [preserved terminal JSON](results/2026-10-06-skill-selection-v3-regressions-smoke.json)
+settles the regression gate. This is not a new Qwen performance measurement.
+The measured controls are now exposed to tuning;
 fresh reviewed controls and real workflow evidence are still required.
+[Slice 3D.4](../docs/campaign-3/phase-03-skill-selection-protocol.md) now supplies
+frozen prospective study plans and 24 new agent-reviewed proposed controls.
+Preparation and first measurement remain pending; no new model result is claimed.
 
 Source: Tower log `2026-10-06-155526-eval_skill_selection.log`, report timestamp
 `2026-10-06T21:55:36.393253+00:00`;

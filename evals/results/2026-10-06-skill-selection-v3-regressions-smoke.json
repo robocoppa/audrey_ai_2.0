@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "measurement_status": "completed",
+  "created_at": "2026-10-06T22:23:57.801179+00:00",
+  "scope": "proposed synthetic labels; not production acceptance",
+  "provenance": {
+    "backend": "hybrid",
+    "model": "qwen3.5:4b",
+    "case_count": 3,
+    "repeats": 1,
+    "rules_revision": 3,
+    "case_set_sha256": "bc07900f55a7332ffc5f96739f8b1b9bd5286b6a8519908a332e141c43da6cc8",
+    "automatic_selection_enabled_in_harness": false,
+    "evaluation_only": true,
+    "cold_load_controlled": false
+  },
+  "selection": {
+    "correct": 3,
+    "total": 3,
+    "correct_activations": 2,
+    "activations": 2,
+    "precision": 1.0,
+    "positives": 2,
+    "misses": 0,
+    "ordinary_false_activations": 0,
+    "ordinary_total": 1
+  },
+  "execution": {
+    "errors": 0,
+    "ineligible_choices": 0,
+    "model_called": 0,
+    "guarded": 1,
+    "model_latency_p50_seconds": null,
+    "model_latency_p95_seconds": null,
+    "input_tokens": {
+      "total": 0,
+      "samples": 0,
+      "p50": null,
+      "p95": null
+    },
+    "output_tokens": {
+      "total": 0,
+      "samples": 0,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "findings": []
+}

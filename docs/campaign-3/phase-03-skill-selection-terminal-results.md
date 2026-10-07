@@ -1,6 +1,6 @@
 # Campaign 3 Slice 3D.3 — measured repairs and terminal results
 
-**Status:** Laptop-complete, 2026-10-06. Targeted Tower acceptance is pending.
+**Status:** Live-accepted, 2026-10-06. The targeted three-case Tower check passed.
 Automatic runtime skill selection remains disabled. Backend verification is
 recorded below.
 
@@ -107,3 +107,17 @@ controls, agreed precision/miss/cost limits, and a real final-answer comparison
 against explicit selection remain prerequisites for automatic activation.
 The exposed cases are regressions, and adding more matching development cases
 alone does not meet that gate. No new router candidate comparison is queued.
+
+## Received Tower acceptance — October 6, 2026
+
+The user supplied the foreground result created at
+`2026-10-06T22:23:57.801179+00:00`: revision 3, hybrid, three cases, one repeat,
+and the expected canonical cases hash. All three proposed labels matched:
+two analysis activations and one guarded management abstention. There were
+zero errors, misses, ordinary false activations, model calls, or tokens. The
+shell returned exit zero and copyable JSON. The [preserved result](../../evals/results/2026-10-06-skill-selection-v3-regressions-smoke.json)
+settles this targeted gate; do not repeat it unchanged.
+
+This acceptance supplies no new Qwen model performance or qualification
+evidence. [Slice 3D.4](phase-03-skill-selection-protocol.md) freezes a prospective
+study before model measurement; automatic runtime selection remains disabled.
