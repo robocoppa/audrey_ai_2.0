@@ -1,11 +1,8 @@
 # Campaign 3 Phase 18 — admin controls and project presentation
 
-## 18A — current slice
+## 18A — complete
 
-**Status:** Built and verified locally. Backend/frontend regression suites,
-typecheck, production build, and the Chromium admin interaction check pass.
-Deployed browser acceptance remains open. Changed admin/API/test lint passes;
-ProjectWorkspace has a pre-existing lint finding in its form-reset effect.
+**Status:** User accepted October 7, 2026.
 
 Account role/status/delete controls use fixed columns, including an empty delete
 slot on the current administrator's row. Model rows place a drag handle on the
@@ -34,8 +31,4 @@ Project home uses **Upload file to project**, equally readable file-action label
 and conversation rows styled like the sidebar. Narrow layouts wrap controls
 without changing upload, membership, grounding, or navigation behavior.
 
-Deploy after pull on Tower by rebuilding `audrey` and `audrey-ui`. Manual
-acceptance covers role persistence, aligned rows, drag persistence after reopening,
-dropdown dismissal, and project presentation. No model generation or new upload
-is needed for those checks. Automatic English skill selection is the following
-slice in Phase 03; it is not part of this UI change.
+Upload, membership, grounding, and navigation behavior remain accepted.

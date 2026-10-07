@@ -9,14 +9,12 @@ they are not ongoing task lists.
 
 ## Current work
 
-- **18A — admin controls and project presentation:** replace model visibility
-  and enable controls with direct role access, align rows, add left-side drag
-  ordering, and improve project file actions and conversation rows. Implementation
-  passed laptop verification; deployed browser acceptance remains open.
-- **Next: 3D — automatic English skill selection.** The user queued this after
-  18A. Reuse the existing selector foundation and retained router; keep runtime
-  automatic selection off until English selection and answer/workflow quality
-  justify activation. Explicit skills remain accepted.
+- **3D.6 — native automatic English skill selection:** built, with browser
+  acceptance pending. Opt-in deterministic rules use ready owned attachment and
+  Project metadata to select the accepted document/video skills. Explicit choices
+  win; unclear targets abstain. No new classifier calls or bot/API changes.
+  `skills.auto_select: false` remains the deployment default until acceptance.
+- **18A — admin controls and project presentation:** accepted October 7.
 - **Closed by the user October 7:** old domain cleanup and the model/runtime
   evidence and traffic-analysis followups. These require no further campaign
   work or testing; do not manufacture new measurements for the model ledger.
@@ -33,7 +31,7 @@ they are not ongoing task lists.
 |---|---|---|
 | 01 | [Platform hardening](phase-01-platform-hardening.md) | Complete |
 | 02 | [Native application](phase-02-native-application.md) | Complete |
-| 03 | [Skills](phase-03-skills.md) | Explicit skills complete; English automatic selection next after 18A |
+| 03 | [Skills](phase-03-skills.md) | Explicit skills complete; native automatic selection built, acceptance pending |
 | 04 | [File downloads](phase-04-file-downloads.md) | Complete |
 | 05 | [Responses foundation](phase-05-responses-api.md) | Complete |
 | 06 | [Router candidates](phase-06-system-one-routing.md) | Complete; retain qwen3.5:4b |
@@ -48,14 +46,14 @@ they are not ongoing task lists.
 | 15 | [Composer and Projects](phase-15-composer-and-projects.md) | Complete |
 | 16 | [Document tooling boundary](phase-16-native-document-tools.md) | Retired; Hermes uses its existing stack |
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
-| 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A built and verified locally; browser acceptance pending |
+| 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 
 ## Remaining work
 
-1. Deploy 18A and complete its visual acceptance.
-2. Build automatic skill selection for English file questions (3D), using the
-   accepted explicit skills and existing rules/router foundation. Preserve an
-   abstain default, tool policy, explicit selection precedence, and ordinary chat.
+1. Enable native automatic selection for the targeted English browser check and
+   accept document/video answer grounding, explicit precedence, and ordinary chat.
+2. After acceptance, record the activation decision in config and close 3D.6.
+   No additional campaign work is required without a new user request.
 
 Domain cleanup and operational evidence/traffic followups are closed by user
 confirmation. Tailscale, 17D, and further Hermes changes stay deferred. 17C is
@@ -71,8 +69,9 @@ only a future diagnostic note for an actual reported failure.
   They do not establish input-token or billing savings.
 - Hermes executes and approves its tools. Audrey validates model requests;
   required tool selection would not authorize execution.
-- Automatic skill selection for English requests is queued after 18A.
-  Non-English input work is out of scope. Historical eval artifacts remain
+- Automatic English skill selection is limited to native chat, deterministic
+  file intent, and the two accepted bundles. A model-based classifier or broader
+  activation requires demonstrated benefit. Non-English input work is out of scope. Historical eval artifacts remain
   evidence; they are not fresh acceptance data after tuning.
 - Background generation, webhooks, Conversations API, historical imports,
   broader media analysis, and model/config experiments require a real need.

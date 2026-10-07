@@ -21,6 +21,7 @@ from audrey.skills.models import (
     SkillRegistrySnapshot,
     SkillSelectionReason,
 )
+from audrey.skills.selection import SkillEvidence, select_automatic_skill
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,8 +84,10 @@ class SkillRegistry:
         known_tools: frozenset[str],
         available_tools: frozenset[str],
         virtual_models: Mapping[str, str] | None = None,
+        auto_select: bool = False,
     ) -> None:
         self.enabled = enabled
+        self.auto_select = auto_select
         self._roots = roots
         self._limits = limits
         self._known_tools = known_tools
@@ -115,6 +118,7 @@ class SkillRegistry:
             known_tools=known_tools,
             available_tools=available_tools,
             virtual_models=config.get("virtual_models", {}),
+            auto_select=bool(config.get("auto_select", False)),
         )
 
     def rediscover(
@@ -293,6 +297,44 @@ class SkillRegistry:
                 )
             return None
         return ResolvedSkill(spec=record.spec, reason=reason)
+
+    def resolve_auto(
+        self,
+        *,
+        prompt: str,
+        files: tuple[SkillEvidence, ...],
+        virtual_model: str,
+        mode: SkillMode,
+    ) -> ResolvedSkill | None:
+        """Native opt-in selection; explicit and mapped resolution runs first.
+
+        Unavailable or unsupported skills abstain instead of failing ordinary
+        chat. Compatibility/API handlers never call this method.
+        """
+
+        if not self.enabled or not self.auto_select:
+            return None
+        if virtual_model in self._virtual_models or virtual_model.startswith(
+            "audrey_passthrough/"
+        ):
+            return None
+        started = time.perf_counter()
+        resolved = None
+        try:
+            skill_id = select_automatic_skill(prompt, files)
+            record = self._state.records.get(skill_id) if skill_id else None
+            if record and not record.unavailable_tools and mode in record.spec.supported_modes:
+                resolved = ResolvedSkill(spec=record.spec, reason="automatic")
+            return resolved
+        finally:
+            skill_requests_total.labels(
+                skill=resolved.spec.id if resolved else "none",
+                reason="automatic",
+                outcome="selected" if resolved else "none",
+            ).inc()
+            skill_selection_seconds.labels(reason="automatic").observe(
+                time.perf_counter() - started
+            )
 
     def resolve_virtual_model(self, virtual_model: str) -> SkillRecord | None:
         """Return one usable mapped bundle; unavailable mappings fail closed."""

@@ -77,6 +77,7 @@ from audrey.routes.openai.schemas import ChatCompletionRequest
 from audrey.routes.openai.streaming import OpenAIStreamSession, StreamOutcome
 from audrey.skills import SkillSelectionError, skill_mode_for_virtual_model
 from audrey.skills.models import ResolvedSkill
+from audrey.skills.native import resolve_native_auto_skill
 from audrey.tools.discovery import ToolRegistry
 
 log = logging.getLogger(__name__)
@@ -1023,24 +1024,6 @@ async def create_run(
             else 400
         )
         raise HTTPException(status_code=status_code, detail=exc.detail()) from exc
-    platform_tools = getattr(request.app.state, "tools", ToolRegistry())
-    model_tools = (
-        platform_tools.restrict(resolved_skill.spec.allowed_tools)
-        if resolved_skill is not None
-        else platform_tools
-    )
-    if resolved_skill is not None:
-        log.info(
-            "skill.selected id=%s version=%d digest=%s reason=%s tools=%s "
-            "instruction_chars=%d resource_chars=%d",
-            resolved_skill.spec.id,
-            resolved_skill.spec.version,
-            resolved_skill.spec.digest[:12],
-            resolved_skill.reason,
-            model_tools.names(),
-            len(resolved_skill.spec.instructions),
-            sum(len(resource.content) for resource in resolved_skill.spec.resources),
-        )
     if selected_model.kind == "direct" and payload.attachment_ids:
         raise HTTPException(
             status_code=422,
@@ -1076,6 +1059,35 @@ async def create_run(
     )
     if previous_records is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
+    if resolved_skill is None and payload.skill is None and selected_model.kind != "direct":
+        resolved_skill = await resolve_native_auto_skill(
+            request,
+            principal,
+            registry=skill_registry,
+            virtual_model=selected_model.protocol_model,
+            attachments=attachments,
+            project_context=project_context,
+            previous_records=previous_records,
+            prompt=payload.content,
+        )
+    platform_tools = getattr(request.app.state, "tools", ToolRegistry())
+    model_tools = (
+        platform_tools.restrict(resolved_skill.spec.allowed_tools)
+        if resolved_skill is not None
+        else platform_tools
+    )
+    if resolved_skill is not None:
+        log.info(
+            "skill.selected id=%s version=%d digest=%s reason=%s tools=%s "
+            "instruction_chars=%d resource_chars=%d",
+            resolved_skill.spec.id,
+            resolved_skill.spec.version,
+            resolved_skill.spec.digest[:12],
+            resolved_skill.reason,
+            model_tools.names(),
+            len(resolved_skill.spec.instructions),
+            sum(len(resource.content) for resource in resolved_skill.spec.resources),
+        )
     current_images, history_images = await _image_parts_for_run(
         request,
         principal,

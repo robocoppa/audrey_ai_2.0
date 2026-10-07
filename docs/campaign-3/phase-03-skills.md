@@ -1,8 +1,8 @@
 # Campaign 3 Phase 3 — reusable skills
 
 **Status:** Explicit `video-analysis` and `grounded-document-analysis` are
-complete. The user queued automatic English skill selection (3D) after 18A on
-October 7. `skills.auto_select: false` remains until its activation decision.
+complete. Native automatic English selection (3D.6) is built; browser acceptance
+is pending. `skills.auto_select: false` remains the default until acceptance.
 English input only.
 
 ## Goal and decisions
@@ -66,35 +66,48 @@ separates facts by source file, states partial-read and missing-evidence limits,
 and compares retrieved contents. Its ship decision is accepted; no unchanged
 answer-comparison or native-selection gate remains.
 
-## Automatic selection — next after 18A
+## 3D.6 — native automatic selection
 
-The standalone evaluator does not select runtime skills, execute tools, read
-real uploads, or change production routing. Its preserved fixtures and reports
-are historical/regression evidence, not untouched validation after tuning.
+Native runs and AG-UI chat use the existing English evidence rules when
+`skills.auto_select` is enabled. Explicit request/virtual-model choices run first.
+Bot principals, direct models, and compatibility API handlers retain their
+existing behavior. No classifier generation, router/model changes, or extra
+skill bundles are introduced.
 
-The Japanese 3D.5 check failed and is closed as out of scope, not passed.
-Do not tune or rerun non-English cases. Preserve artifacts without adding
+- Classify only the current user request and server-verified filename/kind
+  metadata. File bodies, retrieved passages, project instructions, and prior
+  assistant answers cannot select a skill.
+- Evidence comes from current owned Ready attachments and the current Project
+  snapshot. File followups revalidate the most recent canonical attachment set;
+  deleted/unready evidence cannot authorize selection or silently fall back to
+  an older attachment. Ordinary chat abstains before historical-file lookup.
+- Affirmative document/video questions select one available compatible bundle.
+  Quoted/code content, access denials, excluded files, file management, unresolved
+  names, mixed requested kinds, and unsupported image/audio kinds abstain.
+  An explicit supported target can exclude unrelated evidence of another kind.
+- Selection is bounded to 20,000 request characters, 100 evidence entries, and
+  300 filename characters. Larger/unclear requests use ordinary chat. Rule
+  abstention changes no request permission or existing model behavior.
+- The same immutable spec drives prompt instructions, tool restrictions,
+  streaming, and persisted id/version/digest. `skill_reason` is `automatic`;
+  existing run records, bounded metrics, and `skill.selected` logs expose it.
+
+### Acceptance and activation
+
+Use real Ready document and video files in native chat with **Tools and skills →
+Automatic**. Confirm each answer uses its file evidence and a followup remains
+grounded. Compare a document question with an explicit document-skill choice,
+and confirm ordinary chat still answers normally. Server provenance must show
+the expected skill with `reason=automatic`; explicit selection keeps
+`reason=request`. This is a targeted workflow check, not a claim about population
+precision or answer quality from synthetic labels. No broad live evaluation is
+required for the rule-only opt-in slice.
+
+The previous standalone selector study remains historical/regression evidence.
+Its model-based measurement machinery does not activate production selection.
+A classifier fallback remains parked until a real rules miss warrants it. The
+failed Japanese branch is out of scope, not passed; do not tune/rerun it or add
 runtime language rejection.
-
-The next slice addresses English questions about uploaded or project-selected
-documents/videos, where choosing an existing skill can remove a manual step.
-Reuse the current rules/router foundation rather than opening a model search.
-Ordinary chat should abstain; explicit choices retain precedence. Before activation:
-
-1. Obtain human-reviewed fresh labels and agree precision, miss, ordinary false
-   activation, error, latency, token/context, and call-budget limits.
-2. Freeze evaluator source, cases, catalog, model tag, settings, and predicted
-   call budget before measurement. Detect drift before HTTP; preserve private
-   plans/reports without overwrites. Human attestations require actual review.
-3. Explicit/virtual selection precedes deterministic rules, then an optional
-   metadata-only router for undecided eligible cases, then abstention.
-   Firm denials, unavailable evidence, and unsupported modes make no model call.
-4. Distinguish quoted data from instructions and requested evidence from excluded
-   files. Reject ineligible choices; keep guards and actual model decisions separate.
-5. Report execution, label findings, and qualification separately. Small repeated
-   synthetic samples do not establish production rates or final-answer benefit.
-   Compare real answer/workflow benefit against existing explicit selection.
-6. Keep automatic selection disabled until those gates are explicitly accepted.
 
 ## Source map
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 SkillMode = Literal["auto", "fast", "deep"]
-SkillSelectionReason = Literal["request", "virtual_model"]
+SkillSelectionReason = Literal["request", "virtual_model", "automatic"]
 SkillAvailability = Literal["available", "degraded"]
 SkillRegistryStatus = Literal["disabled", "ready", "degraded", "unavailable"]
 

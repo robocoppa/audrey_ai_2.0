@@ -768,7 +768,7 @@ def test_committed_skill_settings_enable_only_the_video_mapping():
         {"virtual_models": []},
         {"virtual_models": {"video": "video-analysis"}},
         {"virtual_models": {"audrey_video": ""}},
-        {"auto_select": True},
+        {"auto_select": "true"},
         {"max_active": 2},
         {"max_active": 1.0},
         {"max_instruction_chars": 0},
@@ -779,6 +779,10 @@ def test_committed_skill_settings_enable_only_the_video_mapping():
 def test_invalid_skill_settings_fail_at_boot(skills):
     with pytest.raises(ValueError, match="skills"):
         _validate_skills({"skills": skills})
+
+
+def test_native_automatic_skills_can_be_enabled_explicitly():
+    _validate_skills({"skills": {"enabled": True, "auto_select": True}})
 
 
 # ─── _validate_native_models ─────────────────────────────────────────

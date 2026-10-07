@@ -652,7 +652,7 @@ _SKILLS_KEYS = {
 
 
 def _validate_skills(merged: dict[str, Any]) -> None:
-    """Keep declarative skill settings strict and selection explicit."""
+    """Keep declarative skill settings and native selection opt-in strict."""
 
     skills = merged.get("skills", {})
     if not isinstance(skills, dict):
@@ -696,8 +696,6 @@ def _validate_skills(merged: dict[str, Any]) -> None:
     auto_select = skills.get("auto_select", False)
     if not isinstance(auto_select, bool):
         raise ValueError("Invalid skills.auto_select: expected true or false")
-    if auto_select:
-        raise ValueError("Invalid skills.auto_select: not supported in this phase")
     max_active = skills.get("max_active", 1)
     if (
         isinstance(max_active, bool)

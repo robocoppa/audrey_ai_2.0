@@ -1335,8 +1335,9 @@ tools:
     - "http://custom-tools:8001"
   max_rounds: 5
 
-# Declarative local skill bundles. Explicit request selection and automatic
-# selection remain off; the video alias uses its tracked built-in bundle.
+# Declarative local skill bundles. Explicit choices and the video alias are live.
+# Native English file-intent selection is opt-in pending browser acceptance.
+# This flag does not change compatibility APIs or bot requests.
 skills:
   enabled: true
   roots:
