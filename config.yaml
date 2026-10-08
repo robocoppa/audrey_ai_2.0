@@ -249,6 +249,9 @@ fast_path:
     # pulled. A phantom here is worse than a phantom in a pool: this list gates
     # whether the fast path runs the TOOL loop at all.
     - "qwen3.8:latest"
+    # Installed Ollama metadata confirms Kimi K3 supports tools. This list
+    # gates file/search access for analysis and research workers too.
+    - "kimi-k3:cloud"
     - "kimi-k2.7-code:cloud"
     - "kimi-k2.6:cloud"
     - "deepseek-v4-pro:cloud"

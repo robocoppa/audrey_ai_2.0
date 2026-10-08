@@ -827,6 +827,21 @@ a:focus-visible {
   );
 }
 
+.composer-dock[data-picker-open="true"] {
+  display: flex;
+  max-height: 100%;
+  flex-shrink: 0;
+  flex-direction: column;
+}
+
+.composer-dock[data-picker-open="true"] .composer {
+  flex: none;
+}
+
+.composer-dock[data-picker-open="true"] .composer-model-picker {
+  display: none;
+}
+
 .composer-model-picker {
   display: grid;
   isolation: isolate;
@@ -1406,15 +1421,21 @@ a:focus-visible {
 .attachment-picker,
 .skill-picker {
   display: flex;
-  max-height: min(26rem, 55vh);
-  margin: 0 0 0.55rem;
+  min-height: 0;
+  max-height: min(18rem, 36dvh);
+  margin: 0.55rem 0 0;
   padding: 0.7rem;
-  overflow: hidden;
+  overflow-y: auto;
   flex-direction: column;
   border: 1px solid var(--border-strong);
   border-radius: 0.8rem;
   background: rgb(10 24 45 / 98%);
   box-shadow: var(--shadow-md);
+}
+
+.attachment-picker > *,
+.skill-picker > * {
+  flex-shrink: 0;
 }
 
 .attachment-picker > header,
@@ -1615,10 +1636,6 @@ a:focus-visible {
   font-size: 0.63rem;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.skill-picker {
-  max-height: min(24rem, 52vh);
 }
 
 .skill-options {
@@ -4812,6 +4829,26 @@ a:focus-visible {
 
   .compact-model-picker-shell {
     grid-column: auto;
+  }
+}
+
+@media (max-width: 560px) {
+  /* Give the expanded picker room below the input on short phone screens. */
+  .workspace:has(.composer-dock[data-picker-open="true"]) {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .workspace:has(.composer-dock[data-picker-open="true"]) > .sidebar,
+  .workspace:has(.composer-dock[data-picker-open="true"]) .thread-controls {
+    display: none;
+  }
+
+  .composer-dock[data-picker-open="true"] .composer-control-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .composer-dock[data-picker-open="true"] .compact-model-picker-shell {
+    grid-column: 1 / -1;
   }
 }
 

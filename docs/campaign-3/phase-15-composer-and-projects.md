@@ -1,6 +1,7 @@
 # Campaign 3 Phase 15 — composer and Projects
 
-**Status:** Complete and accepted, including direct project upload.
+**Status:** Composer and Projects accepted, including direct project upload.
+Menus below the composer are built; browser acceptance is pending.
 
 ## Composer
 
@@ -8,7 +9,15 @@ The centered dock has a 56 rem desktop maximum and two rows: message field plus 
 
 Add files explains uploading a new file or choosing Ready files from My Files. Tools & skills uses server names/descriptions and explains Automatic; it selects a skill that may narrow tools rather than pretending to be an individual-tool permission editor.
 
-File and skill pickers open above their controls, are mutually exclusive, and close on outside click/Escape with focus restoration. The empty draft stays centered; the composer pins to the bottom after the first message. Existing attachment limits/progress, model availability, Stop, and retry remain intact.
+File and skill pickers open below their controls, are mutually exclusive, and
+close on outside click/Escape with focus restoration. Their contents scroll
+within a bounded panel. While a picker is open, the empty-chat portrait collapses;
+on phones navigation and conversation actions also collapse temporarily to keep
+the input and picker usable. Closing it restores the normal layout.
+
+The empty draft stays centered; the composer pins to the bottom after the first
+message. Existing attachment limits/progress, model availability, Stop, and retry
+remain intact.
 
 ## Personal Project contract
 
@@ -25,8 +34,7 @@ The sidebar has compact collapsible Projects. Project home provides instructions
 Project home offers **Upload file to project** and **Choose from My Files**
 with matching readable labels. Its conversations use the sidebar conversation
 row styling, including stacked title/activity and hover treatment. These 18A
-presentation changes await deployed browser acceptance; existing project behavior
-remains accepted.
+presentation changes and existing project behavior are accepted.
 
 New uploads join immediately; Pending/Processing membership survives refresh/restart. Only Ready files become grounding evidence. Visible active states refresh every five seconds; failed rows remain visible for explicit removal, while missing references are pruned.
 

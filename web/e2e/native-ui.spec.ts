@@ -715,9 +715,9 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(assistantMessage).not.toContainText("**answer**");
   await expect(page.getByText("web_search · complete")).toBeHidden();
   await expect(page.locator(".tool-activity")).toHaveCount(0);
-  const sourceSummary = page.getByText("2 sources found · Untrusted source");
-  const modelSummary = page.locator(".run-models summary");
-  const toolSummary = page.locator(".run-tools summary");
+  const sourceSummary = assistantMessage.locator(".saved-sources summary");
+  const modelSummary = page.locator(".saved-models summary");
+  const toolSummary = page.locator(".saved-tools summary");
   await expect(sourceSummary).toBeVisible();
   await expect(modelSummary).toHaveText("2 models");
   await expect(toolSummary).toHaveText("1 tool call");
@@ -738,28 +738,28 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(sourceLink).toHaveAttribute("rel", "noreferrer noopener");
   await expect(page.getByText("Untrusted source", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Untrusted source" })).toHaveCount(0);
-  await expect(page.locator(".run-sources li")).toHaveCount(2);
-  const sourcePanelBox = await page.locator(".run-sources ul").boundingBox();
+  await expect(page.locator(".saved-sources li")).toHaveCount(2);
+  const sourcePanelBox = await page.locator(".saved-sources ul").boundingBox();
   const sourceSummaryBox = await sourceSummary.boundingBox();
   expect(sourcePanelBox).not.toBeNull();
   expect(sourceSummaryBox).not.toBeNull();
   expect(sourcePanelBox?.x ?? 0).toBeGreaterThanOrEqual((sourceSummaryBox?.x ?? 0) - 1);
   await page.getByRole("heading", { name: "Browser smoke" }).click();
-  await expect(page.locator(".run-sources")).not.toHaveAttribute("open", "");
+  await expect(page.locator(".saved-sources")).not.toHaveAttribute("open", "");
   await sourceSummary.click();
   await modelSummary.click();
-  await expect(page.locator(".run-sources")).not.toHaveAttribute("open", "");
-  await expect(page.locator(".run-models")).toHaveAttribute("open", "");
-  await expect(page.locator(".run-models li")).toHaveCount(2);
-  await expect(page.locator(".run-models")).toContainText("qwen-router:latest1 call");
-  await expect(page.locator(".run-models")).toContainText("qwen-worker:latest2 calls");
+  await expect(page.locator(".saved-sources")).not.toHaveAttribute("open", "");
+  await expect(page.locator(".saved-models")).toHaveAttribute("open", "");
+  await expect(page.locator(".saved-models li")).toHaveCount(2);
+  await expect(page.locator(".saved-models")).toContainText("qwen-router:latest1 call");
+  await expect(page.locator(".saved-models")).toContainText("qwen-worker:latest2 calls");
   await toolSummary.click();
-  await expect(page.locator(".run-tools")).toHaveAttribute("open", "");
-  await expect(page.locator(".run-models")).not.toHaveAttribute("open", "");
-  await expect(page.locator(".run-tools li")).toContainText("web_search · complete");
+  await expect(page.locator(".saved-tools")).toHaveAttribute("open", "");
+  await expect(page.locator(".saved-models")).not.toHaveAttribute("open", "");
+  await expect(page.locator(".saved-tools li")).toContainText("web_search · complete");
   await page.getByRole("heading", { name: "Browser smoke" }).click();
-  await expect(page.locator(".run-tools")).not.toHaveAttribute("open", "");
-  await expect(page.getByText("Complete", { exact: true })).toBeVisible();
+  await expect(page.locator(".saved-tools")).not.toHaveAttribute("open", "");
+  await expect(page.locator(".run-activity")).toHaveCount(0);
   await expect(page.locator(".composer-model-picker")).toHaveCount(0);
   await expect(page.locator(".composer .compact-model-picker")).toBeVisible();
   await expect(page.locator(".model-description")).toHaveCount(0);
@@ -1026,6 +1026,7 @@ test("keeps history and an active run alive while switching conversations", asyn
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/skills") return json(route, { enabled: true, status: "ready", items: browserSkills() });
     if (url.pathname === "/api/me/preferences") {
       await json(route, browserPreferences());
       return;
@@ -1081,7 +1082,7 @@ test("keeps history and an active run alive while switching conversations", asyn
     (window as Window & { __finishNavigationRun?: () => void }).__finishNavigationRun?.();
   });
   await expect(page.getByText("Background response survived navigation.")).toBeVisible();
-  await expect(page.getByText("Complete", { exact: true })).toBeVisible();
+  await expect(page.locator(".run-activity")).toHaveCount(0);
 
   await page.getByRole("button", { name: /^Second conversation/u }).click();
   await page.getByRole("button", { name: /^Running conversation/u }).click();
@@ -1839,6 +1840,7 @@ test("keeps the server-owned run alive when the browser reloads", async ({ page 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/skills") return json(route, { enabled: true, status: "ready", items: browserSkills() });
     if (url.pathname === "/api/me/preferences") return json(route, browserPreferences());
     if (url.pathname === "/api/me") return json(route, browserTester());
     if (url.pathname === "/api/models") return json(route, { items: browserModels() });
@@ -1897,6 +1899,62 @@ test("keeps the server-owned run alive when the browser reloads", async ({ page 
   expect((recoveredOrbBox?.y ?? 0) - (recoveredBox?.y ?? 0)).toBeGreaterThan(20);
   expect(await page.evaluate(() => sessionStorage.getItem("__testRunCancelObserved"))).toBeNull();
 });
+
+for (const viewport of [
+  { name: "desktop", width: 1280, height: 720 },
+  { name: "mobile", width: 390, height: 844 },
+  { name: "short mobile", width: 320, height: 640 },
+]) {
+  for (const populated of [false, true]) {
+    test(`opens composer pickers below controls in ${viewport.name} ${populated ? "history" : "empty chat"}`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await mockAudreyApi(page, undefined, populated ? scrollingBrowserHistory() : []);
+      await page.route("**/api/files**", (route) => json(route, browserFileListing(
+        Array.from({ length: 20 }, (_, index) => browserFile(`file_${index}`, `report-${index}.txt`, 100)),
+      )));
+      await page.goto("./");
+
+      const assertPanelGeometry = async (selector: string) => {
+        await expect.poll(() => page.locator(selector).evaluate((panel) => {
+          const dock = panel.closest(".composer-dock")!;
+          const rail = dock.querySelector(".composer-control-rail")!.getBoundingClientRect();
+          const input = dock.querySelector(".composer-input-row")!.getBoundingClientRect();
+          const viewport = panel.closest(".thread-viewport")!.getBoundingClientRect();
+          const box = panel.getBoundingClientRect();
+          return {
+            belowControls: box.top >= rail.bottom,
+            inputVisible: input.top >= viewport.top - 1,
+            panelVisible: box.bottom <= viewport.bottom + 1 && box.height >= 64,
+            withinWidth: box.left >= viewport.left && box.right <= viewport.right,
+          };
+        })).toEqual({
+          belowControls: true, inputVisible: true, panelVisible: true, withinWidth: true,
+        });
+      };
+
+      await page.getByRole("button", { name: "Add files" }).click();
+      await expect(page.getByRole("region", { name: "Choose attachments" })).toBeVisible();
+      await assertPanelGeometry(".attachment-picker");
+      await expect.poll(() => page.locator(".attachment-picker").evaluate(
+        (panel) => panel.scrollHeight > panel.clientHeight,
+      )).toBe(true);
+      await page.getByRole("region", { name: "Choose attachments" })
+        .getByRole("button", { name: /report-19\.txt/u }).click();
+      await expect(page.getByRole("button", { name: "Remove attachment report-19.txt" })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("button", { name: "Add files" })).toBeFocused();
+
+      await page.getByRole("button", { name: "Tools and skills: Automatic" }).click();
+      await expect(page.getByRole("dialog", { name: "Choose how Audrey uses tools" })).toBeVisible();
+      await assertPanelGeometry(".skill-picker");
+      await expect(page.getByRole("dialog", { name: "Choose how Audrey uses tools" })
+        .getByRole("button", { name: /Automatic/u })).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeFocused();
+      await expect(page.getByRole("complementary", { name: "Conversations" })).toBeVisible();
+    });
+  }
+}
 
 test("explains and dismisses the mutually exclusive file and tools pickers", async ({ page }) => {
   await mockAudreyApi(page);
@@ -1971,6 +2029,7 @@ test("uploads an image and a document in chat, then sends both with the question
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/skills") return json(route, { enabled: true, status: "ready", items: browserSkills() });
     if (url.pathname === "/api/me/preferences") return json(route, browserPreferences());
     if (url.pathname === "/api/me") return json(route, browserUser());
     if (url.pathname === "/api/models") return json(route, { items: browserModels() });
@@ -2031,7 +2090,7 @@ test("uploads an image and a document in chat, then sends both with the question
   const composer = page.getByRole("textbox", { name: "Ask Audrey" });
   await composer.fill("What do these show?");
   await composer.press("Enter");
-  await expect(page.getByText("Complete", { exact: true })).toBeVisible();
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
   expect(requestBody).toMatchObject({
     threadId: CONVERSATION_ID,
     attachmentIds: ["file_chat_image", "file_chat_notes"],
@@ -2051,6 +2110,7 @@ test("keeps a video question drafted until the chat upload is ready", async ({ p
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/skills") return json(route, { enabled: true, status: "ready", items: browserSkills() });
     if (url.pathname === "/api/me/preferences") return json(route, browserPreferences());
     if (url.pathname === "/api/me") return json(route, browserUser());
     if (url.pathname === "/api/models") return json(route, { items: browserModels() });
@@ -2092,7 +2152,7 @@ test("keeps a video question drafted until the chat upload is ready", async ({ p
   videoStatus = "ready";
   await expect(page.getByText(/clip.mp4 is processing/)).toHaveCount(0, { timeout: 10000 });
   await composer.press("Enter");
-  await expect(page.getByText("Complete", { exact: true })).toBeVisible();
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
   expect(agentRequests).toBe(1);
   expect(requestBody).toMatchObject({ attachmentIds: ["file_chat_video"] });
 });
@@ -2141,6 +2201,7 @@ test("attaches an owner file through the minimized AG-UI request", async ({ page
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/skills") return json(route, { enabled: true, status: "ready", items: browserSkills() });
     if (url.pathname === "/api/me/preferences") {
       await json(route, browserPreferences());
       return;
@@ -2208,7 +2269,7 @@ test("attaches an owner file through the minimized AG-UI request", async ({ page
   await composer.fill("Use the attached notes again.");
   await composer.press("Enter");
 
-  await expect(page.getByText("Complete", { exact: true })).toBeVisible();
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
   expect(requestBody).toMatchObject({
     threadId: CONVERSATION_ID,
     attachmentIds: ["file_existing", "file_image_one"],
@@ -2732,6 +2793,88 @@ test("queues a video link through native files and follows its summary", async (
   expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
 });
 
+test("keeps file tool summaries on each answer with progress hidden and after reload", async ({ page }) => {
+  const messages: Array<Record<string, unknown>> = [];
+  let turn = 0;
+  await mockAudreyApi(page, async (route) => {
+    turn += 1;
+    const runId = `run_file_${turn}`;
+    const messageId = `msg_file_${turn}`;
+    const answer = `Video answer ${turn}.`;
+    const tools = Array.from({ length: turn === 1 ? 3 : 1 }, (_, index) => ({
+      id: `tool_file_${turn}_${index}`,
+      name: "get_file_text",
+      status: "succeeded",
+      arguments: { file_id: "file_video", artifact: "transcript" },
+      result: { status: "succeeded", sourceCount: 1 },
+      error_code: "",
+    }));
+    const sources = [
+      { id: "video_transcript", title: "Retirement video — transcript", url: "" },
+      { id: "video_visual", title: "Retirement video — visual notes", url: "" },
+    ];
+    const models = [{ model: "qwen3.8:latest", calls: 1 }];
+    messages.push({
+      id: `msg_file_user_${turn}`, run_id: runId, sequence: messages.length + 1,
+      role: "user", status: "completed", content: `Video question ${turn}`,
+      created_at: "2026-10-07T00:00:00Z", updated_at: "2026-10-07T00:00:00Z",
+    }, {
+      id: messageId, run_id: runId, sequence: messages.length + 2,
+      role: "assistant", status: "completed", content: answer,
+      created_at: "2026-10-07T00:00:01Z", updated_at: "2026-10-07T00:00:01Z",
+      sources, models, tool_calls: tools,
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: aguiStream([
+        { type: "RUN_STARTED", threadId: CONVERSATION_ID, runId },
+        { type: "TEXT_MESSAGE_START", messageId, role: "assistant" },
+        { type: "CUSTOM", name: "audrey.model.used", value: { model: models[0].model } },
+        ...sources.map((source) => ({
+          type: "CUSTOM", name: "audrey.source.observed",
+          value: { sourceId: source.id, title: source.title, url: source.url },
+        })),
+        ...tools.flatMap((tool) => [
+          { type: "TOOL_CALL_START", toolCallId: tool.id, toolCallName: tool.name, parentMessageId: messageId },
+          { type: "TOOL_CALL_ARGS", toolCallId: tool.id, delta: JSON.stringify(tool.arguments) },
+          { type: "TOOL_CALL_END", toolCallId: tool.id },
+          { type: "TOOL_CALL_RESULT", messageId: `result_${tool.id}`, toolCallId: tool.id, content: JSON.stringify(tool.result) },
+        ]),
+        { type: "TEXT_MESSAGE_CONTENT", messageId, delta: answer },
+        { type: "TEXT_MESSAGE_END", messageId },
+        { type: "RUN_FINISHED", threadId: CONVERSATION_ID, runId, outcome: { type: "success" } },
+      ]),
+    });
+  }, messages, browserPreferences({ show_progress: false }));
+  await page.goto("./");
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await composer.fill("Video question 1");
+  await composer.press("Enter");
+  const firstAnswer = page.locator(".message-assistant").filter({ hasText: "Video answer 1." });
+  await expect(firstAnswer.locator(".saved-tools summary")).toHaveText("3 tool calls");
+  await expect(firstAnswer.locator(".saved-models summary")).toHaveText("1 model");
+  await expect(firstAnswer.locator(".saved-sources summary")).toHaveText("2 sources found");
+  await expect(page.locator(".run-activity")).toHaveCount(0);
+  await firstAnswer.locator(".saved-tools summary").click();
+  await expect(firstAnswer.locator(".saved-tools")).toContainText("get_file_text × 3 · complete");
+  await page.locator(".thread-header").click();
+  await expect(firstAnswer.locator(".saved-tools")).not.toHaveAttribute("open", "");
+  await composer.fill("Video question 2");
+  await composer.press("Enter");
+  const secondAnswer = page.locator(".message-assistant").filter({ hasText: "Video answer 2." });
+  await expect(secondAnswer.locator(".saved-tools summary")).toHaveText("1 tool call");
+  await expect(firstAnswer.locator(".saved-tools summary")).toHaveText("3 tool calls");
+  expect(turn).toBe(2);
+  await page.reload();
+  await expect(firstAnswer.locator(".saved-tools summary")).toHaveText("3 tool calls");
+  await expect(secondAnswer.locator(".saved-tools summary")).toHaveText("1 tool call");
+  await firstAnswer.locator(".saved-tools summary").click();
+  await expect(firstAnswer.locator(".saved-tools")).toContainText("get_file_text × 3 · complete");
+  await expect(page.locator(".tool-activity")).toHaveCount(0);
+  expect(turn).toBe(2);
+});
+
 test("shows observed sources with the saved assistant answer after reload", async ({ page }) => {
   const messages = canonicalBrowserTurn().map((message) => message.role === "assistant"
     ? { ...message, sources: [
@@ -2920,7 +3063,7 @@ test("retries a failed attached question as a fresh owner-bound turn", async ({ 
   expect(requests).toHaveLength(1);
   fileStatus = "ready";
   await retry.click();
-  await expect(page.getByText("Complete", { exact: true })).toBeVisible();
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
   expect(requests).toHaveLength(2);
   expect(fileReads).toBe(2);
   for (const body of requests) {
@@ -2947,6 +3090,7 @@ test("remounts a recovered answer as soon as the durable run finishes", async ({
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/skills") return json(route, { enabled: true, status: "ready", items: browserSkills() });
     if (url.pathname === "/api/me/preferences") return json(route, browserPreferences());
     if (url.pathname === "/api/me") return json(route, browserTester());
     if (url.pathname === "/api/models") return json(route, { items: browserModels() });
@@ -3005,6 +3149,7 @@ test("recovers a reloaded active attached run and retries after stopping it", as
     if (url.pathname === "/api/me/preferences") return json(route, browserPreferences());
     if (url.pathname === "/api/me") return json(route, browserTester());
     if (url.pathname === "/api/models") return json(route, { items: browserModels() });
+    if (url.pathname === "/api/skills") return json(route, { enabled: true, status: "ready", items: browserSkills() });
     if (url.pathname === "/api/conversations") {
       return json(route, { items: [browserConversation("Reloaded file chat")], next_cursor: null });
     }
@@ -3034,7 +3179,13 @@ test("recovers a reloaded active attached run and retries after stopping it", as
       posts += 1;
       attachmentIds = (request.postDataJSON() as Record<string, unknown>).attachmentIds;
       return route.fulfill({
-        status: 200, contentType: "text/event-stream", body: aguiStream(canonicalBrowserEvents()),
+        status: 200, contentType: "text/event-stream", body: aguiStream([
+          { type: "RUN_STARTED", threadId: CONVERSATION_ID, runId: "run_retry" },
+          { type: "TEXT_MESSAGE_START", messageId: "msg_retry", role: "assistant" },
+          { type: "TEXT_MESSAGE_CONTENT", messageId: "msg_retry", delta: "Retried file answer." },
+          { type: "TEXT_MESSAGE_END", messageId: "msg_retry" },
+          { type: "RUN_FINISHED", threadId: CONVERSATION_ID, runId: "run_retry", outcome: { type: "success" } },
+        ]),
       });
     }
     await route.abort("failed");
@@ -3050,7 +3201,8 @@ test("recovers a reloaded active attached run and retries after stopping it", as
   const retry = page.getByRole("button", { name: "Retry last question" });
   await expect(retry).toBeVisible();
   await retry.click();
-  await expect(page.getByText("Complete", { exact: true })).toBeVisible();
+  await expect(page.getByText("Retried file answer.")).toBeVisible();
+  await expect(retry).toHaveCount(0);
   expect(posts).toBe(1);
   expect(attachmentIds).toEqual(["file_reload"]);
   await expect(page.getByText(/HTTP 409/)).toHaveCount(0);

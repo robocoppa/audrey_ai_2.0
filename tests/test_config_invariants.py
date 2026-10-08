@@ -244,6 +244,18 @@ def _research_pools(cfg: dict) -> list[tuple[str, dict]]:
     ]
 
 
+def test_research_workers_have_source_tools_enabled(cfg):
+    """A researcher can silently become plain chat if its capability gate drifts."""
+    capable = set(cfg["fast_path"]["tool_capable_models"])
+    missing = [
+        (pool, model)
+        for pool, body in _research_pools(cfg)
+        for model in body.get("researchers", [])
+        if model not in capable
+    ]
+    assert not missing, f"Research workers cannot inspect sources: {missing}"
+
+
 def test_every_factcheck_model_is_tool_capable(cfg):
     """The gate tests `factchecker in fast_path.tool_capable_models`.
 

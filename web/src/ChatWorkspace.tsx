@@ -18,6 +18,8 @@ import {
   createContext,
   isValidElement,
   type ReactNode,
+  type SetStateAction,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -65,7 +67,6 @@ import {
   type MessageAttachment,
   type MessageModelUsage,
   type MessageSource,
-  type MessageToolCall,
   type ProjectLimits,
   type SkillSummary,
   type CurrentUser,
@@ -112,6 +113,14 @@ type RunTool = {
   status: "running" | "succeeded" | "failed" | "incomplete";
 };
 
+type AnswerObservations = Pick<RunActivity, "sources" | "models" | "tools">;
+
+type ActivityLedger = {
+  activity: RunActivity;
+  answerMessageId: string | null;
+  answers: ReadonlyMap<string, AnswerObservations>;
+};
+
 type LastAttempt = {
   text: string;
   attachmentIds: string[];
@@ -134,7 +143,7 @@ const ATTACHMENT_FOLDERS: ReadonlyArray<{
 
 const SavedSourcesContext = createContext<ReadonlyMap<string, MessageSource[]>>(new Map());
 const SavedModelsContext = createContext<ReadonlyMap<string, MessageModelUsage[]>>(new Map());
-const SavedToolsContext = createContext<ReadonlyMap<string, MessageToolCall[]>>(new Map());
+const SavedToolsContext = createContext<ReadonlyMap<string, RunTool[]>>(new Map());
 
 const IDLE_ACTIVITY: RunActivity = {
   status: "idle",
@@ -1266,7 +1275,30 @@ function AudreyThread({
 }) {
   const [runError, setRunError] = useState("");
   const [skillId, setSkillId] = useState("");
-  const [activity, setActivity] = useState<RunActivity>(IDLE_ACTIVITY);
+  const [activityLedger, setActivityLedger] = useState<ActivityLedger>({
+    activity: IDLE_ACTIVITY,
+    answerMessageId: null,
+    answers: new Map(),
+  });
+  const activity = activityLedger.activity;
+  const setActivity = useCallback((
+    update: SetStateAction<RunActivity>,
+    messageId?: string | null,
+  ) => {
+    setActivityLedger((current) => {
+      const next = typeof update === "function" ? update(current.activity) : update;
+      const answerMessageId = messageId === undefined ? current.answerMessageId : messageId;
+      let answers = current.answers;
+      if (answerMessageId && ["complete", "cancelled", "error"].includes(next.status)) {
+        answers = new Map(answers).set(answerMessageId, {
+          sources: next.sources,
+          models: next.models,
+          tools: settleRunningTools(next.tools),
+        });
+      }
+      return { activity: next, answerMessageId, answers };
+    });
+  }, []);
   const restoredIncomplete = initialMessages.filter(({ role }) => role === "assistant").at(-1)?.status === "incomplete";
   const [lastAttempt, setLastAttempt] = useState<LastAttempt | null>(() => {
     const assistant = initialMessages.filter(({ role }) => role === "assistant").at(-1);
@@ -1342,18 +1374,24 @@ function AudreyThread({
     () => selectedAttachments.map(({ id }) => id),
     [selectedAttachments],
   );
-  const savedSources = useMemo(() => new Map(
-    initialMessages.filter(({ role }) => role === "assistant")
-      .map(({ id, sources }) => [id, sources ?? []] as const),
-  ), [initialMessages]);
-  const savedModels = useMemo(() => new Map(
-    initialMessages.filter(({ role }) => role === "assistant")
-      .map(({ id, models: messageModels }) => [id, messageModels ?? []] as const),
-  ), [initialMessages]);
-  const savedTools = useMemo(() => new Map(
-    initialMessages.filter(({ role }) => role === "assistant")
-      .map(({ id, tool_calls: tools }) => [id, tools ?? []] as const),
-  ), [initialMessages]);
+  const savedSources = useMemo(() => {
+    const sources = new Map(initialMessages.filter(({ role }) => role === "assistant")
+      .map(({ id, sources }) => [id, sources ?? []] as const));
+    for (const [id, answer] of activityLedger.answers) sources.set(id, answer.sources);
+    return sources;
+  }, [initialMessages, activityLedger.answers]);
+  const savedModels = useMemo(() => {
+    const models = new Map(initialMessages.filter(({ role }) => role === "assistant")
+      .map(({ id, models }) => [id, models ?? []] as const));
+    for (const [id, answer] of activityLedger.answers) models.set(id, answer.models);
+    return models;
+  }, [initialMessages, activityLedger.answers]);
+  const savedTools = useMemo(() => {
+    const tools = new Map<string, RunTool[]>(initialMessages.filter(({ role }) => role === "assistant")
+      .map(({ id, tool_calls }) => [id, tool_calls ?? []] as const));
+    for (const [id, answer] of activityLedger.answers) tools.set(id, answer.tools);
+    return tools;
+  }, [initialMessages, activityLedger.answers]);
   useEffect(() => {
     if (!attachmentPickerOpen && !skillPickerOpen) return;
     if (skillPickerOpen) firstSkillOptionRef.current?.focus();
@@ -1450,7 +1488,7 @@ function AudreyThread({
           sources: [],
           models: [],
           tools: [],
-        });
+        }, null);
       },
       onRunStartedEvent: () => {
         setAttachmentPickerOpen(false);
@@ -1514,6 +1552,9 @@ function AudreyThread({
               : { ...current, sources: [...current.sources, source] });
           }
         }
+      },
+      onTextMessageStartEvent: ({ event }) => {
+        if (event.role === "assistant") setActivity((current) => current, event.messageId);
       },
       onToolCallStartEvent: ({ event }) => {
         setActivity((current) => {
@@ -1584,7 +1625,7 @@ function AudreyThread({
     };
     const subscription = agent.subscribe(subscriber);
     return () => subscription.unsubscribe();
-  }, [agent, onRunActiveChange]);
+  }, [agent, onRunActiveChange, setActivity]);
   const runtime = useAgUiRuntime({
     agent,
     adapters: { history },
@@ -1700,7 +1741,7 @@ function AudreyThread({
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [queuedRetry, runtime]);
+  }, [queuedRetry, runtime, setActivity]);
 
   async function toggleAttachmentPicker() {
     if (attachmentPickerOpen) {
@@ -1870,7 +1911,10 @@ function AudreyThread({
           <ThreadPrimitive.If empty={false}>
             <div className="thread-message-spacer" aria-hidden="true" />
           </ThreadPrimitive.If>
-          <ThreadPrimitive.ViewportFooter className="composer-dock">
+          <ThreadPrimitive.ViewportFooter
+            className="composer-dock"
+            data-picker-open={attachmentPickerOpen || skillPickerOpen}
+          >
             <ThreadPrimitive.ScrollToBottom
               className="scroll-bottom"
               aria-label="Scroll to latest message"
@@ -1885,7 +1929,7 @@ function AudreyThread({
               </p>
             ) : (
               <>
-                {(showProgress || activity.status === "error") ? (
+                {((showProgress && activity.status !== "complete") || activity.status === "error") ? (
                   <RunActivityStatus activity={activity} error={runError} />
                 ) : null}
                 {lastAttempt && (restoredIncomplete || activity.status === "error" || runError) ? (
@@ -1955,6 +1999,89 @@ function AudreyThread({
                     <button type="button" onClick={() => setUploadIssue("")}>Dismiss</button>
                   </div>
                 ) : null}
+                <ComposerPrimitive.Root
+                  className="composer"
+                  onSubmitCapture={(event) => {
+                    if (submissionBlocked) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      return;
+                    }
+                    const text = composerInputRef.current?.value.trim() ?? "";
+                    if (text) setLastAttempt({ text, attachmentIds: selectedAttachments.map(({ id }) => id) });
+                  }}
+                >
+                  <div className="composer-input-row">
+                    <ComposerPrimitive.Input
+                      ref={composerInputRef}
+                      className="composer-input"
+                      aria-label="Ask Audrey"
+                      placeholder="Ask Audrey…"
+                      rows={1}
+                    />
+                    <div className="composer-actions">
+                      {!recoveredRunActive ? (
+                        <ComposerPrimitive.Cancel
+                          className="cancel-button"
+                          onClick={() => { userRequestedCancelRef.current = true; }}
+                        >Stop</ComposerPrimitive.Cancel>
+                      ) : null}
+                      <ComposerPrimitive.Send
+                        className="send-button"
+                        aria-label="Send message"
+                        disabled={submissionBlocked}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M12 19V5M6.5 10.5 12 5l5.5 5.5" />
+                        </svg>
+                      </ComposerPrimitive.Send>
+                    </div>
+                  </div>
+                  <div className="composer-control-rail" aria-label="Message options">
+                    <ComposerModelPicker
+                      compact
+                      models={models}
+                      canBrowseDirectModels={canBrowseDirectModels}
+                      modelId={modelId}
+                      disabled={modeDisabled || attachmentBusy || retrying}
+                      onChange={changeModel}
+                    />
+                    <button
+                      ref={attachButtonRef}
+                      className="composer-rail-control attach-button"
+                      type="button"
+                      onClick={() => void toggleAttachmentPicker()}
+                      disabled={modeDisabled || retrying || !supportsFiles}
+                      title={supportsFiles
+                        ? "Upload a new file or choose ready files from My Files"
+                        : `${selectedModel.label} accepts text only`}
+                      aria-label={attachmentPickerOpen ? "Close file picker" : "Add files"}
+                      aria-expanded={attachmentPickerOpen}
+                    >
+                      <span className="composer-control-label">Files</span>
+                      <strong>
+                        {selectedAttachments.length > 0
+                          ? `${selectedAttachments.length} selected`
+                          : "Add files"}
+                      </strong>
+                    </button>
+                    <button
+                      ref={skillButtonRef}
+                      className="composer-rail-control skill-button"
+                      type="button"
+                      onClick={toggleSkillPicker}
+                      disabled={submissionBlocked || selectedSkillMode === null}
+                      title={selectedSkillMode === null
+                        ? `${selectedModel.label} does not support Audrey skills`
+                        : "Choose automatic tool use or a focused Audrey skill"}
+                      aria-label={`Tools and skills: ${skillControlValue}`}
+                      aria-expanded={skillPickerOpen}
+                    >
+                      <span className="composer-control-label">Tools &amp; skills</span>
+                      <strong>{skillControlValue}</strong>
+                    </button>
+                  </div>
+                </ComposerPrimitive.Root>
                 {attachmentPickerOpen ? (
                   <section
                     ref={attachmentPickerRef}
@@ -2142,89 +2269,6 @@ function AudreyThread({
                     </div>
                   </section>
                 ) : null}
-                <ComposerPrimitive.Root
-                  className="composer"
-                  onSubmitCapture={(event) => {
-                    if (submissionBlocked) {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      return;
-                    }
-                    const text = composerInputRef.current?.value.trim() ?? "";
-                    if (text) setLastAttempt({ text, attachmentIds: selectedAttachments.map(({ id }) => id) });
-                  }}
-                >
-                  <div className="composer-input-row">
-                    <ComposerPrimitive.Input
-                      ref={composerInputRef}
-                      className="composer-input"
-                      aria-label="Ask Audrey"
-                      placeholder="Ask Audrey…"
-                      rows={1}
-                    />
-                    <div className="composer-actions">
-                      {!recoveredRunActive ? (
-                        <ComposerPrimitive.Cancel
-                          className="cancel-button"
-                          onClick={() => { userRequestedCancelRef.current = true; }}
-                        >Stop</ComposerPrimitive.Cancel>
-                      ) : null}
-                      <ComposerPrimitive.Send
-                        className="send-button"
-                        aria-label="Send message"
-                        disabled={submissionBlocked}
-                      >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                          <path d="M12 19V5M6.5 10.5 12 5l5.5 5.5" />
-                        </svg>
-                      </ComposerPrimitive.Send>
-                    </div>
-                  </div>
-                  <div className="composer-control-rail" aria-label="Message options">
-                    <ComposerModelPicker
-                      compact
-                      models={models}
-                      canBrowseDirectModels={canBrowseDirectModels}
-                      modelId={modelId}
-                      disabled={modeDisabled || attachmentBusy || retrying}
-                      onChange={changeModel}
-                    />
-                    <button
-                      ref={attachButtonRef}
-                      className="composer-rail-control attach-button"
-                      type="button"
-                      onClick={() => void toggleAttachmentPicker()}
-                      disabled={modeDisabled || retrying || !supportsFiles}
-                      title={supportsFiles
-                        ? "Upload a new file or choose ready files from My Files"
-                        : `${selectedModel.label} accepts text only`}
-                      aria-label={attachmentPickerOpen ? "Close file picker" : "Add files"}
-                      aria-expanded={attachmentPickerOpen}
-                    >
-                      <span className="composer-control-label">Files</span>
-                      <strong>
-                        {selectedAttachments.length > 0
-                          ? `${selectedAttachments.length} selected`
-                          : "Add files"}
-                      </strong>
-                    </button>
-                    <button
-                      ref={skillButtonRef}
-                      className="composer-rail-control skill-button"
-                      type="button"
-                      onClick={toggleSkillPicker}
-                      disabled={submissionBlocked || selectedSkillMode === null}
-                      title={selectedSkillMode === null
-                        ? `${selectedModel.label} does not support Audrey skills`
-                        : "Choose automatic tool use or a focused Audrey skill"}
-                      aria-label={`Tools and skills: ${skillControlValue}`}
-                      aria-expanded={skillPickerOpen}
-                    >
-                      <span className="composer-control-label">Tools &amp; skills</span>
-                      <strong>{skillControlValue}</strong>
-                    </button>
-                  </div>
-                </ComposerPrimitive.Root>
               </>
             )}
           </ThreadPrimitive.ViewportFooter>
@@ -2349,17 +2393,17 @@ function ExclusiveRunDetails({
     document.dispatchEvent(new CustomEvent(RUN_DETAILS_OPEN_EVENT, {
       detail: detailsRef.current,
     }));
-    const closeOnOutsideClick = (event: PointerEvent) => {
+    const closeOnOutsideClick = (event: MouseEvent) => {
       const target = event.target;
       if (target instanceof Node && !detailsRef.current?.contains(target)) setOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
     };
-    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("click", closeOnOutsideClick);
     document.addEventListener("keydown", closeOnEscape);
     return () => {
-      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("click", closeOnOutsideClick);
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [open]);

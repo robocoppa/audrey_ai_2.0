@@ -9,11 +9,15 @@ they are not ongoing task lists.
 
 ## Current work
 
-- **3D.6 — native automatic English skill selection:** built, with browser
-  acceptance pending. Opt-in deterministic rules use ready owned attachment and
-  Project metadata to select the accepted document/video skills. Explicit choices
-  win; unclear targets abstain. No new classifier calls or bot/API changes.
-  `skills.auto_select: false` remains the deployment default until acceptance.
+- **3D.6 — native automatic English skill selection:** built; deployed
+  document/video selection and successful video file reads are confirmed.
+  Remaining browser acceptance is pending. Opt-in deterministic rules use ready
+  owned attachment and Project metadata. Explicit choices win; unclear targets
+  abstain. `skills.auto_select: false` remains the default until acceptance.
+- **Composer/provenance followup:** built, awaiting browser acceptance. Files and
+  Tools & skills open below the composer. Sources, Models, and Tool calls stay
+  beside each completed answer immediately, even with progress display off.
+  Kimi K3 is included in the tool capability gate used by native panel workers.
 - **18A — admin controls and project presentation:** accepted October 7.
 - **Closed by the user October 7:** old domain cleanup and the model/runtime
   evidence and traffic-analysis followups. These require no further campaign
@@ -38,22 +42,23 @@ they are not ongoing task lists.
 | 07 | [Scanned PDFs](phase-07-scanned-pdf-ocr.md) | Complete |
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
-| 10 | [Answer provenance](phase-10-ordinary-answer-provenance.md) | Complete |
+| 10 | [Answer provenance](phase-10-ordinary-answer-provenance.md) | Complete; immediate answer summaries await acceptance |
 | 11 | [File explorer](phase-11-native-file-explorer.md) | Complete |
 | 12 | [Navigation](phase-12-sidebar-navigation.md) | Complete |
 | 13 | [Responses extensions](phase-13-responses-multimodal-input.md) | Complete |
 | 14 | [Bots and tokens](phase-14-bot-accounts-and-token-lifetimes.md) | Complete |
-| 15 | [Composer and Projects](phase-15-composer-and-projects.md) | Complete |
+| 15 | [Composer and Projects](phase-15-composer-and-projects.md) | Complete; menus below composer await acceptance |
 | 16 | [Document tooling boundary](phase-16-native-document-tools.md) | Retired; Hermes uses its existing stack |
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 
 ## Remaining work
 
-1. Enable native automatic selection for the targeted English browser check and
-   accept document/video answer grounding, explicit precedence, and ordinary chat.
-2. After acceptance, record the activation decision in config and close 3D.6.
-   No additional campaign work is required without a new user request.
+1. Accept the below-composer menus and immediate per-answer tool summaries in
+   the browser, reusing the existing Ready video. Recorded video reads are passed;
+   the remaining defect was their display, not missing tool execution.
+2. Close remaining 3D.6 browser acceptance and record the activation decision in
+   config. No additional campaign work is required without a new user request.
 
 Domain cleanup and operational evidence/traffic followups are closed by user
 confirmation. Tailscale, 17D, and further Hermes changes stay deferred. 17C is

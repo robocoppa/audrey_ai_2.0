@@ -1,6 +1,7 @@
 # Campaign 3 Phase 10 — ordinary-answer provenance
 
-**Status:** Complete and accepted.
+**Status:** Foundation accepted. Immediate per-answer summaries are built;
+browser acceptance is pending.
 
 ## Evidence contract
 
@@ -17,6 +18,15 @@ Private sources contain a bounded display title and deduplication identity/tool 
 
 ## Presentation and limits
 
-Saved Sources, Models, and Tool calls appear as compact adjacent expandable disclosures and survive refresh. A private source without a URL is displayed as text. Raw tool cards do not return.
+Sources, Models, and Tool calls appear as compact adjacent expandable
+disclosures on each assistant answer as soon as its run ends. They remain across
+later turns and refresh, including when progress display is off. Active runs keep
+the existing optional progress row; completed runs do not duplicate it. Opening
+one disclosure closes its peers; outside click and Escape close it.
+
+A private source without a URL is displayed as text. Tool names describe actual
+operations (for example `get_file_text`), rather than creating a separate tool for
+the selected skill. Repeated calls are grouped with their count and status. Raw
+tool cards, arguments, and result bodies do not return.
 
 These are observed sources, not claim-level citations. Any future claim-to-evidence feature requires deterministic linkage rather than inference from answer prose.
