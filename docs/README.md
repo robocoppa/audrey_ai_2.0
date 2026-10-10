@@ -9,10 +9,13 @@
   (Phases 1 → 33). Each `phase-N-deploy.md` ends with smoke-test commands
   that verified the phase when it shipped. `campaign-1/HISTORY.md` (gitignored,
   laptop-only) is the authoritative running state of the build campaign.
-- [`campaign-2/`](campaign-2/) — the previous build campaign, Phase 1 → 43.
-- [`campaign-3/`](campaign-3/) — the current campaign: native application, skills,
+- [`campaign-2/`](campaign-2/) — post-1.0 feature work, Phase 1 → 15.
+- [`campaign-3/`](campaign-3/) — Phase 16 → 43: the work that resumed after
+  the June 2026 pause — optimization pass, research mode, `web_fetch`, video
+  ingest and hybrid retrieval.
+- [`campaign-4/`](campaign-4/) — the current campaign: native application, skills,
   file workflows, and API/operations improvements. Start at
-  [`campaign-3/README.md`](campaign-3/README.md).
+  [`campaign-4/README.md`](campaign-4/README.md).
 - [`unraid-ollama.md`](guides/unraid-ollama.md) — canonical Ollama container config
   (referenced by Phase 1).
 - [`archive/`](archive/) — `PROJECT_STATE-archive-<date>.md`, the closed
@@ -32,17 +35,24 @@
 
 ### Reading a phase number
 
-**Phase numbers repeat across campaigns.** Campaign 1 ran 1 → 33 and
-Campaign 2 reached 43 and Campaign 3 begins at 1, so "Phase 13" names two
-unrelated documents — the per-user upload work in Campaign 1 and the
-passthrough virtual model in Campaign 2. Always say which campaign, and prefer
-the filename: since
-Campaign 2's docs are named for what they contain, the name disambiguates
-on its own.
+**Phase numbers repeat across campaigns.** Campaign 1 ran 1 → 33, Campaign 2
+ran 1 → 15, Campaign 3 continued that numbering from 16 → 43, and Campaign 4
+begins at 1. So "Phase 13" names three unrelated documents — the per-user
+upload work in Campaign 1, the passthrough virtual model in Campaign 2 and the
+Responses extensions in Campaign 4 — and phases 16–18 exist in both Campaign 3
+and Campaign 4. Always say which campaign, and prefer the filename: since
+Campaigns 2 and 3 name their docs for what they contain, the name
+disambiguates on its own.
 
-Campaign 2 and 3 filenames are zero-padded (`phase-07-…`) so they sort in phase
-order. Campaign 1's are not — it is closed, and its contents are indexed
-below. Campaign 3 has one main plan and exactly one document per phase.
+Campaign 3 was split out of Campaign 2 afterwards, at the point where work
+resumed after a two-week pause in June 2026 with the optimization pass. It
+keeps its original phase numbers because commit messages, code comments and
+archived state cite them: a "Campaign 2" reference to phase 16 or later,
+written before the split, means the Campaign 3 document with that number.
+
+Campaign 2, 3 and 4 filenames are zero-padded (`phase-07-…`) so they sort in
+phase order. Campaign 1's are not — it is closed, and its contents are indexed
+below. Campaign 4 has one main plan and exactly one document per phase.
 Older campaigns retain their historical plan/deploy split.
 
 ## Phase docs by feature area
@@ -50,14 +60,108 @@ Older campaigns retain their historical plan/deploy split.
 The phase docs in `campaign-1/` are historical — written when the feature
 shipped. Use the groupings below for navigation.
 
-### Campaign 3 (current)
+### Campaign 4 (current)
 
-The [main plan](campaign-3/README.md) contains phase status, remaining order,
+The [main plan](campaign-4/README.md) contains phase status, remaining order,
 and explicit Tower/laptop deployment and test guidance. Follow its table to
 the current phase; completed phases retain compact contracts rather than
 live-test logs or duplicate roadmaps.
 
-### Campaign 2 (previous)
+### Campaign 3 (Phases 16–43)
+
+**Optimization pass, routing and models (16–23)**
+
+- [16 fast-path model fallback](campaign-3/phase-16-fast-path-model-fallback.md)
+- [17 deep-panel dedup](campaign-3/phase-17-deep-panel-dedup.md)
+- [18 concurrent tool discovery](campaign-3/phase-18-concurrent-tool-discovery.md)
+- [19 split openai routes](campaign-3/phase-19-split-openai-routes.md) —
+  `routes/openai.py` becomes a package.
+- [20 concurrent cloud workers](campaign-3/phase-20-concurrent-cloud-workers.md)
+- [21 local worker timeout fix](campaign-3/phase-21-local-worker-timeout-fix.md)
+- [22 depth-intent routing](campaign-3/phase-22-depth-intent-routing.md)
+- [23 deep synthesis timeout](campaign-3/phase-23-deep-synthesis-timeout.md)
+  — pool-aware. (Its heading says 23a; the phase is 23.)
+
+**Research quality (25–28)**
+
+- [25 research fact-check stage](campaign-3/phase-25-research-fact-check-stage.md)
+- [26 research claim ledger](campaign-3/phase-26-research-claim-ledger.md) —
+  claim/source ledger plus SearXNG fallback.
+- [27 eval on box](campaign-3/phase-27-eval-on-box.md) — run the live eval on
+  the box, independent of the laptop's internet.
+- [28 research grounding diagnostic](campaign-3/phase-28-research-grounding-diagnostic.md)
+  — the `read_url` failure.
+
+**Fetching and access (29–31)**
+
+- [29 web_fetch page-opener](campaign-3/phase-29-web-fetch-page-opener.md)
+- [30 web_fetch SSRF hardening](campaign-3/phase-30-web-fetch-ssrf-hardening.md)
+- [31 KB query auth](campaign-3/phase-31-kb-query-auth.md) — authentication on
+  the query routes, which is what made publishing `audrey:8000` to the LAN
+  safe.
+
+**Video ingest (32–38)** — one pipeline built in slices; each phase is
+deployable and verifiable on its own.
+
+- [32 video upload transport](campaign-3/phase-32-video-upload-transport.md) —
+  chunked parts past Cloudflare's 100 MB body cap. **Landed.**
+- [33 video job lifecycle](campaign-3/phase-33-video-job-lifecycle.md) — claim,
+  lease, complete, fail, requeue. **Landed, fully verified.**
+- [34 media-worker container](campaign-3/phase-34-media-worker-container.md) —
+  ffmpeg in a sidecar, no model calls. **Landed, fully verified.**
+- [35 video transcript](campaign-3/phase-35-video-transcript.md) — whisper,
+  baked into the worker image. **Landed, fully verified** (step 5 moved to 38
+  with `keep_source`).
+- [36 video visual assessment](campaign-3/phase-36-video-visual-assessment.md)
+  — keyframes through the `vl` pool. **Landed, working** — the gate keeps 6 of
+  19 sampled frames and each describe costs ~62s, which is the cost data
+  phase 38 was waiting for.
+- [37 video summary](campaign-3/phase-37-video-summary.md) — one cloud call
+  over the transcript and descriptions. **Landed, working** — 3.6s and no GPU,
+  under 1% of a video ingest.
+- [38 video optimise](campaign-3/phase-38-video-optimise.md) — making it
+  affordable, and where deleting the source video now lives. **Partly built.**
+  Cost attribution splits a describe call into queue/load/prefill/generation,
+  because the plan's own lever ranking turned out to be four guesses about
+  which of those is large — two of them not on the list. Source reclamation is
+  built but **off**: it deletes a file the user uploaded, and the 1 GiB quota
+  that motivated it is a config number on a NAS. The levers themselves wait on
+  one ingest's worth of numbers.
+
+**Using it (40-42)**
+
+- [40 uploads in chat](campaign-3/phase-40-uploads-in-chat.md) — the surfaces
+  around video ingest rather than the pipeline itself: a link to the upload
+  page, a tool that lists your own files, a filter that scopes a question to
+  one of them, and elapsed time while a job runs. **All four steps built; the
+  listing tool is deployed.** The open question is behavioural and needs a
+  human: does the model scope to a file when it should, and only then.
+- [41 paste a link, get a video](campaign-3/phase-41-url-video-ingest.md) — a
+  URL field on the upload page and a fetcher container that downloads into the
+  same pipeline uploads already use. **Planned.** Explains why the download
+  cannot happen in `media-worker` (no egress, read-only `/data`, both on
+  purpose), and why subtitles beat whisper when a video has them.
+- [42 a virtual model good at videos](campaign-3/phase-42-video-specialist.md)
+  — a specialist that chains "list my files" into a scoped search rather than
+  working it out per conversation. **Planned and gated** on phase 40's
+  behavioural check. Corrects phase 40's flat "no `audrey_video`", which was an
+  argument about ingest being read as one about retrieval.
+
+**Retrieval quality**
+
+- [39 hybrid retrieval](campaign-3/phase-39-hybrid-retrieval.md) — BM25
+  alongside the vectors, so the KB can find what a document *says* and not
+  only what it means. Prompted by measurements in phase 35: a 10-word
+  paraphrase returned its chunk at 0.796 while a 6-word verbatim quote from
+  the same transcript returned nothing. **Landed, fully verified** — that
+  quote now comes back at rank 1, at a cosine the floor had been discarding.
+- [43 KB result coverage](campaign-3/phase-43-kb-result-coverage.md) — the
+  measure-then-fix plan for pooled `kb_search` results, where one file can
+  crowd out the others a question spans.
+
+There is no Phase 24 in Campaign 3.
+
+### Campaign 2 (Phases 1–15)
 
 **Foundations and cleanup (1–12)**
 
@@ -82,99 +186,13 @@ live-test logs or duplicate roadmaps.
 - [12 chunk-tail fix](campaign-2/phase-12-chunk-tail-fix.md) — drop
   near-duplicate tail chunks.
 
-**Routing, models and the chat path (13–23)**
+**Routing, models and the chat path (13–15)**
 
 - [13 passthrough virtual model](campaign-2/phase-13-passthrough-virtual-model.md)
   — `audrey_passthrough/<concrete>`, the route that puts LAN clients behind
   `FairLocalGate` and `UserInflightRegistry`.
 - [14 fleet watchdog](campaign-2/phase-14-fleet-watchdog.md) — bot liveness.
 - [15 inline image support](campaign-2/phase-15-inline-image-support.md)
-- [16 fast-path model fallback](campaign-2/phase-16-fast-path-model-fallback.md)
-- [17 deep-panel dedup](campaign-2/phase-17-deep-panel-dedup.md)
-- [18 concurrent tool discovery](campaign-2/phase-18-concurrent-tool-discovery.md)
-- [19 split openai routes](campaign-2/phase-19-split-openai-routes.md) —
-  `routes/openai.py` becomes a package.
-- [20 concurrent cloud workers](campaign-2/phase-20-concurrent-cloud-workers.md)
-- [21 local worker timeout fix](campaign-2/phase-21-local-worker-timeout-fix.md)
-- [22 depth-intent routing](campaign-2/phase-22-depth-intent-routing.md)
-- [23 deep synthesis timeout](campaign-2/phase-23-deep-synthesis-timeout.md)
-  — pool-aware. (Its heading says 23a; the phase is 23.)
-
-**Research quality (25–28)**
-
-- [25 research fact-check stage](campaign-2/phase-25-research-fact-check-stage.md)
-- [26 research claim ledger](campaign-2/phase-26-research-claim-ledger.md) —
-  claim/source ledger plus SearXNG fallback.
-- [27 eval on box](campaign-2/phase-27-eval-on-box.md) — run the live eval on
-  the box, independent of the laptop's internet.
-- [28 research grounding diagnostic](campaign-2/phase-28-research-grounding-diagnostic.md)
-  — the `read_url` failure.
-
-**Fetching and access (29–31)**
-
-- [29 web_fetch page-opener](campaign-2/phase-29-web-fetch-page-opener.md)
-- [30 web_fetch SSRF hardening](campaign-2/phase-30-web-fetch-ssrf-hardening.md)
-- [31 KB query auth](campaign-2/phase-31-kb-query-auth.md) — authentication on
-  the query routes, which is what made publishing `audrey:8000` to the LAN
-  safe.
-
-**Video ingest (32–38)** — one pipeline built in slices; each phase is
-deployable and verifiable on its own.
-
-- [32 video upload transport](campaign-2/phase-32-video-upload-transport.md) —
-  chunked parts past Cloudflare's 100 MB body cap. **Landed.**
-- [33 video job lifecycle](campaign-2/phase-33-video-job-lifecycle.md) — claim,
-  lease, complete, fail, requeue. **Landed, fully verified.**
-- [34 media-worker container](campaign-2/phase-34-media-worker-container.md) —
-  ffmpeg in a sidecar, no model calls. **Landed, fully verified.**
-- [35 video transcript](campaign-2/phase-35-video-transcript.md) — whisper,
-  baked into the worker image. **Landed, fully verified** (step 5 moved to 38
-  with `keep_source`).
-- [36 video visual assessment](campaign-2/phase-36-video-visual-assessment.md)
-  — keyframes through the `vl` pool. **Landed, working** — the gate keeps 6 of
-  19 sampled frames and each describe costs ~62s, which is the cost data
-  phase 38 was waiting for.
-- [37 video summary](campaign-2/phase-37-video-summary.md) — one cloud call
-  over the transcript and descriptions. **Landed, working** — 3.6s and no GPU,
-  under 1% of a video ingest.
-- [38 video optimise](campaign-2/phase-38-video-optimise.md) — making it
-  affordable, and where deleting the source video now lives. **Partly built.**
-  Cost attribution splits a describe call into queue/load/prefill/generation,
-  because the plan's own lever ranking turned out to be four guesses about
-  which of those is large — two of them not on the list. Source reclamation is
-  built but **off**: it deletes a file the user uploaded, and the 1 GiB quota
-  that motivated it is a config number on a NAS. The levers themselves wait on
-  one ingest's worth of numbers.
-
-**Using it (40-42)**
-
-- [40 uploads in chat](campaign-2/phase-40-uploads-in-chat.md) — the surfaces
-  around video ingest rather than the pipeline itself: a link to the upload
-  page, a tool that lists your own files, a filter that scopes a question to
-  one of them, and elapsed time while a job runs. **All four steps built; the
-  listing tool is deployed.** The open question is behavioural and needs a
-  human: does the model scope to a file when it should, and only then.
-- [41 paste a link, get a video](campaign-2/phase-41-url-video-ingest.md) — a
-  URL field on the upload page and a fetcher container that downloads into the
-  same pipeline uploads already use. **Planned.** Explains why the download
-  cannot happen in `media-worker` (no egress, read-only `/data`, both on
-  purpose), and why subtitles beat whisper when a video has them.
-- [42 a virtual model good at videos](campaign-2/phase-42-video-specialist.md)
-  — a specialist that chains "list my files" into a scoped search rather than
-  working it out per conversation. **Planned and gated** on phase 40's
-  behavioural check. Corrects phase 40's flat "no `audrey_video`", which was an
-  argument about ingest being read as one about retrieval.
-
-**Retrieval quality**
-
-- [39 hybrid retrieval](campaign-2/phase-39-hybrid-retrieval.md) — BM25
-  alongside the vectors, so the KB can find what a document *says* and not
-  only what it means. Prompted by measurements in phase 35: a 10-word
-  paraphrase returned its chunk at 0.796 while a 6-word verbatim quote from
-  the same transcript returned nothing. **Landed, fully verified** — that
-  quote now comes back at rank 1, at a cosine the floor had been discarding.
-
-There is no Phase 24 in Campaign 2.
 
 ### Foundation (Phases 1–10)
 

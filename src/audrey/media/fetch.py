@@ -144,7 +144,7 @@ class UrlInfo:
     #: Language tags with machine-generated captions.
     auto_caption_langs: tuple[str, ...] = ()
     #: Chapter boundaries, if the uploader marked any. Carried but not yet
-    #: used — see `docs/campaign-2/phase-41-url-video-ingest.md`.
+    #: used — see `docs/campaign-3/phase-41-url-video-ingest.md`.
     chapters: tuple[dict, ...] = ()
 
     def caption_choice(self, langs: str = DEFAULT_SUB_LANGS) -> str:

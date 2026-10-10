@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 import { AudreyLoader } from "./AudreyLoader";
 import { AdminPanel } from "./AdminPanel";
@@ -270,7 +270,12 @@ export function App() {
           />
         </Suspense>
       </main>
-      {filesOpen ? <FileManager onClose={() => setFilesOpen(false)} /> : null}
+      {filesOpen ? (
+        <FileManager onClose={() => {
+          setFilesOpen(false);
+          restoreHeaderActionFocus("app-my-files-action");
+        }} />
+      ) : null}
     </div>
   );
 }
@@ -376,60 +381,136 @@ function ReadySessionControls({
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuToggleRef = useRef<HTMLButtonElement>(null);
+  const menuPanelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    menuPanelRef.current?.querySelector<HTMLElement>("button, a[href]")?.focus();
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) {
+        setMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMenuOpen(false);
+        menuToggleRef.current?.focus();
+      }
+    };
+    const closeOnDesktop = () => {
+      if (window.innerWidth > 1100) setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeOnDesktop);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      window.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeOnDesktop);
+    };
+  }, [menuOpen]);
+
   const healthDetails = capabilityHealth
     ? `Chat: ${capabilityHealth.chat.status} · Tools: ${capabilityHealth.tools.status} · Knowledge: ${capabilityHealth.knowledge.status}`
     : undefined;
 
   return (
     <div className="session-controls" role="group" aria-label="Session controls">
-      {capabilityHealth?.status === "unavailable" ? (
-        <span className="capability-badge capability-badge-unavailable" role="status" title={healthDetails}>
-          Models offline
-        </span>
-      ) : capabilityHealth?.status === "degraded" ? (
-        <span className="capability-badge" role="status" title={healthDetails}>
-          Some features degraded
-        </span>
-      ) : healthUnavailable ? (
-        <span className="capability-badge" role="status">
-          Status unavailable
-        </span>
-      ) : null}
-      <div className="topbar-files-action" role="group" aria-label="File actions">
+      <div
+        className="session-menu"
+        ref={menuRef}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setMenuOpen(false);
+        }}
+      >
         <button
-          className="my-files-button"
+          id="app-session-menu-toggle"
+          className="session-menu-toggle"
           type="button"
-          onClick={onOpenFiles}
+          ref={menuToggleRef}
+          aria-label="Menu"
+          aria-expanded={menuOpen}
+          aria-controls="app-session-menu"
+          onClick={() => setMenuOpen((current) => !current)}
         >
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M3 7.5h7l2 2h9v8.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7.5Z" />
-            <path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1.5" />
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            <path d={menuOpen ? "M6 6l12 12M6 18 18 6" : "M4 6h16M4 12h16M4 18h16"} />
           </svg>
-          <span>My Files</span>
         </button>
-      </div>
-      <div className="account-actions" role="group" aria-label="Signed in user">
-        <button
-          className="session-name"
-          type="button"
-          aria-label="Open account settings"
-          title={`${user.display_name || user.email} · Account settings`}
-          onClick={() => setSettingsOpen(true)}
+        <div
+          id="app-session-menu"
+          className={`session-menu-panel${menuOpen ? " is-open" : ""}`}
+          ref={menuPanelRef}
+          role="group"
+          aria-label="Account and workspace actions"
         >
-          {firstName(user)}
-        </button>
-        {user.groups.includes("admins") ? (
-          <button
-            className="admin-button"
-            type="button"
-            onClick={() => setAdminOpen(true)}
-          >
-            Admin Panel
-          </button>
-        ) : null}
-        {user.auth_provider === "cloudflare_access" ? (
-          <a className="logout-button" href="/cdn-cgi/access/logout">Log out</a>
-        ) : null}
+          {capabilityHealth?.status === "unavailable" ? (
+            <span className="capability-badge capability-badge-unavailable" role="status" title={healthDetails}>
+              Models offline
+            </span>
+          ) : capabilityHealth?.status === "degraded" ? (
+            <span className="capability-badge" role="status" title={healthDetails}>
+              Some features degraded
+            </span>
+          ) : healthUnavailable ? (
+            <span className="capability-badge" role="status">
+              Status unavailable
+            </span>
+          ) : null}
+          <div className="topbar-files-action" role="group" aria-label="File actions">
+            <button
+              id="app-my-files-action"
+              className="my-files-button"
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                onOpenFiles();
+              }}
+            >
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 7.5h7l2 2h9v8.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7.5Z" />
+                <path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1.5" />
+              </svg>
+              <span>My Files</span>
+            </button>
+          </div>
+          <div className="account-actions" role="group" aria-label="Signed in user">
+            <button
+              id="app-account-action"
+              className="session-name"
+              type="button"
+              aria-label="Open account settings"
+              title={`${user.display_name || user.email} · Account settings`}
+              onClick={() => {
+                setMenuOpen(false);
+                setSettingsOpen(true);
+              }}
+            >
+              <span className="session-account-name">{firstName(user)}</span>
+              <span className="compact-menu-label">Account settings</span>
+            </button>
+            {user.groups.includes("admins") ? (
+              <button
+                id="app-administration-action"
+                className="admin-button"
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setAdminOpen(true);
+                }}
+              >
+                Admin Panel
+              </button>
+            ) : null}
+            {user.auth_provider === "cloudflare_access" ? (
+              <a className="logout-button" href="/cdn-cgi/access/logout" onClick={() => setMenuOpen(false)}>Log out</a>
+            ) : null}
+          </div>
+        </div>
       </div>
       {settingsOpen ? (
         <AccountSettings
@@ -438,18 +519,30 @@ function ReadySessionControls({
           onUserChange={onUserChange}
           onPreferencesChange={onPreferencesChange}
           onDataPurgeAttempted={onDataPurgeAttempted}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => {
+            setSettingsOpen(false);
+            restoreHeaderActionFocus("app-account-action");
+          }}
         />
       ) : null}
       {adminOpen ? (
         <AdminPanel
           currentUserId={user.id}
           onChanged={onAdministrationChanged}
-          onClose={() => setAdminOpen(false)}
+          onClose={() => {
+            setAdminOpen(false);
+            restoreHeaderActionFocus("app-administration-action");
+          }}
         />
       ) : null}
     </div>
   );
+}
+
+function restoreHeaderActionFocus(actionId: string) {
+  document.getElementById(
+    window.innerWidth <= 1100 ? "app-session-menu-toggle" : actionId,
+  )?.focus();
 }
 
 function firstName(user: CurrentUser): string {

@@ -88,7 +88,7 @@ passthrough. So you will see the gate threaded through
 current exception: if configured to use a local model, it calls Ollama directly
 without the fair gate. The in-flight cap, by contrast, is acquired exactly
 *once per request*, right at the route boundary in
-[`routes/openai/pipeline.py:123`](../../src/audrey/routes/openai/pipeline.py#L123) and
+[`routes/openai/pipeline.py:178`](../../src/audrey/routes/openai/pipeline.py#L178) and
 [`routes/openai/pipeline.py:241`](../../src/audrey/routes/openai/pipeline.py#L241).
 The whole pipeline executes inside that single `async with` block.
 
@@ -235,7 +235,7 @@ flow:
 
 #### The release path and the `_last_granted` trick
 
-[`fair_gate.py:141-188`](../../src/audrey/pipeline/fair_gate.py#L141)
+[`fair_gate.py:156-203`](../../src/audrey/pipeline/fair_gate.py#L156)
 is where the fairness actually happens. The intent is round-robin:
 when the slot frees, prefer a *different* user from the one that
 just had it. But why is this hard?
@@ -425,7 +425,7 @@ other unusual exit. Whatever happens, the reservation comes off.
 
 #### `_safe_bucket`
 
-[`inflight.py:148-153`](../../src/audrey/routes/inflight.py#L148):
+[`inflight.py:167-172`](../../src/audrey/routes/inflight.py#L167):
 when the wait time exceeds one second, the registry logs a line so
 you can see who's getting throttled. The log uses `_safe_bucket`,
 which trims an email to an 8-character local-part prefix. The user
@@ -438,7 +438,7 @@ gesture worth keeping.
 ### 2.4 How they fit together at the route boundary
 
 Both objects are constructed in the lifespan handler in
-[`main.py:61-63`](../../src/audrey/main.py#L61), stashed on
+[`main.py:120-125`](../../src/audrey/main.py#L120), stashed on
 `app.state.gate` and `app.state.inflight`, and pulled by the route
 per request. The in-flight cap wraps the *whole* pipeline call:
 
@@ -559,12 +559,12 @@ Three transitions need to happen cleanly. The worker that held
 the slot is inside the `@asynccontextmanager`'s body when
 cancellation arrives; its `async with gate.acquire(...)` exit
 runs `await self._release()` at
-[`fair_gate.py:139`](../../src/audrey/pipeline/fair_gate.py#L139),
+[`fair_gate.py:146`](../../src/audrey/pipeline/fair_gate.py#L146),
 returning the slot. That part is the easy case — `try/finally`
 semantics give it to you for free. The harder case is the three
 parked waiters: their `await fut` gets a `CancelledError`, and
 the
-[`fair_gate.py:120`](../../src/audrey/pipeline/fair_gate.py#L120)
+[`fair_gate.py:121`](../../src/audrey/pipeline/fair_gate.py#L121)
 `except` clause is what removes their Futures from the bucket's
 deque so the next `_release` doesn't try to grant a slot to a
 ghost. There's still a narrow race — a Future can be cancelled

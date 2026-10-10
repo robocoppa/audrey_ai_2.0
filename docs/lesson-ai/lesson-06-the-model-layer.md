@@ -73,9 +73,9 @@ harder to test.
 
 These are the files we'll reference in this lesson, open each one as we go:
 
-- [`config.yaml`](../../config.yaml#L21) - the model registry and
+- [`config.yaml`](../../config.yaml#L77) - the model registry and
   deep-panel pools.
-- [`src/audrey/main.py`](../../src/audrey/main.py#L56) - where the
+- [`src/audrey/main.py`](../../src/audrey/main.py#L115) - where the
   model-layer objects are built at startup.
 - [`src/audrey/models/registry.py`](../../src/audrey/models/registry.py#L16)
   - the ranked model registry.
@@ -83,18 +83,18 @@ These are the files we'll reference in this lesson, open each one as we go:
   - temporary model cooldowns.
 - [`src/audrey/models/ollama.py`](../../src/audrey/models/ollama.py#L29)
   - Audrey's async HTTP client for Ollama.
-- [`src/audrey/pipeline/fast_path.py`](../../src/audrey/pipeline/fast_path.py#L31)
+- [`src/audrey/pipeline/fast_path.py`](../../src/audrey/pipeline/fast_path.py#L81)
   - single-model selection.
-- [`src/audrey/pipeline/deep_panel.py`](../../src/audrey/pipeline/deep_panel.py#L52)
+- [`src/audrey/pipeline/deep_panel.py`](../../src/audrey/pipeline/deep_panel.py#L105)
   - worker-pool selection.
-- [`src/audrey/pipeline/synthesize.py`](../../src/audrey/pipeline/synthesize.py#L82)
+- [`src/audrey/pipeline/synthesize.py`](../../src/audrey/pipeline/synthesize.py#L83)
   - synthesizer primary/fallback selection.
 
 Don't get too bogged down with how much code is contained within these files. We're going to focus on specific sections that are pertinent to what we're learning. By the end of the course you may be surprised how differently you see the code compared to when you started.
 
 ### 2.1 Startup builds the shared model objects
 
-Start in [`src/audrey/main.py`](../../src/audrey/main.py#L56), inside
+Start in [`src/audrey/main.py`](../../src/audrey/main.py#L115), inside
 `lifespan`. Lesson 5 covered this function as startup code. This time, focus
 only on the model-layer objects:
 
@@ -108,7 +108,7 @@ gate = FairLocalGate(concurrency=gpu_concurrency)
 ```
 
 Then `lifespan` passes those objects into `build_graph(...)` at
-[`main.py:89`](../../src/audrey/main.py#L89):
+[`main.py:180`](../../src/audrey/main.py#L180):
 
 ```python
 graph = build_graph(cfg, ollama, registry, health, gate, tool_registry)
@@ -118,7 +118,7 @@ This is the same closure idea from Lesson 5. The compiled graph keeps
 references to these objects. Every request uses the same `OllamaClient`, the
 same `ModelRegistry`, the same `HealthTracker`, and the same `FairLocalGate`.
 The same objects are also stored on `app.state` starting at
-[`main.py:152`](../../src/audrey/main.py#L152), so routes can reach them too.
+[`main.py:265`](../../src/audrey/main.py#L265), so routes can reach them too.
 
 That matters because health is process-local memory. If a model times out on
 one request, the next request should know to avoid it for a little while. That
@@ -134,7 +134,7 @@ startup creates the model-layer objects once
 
 ### 2.2 `config.yaml` is the source of model choices
 
-Open [`config.yaml`](../../config.yaml#L21) and find `model_registry`.
+Open [`config.yaml`](../../config.yaml#L77) and find `model_registry`.
 
 The registry is grouped by **task type**:
 
@@ -148,10 +148,10 @@ does not choose them directly. Audrey classifies the prompt and then asks the
 model layer for a model that fits the task.
 
 A registry entry looks like this at
-[`config.yaml:47`](../../config.yaml#L47):
+[`config.yaml:137`](../../config.yaml#L137):
 
 ```yaml
-- { name: "qwen3.6:35b", priority: 100, speed: 75, quality: 92, location: local }
+- { name: "qwen3.8:latest", priority: 100, speed: 75, quality: 92, location: local }
 ```
 
 Read that as:
@@ -175,9 +175,9 @@ Location decides whether local GPU fairness applies.
 
 Below `model_registry`, `config.yaml` also defines deep-panel pools:
 
-- [`deep_panel`](../../config.yaml#L98)
-- [`deep_panel_cloud`](../../config.yaml#L135)
-- [`deep_panel_local`](../../config.yaml#L160)
+- [`deep_panel`](../../config.yaml#L277)
+- [`deep_panel_cloud`](../../config.yaml#L342)
+- [`deep_panel_local`](../../config.yaml#L397)
 
 Those pools are different from the registry. The registry is a ranked menu of
 possible models by task. A deep-panel pool is a more explicit recipe: "for this
@@ -209,7 +209,7 @@ But Python type hints do not automatically validate YAML at runtime. YAML is
 just data loaded from a file.
 
 That is why Audrey also has `_parse_location(...)` at
-[`registry.py:84`](../../src/audrey/models/registry.py#L84):
+[`registry.py:118`](../../src/audrey/models/registry.py#L118):
 
 ```python
 def _parse_location(raw: object, *, task: str, model: str) -> Location:
@@ -330,7 +330,7 @@ This is the fast path's main selection helper. It walks the already-sorted list
 and returns the first model whose name passes the `is_healthy` check.
 
 The call site in the fast path looks like this at
-[`fast_path.py:37`](../../src/audrey/pipeline/fast_path.py#L37):
+[`fast_path.py:87`](../../src/audrey/pipeline/fast_path.py#L87):
 
 ```python
 spec = registry.first_healthy(task, health.is_healthy)
@@ -431,7 +431,7 @@ success -> forget past failures
 ### 2.6 Fast path: one model answers
 
 Now open
-[`src/audrey/pipeline/fast_path.py:31`](../../src/audrey/pipeline/fast_path.py#L31).
+[`src/audrey/pipeline/fast_path.py:81`](../../src/audrey/pipeline/fast_path.py#L81).
 
 This file is used when Audrey is in fast mode: one concrete model should answer
 the request. Fast mode can happen because the user selected `audrey_fast`, or
@@ -457,7 +457,7 @@ task type -> ranked registry list -> first model not cooling down
 ```
 
 Then `run_fast_path(...)` decides whether to use tools at
-[`fast_path.py:114`](../../src/audrey/pipeline/fast_path.py#L114):
+[`fast_path.py:541`](../../src/audrey/pipeline/fast_path.py#L541):
 
 ```python
 use_tools = bool(
@@ -474,7 +474,7 @@ writing the final answer.
 
 If tools are not used, the fast path makes a single Ollama chat call, wrapped
 in a bounded fallback over the healthy candidates at
-[`fast_path.py:138`](../../src/audrey/pipeline/fast_path.py#L138):
+[`fast_path.py:586`](../../src/audrey/pipeline/fast_path.py#L586):
 
 ```python
 async with gate.acquire(cand.name, location=cand.location, user_id=user_id):
@@ -502,7 +502,7 @@ Both local and cloud models still go through `OllamaClient`. In Audrey's setup,
 concurrency hint.
 
 If the Ollama call raises `OllamaError`, the fast path records a failure at
-[`fast_path.py:145`](../../src/audrey/pipeline/fast_path.py#L145):
+[`fast_path.py:599`](../../src/audrey/pipeline/fast_path.py#L599):
 
 ```python
 except OllamaError as e:
@@ -524,7 +524,7 @@ Once a model has recorded a failure, the next request's
 ### 2.7 Deep panel: several workers answer
 
 Open
-[`src/audrey/pipeline/deep_panel.py:52`](../../src/audrey/pipeline/deep_panel.py#L52).
+[`src/audrey/pipeline/deep_panel.py:105`](../../src/audrey/pipeline/deep_panel.py#L105).
 
 Deep mode is different from fast mode. Instead of asking the registry for one
 best model, Audrey starts from a configured worker pool.
@@ -540,7 +540,7 @@ _POOL_KEYS = {
 ```
 
 Then `select_workers(...)` reads the pool for the current task at
-[`deep_panel.py:140`](../../src/audrey/pipeline/deep_panel.py#L140):
+[`deep_panel.py:159`](../../src/audrey/pipeline/deep_panel.py#L159):
 
 ```python
 pool = cfg.raw.get(pool_key, {}).get(task, {})
@@ -565,7 +565,7 @@ it cannot find the model, it defaults to `local`. That default is conservative
 for scheduling: an unknown model should not bypass the local gate by accident.
 
 `select_workers(...)` also filters by health at
-[`deep_panel.py:146`](../../src/audrey/pipeline/deep_panel.py#L146):
+[`deep_panel.py:165`](../../src/audrey/pipeline/deep_panel.py#L165):
 
 ```python
 if not health.is_healthy(name):
@@ -574,7 +574,7 @@ if not health.is_healthy(name):
 ```
 
 And it caps cloud workers at
-[`deep_panel.py:150`](../../src/audrey/pipeline/deep_panel.py#L150):
+[`deep_panel.py:169`](../../src/audrey/pipeline/deep_panel.py#L169):
 
 ```python
 if loc == "cloud":
@@ -598,20 +598,20 @@ registry candidates for that task. This selection-and-fallback logic lives in
 one shared helper, `_prepare_panel`, that both the non-streaming `run_panel`
 and the streaming `run_panel_streaming` call — so the fallback can't drift
 between the two paths. The fallback block is at
-[`deep_panel.py:288`](../../src/audrey/pipeline/deep_panel.py#L288). That keeps
+[`deep_panel.py:594`](../../src/audrey/pipeline/deep_panel.py#L594). That keeps
 deep mode from becoming brittle when a pool entry is temporarily unavailable.
 
 Each worker runs through `_run_one_worker(...)` (defined at
-[`deep_panel.py:121`](../../src/audrey/pipeline/deep_panel.py#L121)). The most
+[`deep_panel.py:343`](../../src/audrey/pipeline/deep_panel.py#L343)). The most
 important behavior is in its docstring at
-[`deep_panel.py:204`](../../src/audrey/pipeline/deep_panel.py#L204):
+[`deep_panel.py:366`](../../src/audrey/pipeline/deep_panel.py#L366):
 
 ```python
 """Execute one worker. Always returns a WorkerDraft — never raises."""
 ```
 
 A deep worker failure becomes a draft with an `error` field at
-[`deep_panel.py:272`](../../src/audrey/pipeline/deep_panel.py#L272):
+[`deep_panel.py:467`](../../src/audrey/pipeline/deep_panel.py#L467):
 
 ```python
 except OllamaError as e:
@@ -636,7 +636,7 @@ deep panel: one worker fails -> keep the error as a draft and continue
 ### 2.8 Synthesis: primary, fallback, then graceful degradation
 
 Open
-[`src/audrey/pipeline/synthesize.py:82`](../../src/audrey/pipeline/synthesize.py#L82).
+[`src/audrey/pipeline/synthesize.py:83`](../../src/audrey/pipeline/synthesize.py#L83).
 
 After the deep panel runs, Audrey may have several worker drafts. The
 synthesizer turns those drafts into one final answer.
@@ -654,7 +654,7 @@ def pick_synthesizer(cfg: Config, *, pool_key: str, task: TaskType) -> tuple[str
 ```
 
 Then `synthesize(...)` tries the primary and fallback in order at
-[`synthesize.py:201`](../../src/audrey/pipeline/synthesize.py#L201):
+[`synthesize.py:216`](../../src/audrey/pipeline/synthesize.py#L216):
 
 ```python
 candidates = [primary] if primary == fallback else [primary, fallback]
@@ -673,7 +673,7 @@ Notice the repeated pattern:
 - On `OllamaError`, `record_failure(...)`.
 
 If both synthesizers fail, Audrey degrades to the longest worker draft at
-[`synthesize.py:240`](../../src/audrey/pipeline/synthesize.py#L240):
+[`synthesize.py:256`](../../src/audrey/pipeline/synthesize.py#L256):
 
 ```python
 best = max(drafts, key=lambda d: len(d.get("content") or ""))
@@ -698,14 +698,14 @@ This is the only file in the model layer that actually speaks HTTP to Ollama.
 Everything else chooses model names and handles success/failure policy.
 
 Before the client sends anything, Audrey normalizes message shapes with
-[`_to_ollama_messages`](../../src/audrey/models/ollama.py#L46). This helper is
+[`_to_ollama_messages`](../../src/audrey/models/ollama.py#L133). This helper is
 load-bearing for image turns: OpenAI-style messages may contain a `content`
 list with text and image parts, while Ollama expects a plain text `content`
 field plus an `images` list. The helper absorbs that protocol mismatch so the
 rest of the model layer can pass one `messages` value around.
 
 The client owns an `httpx.AsyncClient` at
-[`ollama.py:98`](../../src/audrey/models/ollama.py#L98):
+[`ollama.py:282`](../../src/audrey/models/ollama.py#L282):
 
 ```python
 self._client = httpx.AsyncClient(
@@ -726,10 +726,10 @@ network connection.
 
 All public methods are `async`:
 
-- [`tags()`](../../src/audrey/models/ollama.py#L110)
-- [`chat()`](../../src/audrey/models/ollama.py#L159)
-- [`chat_stream()`](../../src/audrey/models/ollama.py#L232)
-- [`embed()`](../../src/audrey/models/ollama.py#L283)
+- [`tags()`](../../src/audrey/models/ollama.py#L299)
+- [`chat()`](../../src/audrey/models/ollama.py#L423)
+- [`chat_stream()`](../../src/audrey/models/ollama.py#L499)
+- [`embed()`](../../src/audrey/models/ollama.py#L585)
 
 That means callers must use `await` or `async for`. Audrey is an async web app;
 while one request waits on Ollama, the event loop can keep serving other work.
@@ -737,7 +737,7 @@ while one request waits on Ollama, the event loop can keep serving other work.
 #### Non-streaming chat
 
 `chat(...)` builds an Ollama `/api/chat` payload at
-[`ollama.py:141`](../../src/audrey/models/ollama.py#L197):
+[`ollama.py:463`](../../src/audrey/models/ollama.py#L463):
 
 ```python
 payload: dict[str, Any] = {
@@ -752,7 +752,7 @@ if tools:
 ```
 
 Then it sends the request at
-[`ollama.py:152`](../../src/audrey/models/ollama.py#L140):
+[`ollama.py:479`](../../src/audrey/models/ollama.py#L479):
 
 ```python
 r = await self._client.post("/api/chat", json=payload, timeout=...)
@@ -768,7 +768,7 @@ There are three broad failure types:
 
 That last one is easy to miss. A "successful" HTTP status is not enough. Audrey
 expects a JSON object from Ollama. `_json_object(...)` enforces that at
-[`ollama.py:270`](../../src/audrey/models/ollama.py#L330):
+[`ollama.py:642`](../../src/audrey/models/ollama.py#L642):
 
 ```python
 def _json_object(r: httpx.Response, op: str) -> dict[str, Any]:
@@ -791,7 +791,7 @@ One exception type keeps the failure contract simple.
 #### Streaming chat
 
 `chat_stream(...)` is different at
-[`ollama.py:172`](../../src/audrey/models/ollama.py#L232):
+[`ollama.py:499`](../../src/audrey/models/ollama.py#L499):
 
 ```python
 async def chat_stream(...) -> AsyncIterator[dict[str, Any]]:
@@ -851,9 +851,9 @@ Here is what happens after the request reaches the graph:
    user chose `audrey_fast`; the forced-fast check lives at
    [`graph.py:287`](../../src/audrey/pipeline/graph.py#L287).
 3. `node_fast_path` calls `run_fast_path(...)` at
-   [`graph.py:334`](../../src/audrey/pipeline/graph.py#L334).
+   [`graph.py:357`](../../src/audrey/pipeline/graph.py#L357).
 4. `run_fast_path(...)` calls `pick_fast_model(...)` at
-   [`fast_path.py:114`](../../src/audrey/pipeline/fast_path.py#L114).
+   [`fast_path.py:540`](../../src/audrey/pipeline/fast_path.py#L540).
 5. `pick_fast_model(...)` asks the registry for the first healthy `general`
    candidate:
 

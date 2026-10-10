@@ -151,7 +151,7 @@ Three things to notice:
    schema is what it must conform to when deciding *what* to send.
 3. **Audrey did not write this JSON by hand.** It was built by
    `to_ollama_tool` on `ToolSpec` —
-   [`tools/discovery.py:47`](../../src/audrey/tools/discovery.py#L47):
+   [`tools/discovery.py:167`](../../src/audrey/tools/discovery.py#L167):
 
 ```python
 def to_ollama_tool(self) -> dict[str, Any]:
@@ -250,7 +250,7 @@ Provider tooling helps in two ways:
 
 This is why Audrey strips schema features the protocol theoretically
 supports but small models choke on. From
-[`tools/discovery.py:100`](../../src/audrey/tools/discovery.py#L100),
+[`tools/discovery.py:246`](../../src/audrey/tools/discovery.py#L246),
 `_strip_unsupported_keywords` removes things like `format: "email"`,
 top-level `oneOf`, and unevaluated property constraints. The full
 JSON Schema spec is rich; the subset that survives across model sizes
@@ -640,7 +640,7 @@ Audrey's small Ollama models start ignoring it. What's the protocol-
 level explanation?"**
 
 Two layers. First, `_strip_unsupported_keywords` in
-[`tools/discovery.py:100`](../../src/audrey/tools/discovery.py#L100)
+[`tools/discovery.py:246`](../../src/audrey/tools/discovery.py#L246)
 will remove the `oneOf` before the schema is ever sent — so the model
 sees a schema that no longer matches the underlying endpoint, and the
 "required" hints get dropped. Second, even if the strip didn't happen,

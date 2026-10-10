@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import {
   ApiError,
@@ -38,6 +38,7 @@ export function AccountSettings({
   onDataPurgeAttempted: () => void;
   onClose: () => void;
 }) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [displayName, setDisplayName] = useState(user.display_name);
   const [draft, setDraft] = useState<UserPreferencesUpdate>({
     timezone: preferences.timezone,
@@ -95,6 +96,10 @@ export function AccountSettings({
   const dataBusy = dataExporting || purgeRequesting;
   const busy = profileSaving || preferencesSaving || tokenBusy || memoryBusy || dataBusy
     || Boolean(issuedToken);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus({ preventScroll: true });
+  }, []);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -412,7 +417,7 @@ export function AccountSettings({
             <span>Audrey account</span>
             <h2 id="account-settings-title">Settings</h2>
           </div>
-          <button type="button" onClick={onClose} disabled={busy} aria-label="Close settings">×</button>
+          <button ref={closeButtonRef} type="button" onClick={onClose} disabled={busy} aria-label="Close settings">×</button>
         </div>
 
         {purgeStatus ? (
@@ -451,7 +456,6 @@ export function AccountSettings({
           <label>
             <span>Profile name</span>
             <input
-              autoFocus
               maxLength={100}
               value={displayName}
               onChange={(event) => setDisplayName(event.target.value)}

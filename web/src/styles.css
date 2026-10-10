@@ -4684,103 +4684,6 @@ a:focus-visible {
     justify-self: start;
   }
 
-  .topbar {
-    display: flex;
-    justify-content: space-between;
-    padding: 1rem 1.25rem;
-  }
-
-  .brand {
-    width: auto;
-    justify-content: flex-start;
-    gap: 0.35rem;
-  }
-
-  .brand-wordmark {
-    width: 8.4rem;
-    height: 2.5rem;
-  }
-
-  .brand-wordmark img {
-    top: -0.82rem;
-    left: -1.7rem;
-    width: 11.8rem;
-  }
-
-  .brand-product {
-    position: static;
-    transform: none;
-    padding-left: 0.5rem;
-    font-size: 0.66rem;
-  }
-
-  .topbar > .session-controls {
-    padding-right: 0;
-  }
-
-  .session-controls {
-    gap: 0.35rem;
-  }
-
-  .topbar-files-action {
-    margin-right: 0.15rem;
-    padding-right: 0.55rem;
-  }
-
-  .my-files-button {
-    min-height: 2.1rem;
-    padding: 0.38rem 0.55rem;
-    font-size: 0.64rem;
-  }
-
-  .account-actions {
-    gap: 0.35rem;
-  }
-
-  .session-badge,
-  .session-retry-button,
-  .session-name,
-  .admin-button,
-  .logout-button,
-  .my-files-button {
-    font-size: 0.64rem;
-  }
-
-  .workspace {
-    grid-template-columns: 1fr;
-    grid-template-rows: clamp(10rem, 26vh, 14rem) minmax(0, 1fr);
-  }
-
-  .sidebar {
-    min-height: auto;
-    max-height: none;
-    padding-bottom: 0.65rem;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .conversation-list {
-    flex-direction: row;
-  }
-
-  .conversation {
-    min-width: 10rem;
-  }
-
-  .chat-column {
-    min-height: 0;
-  }
-
-  .thread-header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .thread-controls {
-    width: 100%;
-    justify-content: space-between;
-  }
-
   .rename-conversation {
     flex-wrap: wrap;
   }
@@ -4811,47 +4714,6 @@ a:focus-visible {
   }
 }
 
-@media (max-width: 400px) {
-  .topbar {
-    flex-wrap: wrap;
-    row-gap: 0.45rem;
-  }
-
-  .topbar > .session-controls {
-    width: 100%;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .composer-control-rail {
-    grid-template-columns: 1fr;
-  }
-
-  .compact-model-picker-shell {
-    grid-column: auto;
-  }
-}
-
-@media (max-width: 560px) {
-  /* Give the expanded picker room below the input on short phone screens. */
-  .workspace:has(.composer-dock[data-picker-open="true"]) {
-    grid-template-rows: minmax(0, 1fr);
-  }
-
-  .workspace:has(.composer-dock[data-picker-open="true"]) > .sidebar,
-  .workspace:has(.composer-dock[data-picker-open="true"]) .thread-controls {
-    display: none;
-  }
-
-  .composer-dock[data-picker-open="true"] .composer-control-rail {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .composer-dock[data-picker-open="true"] .compact-model-picker-shell {
-    grid-column: 1 / -1;
-  }
-}
-
 @media (prefers-reduced-motion: no-preference) {
   .welcome {
     animation: reveal 450ms ease-out both;
@@ -4872,7 +4734,7 @@ a:focus-visible {
   }
 }
 
-/* Campaign 3 Phase 15C: compact project navigation and management. */
+/* Campaign 4 Phase 15C: compact project navigation and management. */
 .projects-sidebar {
   display: flex;
   min-height: 0;
@@ -5076,7 +4938,7 @@ a:focus-visible {
 
 .project-editor-dialog {
   width: min(34rem, 100%);
-  max-height: min(42rem, calc(100vh - 2rem));
+  max-height: min(42rem, calc(100dvh - 2rem));
   overflow-y: auto;
   border: 1px solid var(--border-strong);
   border-radius: 1rem;
@@ -5576,31 +5438,6 @@ a:focus-visible {
 }
 
 @media (max-width: 560px) {
-  .sidebar {
-    overflow-y: auto;
-  }
-
-  .projects-sidebar {
-    max-height: none;
-  }
-
-  .project-sidebar-list {
-    display: flex;
-    flex: none;
-    gap: 0.35rem;
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-
-  .project-sidebar-row {
-    min-width: 11rem;
-  }
-
-  .project-conversation-list {
-    max-height: 7rem;
-    overflow-y: auto;
-  }
-
   .project-home {
     padding: 1rem;
   }
@@ -5661,5 +5498,375 @@ a:focus-visible {
   .conversation-actions {
     width: 100%;
     flex-wrap: wrap;
+  }
+}
+
+
+/* Compact navigation keeps the workspace full-height while history is a drawer. */
+html,
+body,
+#root {
+  overscroll-behavior-y: none;
+}
+
+.session-menu {
+  position: relative;
+}
+
+.session-menu-panel {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.session-menu-toggle,
+.compact-menu-label,
+.workspace-mobile-navigation,
+.conversation-drawer-header {
+  display: none;
+}
+
+.audrey-loading-dots {
+  display: inline-block;
+  width: 0.85em;
+  text-align: left;
+}
+
+.audrey-loading-dot {
+  opacity: 0;
+  animation: loading-dot-two 1.8s steps(1, end) infinite;
+}
+
+.audrey-loading-dot.dot-three {
+  animation-name: loading-dot-three;
+}
+
+@keyframes loading-dot-two {
+  0%, 100% { opacity: 0; }
+  33.333%, 99.999% { opacity: 1; }
+}
+
+@keyframes loading-dot-three {
+  0%, 100% { opacity: 0; }
+  66.666%, 99.999% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audrey-loading-dot {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+@media (max-width: 1100px) {
+  .topbar {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.65rem 1rem;
+  }
+
+  .brand {
+    width: auto;
+    justify-content: flex-start;
+  }
+
+  .brand-product,
+  .session-account-name {
+    display: none;
+  }
+
+  .topbar > .session-controls {
+    padding-right: 0;
+  }
+
+  .session-menu-toggle {
+    display: grid;
+    width: 2.65rem;
+    height: 2.65rem;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    background: var(--surface-raised);
+    color: var(--text-soft);
+  }
+
+  .session-menu-panel {
+    position: absolute;
+    z-index: 35;
+    top: calc(100% + 0.6rem);
+    right: 0;
+    display: none;
+    width: min(17rem, calc(100vw - 2rem));
+    max-height: calc(100dvh - 5.5rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    align-items: stretch;
+    padding: 0.6rem;
+    border: 1px solid var(--border-strong);
+    border-radius: 0.85rem;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-md);
+  }
+
+  .session-menu-panel.is-open {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .session-menu-panel .topbar-files-action {
+    margin: 0;
+    padding: 0 0 0.6rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .session-menu-panel .account-actions {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .session-menu-panel .my-files-button,
+  .session-menu-panel .session-name,
+  .session-menu-panel .admin-button,
+  .session-menu-panel .logout-button {
+    display: flex;
+    width: 100%;
+    max-width: none;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 0.65rem 0.85rem;
+    border-radius: 0.6rem;
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+
+  .compact-menu-label {
+    display: inline;
+  }
+}
+
+@media (max-width: 900px) {
+  .workspace {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .workspace-mobile-navigation {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.35rem 0.8rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-deep);
+  }
+
+  .workspace-mobile-navigation button {
+    display: inline-flex;
+    min-height: 2.5rem;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.65rem;
+    border: 1px solid transparent;
+    border-radius: 0.6rem;
+    background: transparent;
+    color: var(--text-soft);
+    font-size: 0.8rem;
+    font-weight: 650;
+  }
+
+  .workspace-mobile-navigation .workspace-new-conversation {
+    border-color: rgb(99 181 255 / 25%);
+    background: rgb(52 153 250 / 9%);
+    color: var(--accent);
+  }
+
+  .conversation-drawer-backdrop {
+    position: fixed;
+    z-index: 36;
+    inset: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: rgb(2 7 16 / 70%);
+    cursor: default;
+  }
+
+  .workspace > .sidebar {
+    position: fixed;
+    z-index: 37;
+    inset: 0 auto 0 0;
+    display: none;
+    width: min(22rem, calc(100vw - 2.5rem));
+    height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: max(0.8rem, env(safe-area-inset-top)) 0.8rem max(0.8rem, env(safe-area-inset-bottom));
+    border-right: 1px solid var(--border-strong);
+    background: var(--surface);
+    box-shadow: var(--shadow-md);
+  }
+
+  .workspace[data-navigation-open="true"] > .sidebar {
+    display: flex;
+  }
+
+  .conversation-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.8rem;
+    padding-inline: 0.4rem;
+  }
+
+  .conversation-drawer-close {
+    display: grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 0.65rem;
+    background: transparent;
+    color: var(--text-soft);
+  }
+
+  .sidebar > * {
+    flex-shrink: 0;
+  }
+
+  .sidebar .conversation-list,
+  .sidebar .project-sidebar-list,
+  .sidebar .project-conversation-list {
+    max-height: none;
+    overflow: visible;
+    flex: none;
+  }
+
+  .sidebar .projects-sidebar {
+    max-height: none;
+  }
+
+  .workspace-mobile-error {
+    position: absolute;
+    z-index: 6;
+    top: 3.25rem;
+    right: 0.8rem;
+    left: 0.8rem;
+    margin: 0;
+    padding: 0.75rem;
+    border: 1px solid var(--danger);
+    border-radius: 0.6rem;
+    background: var(--surface);
+    color: var(--danger);
+    font-size: 0.8rem;
+  }
+
+  .chat-column {
+    grid-row: 2;
+  }
+
+  .thread-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0.65rem 1rem;
+  }
+
+  .thread-controls,
+  .conversation-actions {
+    width: 100%;
+  }
+
+  .conversation-actions {
+    flex-wrap: wrap;
+  }
+
+  .project-move-control {
+    min-width: 0;
+    width: auto;
+    flex: 1;
+  }
+
+  .project-move-control select {
+    min-width: 0;
+    max-width: min(14rem, 100%);
+    flex: 1;
+  }
+
+  .conversation-title-display h1 {
+    min-width: 0;
+  }
+
+  .thread-viewport {
+    padding: 0.8rem;
+    scrollbar-gutter: auto;
+  }
+
+  .composer-dock {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  .project-home-grid,
+  .admin-toolbar,
+  .admin-add-account {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .account-settings,
+  .file-manager,
+  .project-home,
+  .project-editor-dialog {
+    overscroll-behavior: contain;
+  }
+}
+
+@media (max-width: 560px) {
+  .brand-wordmark {
+    width: 8.4rem;
+    height: 2.5rem;
+  }
+
+  .brand-wordmark img {
+    top: -0.82rem;
+    left: -1.7rem;
+    width: 11.8rem;
+  }
+
+  .thread-title > span,
+  .project-breadcrumb {
+    display: none;
+  }
+
+  .thread-header h1 {
+    font-size: 0.92rem;
+  }
+
+  .conversation-actions button {
+    min-height: 2.35rem;
+    padding: 0.45rem 0.55rem;
+  }
+
+  .project-move-control > span {
+    display: none;
+  }
+
+  .composer {
+    padding: 0.6rem;
+  }
+
+  .composer-control-rail {
+    gap: 0.35rem;
+  }
+
+  .composer-model-picker img {
+    width: min(10.8rem, 24dvh);
+    height: min(10.8rem, 24dvh);
   }
 }

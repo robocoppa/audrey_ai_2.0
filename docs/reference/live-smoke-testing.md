@@ -1,6 +1,6 @@
 # Live testing — runner and deployment reference
 
-The [Campaign 3 main plan](../campaign-3/README.md) owns priorities and rebuild
+The [Campaign 4 main plan](../campaign-4/README.md) owns priorities and rebuild
 instructions. This reference contains runner/auth rules, not past test logs.
 English user input only; accepted checks do not need another run.
 

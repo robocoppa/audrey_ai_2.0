@@ -1952,7 +1952,7 @@ async def fetch_failed(
     return JobResultResponse(file_id=file_id, status="failed", chunks=0)
 
 
-# ─── Media-processing job lifecycle (Phase 33, Campaign 3 Phase 7) ────
+# ─── Media-processing job lifecycle (Campaign 3 Phase 33, Campaign 4 Phase 7) ────
 #
 # Audio, videos and scanned PDFs upload to `status='pending'`. Extraction can take
 # minutes of CPU or GPU work and cannot live in an upload request. These routes

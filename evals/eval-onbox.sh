@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # eval-onbox.sh — run the live eval ON THE BOX and Telegram-notify on completion,
-# in one command. See docs/campaign-2/phase-27-eval-on-box.md.
+# in one command. See docs/campaign-3/phase-27-eval-on-box.md.
 #
 # Why this exists: the bare `docker run -d …` + a separately-pasted notify command
 # is easy to half-forget (you get the run but no ping). This wraps both so the

@@ -596,7 +596,7 @@ Qdrant collection, and show up in the user's file list without
 scrolling Qdrant on every request.
 
 `POST /v1/files`
-([`routes/files.py:145`](../../src/audrey/routes/files.py#L145))
+([`routes/files.py:525`](../../src/audrey/routes/files.py#L525))
 runs eight steps in order — each one assumes the previous succeeded
 and unwinds in reverse on failure:
 
@@ -609,11 +609,11 @@ and unwinds in reverse on failure:
    `kb_user_images_<sanitized>` plus the payload indexes on first
    upload.
 3. **Pre-flight quota check**
-   ([`routes/files.py:170`](../../src/audrey/routes/files.py#L170)).
+   ([`routes/files.py:559`](../../src/audrey/routes/files.py#L559)).
    If the user is already at or over their byte budget, 413
    immediately without touching disk.
 4. **Stream to disk** with a per-upload cap
-   ([`routes/files.py:115`](../../src/audrey/routes/files.py#L115)).
+   ([`routes/files.py:397`](../../src/audrey/routes/files.py#L397)).
    1 MB chunks, written to
    `<upload_root>/<sanitized_user>/<file_id>.<ext>`; cap exceeded
    → 413 and unlink.
@@ -628,7 +628,7 @@ and unwinds in reverse on failure:
    pipeline, writing to the per-user collection and stamping each
    point's payload with `user` and `file_id`.
 8. **Record in sqlite**
-   ([`routes/files.py:259`](../../src/audrey/routes/files.py#L259)).
+   ([`routes/files.py:891`](../../src/audrey/routes/files.py#L891)).
    After Qdrant succeeded; if this write fails, we roll back the
    Qdrant upsert to avoid a phantom file.
 
@@ -698,7 +698,7 @@ disk unlink are housekeeping that can take their own time.
 But what about drift that happens *outside* the request flow?
 Manual `qdrant` purges, container restarts mid-upload, a sqlite
 file restored from an old backup? That's what
-[`reconcile_with_qdrant`](../../src/audrey/kb/uploads_db.py#L957)
+[`reconcile_with_qdrant`](../../src/audrey/kb/uploads_db.py#L2847)
 is for — a two-direction sweep:
 - **Backfill.** Anything in Qdrant that's missing from sqlite gets
   added. So if sqlite was restored from an old backup, any uploads

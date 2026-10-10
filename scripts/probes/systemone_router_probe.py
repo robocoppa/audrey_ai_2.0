@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare Ollama System One decision models with Audrey's current router.
 
-This is Campaign 3 Phase 6A: measurement only. It calls the incumbent through
+This is Campaign 4 Phase 6A: measurement only. It calls the incumbent through
 Audrey's real ``router_classify`` function and calls decision models through
 Ollama's typed ``/v1/systemone`` endpoint. It does not edit ``config.yaml`` or
 change production classification.

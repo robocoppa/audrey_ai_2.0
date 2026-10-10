@@ -275,7 +275,7 @@ Five steps. Read top to bottom:
    ID and write the batch.
 
 **Concept spotlight — deterministic IDs.**
-[`kb/qdrant.py:139-75`](../../src/audrey/kb/qdrant.py#L139):
+[`kb/qdrant.py:151-87`](../../src/audrey/kb/qdrant.py#L151):
 
 ```python
 def point_id(*, source: str, kind: str, idx: int) -> str:
@@ -403,7 +403,7 @@ returns each vector, Audrey scales it down so its total length is 1.
 This is a math trick that makes cosine-similarity comparisons faster
 and lets the same stored vectors work if we ever switch Qdrant to a
 different distance metric. The details are in `_normalize` at
-[`kb/embed.py:163`](../../src/audrey/kb/embed.py#L163); it's a one-
+[`kb/embed.py:194`](../../src/audrey/kb/embed.py#L194); it's a one-
 time cost at ingest and search, and you can largely treat it as a
 background detail.
 
@@ -429,7 +429,7 @@ The interesting part is the constraints that come out of all this:
 ### 2.5 The query path
 
 `/v1/kb/query` is short —
-[`routes/kb.py:339`](../../src/audrey/routes/kb.py#L339):
+[`routes/kb.py:419`](../../src/audrey/routes/kb.py#L419):
 
 ```python
 @router.post("/query", response_model=QueryResponse)
@@ -460,7 +460,7 @@ The pieces of FastAPI to notice:
   build the `kb_search` tool spec for the model.
 
 The merge logic is in `_search_text_merged` —
-[`routes/kb.py:462`](../../src/audrey/routes/kb.py#L462):
+[`routes/kb.py:562`](../../src/audrey/routes/kb.py#L562):
 
 ```python
 async def _search_text_merged(qdrant, vec, *, top_k, user):
@@ -499,7 +499,7 @@ If we ever spun up a per-user collection on a different embedder, the
 scores would look comparable on paper (both are floats in the same
 range) but mean different things — the merge would produce arbitrary
 ordering. The docstring at
-[`routes/kb.py:471-474`](../../src/audrey/routes/kb.py#L471) pins
+[`routes/kb.py:571-574`](../../src/audrey/routes/kb.py#L571) pins
 that contract:
 
 > If a per-user collection ever ships with a different model, switch
@@ -527,7 +527,7 @@ within a few cosine degrees of each other.
 `/v1/kb/query/image` (handler at
 [`routes/kb.py:691`](../../src/audrey/routes/kb.py#L691)) picks which
 encoder to call based on which field of the request body was supplied
-([`routes/kb.py:707`](../../src/audrey/routes/kb.py#L707)):
+([`routes/kb.py:808`](../../src/audrey/routes/kb.py#L808)):
 
 ```python
 if req.image_url:
@@ -578,7 +578,7 @@ The model never talks to Audrey's KB directly. It dispatches
 `kb_search` (or `kb_image_search`) as a tool call (Lesson 9), which
 hits the custom-tools server, which then HTTP-proxies into Audrey's
 `/v1/kb/query`. Closing the loop:
-[`tools-server/app.py:490`](../../tools-server/app.py#L490):
+[`tools-server/app.py:722`](../../tools-server/app.py#L722):
 
 ```python
 async def kb_search(req: KBSearchRequest) -> KBSearchResponse:
@@ -654,12 +654,12 @@ in Lesson 12 is what cleans these up.
 
 **5. SSRF-rejected image URL.**
 `_validate_image_url` raises `ValueError`; the route catches it
-([`routes/kb.py:713-714`](../../src/audrey/routes/kb.py#L713)) and 422s
+([`routes/kb.py:814-815`](../../src/audrey/routes/kb.py#L814)) and 422s
 with the reason. From the model's side this looks like any tool
 failure: it gets the rejection message in the `role: "tool"`
 content, and the right thing is to ask the user for a different URL
 rather than retry. Redirect responses get caught specially
-([`kb/embed.py:197-206`](../../src/audrey/kb/embed.py#L208)) and
+([`kb/embed.py:228-237`](../../src/audrey/kb/embed.py#L228)) and
 name the redirect target so the user can resupply the final URL.
 
 There is also a sixth mode worth knowing: **the KB returns hits but
@@ -683,7 +683,7 @@ happens to the now-surplus chunks in Qdrant?"**
 
 `ingest_text_file` runs `delete_by_source(source,
 collection=qdrant.text_collection)` before the upsert
-([`kb/ingest.py:122`](../../src/audrey/kb/ingest.py#L122)). That
+([`kb/ingest.py:133`](../../src/audrey/kb/ingest.py#L133)). That
 clears every point in `kb_text` whose payload `source` matches the
 file's absolute path — all of the old chunks. The upsert then writes
 the current ones with deterministic IDs. Net effect: the old points

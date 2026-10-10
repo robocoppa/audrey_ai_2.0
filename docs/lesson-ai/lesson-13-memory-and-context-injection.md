@@ -48,7 +48,7 @@ this as the present moment." Two functions in
 [`pipeline/context.py`](../../src/audrey/pipeline/context.py), no I/O,
 no skip path; the instruction defuses models that would otherwise
 reason about the timestamp as data. The node wrapper at
-[`graph.py:207`](../../src/audrey/pipeline/graph.py#L207) prepends it
+[`graph.py:227`](../../src/audrey/pipeline/graph.py#L227) prepends it
 to `state["messages"]`. That's the whole subsystem; the rest of the
 lesson is per-user.)
 
@@ -106,11 +106,11 @@ Audrey just remembers the answer briefly.*
 
 #### What `require_user` looks like at the route
 
-[`require_user`](../../src/audrey/auth.py#L126) is a FastAPI
+[`require_user`](../../src/audrey/auth.py#L308) is a FastAPI
 **dependency**. A dependency in FastAPI is a function whose return
 value gets injected into a route handler automatically. The chat
 route declares it at
-[`routes/openai/routes.py:90`](../../src/audrey/routes/openai/routes.py#L90):
+[`routes/openai/routes.py:121`](../../src/audrey/routes/openai/routes.py#L121):
 
 ```python
 async def chat_completions(
@@ -129,7 +129,7 @@ OWUI probe, the cache, or the 401 path. Auth has been pushed entirely
 into one dependency.
 
 The return type, `AuthedUser`, is a small dataclass at
-[`auth.py:64`](../../src/audrey/auth.py#L64):
+[`auth.py:86`](../../src/audrey/auth.py#L86):
 
 ```python
 @dataclass(slots=True)
@@ -148,7 +148,7 @@ hands `user_id=me.email` would silently break.
 `owui_id` is OWUI's internal user id (kept for debugging / future
 admin features), and `role` is `"user"` or `"admin"` — used by the
 admin-only routes via a companion dependency,
-[`require_admin`](../../src/audrey/auth.py#L157), which calls
+[`require_admin`](../../src/audrey/auth.py#L456), which calls
 `require_user` first then additionally checks `me.role == "admin"`
 and returns 403 if not. (401 means "we don't know who you are"; 403
 means "we know who you are and you're not allowed.")
@@ -213,7 +213,7 @@ Three things happen on the way to `me`:
 
 Once `require_user` returns, the route has a trusted `AuthedUser` and
 uses `me.email` everywhere a `user_id` is needed. Notice this guard
-at [`routes/openai/routes.py:112`](../../src/audrey/routes/openai/routes.py#L112):
+at [`routes/openai/routes.py:178`](../../src/audrey/routes/openai/routes.py#L178):
 
 ```python
 # Identity comes from the Authorization header via require_user, NOT from
@@ -243,7 +243,7 @@ eviction:
 - `POST /v1/admin/auth/clear` — drops every cached entry. Useful
   after an OWUI config or version change.
 - An email-scoped variant powered by
-  [`clear_auth_cache_for_email`](../../src/audrey/auth.py#L224) —
+  [`clear_auth_cache_for_email`](../../src/audrey/auth.py#L516) —
   drops just one user's entries (a user can have multiple tokens
   across devices) without disturbing others.
 
@@ -310,7 +310,7 @@ block stays under roughly a kilobyte total.
 **The `{user_id}` substitution.** Memory writes happen via the model
 calling the `memory_store` tool. For the model to know when, the
 composer adds a hint from
-[`prompts.py:118`](../../src/audrey/pipeline/prompts.py#L118) telling
+[`prompts.py:470`](../../src/audrey/pipeline/prompts.py#L470) telling
 it to use `tags="user:{user_id}"`. At injection time the placeholder
 is replaced with the real email. If the substitution didn't happen,
 every entry would store under the literal string `user:{user_id}` and
@@ -319,7 +319,7 @@ added when `user_id` is non-empty — anonymous requests can't write to
 memory anyway.
 
 The composer at
-[`prompts.py:202`](../../src/audrey/pipeline/prompts.py#L202) pins the
+[`prompts.py:599`](../../src/audrey/pipeline/prompts.py#L599) pins the
 slot order: incoming system messages first, then task-role prompt,
 then memory hint, then chat-history search guidance. The chat-history
 guidance only appears when `chat_history_search` is in the registry —
@@ -345,7 +345,7 @@ handler — would mean every streaming branch (fast, deep, ReAct,
 non-tool) gets its own accumulator. That's bug-bait.
 
 `StreamCollector` at
-[`chat_archive.py:116`](../../src/audrey/pipeline/chat_archive.py#L116)
+[`chat_archive.py:142`](../../src/audrey/pipeline/chat_archive.py#L142)
 solves it with a passthrough generator wrapper. Usage from the route
 handler — `collector = StreamCollector()`, then `async for frame in
 collector.wrap(generator): yield frame`, then read `collector.text`
@@ -366,7 +366,7 @@ Two details:
   deep-streaming branch instead keeps banners out of the archive by
   accumulating the answer body manually in `final_content` inside
   `_stream_deep_with_banners`
-  ([`routes/openai/pipeline.py:492`](../../src/audrey/routes/openai/pipeline.py#L492)).
+  ([`routes/openai/pipeline.py:735`](../../src/audrey/routes/openai/pipeline.py#L735)).
 - **`partial=True` on client disconnect.** `wrap()` catches
   `CancelledError` from the source generator and sets
   `self.partial = True` before re-raising. Cancellation happens when
@@ -384,7 +384,7 @@ body, but Audrey doesn't get to pick where OWUI puts it — different
 versions have shipped different shapes, and a future OWUI release
 could move the field again.
 
-[`resolve_conversation_id`](../../src/audrey/pipeline/chat_archive.py#L57)
+[`resolve_conversation_id`](../../src/audrey/pipeline/chat_archive.py#L74)
 walks a five-step ladder, returning at the first hit:
 
 ```text
@@ -416,7 +416,7 @@ Step 5 only fires when there are no messages and no user — a true
 edge case (anonymous request with empty history).
 
 The route resolves this once before pipeline branching at
-[`routes/openai/routes.py:151`](../../src/audrey/routes/openai/routes.py#L151), then
+[`routes/openai/routes.py:276`](../../src/audrey/routes/openai/routes.py#L276), then
 threads `conversation_id` through both the streaming and non-streaming
 paths so capture and archive write agree.
 
@@ -425,18 +425,18 @@ paths so capture and archive write agree.
 
 Once a turn finishes, Audrey ships the user message + assistant reply
 to the tools server for indexing. The writer is
-[`ChatArchiveClient.archive_turn`](../../src/audrey/pipeline/chat_archive.py#L216),
+[`ChatArchiveClient.archive_turn`](../../src/audrey/pipeline/chat_archive.py#L502),
 called **once per request, after the assistant content is known.**
 
 "After the assistant content is known" is the key constraint. For a
 non-streaming request, the full reply is built inside the pipeline
 and returned as one chunk — the archive call fires after the graph
 finishes, just before the route hands the JSON response back to the
-client (see [`routes/openai/pipeline.py:134`](../../src/audrey/routes/openai/pipeline.py#L134)).
+client (see [`routes/openai/pipeline.py:200`](../../src/audrey/routes/openai/pipeline.py#L200)).
 For a streaming-deep request, the reply is *only* fully known once
 the SSE stream has been fully emitted — so the archive call lives at
 the very end of `_stream_deep_with_banners` (see
-[`routes/openai/pipeline.py:818`](../../src/audrey/routes/openai/pipeline.py#L818)),
+[`routes/openai/pipeline.py:721`](../../src/audrey/routes/openai/pipeline.py#L721)),
 using the `final_content` string accumulated from synthesizer deltas. Two call
 sites, two different "the content is now known" moments, one writer.
 
@@ -484,7 +484,7 @@ OpenAPI tool surface (it's not model-callable — only Audrey's archive
 client calls it).
 
 Now switch to [`tools-server/chat_archive.py`](../../tools-server/chat_archive.py).
-[`ChatArchiveStore.archive_turn`](../../tools-server/chat_archive.py#L367)
+[`ChatArchiveStore.archive_turn`](../../tools-server/chat_archive.py#L580)
 does three things in order:
 
 1. **SQLite write** — user turn + assistant turn into `messages`, plus
@@ -516,7 +516,7 @@ not lock-based concurrency control.
 that's only the assistant turn loses the "what was I asking" context
 — the user types "what about the second one?" and the matching answer
 is meaningless without the prior question. So
-[`build_chunks`](../../tools-server/chat_archive.py#L160) concatenates
+[`build_chunks`](../../tools-server/chat_archive.py#L237) concatenates
 `User: ... \nAssistant: ...` into the chunk text. Long pairs split at
 sentence boundaries with overlap, same chunking shape as the KB
 ingest pipeline (covered in the KB-ingest lesson).
@@ -525,7 +525,7 @@ ingest pipeline (covered in the KB-ingest lesson).
 request, before the model sees the prompt. The chat archive does not.
 The model decides when to search it via the `chat_history_search`
 tool. The reasoning is in
-[`prompts.py:404`](../../src/audrey/pipeline/prompts.py#L404):
+[`prompts.py:482`](../../src/audrey/pipeline/prompts.py#L482):
 
 ```python
 "Use `chat_history_search` only when the user references something "
@@ -547,11 +547,11 @@ recall are wrappers; the *building blocks* (`datetime_system_message`,
 `recall_for_request`, `compose_system_messages`) are plain functions
 in `pipeline/context.py` and `pipeline/memory.py`. That's because the
 streaming-deep route bypasses the graph and calls them directly at
-[`routes/openai/pipeline.py:1161`](../../src/audrey/routes/openai/pipeline.py#L1161).
+[`routes/openai/pipeline.py:1539`](../../src/audrey/routes/openai/pipeline.py#L1539).
 
 | | Non-streaming | Streaming-deep |
 |---|---|---|
-| Lives in | [`graph.py:139, 155`](../../src/audrey/pipeline/graph.py#L207) | [`routes/openai/pipeline.py:1161`](../../src/audrey/routes/openai/pipeline.py#L1161) |
+| Lives in | [`graph.py:257, 273`](../../src/audrey/pipeline/graph.py#L257) | [`routes/openai/pipeline.py:1539`](../../src/audrey/routes/openai/pipeline.py#L1539) |
 | Datetime | `node_datetime` | direct `datetime_system_message()` call |
 | Recall | `node_memory_recall` | direct `recall_for_request()` call |
 | Composer | `compose_system_messages(...)` | `compose_system_messages(...)` |
@@ -607,7 +607,7 @@ they asked yesterday. Does the archive treat this as a continued
 conversation or a new one?**
 
 It depends on whether OWUI sends `chat_id`. If yes (steps 1-3 of
-[`resolve_conversation_id`](../../src/audrey/pipeline/chat_archive.py#L57)),
+[`resolve_conversation_id`](../../src/audrey/pipeline/chat_archive.py#L74)),
 new tab → new chat_id → new conversation. If OWUI omits the field
 (step 4 fallback), the deterministic hash over `(user, first 6
 message contents)` will match yesterday's hash and the new request
@@ -618,7 +618,7 @@ means "same opening turns" is the stitching signal, not "same tab."
 **4. The archive write times out. Does the user see an error?**
 
 No. The post-response archive call is best-effort:
-[`ChatArchiveClient.archive_turn`](../../src/audrey/pipeline/chat_archive.py#L216)
+[`ChatArchiveClient.archive_turn`](../../src/audrey/pipeline/chat_archive.py#L502)
 catches every `httpx.HTTPError` and `TimeoutError`, logs them, and
 increments `chat_archive_writes_total{result="fail"}`. The response is
 already on its way back to the user — the archive write happens *after*

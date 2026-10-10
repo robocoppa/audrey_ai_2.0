@@ -171,6 +171,80 @@ export function ChatWorkspace({
   models: AudreyModel[];
   skills: SkillSummary[];
 }) {
+  const [compactNavigation, setCompactNavigation] = useState(() =>
+    window.matchMedia?.("(max-width: 900px)").matches ?? false);
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const navigationRef = useRef<HTMLElement>(null);
+  const navigationToggleRef = useRef<HTMLButtonElement>(null);
+  const lastFocusedRef = useRef<HTMLElement | null>(null);
+
+  const closeNavigation = useCallback(() => {
+    setNavigationOpen(false);
+    if (compactNavigation && navigationOpen) {
+      window.requestAnimationFrame(() => navigationToggleRef.current?.focus({ preventScroll: true }));
+    }
+  }, [compactNavigation, navigationOpen]);
+
+  useEffect(() => {
+    const viewport = window.matchMedia?.("(max-width: 900px)");
+    if (!viewport) return;
+    const rememberFocus = (event: FocusEvent) => {
+      if (event.target instanceof HTMLElement && event.target !== document.body) {
+        lastFocusedRef.current = event.target;
+      }
+    };
+    const updateViewport = (event: MediaQueryListEvent) => {
+      // A CSS breakpoint can hide a control before this event fires, moving
+      // activeElement to body. Retain the last focused control for restoration.
+      const focused = document.activeElement === document.body
+        ? lastFocusedRef.current
+        : document.activeElement;
+      const focusInHistory = focused instanceof HTMLElement && navigationRef.current?.contains(focused);
+      const focusInCompactControls = focused instanceof HTMLElement
+        && (focused.closest(".workspace-mobile-navigation") || focused.closest(".conversation-drawer-header"));
+      setCompactNavigation(event.matches);
+      setNavigationOpen(false);
+      if (event.matches && focusInHistory) {
+        window.requestAnimationFrame(() => navigationToggleRef.current?.focus({ preventScroll: true }));
+      } else if (!event.matches && focusInCompactControls) {
+        window.requestAnimationFrame(() => navigationRef.current?.querySelector<HTMLButtonElement>(".new-conversation")?.focus({ preventScroll: true }));
+      }
+    };
+    document.addEventListener("focusin", rememberFocus);
+    viewport.addEventListener("change", updateViewport);
+    return () => {
+      document.removeEventListener("focusin", rememberFocus);
+      viewport.removeEventListener("change", updateViewport);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!compactNavigation || !navigationOpen) return;
+    const navigation = navigationRef.current;
+    navigation?.querySelector<HTMLButtonElement>(".conversation-drawer-close")?.focus({ preventScroll: true });
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeNavigation();
+      } else if (event.key === "Tab" && navigation) {
+        const actions = Array.from(navigation.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex="0"]',
+        )).filter((action) => action.getClientRects().length > 0);
+        const first = actions[0];
+        const last = actions[actions.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [closeNavigation, compactNavigation, navigationOpen]);
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [openedConversations, setOpenedConversations] = useState<Conversation[]>([]);
   const [projects, setProjects] = useState<AudreyProject[]>([]);
@@ -345,7 +419,7 @@ export function ChatWorkspace({
           ?? items[0]
           ?? null;
         if (nextSelected) {
-          openConversation(nextSelected);
+          openConversation(nextSelected, { dismissNavigation: false });
         } else {
           selectConversation(null);
         }
@@ -393,13 +467,15 @@ export function ChatWorkspace({
   }
 
   function openProject(project: AudreyProject) {
+    closeNavigation();
     selectedProjectIdRef.current = project.id;
     setSelectedProjectId(project.id);
     setExpandedProjectId(project.id);
     selectConversation(null);
   }
 
-  function openConversation(conversation: Conversation) {
+  function openConversation(conversation: Conversation, { dismissNavigation = true } = {}) {
+    if (dismissNavigation && navigationOpen) closeNavigation();
     const projectId = conversation.project_id ?? null;
     selectedProjectIdRef.current = projectId;
     setSelectedProjectId(projectId);
@@ -424,6 +500,7 @@ export function ChatWorkspace({
         setView("active");
       }
       selectConversation(conversation);
+      closeNavigation();
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
@@ -476,9 +553,16 @@ export function ChatWorkspace({
     }
   }
 
+  function closeNewProject() {
+    setNewProjectOpen(false);
+    if (compactNavigation) {
+      window.requestAnimationFrame(() => navigationToggleRef.current?.focus({ preventScroll: true }));
+    }
+  }
+
   function projectCreated(project: AudreyProject) {
     setProjects((current) => [project, ...current]);
-    setNewProjectOpen(false);
+    closeNewProject();
     openProject(project);
   }
 
@@ -601,15 +685,66 @@ export function ChatWorkspace({
   }
 
   return (
-    <div className="workspace">
+    <div className="workspace" data-navigation-open={navigationOpen}>
+      <div className="workspace-mobile-navigation" inert={compactNavigation && navigationOpen ? true : undefined}>
+        <button
+          className="workspace-history-toggle"
+          type="button"
+          ref={navigationToggleRef}
+          aria-label="Open conversation history"
+          aria-expanded={navigationOpen}
+          aria-controls="conversation-navigation"
+          onClick={() => setNavigationOpen(true)}
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            <path d="M4 5h16M4 12h16M4 19h16" />
+          </svg>
+          <span>Chats</span>
+        </button>
+        <button
+          className="workspace-new-conversation"
+          type="button"
+          aria-label="New chat"
+          onClick={startConversation}
+          disabled={creating || loading || catalogUnavailable}
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          <span>{creating ? "Creating…" : "New chat"}</span>
+        </button>
+      </div>
+      {compactNavigation && !navigationOpen && error ? (
+        <p className="workspace-mobile-error" role="alert">{error}</p>
+      ) : null}
+      {compactNavigation && navigationOpen ? (
+        <button className="conversation-drawer-backdrop" type="button" tabIndex={-1} aria-label="Dismiss conversation history" onClick={closeNavigation} />
+      ) : null}
       {newProjectOpen ? (
         <NewProjectDialog
           limits={projectLimits}
-          onClose={() => setNewProjectOpen(false)}
+          onClose={closeNewProject}
           onCreated={projectCreated}
         />
       ) : null}
-      <aside className="sidebar" aria-label="Conversations">
+      <aside
+        className="sidebar"
+        id="conversation-navigation"
+        ref={navigationRef}
+        aria-label="Conversations"
+        role={compactNavigation ? "dialog" : undefined}
+        aria-modal={compactNavigation && navigationOpen ? true : undefined}
+        aria-hidden={compactNavigation && !navigationOpen ? true : undefined}
+        inert={compactNavigation && !navigationOpen ? true : undefined}
+      >
+        <div className="conversation-drawer-header">
+          <strong>Conversations</strong>
+          <button className="conversation-drawer-close" type="button" aria-label="Close conversation history" onClick={closeNavigation}>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+              <path d="M6 6l12 12M6 18 18 6" />
+            </svg>
+          </button>
+        </div>
         <div className="sidebar-primary-action">
           <button
             className="new-conversation"
@@ -627,7 +762,10 @@ export function ChatWorkspace({
         <section className="projects-sidebar" aria-labelledby="projects-sidebar-title">
           <header>
             <h2 id="projects-sidebar-title">Projects</h2>
-            <button type="button" onClick={() => setNewProjectOpen(true)} aria-label="New project">
+            <button type="button" onClick={() => {
+              setNavigationOpen(false);
+              setNewProjectOpen(true);
+            }} aria-label="New project">
               <span aria-hidden="true">＋</span>
               <span>New</span>
             </button>
@@ -820,7 +958,7 @@ export function ChatWorkspace({
         {error ? <p className="sidebar-error" role="alert">{error}</p> : null}
       </aside>
 
-      <section className="chat-column" aria-label="Audrey conversation">
+      <section className="chat-column" aria-label="Audrey conversation" inert={compactNavigation && navigationOpen ? true : undefined}>
         {catalogUnavailable ? (
           <div className="catalog-unavailable">
             <h2>No models available</h2>

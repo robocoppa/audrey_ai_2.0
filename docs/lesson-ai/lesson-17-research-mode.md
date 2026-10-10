@@ -31,7 +31,7 @@ planner → panel → synth → reflect: several workers draft, and a synthesize
 **research → verify → fact-check → write** — and the answer is one model's
 prose (the *writer's*), built from findings the other stages have already
 checked. The whole entry point is
-[`run_research_pipeline_streaming`](../../src/audrey/pipeline/deep_panel.py#L1584);
+[`run_research_pipeline_streaming`](../../src/audrey/pipeline/deep_panel.py#L1841);
 its docstring lists the four stages and the events each one emits.
 
 The learner question to hold onto: *what makes the answer more trustworthy?*
@@ -47,7 +47,7 @@ sources.** Everything below is that sentence in detail.
 | **Write** | Turn verified findings into one answer. | The user's prose, then a code-built Sources list. |
 
 > **Every stage degrades; the mode never dead-ends.** The pipeline
-> [never raises](../../src/audrey/pipeline/deep_panel.py#L1627) — each stage
+> [never raises](../../src/audrey/pipeline/deep_panel.py#L1887) — each stage
 > catches its own failures and falls back to the prior prose behaviour, and the
 > write stage runs *even with no findings at all*, so the user gets a flagged,
 > honest answer rather than an error. This is the same "always answer
@@ -71,13 +71,13 @@ the code does *after* the writer finishes.
 ### 2.1 Research fan-out
 
 Stage 1 selects a panel of researchers and runs each as its own worker
-([`deep_panel.py:1636`](../../src/audrey/pipeline/deep_panel.py#L1636)). Every
+([`deep_panel.py:1896`](../../src/audrey/pipeline/deep_panel.py#L1896)). Every
 worker is a full ReAct loop — the same search-and-reason machinery from
 [Lesson 9](lesson-09-tool-use-and-react.md) — and they run concurrently, collected
 as each finishes. Each returns prose notes ending in a `SOURCES:` section.
 
 The researcher prompt
-([`prompts.py:118`](../../src/audrey/pipeline/prompts.py#L118)) is worth
+([`prompts.py:182`](../../src/audrey/pipeline/prompts.py#L182)) is worth
 reading closely, because it encodes a real lesson about grounding: it tells the
 worker that when a search surfaces an authoritative or primary source — an
 official project page, release notes, the original paper — to read *that*
@@ -90,11 +90,11 @@ it at the source that actually settles the question.
 
 The prose findings are the answer's raw material, but prose is hard for the
 *next* stages to reason over precisely. So — when the ledger feature is on
-([`config.yaml:235`](../../config.yaml#L235)) — a second, mechanical pass runs
+([`config.yaml:644`](../../config.yaml#L644)) — a second, mechanical pass runs
 per worker, converting each one's prose into a structured `ResearchResult`
-([`deep_panel.py:834`](../../src/audrey/pipeline/deep_panel.py#L834)). This is
+([`deep_panel.py:1068`](../../src/audrey/pipeline/deep_panel.py#L1068)). This is
 a *separate* model call with a separate prompt
-([`prompts.py:148`](../../src/audrey/pipeline/prompts.py#L148)) that adds no new
+([`prompts.py:238`](../../src/audrey/pipeline/prompts.py#L238)) that adds no new
 facts — it only re-expresses what the researcher already found as claims and
 sources.
 
@@ -115,7 +115,7 @@ writer makes it read well.
 > decoder, which constrains it to emit JSON matching that shape. There's a
 > sharp edge — schema `$ref`s (the references Pydantic generates for nested
 > models) aren't reliably handled across different models, so
-> [`inlined_schema`](../../src/audrey/pipeline/ledger.py#L221) flattens every
+> [`inlined_schema`](../../src/audrey/pipeline/ledger.py#L292) flattens every
 > `$ref` into an inline copy first. Some models choke on the nested form and
 > handle the flat one; inlining makes the call portable across the panel.
 
@@ -133,7 +133,7 @@ writer makes it read well.
 > sanity-check URL shape later, when we decide what to show the user, not here.
 
 The structured ledgers from all workers are then merged
-([`deep_panel.py:971`](../../src/audrey/pipeline/deep_panel.py#L971)): sources
+([`deep_panel.py:1209`](../../src/audrey/pipeline/deep_panel.py#L1209)): sources
 are deduplicated by URL, but claims are **not** deduplicated. That's deliberate
 — if two workers disagree, the pipeline *wants* both claims to survive into the
 fact-check stage, where the disagreement can be resolved against sources. Merging
@@ -142,9 +142,9 @@ away the conflict would hide exactly what the next stage exists to catch.
 ### 2.3 Verify
 
 With a grounded ledger in hand, the verifier
-([`deep_panel.py:1748`](../../src/audrey/pipeline/deep_panel.py#L1748)) audits
+([`deep_panel.py:2016`](../../src/audrey/pipeline/deep_panel.py#L2016)) audits
 the merged findings for overclaiming. Its prompt
-([`prompts.py:174`](../../src/audrey/pipeline/prompts.py#L174)) is narrow and
+([`prompts.py:288`](../../src/audrey/pipeline/prompts.py#L288)) is narrow and
 specific: flag claims stated more precisely than the evidence supports — an
 exact date presented as certain when the sources hedge, a superlative
 ("the first to", "invented"), an over-specific attribution. It does **not**
@@ -155,15 +155,15 @@ self-censor does neither well.
 ### 2.4 Fact-check
 
 The fact-check stage
-([`deep_panel.py:1790`](../../src/audrey/pipeline/deep_panel.py#L1790)) is itself
+([`deep_panel.py:2084`](../../src/audrey/pipeline/deep_panel.py#L2084)) is itself
 a tool-using ReAct loop: it `web_search`-confirms the high-risk and dated claims
 and returns corrections the writer applies. It only runs when a fact-checker is
 configured, healthy, and tool-capable — and when it can't run, the pipeline
-[logs *which* precondition failed](../../src/audrey/pipeline/deep_panel.py#L1772)
+[logs *which* precondition failed](../../src/audrey/pipeline/deep_panel.py#L2054)
 and proceeds, exactly as the verify → write flow did before.
 
 When a ledger exists, the prose corrections are structured back against it
-([`deep_panel.py:1815`](../../src/audrey/pipeline/deep_panel.py#L1815)) into a
+([`deep_panel.py:2110`](../../src/audrey/pipeline/deep_panel.py#L2110)) into a
 [`FactCheckResult`](../../src/audrey/pipeline/ledger.py#L195) — per-claim
 verdicts like `supported`, `unsupported`, `needs_hedge`. Those verdicts are what
 let the next steps drop an unsupported claim from the Sources list and soften a
@@ -172,10 +172,10 @@ corrections and moves on.
 
 ### 2.5 Write — and the two things code does after it
 
-The writer ([`deep_panel.py:1863`](../../src/audrey/pipeline/deep_panel.py#L1863))
+The writer ([`deep_panel.py:2174`](../../src/audrey/pipeline/deep_panel.py#L2174))
 turns the verified findings, the critique, and the corrections into one answer,
 streamed live to the user. Its prompt
-([`prompts.py:249`](../../src/audrey/pipeline/prompts.py#L249)) binds it to two
+([`prompts.py:410`](../../src/audrey/pipeline/prompts.py#L410)) binds it to two
 hard rules — introduce no new facts, and apply every flag the verifier raised —
 and tells it how to behave when grounding was thin: open with an honest caveat,
 then state what it knows plainly and decline on what it can't confirm, rather
@@ -187,24 +187,24 @@ the ledger, after the prose is written.
 
 **The Sources list.** Once the writer finishes cleanly, the pipeline appends a
 `## Sources` block built by
-[`_render_sources_block`](../../src/audrey/pipeline/deep_panel.py#L1368). It takes
+[`_render_sources_block`](../../src/audrey/pipeline/deep_panel.py#L1625). It takes
 the sources backing claims the fact-checker did *not* drop, ranks them by
-authority ([`_source_rank`](../../src/audrey/pipeline/deep_panel.py#L1326) — an
+authority ([`_source_rank`](../../src/audrey/pipeline/deep_panel.py#L1583) — an
 official page or encyclopedia outranks a blog), deduplicates by URL, and caps the
 list. An ungrounded or creative answer produces **nothing** here — no ledger, no
 surviving sourced claim, so no empty Sources header sprouts on a birthday toast.
 
 **The hedging.** When the hedging feature is on
-([`config.yaml:243`](../../config.yaml#L243)), each surviving claim gets a
+([`config.yaml:652`](../../config.yaml#L652)), each surviving claim gets a
 *disposition* — state it plainly, attribute it to its source, or hedge it —
 from the pure function
-[`hedge_policy`](../../src/audrey/pipeline/ledger.py#L496). The rules are ordered
+[`hedge_policy`](../../src/audrey/pipeline/ledger.py#L630). The rules are ordered
 and small: a vendor's own claim is *attributed*, never endorsed; a claim flagged
 `needs_hedge` is softened; a high-risk claim hedges unless a strong source
 carries it; an authoritative, non-high-risk claim is stated plainly; everything
 else hedges as the conservative default. The dispositions are rendered into a
 short block of writer guidance by
-[`_render_dispositions_block`](../../src/audrey/pipeline/deep_panel.py#L1443).
+[`_render_dispositions_block`](../../src/audrey/pipeline/deep_panel.py#L1700).
 
 > **Concept spotlight — the pipeline shapes the answer after the model, not by
 > asking the model.** Why compute these instead of telling the writer "list your
@@ -221,7 +221,7 @@ There's one nuance in the hedging block worth its own mention, because it's the
 difference between helpful and useless. The block renders **only** the few
 claims that need special handling, against a one-line "state everything else
 plainly" backdrop — and
-[`_render_dispositions_block`](../../src/audrey/pipeline/deep_panel.py#L1443)
+[`_render_dispositions_block`](../../src/audrey/pipeline/deep_panel.py#L1700)
 suppresses the block entirely if *every* surviving claim would be hedged. A
 disposition list that says "hedge everything" carries no more signal than a
 blanket "be careful," and blanket caution is exactly what turns a confident
@@ -279,7 +279,7 @@ raise. Without it, one null URL would `ValidationError` the entire
 `ResearchResult` and discard everything that worker found — see the §2.2
 tolerant-validation spotlight. A blank URL is harmless because URL shape is
 checked later, when deciding what to show the user
-([`_usable_url`](../../src/audrey/pipeline/deep_panel.py#L1337)), not at parse
+([`_usable_url`](../../src/audrey/pipeline/deep_panel.py#L1594)), not at parse
 time. The rule: one malformed field must never throw away a whole worker's work.
 
 **2. The answer is a creative, ungrounded one (say, "write me a toast"). Why is
@@ -287,10 +287,10 @@ there no Sources list and no hedging block?**
 
 Because both are built from the ledger, and a creative answer has no grounded
 ledger to build from.
-[`_render_sources_block`](../../src/audrey/pipeline/deep_panel.py#L1368) returns
+[`_render_sources_block`](../../src/audrey/pipeline/deep_panel.py#L1625) returns
 `""` when there's no ledger or no surviving source with a usable URL, so no
 `## Sources` header appears; the append step only runs on a clean answer at
-[`deep_panel.py:1815`](../../src/audrey/pipeline/deep_panel.py#L1815). The hedging
+[`deep_panel.py:2110`](../../src/audrey/pipeline/deep_panel.py#L2110). The hedging
 block is likewise empty with no claims to disposition. This is the §2.5 point:
 the deterministic shaping is *conditional on grounding*, so an ungrounded answer
 stays clean prose rather than sprouting empty scaffolding.
@@ -299,7 +299,7 @@ stays clean prose rather than sprouting empty scaffolding.
 actually read better — without rebuilding the image. What's the lever?**
 
 The `hedge_policy` flag in the research-ledger config
-([`config.yaml:243`](../../config.yaml#L243)). It's a *separate* flag from the
+([`config.yaml:652`](../../config.yaml#L652)). It's a *separate* flag from the
 ledger's own `enabled` flag precisely so the hedging can be toggled against a
 ledger-on baseline: flip it, re-run a live eval over saved answers, and diff the
 two. It changes only the writer's wording (plain statement becomes explicitly
@@ -313,7 +313,7 @@ Deep mode *merges* the panel's drafts: a synthesizer reads all the workers'
 drafts and composes the answer from them. Research mode does **not** merge — the
 panel produces checked *findings* (research → verify → fact-check), and a single
 **writer** turns those findings into the answer
-([`deep_panel.py:1863`](../../src/audrey/pipeline/deep_panel.py#L1863)). The
+([`deep_panel.py:2174`](../../src/audrey/pipeline/deep_panel.py#L2174)). The
 answer is one model's prose constrained by what the earlier stages verified, not
 a blend of several drafts. That's why research mode can bind the writer to "apply
 every verifier flag" and "introduce no new facts" — there's a single authoring
@@ -326,8 +326,8 @@ Because asking a model to do that bookkeeping degrades the very prose you want
 from it — it spends effort tracking citations and pads with weak sources to
 satisfy the instruction, instead of writing well (the §2.5 spotlight). Pushing
 the deterministic decisions into pure functions
-([`_render_sources_block`](../../src/audrey/pipeline/deep_panel.py#L1368),
-[`hedge_policy`](../../src/audrey/pipeline/ledger.py#L496)) keeps the writer
+([`_render_sources_block`](../../src/audrey/pipeline/deep_panel.py#L1625),
+[`hedge_policy`](../../src/audrey/pipeline/ledger.py#L630)) keeps the writer
 focused on prose *and* makes those decisions unit-testable, which a prompt never
 is. The principle: if you can compute it from data, compute it — don't ask the
 model.

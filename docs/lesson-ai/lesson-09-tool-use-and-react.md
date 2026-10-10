@@ -110,13 +110,13 @@ a good moment to let another user's request slip onto the GPU.
 
 These are the files we'll reference in this lesson:
 
-- [`src/audrey/tools/discovery.py:77`](../../src/audrey/tools/discovery.py#L77)
+- [`src/audrey/tools/discovery.py:223`](../../src/audrey/tools/discovery.py#L223)
   - turns OpenAPI specs into Ollama tool schemas.
 - [`src/audrey/tools/dispatch.py:79`](../../src/audrey/tools/dispatch.py#L79)
   - executes one tool call, returns a `ToolResult`, never raises.
-- [`src/audrey/pipeline/react.py:101`](../../src/audrey/pipeline/react.py#L101)
+- [`src/audrey/pipeline/react.py:487`](../../src/audrey/pipeline/react.py#L487)
   - the loop: chat, dispatch, repeat.
-- [`config.yaml:247`](../../config.yaml#L247) - `agentic.react.*` knobs.
+- [`config.yaml:687`](../../config.yaml#L687) - `agentic.react.*` knobs.
 - [`tools-server/app.py`](../../tools-server/app.py) - the FastAPI service
   that exposes the actual tools.
 
@@ -125,7 +125,7 @@ call makes from registry to result.
 
 ### 2.1 Discovery happens once, at startup
 
-Open [`tools/discovery.py:178`](../../src/audrey/tools/discovery.py#L178).
+Open [`tools/discovery.py:375`](../../src/audrey/tools/discovery.py#L375).
 At startup, `lifespan` in `main.py` calls `discover_all(...)` once. That
 walks each tool server's `/openapi.json`, picks out the operations tagged
 `tools`, and builds a `ToolRegistry`:
@@ -159,7 +159,7 @@ Two practical consequences:
 The `name` is the FastAPI `operation_id`, the `description` is the route's
 summary or docstring, and `parameters` is the request-body schema with all
 `$ref`s inlined. That inlining lives in
-[`discovery.py:77`](../../src/audrey/tools/discovery.py#L77) (`_resolve_refs`).
+[`discovery.py:223`](../../src/audrey/tools/discovery.py#L223) (`_resolve_refs`).
 Ollama's tool-calling implementation does not follow refs at runtime, so
 Audrey resolves them ahead of time.
 
@@ -167,7 +167,7 @@ Audrey resolves them ahead of time.
 
 Models trip over JSON Schema keywords that aren't in their training-time
 tool format. Open
-[`tools/discovery.py:100`](../../src/audrey/tools/discovery.py#L100):
+[`tools/discovery.py:246`](../../src/audrey/tools/discovery.py#L246):
 
 ```python
 def _strip_unsupported_keywords(schema):
@@ -190,7 +190,7 @@ down. Getting that wrong would silently drop every property in your schema.
 ### 2.3 `ToolSpec` carries enough to dispatch later
 
 A discovered tool is held in this dataclass at
-[`tools/discovery.py:40`](../../src/audrey/tools/discovery.py#L40):
+[`tools/discovery.py:149`](../../src/audrey/tools/discovery.py#L149):
 
 ```python
 @dataclass(slots=True)
@@ -213,7 +213,7 @@ schemas the model gets per request.
 
 ### 2.4 The ReAct loop, top-down
 
-Open [`pipeline/react.py:179`](../../src/audrey/pipeline/react.py#L179).
+Open [`pipeline/react.py:487`](../../src/audrey/pipeline/react.py#L487).
 The function signature is long but the body is short:
 
 ```python
@@ -300,7 +300,7 @@ results = await asyncio.gather(*[
 
 ### 2.6 The dispatcher: turn one tool_call into a ToolResult
 
-Open [`tools/dispatch.py:115`](../../src/audrey/tools/dispatch.py#L201). The
+Open [`tools/dispatch.py:163`](../../src/audrey/tools/dispatch.py#L163). The
 function signature is small but the body has several explicit failure
 paths:
 
@@ -339,7 +339,7 @@ explaining what happened. The ReAct loop then includes that as a
 ### 2.7 Concept spotlight — the user-overwrite invariant
 
 This is the most important part of the dispatcher, and it's three lines.
-At [`tools/dispatch.py:166`](../../src/audrey/tools/dispatch.py#L252):
+At [`tools/dispatch.py:224`](../../src/audrey/tools/dispatch.py#L224):
 
 ```python
 if user_id and name in _USER_SCOPED_TOOLS:
@@ -383,10 +383,10 @@ of ingested documentation can easily run to 8-15 KB. A `web_search` for a
 busy topic can return paragraphs of snippets.
 
 `max_tool_result_chars` (default 2000, from
-[`config.yaml:250`](../../config.yaml#L250)) is the single-shot cap. The
+[`config.yaml:725`](../../config.yaml#L725)) is the single-shot cap. The
 dispatcher truncates to that length and appends `…[truncated]` so the
 model knows it didn't see everything. The helper lives at
-[`tools/dispatch.py:102`](../../src/audrey/tools/dispatch.py#L127):
+[`tools/dispatch.py:89`](../../src/audrey/tools/dispatch.py#L89):
 
 ```python
 def _truncate(s, limit):
@@ -405,7 +405,7 @@ query," not "raise the cap."
 ### 2.9 Concept spotlight — concurrent dispatch
 
 Tool dispatch within one ReAct round is parallel. From
-[`react.py:295`](../../src/audrey/pipeline/react.py#L295):
+[`react.py:687`](../../src/audrey/pipeline/react.py#L687):
 
 ```python
 results = await asyncio.gather(*[
@@ -457,7 +457,7 @@ strong enough: small models can stall (no bytes for minutes), or invent a
 "pseudo tool-call" in plain text ("I would search for ...").
 
 Audrey forces the mode change explicitly. From
-[`react.py:328`](../../src/audrey/pipeline/react.py#L328):
+[`react.py:721`](../../src/audrey/pipeline/react.py#L721):
 
 ```python
 log.warning("react: max_rounds=%d reached for %s; forcing final answer without tools", ...)
@@ -486,7 +486,7 @@ and "the user just asked me to wrap up" is a very clear mode signal.
 
 Each `ollama.chat` call in ReAct is wrapped in `health.record_success`
 and `health.record_failure`. From
-[`react.py:239`](../../src/audrey/pipeline/react.py#L239):
+[`react.py:571`](../../src/audrey/pipeline/react.py#L571):
 
 ```python
 try:

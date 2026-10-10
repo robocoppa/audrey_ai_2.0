@@ -743,7 +743,7 @@ def test_committed_application_settings_are_valid():
 
 # ─── _validate_skills ────────────────────────────────────────────────
 
-def test_committed_skill_settings_enable_only_the_video_mapping():
+def test_committed_skills_enable_native_selection_and_video_mapping():
     raw = _load_yaml(_REPO_ROOT / "config.yaml")
 
     _validate_skills(raw)
@@ -752,7 +752,7 @@ def test_committed_skill_settings_enable_only_the_video_mapping():
     assert raw["skills"]["virtual_models"] == {
         "audrey_video": "video-analysis",
     }
-    assert raw["skills"]["auto_select"] is False
+    assert raw["skills"]["auto_select"] is True
 
 
 @pytest.mark.parametrize(

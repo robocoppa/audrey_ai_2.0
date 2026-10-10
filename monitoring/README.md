@@ -61,4 +61,4 @@ curl --fail --silent --show-error --write-out 'HTTP %{http_code}\n' \
 ```
 
 Pass: HTTP 200. For application rebuilds and runner selection, use the
-[Campaign 3 main plan](../docs/campaign-3/README.md).
+[Campaign 4 main plan](../docs/campaign-4/README.md).

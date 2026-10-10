@@ -7,7 +7,7 @@ endpoint, not part of the API surface.
 Users reach this from a link in an OWUI banner. **Open WebUI has no
 sidebar-links feature** — phase 40 planned around one that does not exist, and
 this docstring named it too. A banner is the supported way to put a link in
-front of an OWUI user; see `docs/campaign-2/phase-40-uploads-in-chat.md` step 1.
+front of an OWUI user; see `docs/campaign-3/phase-40-uploads-in-chat.md` step 1.
 
 The one thing the page cannot know for itself is the way back. The banner opens
 it with `target="_blank"`, so there is no history to go back through, and phase

@@ -35,6 +35,8 @@ LOCAL_MODELS=(
   "llama4:latest"
   "qwen3-vl:32b"
   "llava:34b"
+  # Direct text/image specialist for bot passthrough requests.
+  "medgemma:27b"
   "nomic-embed-text:latest"
   # ── 2026-08-18 bake-off candidates, NOT production roles ──
   # These hold no `model_registry` slot and sit in no pool; they reach config

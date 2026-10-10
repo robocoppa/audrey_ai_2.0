@@ -1,4 +1,4 @@
-# Campaign 2 — Optimization pass
+# Campaign 3 — Optimization pass
 
 A focused plan for four items surfaced by a fresh-eyes codebase review
 (2026-06-23). **All four are in scope, done in stages** (user decision

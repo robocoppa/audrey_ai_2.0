@@ -1,4 +1,4 @@
-"""Campaign 3 Wave 1D.3 — custom-tools degrades per capability."""
+"""Campaign 4 Wave 1D.3 — custom-tools degrades per capability."""
 
 from __future__ import annotations
 

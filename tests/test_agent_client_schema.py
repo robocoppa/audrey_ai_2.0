@@ -10,7 +10,7 @@ the box looks healthy because it never saw a request.
 Diagnosed 2026-08-29 on a Hermes agent whose plain chat turns worked while
 EVERY tool-calling turn failed. The asymmetry is the tell: the first call of a
 tool turn carries no `tool` message and validates; the follow-up carrying the
-tool result does, and 422s. See `docs/campaign-3/` for the incident write-up.
+tool result does, and 422s. See `docs/campaign-4/` for the incident write-up.
 """
 
 from __future__ import annotations

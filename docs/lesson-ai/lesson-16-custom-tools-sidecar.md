@@ -47,7 +47,7 @@ OpenAPI remain service plumbing, not model-callable tools.
 > up advertising *zero* tools. `compose.yaml` orders Audrey's start after
 > the sidecar's healthcheck to avoid this; the admin rediscover route is
 > the manual recovery if it happens anyway. You saw this from Audrey's side
-> in earlier lessons — the sidecar's `/health` route ([app.py:220](../../tools-server/app.py#L220))
+> in earlier lessons — the sidecar's `/health` route ([app.py:294](../../tools-server/app.py#L294))
 > is what that healthcheck hits.
 
 ### 1.2 The five files
@@ -71,7 +71,7 @@ cover the read/maintenance side (search, prune, stats).
 
 Every tool the model can call is one FastAPI route, and they all share the
 same four-part shape. `web_search` is the cleanest example. Its request
-schema is at [app.py:144](../../tools-server/app.py#L144):
+schema is at [app.py:218](../../tools-server/app.py#L218):
 
 ```python
 class WebSearchRequest(BaseModel):                      # ① request schema
@@ -79,7 +79,7 @@ class WebSearchRequest(BaseModel):                      # ① request schema
     count: Annotated[int, Field(ge=1, le=10, ...)] = 5
 ```
 
-and its route decorator + handler at [app.py:402](../../tools-server/app.py#L402):
+and its route decorator + handler at [app.py:623](../../tools-server/app.py#L623):
 
 ```python
 @app.post(
@@ -115,7 +115,7 @@ Each part has a job, and most of them are for the model or the discovery machine
    request that advertises this tool*. This is prompt real estate — it's
    where you tell the model *when* to use the tool, not just what it does.
    (Look at `chat_history_search`'s description at
-   [app.py:681](../../tools-server/app.py#L681): half of it is "use only
+   [app.py:923](../../tools-server/app.py#L923): half of it is "use only
    when…" — actively steering the model away from over-calling it.)
 
 That's the contract. Get all five right and the model gains a working tool;
@@ -128,7 +128,7 @@ Not every route should be a tool. The chat archive has three routes the
 model must **never** call — writing a turn, pruning old data, reading
 stats. Those are for Audrey's archive client and the admin operator only.
 
-The mechanism is one flag ([app.py:872](../../tools-server/app.py#L872)):
+The mechanism is one flag ([app.py:1432](../../tools-server/app.py#L1432)):
 
 ```python
 @app.post("/chat_history/archive", include_in_schema=False, tags=["internal"])
@@ -160,7 +160,7 @@ into three groups with very different implementations:
 
 The **proxy** kind is worth pausing on because it's counterintuitive: the
 sidecar calls *back into Audrey*. Here's the whole of `kb_search`
-([app.py:490](../../tools-server/app.py#L490)), which is representative:
+([app.py:722](../../tools-server/app.py#L722)), which is representative:
 
 ```python
 async def kb_search(req: KBSearchRequest) -> KBSearchResponse:
@@ -209,7 +209,7 @@ The error handling tells you where a failure lives. Two distinct cases:
 
 So a 502 from `kb_search` means "the proxy works, its upstream doesn't,"
 while any other 4xx is Audrey's own verdict on the query. `kb_image_search`
-([app.py:302](../../tools-server/app.py#L302)) is the same shape against
+([app.py:520](../../tools-server/app.py#L520)) is the same shape against
 `/v1/kb/query/image`, with one extra guard: it requires exactly one of
 `query` / `image_url` / `image_b64` and 422s if the model sends none.
 
@@ -273,7 +273,7 @@ off and tries again — 1s, then 2s, then 4s, capped at 15s. The exponential wai
 is what makes this *polite*: hammering a rate-limited API with immediate retries
 just deepens the limit. If all four attempts fail, `reraise=True` lets the last
 exception out. The 429 case remains a `BraveRateLimitError`, which the
-`web_search` handler catches and returns as 503 ([app.py:242](../../tools-server/app.py#L242));
+`web_search` handler catches and returns as 503 ([app.py:316](../../tools-server/app.py#L316));
 other HTTP status failures can currently escape as a generic server error.
 
 So from the model's seat, a rate-limited Brave looks like a tool that
@@ -329,14 +329,14 @@ handshake, and workers reach for it on their own.
 (the same 768-d text embedder the KB uses — Lesson 11). A few design
 choices make it correct and worth understanding.
 
-**Deterministic point ids** ([db.py:63](../../tools-server/db.py#L63)).
+**Deterministic point ids** ([db.py:64](../../tools-server/db.py#L64)).
 Each memory's Qdrant point id is `uuid5(NAMESPACE_URL, f"{user}|{key}")` —
 a *deterministic* hash of the (user, key) pair. So re-storing the same
 (user, key) produces the *same* id, and the upsert overwrites rather than
 duplicating. This is how `memory_store` is idempotent: store "favorite
 language: Python" twice and you have one point, not two.
 
-**What actually gets embedded** ([`_embedding_text`, db.py:66](../../tools-server/db.py#L68)).
+**What actually gets embedded** ([`_embedding_text`, db.py:69](../../tools-server/db.py#L69)).
 A memory is a `(key, value, tags)` triple, but you can't embed a dict — you
 need one string to send to `nomic-embed-text`. The store builds it as
 `f"{key}: {value} [tags: {stripped_tags}]"`, and the construction is
@@ -364,9 +364,9 @@ user, but they answer different questions:
 | Mechanism | Qdrant **scroll** — payload filter, no vector | **vector search** + payload filter + threshold |
 | Returns | one entry (newest if duplicates) | up to `top_k` ranked entries |
 
-`recall` ([db.py:264](../../tools-server/db.py#L264)) is a pure payload
+`recall` ([db.py:337](../../tools-server/db.py#L337)) is a pure payload
 lookup — it never embeds anything, just scrolls for points where `key` and
-`user` both match. `search` ([db.py:293](../../tools-server/db.py#L293))
+`user` both match. `search` ([db.py:585](../../tools-server/db.py#L585))
 embeds the query, runs a cosine vector search filtered to the user, and
 drops anything below `MEMORY_SIMILARITY_THRESHOLD`. That threshold is set
 *tight* (0.5) on purpose: a memory false-positive is injected into the
@@ -379,10 +379,10 @@ per-user; the scope must be exact, or one user's memory leaks into
 another's. The free-form `tags` string carries `user:<id>`, but filtering
 on a substring of `tags` is fragile — `user:al` would match `user:alice`.
 So at write time the store *extracts* the user id
-([`_parse_user`, db.py:53](../../tools-server/db.py#L55)) and duplicates it
+([`_parse_user`, db.py:56](../../tools-server/db.py#L56)) and duplicates it
 into a dedicated `user` payload field with a keyword index. Every read
-filters on that exact field ([recall, db.py:229](../../tools-server/db.py#L264);
-[search, db.py:258](../../tools-server/db.py#L293)). The docstrings on both
+filters on that exact field ([recall, db.py:337](../../tools-server/db.py#L337);
+[search, db.py:585](../../tools-server/db.py#L585)). The docstrings on both
 read methods carry the same warning: never relax the `user` filter.
 
 **The model never controls user scope.** This is the key safety property.
@@ -416,7 +416,7 @@ def _check_chunk_overlap(self) -> Settings:
     return self
 ```
 
-([settings.py:56](../../tools-server/settings.py#L56)) The chat archive's
+([settings.py:135](../../tools-server/settings.py#L135)) The chat archive's
 text splitter steps through long text by `max_chars - overlap`. If overlap
 were ever set `>=` max_chars, that step would be zero or negative and the
 splitter would crash — but only later, on a write large enough to need
@@ -426,7 +426,7 @@ refuses to start, naming both knobs. This is the "fail fast at boot"
 principle — surface a config error at the earliest possible moment, not on
 some unlucky request hours later.
 
-The **lifespan** ([app.py:47](../../tools-server/app.py#L47)) is where the
+The **lifespan** ([app.py:75](../../tools-server/app.py#L75)) is where the
 clients are born. On startup it constructs the `BraveClient`, the
 `MemoryStore`, an httpx client pointed at Audrey (for the proxy tools), and
 the `ChatArchiveStore`; calls each one's `init()`; and hangs them on
@@ -442,7 +442,7 @@ them across requests, close them cleanly.
 gets written — `archive_turn`, the Q+A-pair chunking, the embed-and-upsert.
 The sidecar exposes three more operations on top of that store:
 
-- **`search`** ([chat_archive.py:503](../../tools-server/chat_archive.py#L503))
+- **`search`** ([chat_archive.py:904](../../tools-server/chat_archive.py#L904))
   backs the `chat_history_search` tool. It embeds the query, vector-searches
   Qdrant filtered by `user` (plus an optional `created_at` date range), and
   returns snippet-first hits. Its similarity threshold is set *looser* than
@@ -451,7 +451,7 @@ The sidecar exposes three more operations on top of that store:
   `memory_search` false positive would poison the prompt with a wrong
   "fact about the user." Same machinery, different threshold, for a
   principled reason.
-- **`prune`** ([chat_archive.py:562](../../tools-server/chat_archive.py#L562))
+- **`prune`** ([chat_archive.py:1815](../../tools-server/chat_archive.py#L1815))
   applies retention: if `retention_days > 0`, it deletes Qdrant points
   *first*, then the SQLite rows older than the cutoff. (Vectors before
   source, so a crash mid-prune leaves recoverable source rows, never
@@ -476,8 +476,8 @@ Three independent failure points, all from §2.1–§2.2. (a) A missing or
 wrong `operation_id` — without it FastAPI auto-generates an unusable name,
 so even if the tool is discovered the model can't call it cleanly (contrast
 the explicit `operation_id="web_search"` at
-[`app.py:227`](../../tools-server/app.py#L227)). (b) `include_in_schema=False`
-left on (the flag at [`app.py:493`](../../tools-server/app.py#L493) on the
+[`app.py:625`](../../tools-server/app.py#L625)). (b) `include_in_schema=False`
+left on (the flag at [`app.py:1454`](../../tools-server/app.py#L1454) on the
 internal routes), which hides the route from `/openapi.json`, so discovery
 never sees it. (c) Discovery already ran: Audrey reads `/openapi.json` *once
 at startup*, so a route added after that boot is invisible until you hit the
@@ -488,7 +488,7 @@ admin rediscover route or restart Audrey — the `tools=0`-style staleness from
 Audrey?**
 
 Audrey's (or the network between them), not the sidecar. `kb_search` is a
-*proxy* tool ([`app.py:497`](../../tools-server/app.py#L497)): its handler
+*proxy* tool ([`app.py:722`](../../tools-server/app.py#L722)): its handler
 reaches *back into* Audrey's `/v1/kb/query` via the
 `app.state.audrey` httpx client. A 502 means that upstream call failed — the
 sidecar is up and serving, but the Audrey KB endpoint it depends on isn't
@@ -498,9 +498,9 @@ on the *other* side of the wire than the tool's name suggests.
 **3. Why can the model call `chat_history_search` but not
 `chat_history/prune`?**
 
-`chat_history_search` ([`app.py:429`](../../tools-server/app.py#L429)) is a
+`chat_history_search` ([`app.py:648`](../../tools-server/app.py#L648)) is a
 normal route — visible in `/openapi.json`, so discovery turns it into a tool.
-`chat_history/prune` ([`app.py:493`](../../tools-server/app.py#L493)) is
+`chat_history/prune` ([`app.py:1454`](../../tools-server/app.py#L1454)) is
 declared `include_in_schema=False`, so it never appears in the schema Audrey
 reads — the model has no name to call. The route still works over HTTP for the
 admin operator who knows the path; it's just not a *tool*. This is the §2.2
@@ -513,10 +513,10 @@ do you look first?**
 The `user` payload filter, in two places. First, `recall` and `search` must
 filter on the exact `user` keyword field — see the `FieldCondition(key="user", …)`
 in `recall` ([`db.py:241`](../../tools-server/db.py#L241)) and `search`
-([`db.py:314`](../../tools-server/db.py#L314)) — never a substring of `tags`.
+([`db.py:611`](../../tools-server/db.py#L611)) — never a substring of `tags`.
 Second, confirm Audrey's dispatch is still overriding the model-supplied `user`
 argument with the *authenticated* user: the `_USER_SCOPED_TOOLS` membership
-check at [`dispatch.py:130`](../../src/audrey/tools/dispatch.py#L130) is what
+check at [`dispatch.py:224`](../../src/audrey/tools/dispatch.py#L224) is what
 forces that override. If the model's own `user` value ever reached the store
 unmodified, scoping would be defeated — a model could read another account by
 guessing its id.
@@ -527,7 +527,7 @@ see, and what keeps it from taking down the whole request?**
 After the retry budget exhausts, `brave.py` raises `BraveRateLimitError`
 ([`brave.py:101`](../../tools-server/brave.py#L101)), and the `web_search`
 handler converts it to a 503
-([`app.py:243`](../../tools-server/app.py#L243)). The model doesn't see a
+([`app.py:317`](../../tools-server/app.py#L317)). The model doesn't see a
 crash — it sees a *failed tool result*, which the ReAct loop (Lesson 9) feeds
 back like any other: the model can apologize, try a different approach, or
 answer without the web. That's the failure-isolation payoff of the separate
@@ -537,7 +537,7 @@ process from §1.1 — one tool degraded, the request lives.
 `MAX_CHARS=2500`. What happens, and when?**
 
 The sidecar refuses to start. The `Settings` validator
-([`settings.py:57`](../../tools-server/settings.py#L57)) raises at boot
+([`settings.py:136`](../../tools-server/settings.py#L136)) raises at boot
 because overlap ≥ max_chars, naming both env vars in the message. Before this
 validator existed, the bad config would have crashed *later* — on the first
 archive write large enough to trigger a hard split, where the chunk step

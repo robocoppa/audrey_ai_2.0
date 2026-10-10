@@ -15,14 +15,14 @@ CLAUDE.md
 # Lesson-side working docs that should not ship to GitHub.
 # AUDIT.md collects code-review findings raised during lesson writing —
 # it's an internal queue, not teaching material. One per course.
-docs/lessons/AUDIT.md
+docs/lesson-ai/AUDIT.md
 docs/lesson-python/AUDIT.md
 docs/lesson-python/_LESSON-*-HANDOFF.md
 
 # Private whole-codebase/security review working docs. These contain detailed
 # findings and remediation mechanics that should remain laptop-local.
 docs/reviews/
-docs/campaign-3/phase-01-audit-remediation-plan.md
+docs/campaign-4/phase-01-audit-remediation-plan.md
 
 # OpenClaw builder's guide — laptop-local; references Unraid LAN IP
 # and personal channel tokens. Reference doc for building agents.

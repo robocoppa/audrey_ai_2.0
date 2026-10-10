@@ -499,7 +499,7 @@ class ChatArchiveStore:
         )
 
     async def _migrate_repair_schema(self) -> None:
-        """Add repair metadata to databases created before Campaign 3."""
+        """Add repair metadata to databases created before Campaign 4."""
         if self._db is None:
             raise RuntimeError("ChatArchiveStore.init() not called")
         cursor = await self._db.execute("PRAGMA table_info(archive_chunks)")

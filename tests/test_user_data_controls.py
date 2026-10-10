@@ -1,4 +1,4 @@
-"""Authenticated inventory/export contracts for Campaign 3 Wave 1C.5."""
+"""Authenticated inventory/export contracts for Campaign 4 Wave 1C.5."""
 
 from __future__ import annotations
 

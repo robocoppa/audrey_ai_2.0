@@ -212,6 +212,73 @@ describe("App", () => {
     );
   });
 
+  it("dismisses the header menu outside it and with Escape, restoring keyboard focus", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((path: string) => {
+      const payload = path === "/api/me"
+        ? {
+            id: "usr_example",
+            email: "alice@example.com",
+            display_name: "Alice",
+            role: "user",
+            status: "active",
+            groups: ["users"],
+            auth_provider: "cloudflare_access",
+          }
+        : path === "/api/me/preferences"
+          ? DEFAULT_PREFERENCES
+          : path === "/api/files"
+            ? {
+                items: [],
+                total_bytes: 0,
+                server_time: "2026-09-01T00:00:00+00:00",
+                limits: {
+                  max_upload_bytes: 50_000_000,
+                  max_user_bytes: 1_000_000_000,
+                  allowed_extensions: [".txt"],
+                  chunked_max_bytes: 2_000_000_000,
+                  part_size: 8_000_000,
+                  fetch_hosts: [],
+                  max_images_per_turn: 4,
+                },
+              }
+            : collectionPayload(path);
+      return Promise.resolve(new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }));
+    render(<App />);
+
+    const toggle = await screen.findByRole("button", { name: "Menu" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "My Files" })).toHaveFocus();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveFocus();
+
+    fireEvent.click(toggle);
+    fireEvent.pointerDown(screen.getByRole("link", { name: "Audrey home" }));
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "My Files" }));
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(await screen.findByRole("dialog", { name: "Your files" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Close files" }));
+    expect(toggle).toHaveFocus();
+
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "Open account settings" }));
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(await screen.findByRole("dialog", { name: "Settings" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+    expect(toggle).toHaveFocus();
+    expect(screen.queryByRole("button", { name: "Admin Panel" })).not.toBeInTheDocument();
+  });
+
   it("reports degraded capabilities without blocking the workspace", async () => {
     const fetchMock = vi.fn().mockImplementation((path: string) => {
       const payload = path === "/api/me"

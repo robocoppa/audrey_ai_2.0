@@ -27,7 +27,14 @@ export function AudreyLoader({
               <img src={autoPortrait} alt="" />
             </div>
             {!message ? (
-              <span className="audrey-loading-label" aria-hidden="true">Loading</span>
+              <span className="audrey-loading-label" aria-hidden="true">
+                Loading
+                <span className="audrey-loading-dots">
+                  <span>.</span>
+                  <span className="audrey-loading-dot dot-two">.</span>
+                  <span className="audrey-loading-dot dot-three">.</span>
+                </span>
+              </span>
             ) : null}
           </div>
         ) : null}

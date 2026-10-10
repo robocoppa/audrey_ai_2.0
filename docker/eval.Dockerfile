@@ -1,6 +1,6 @@
 # docker/eval.Dockerfile — run the live eval harness ON THE BOX, not the laptop.
 #
-# See docs/campaign-2/phase-27-eval-on-box.md. The harness
+# See docs/campaign-3/phase-27-eval-on-box.md. The harness
 # (evals/eval_research.py) is network-config-driven; running it from a
 # container on `ollama-net` makes a long protocol run immune to the laptop's
 # internet (three runs died to laptop connectivity, 2026-07-01).

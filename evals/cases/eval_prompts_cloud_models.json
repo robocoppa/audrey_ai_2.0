@@ -1,0 +1,307 @@
+[
+  {
+    "name": "code-hard-lru-ttl",
+    "prompt": "Write a Python class TTLCache(capacity, ttl, clock) combining LRU eviction with time-based expiry. `clock` is a zero-arg callable returning the current time as a number; `ttl` is a duration in the same units. An entry set at time T expires once clock() reaches T+ttl (expired entries return None from get and free capacity). get(key) returns the value or None, and counts as a use for LRU ordering. put(key, value) inserts/updates. When more than `capacity` unexpired entries would be held, evict the least-recently-used. Reply with a single complete Python code block using only the standard library, defining the class exactly as named.",
+    "code_test": "\nt = [0]\ndef clock():\n    return t[0]\n\nc = TTLCache(2, ttl=10, clock=clock)\nt[0] = 100\nc.put(\"a\", 1)\nc.put(\"b\", 2)\nassert c.get(\"a\") == 1\nt[0] = 105\nassert c.get(\"b\") == 2          # still fresh (expiry 110)\nt[0] = 111\nassert c.get(\"a\") is None       # expired (set at 100, expiry 110)\nassert c.get(\"b\") is None\nt[0] = 200\nc.put(\"x\", 10)\nc.put(\"y\", 20)\nassert c.get(\"x\") == 10 and c.get(\"y\") == 20\nc.put(\"z\", 30)                  # cap 2, x is LRU\nassert c.get(\"x\") is None\nassert c.get(\"y\") == 20 and c.get(\"z\") == 30\n\n# get() is a use for LRU but must NOT extend expiry\nt[0] = 300\nc.put(\"k\", 1)                   # expiry 310\nt[0] = 305\nassert c.get(\"k\") == 1          # use (does not refresh expiry)\nt[0] = 311\nassert c.get(\"k\") is None       # still expires at 310, not 315\n\n# get() counts as a use for LRU ordering: touch the older entry so the\n# NEWER one becomes least-recently-used and is the one evicted.\nt[0] = 400\nc2 = TTLCache(2, ttl=1000, clock=clock)\nc2.put(\"m\", 1)\nc2.put(\"n\", 2)                  # order: m (LRU), n\nassert c2.get(\"m\") == 1         # use m -> now n is LRU\nc2.put(\"o\", 3)                  # evict LRU = n, not m\nassert c2.get(\"n\") is None\nassert c2.get(\"m\") == 1 and c2.get(\"o\") == 3\n\n# Expiry order can diverge from recency order: an entry touched by get() is\n# most-recently-used yet may expire first (get is a use, not a refresh). A\n# stale entry must never keep occupying a capacity slot and force eviction of\n# a LIVE entry. (Probe the live entry; get()-ing the stale key would mask a\n# reap that only removes expired entries up to the first fresh one.)\nt[0] = 1000\nd = TTLCache(3, ttl=100, clock=clock)\nd.put(\"A\", 1)                   # expiry 1100\nt[0] = 1050\nd.put(\"B\", 2)                   # expiry 1150\nassert d.get(\"A\") == 1          # A now most-recently-used; expiry stays 1100\nt[0] = 1120                     # A expired (<=1120); B still fresh (1150)\nd.put(\"C\", 3)                   # a correct reap drops the stale A here\nd.put(\"D\", 4)                   # cap 3 with A gone: {B,C,D} fit, nothing live evicted\nassert d.get(\"B\") == 2          # B must survive: a stale A stealing a slot would evict it\nassert d.get(\"C\") == 3\nassert d.get(\"D\") == 4\nprint(\"ok\")\n",
+    "code_timeout": 15,
+    "expect_banners": false,
+    "expect_sources": false,
+    "source_case": "eval_prompts_code_hard_models.json:code-hard-lru-ttl"
+  },
+  {
+    "name": "code-hard-debug-async",
+    "prompt": "This async helper is meant to fetch every key and return a list of results aligned to the input order, but a single failing key makes the whole call blow up and lose the other results. Explain the bug in one short paragraph, then give a corrected async function in a single complete Python code block. Contract for fetch_all(fetch, keys): `fetch` is an async callable; return a list the same length and order as `keys`, where a key whose fetch raised any Exception becomes None and all other results are preserved. Keep the name fetch_all.\n\nimport asyncio\n\nasync def fetch_all(fetch, keys):\n    return await asyncio.gather(*(fetch(k) for k in keys))",
+    "code_test": "\nimport asyncio\n\nasync def fetch(k):\n    await asyncio.sleep(0)\n    if k == 3:\n        raise ValueError(\"boom\")\n    return k * 10\n\nout = asyncio.run(fetch_all(fetch, [1, 2, 3, 4]))\nassert out == [10, 20, None, 40], out\nassert asyncio.run(fetch_all(fetch, [])) == []\nprint(\"ok\")\n",
+    "code_timeout": 15,
+    "expect_banners": false,
+    "expect_sources": false,
+    "source_case": "eval_prompts_code_hard_models.json:code-hard-debug-async"
+  },
+  {
+    "name": "code-hard-tokenizer",
+    "prompt": "Write a Python function tokenize(s) that splits a simple arithmetic expression into a list of tokens. Tokens are: integers (possibly multi-digit) as Python ints, and the single-character strings + - * / ( ). Spaces are skipped. Any other character raises ValueError. Examples: tokenize('12 + 34*(5-6)') returns [12, '+', 34, '*', '(', 5, '-', 6, ')']. Reply with a single complete Python code block using only the standard library, defining the function exactly as named.",
+    "code_test": "\nassert tokenize(\"12 + 34*(5-6)\") == [12, \"+\", 34, \"*\", \"(\", 5, \"-\", 6, \")\"]\nassert tokenize(\"\") == []\nassert tokenize(\"   7   \") == [7]\nassert tokenize(\"100\") == [100]\ntry:\n    tokenize(\"1 $ 2\")\n    raise SystemExit(\"should have raised on '$'\")\nexcept ValueError:\n    pass\nprint(\"ok\")\n",
+    "code_timeout": 15,
+    "expect_banners": false,
+    "expect_sources": false,
+    "source_case": "eval_prompts_code_hard_models.json:code-hard-tokenizer"
+  },
+  {
+    "name": "code-hard-topo",
+    "prompt": "Write a Python function toposort(graph) that returns a topological ordering of a directed acyclic graph. `graph` is a dict mapping each node to a list of the nodes it points to (edges u->v mean u must come before v). When several nodes are simultaneously available (indegree zero), pick them in ascending sorted order so the result is deterministic. If the graph contains a cycle, raise ValueError. Reply with a single complete Python code block using only the standard library, defining the function exactly as named.",
+    "code_test": "\ng = {\"a\": [\"b\", \"c\"], \"b\": [\"d\"], \"c\": [\"d\"], \"d\": []}\nassert toposort(g) == [\"a\", \"b\", \"c\", \"d\"], toposort(g)\n# deterministic lexicographic tie-break among ready nodes\ng2 = {\"z\": [\"m\"], \"a\": [\"m\"], \"m\": []}\nassert toposort(g2) == [\"a\", \"z\", \"m\"], toposort(g2)\n# cycle -> ValueError\ntry:\n    toposort({\"a\": [\"b\"], \"b\": [\"a\"]})\n    raise SystemExit(\"should have raised on cycle\")\nexcept ValueError:\n    pass\nassert toposort({\"solo\": []}) == [\"solo\"]\nprint(\"ok\")\n",
+    "code_timeout": 15,
+    "expect_banners": false,
+    "expect_sources": false,
+    "source_case": "eval_prompts_code_hard_models.json:code-hard-topo"
+  },
+  {
+    "name": "code-hard-parse-duration",
+    "prompt": "Write a Python function parse_duration(s) that parses a compact duration string like '1h30m', '45s', or '2h' into a total number of seconds (h=3600, m=60, s=1). The string is a sequence of <integer><unit> chunks with no separators; each unit h/m/s may appear at most once; there is no required order but chunks must be contiguous with no gaps or stray characters. Any malformed input — empty string, unknown unit, duplicate unit, trailing garbage, embedded spaces — raises ValueError. Reply with a single complete Python code block using only the standard library, defining the function exactly as named.",
+    "code_test": "\nassert parse_duration(\"1h30m\") == 5400\nassert parse_duration(\"45s\") == 45\nassert parse_duration(\"2h\") == 7200\nassert parse_duration(\"1h1m1s\") == 3661\nfor bad in [\"\", \"1x\", \"1h1h\", \"h\", \"10\", \"1h 30m\", \"1hh\"]:\n    try:\n        parse_duration(bad)\n        raise SystemExit(f\"should have raised on {bad!r}\")\n    except ValueError:\n        pass\nprint(\"ok\")\n",
+    "code_timeout": 15,
+    "expect_banners": false,
+    "expect_sources": false,
+    "source_case": "eval_prompts_code_hard_models.json:code-hard-parse-duration"
+  },
+  {
+    "name": "reasoning-race-order",
+    "prompt": "Three friends — Ada, Ben, and Cal — finished a race. Ada wasn't last. Cal finished before Ada. Ben didn't win. In what order did they finish? Lay out the deduction, not just the answer. Then end your reply with a final line of exactly three names separated by ' > ' in finishing order, with no bold and nothing else on that line.",
+    "expect_sources": false,
+    "allow_user_attribution": true,
+    "answer_contains": [
+      "cal > ada > ben"
+    ],
+    "answer_not_contains": [
+      "wait —",
+      "wait,",
+      "let me recompute",
+      "let me recalculate"
+    ],
+    "expect_banners": false,
+    "source_case": "eval_prompts_models_ab.json:reasoning-race-order"
+  },
+  {
+    "name": "reasoning-markup-discount",
+    "prompt": "A jacket costs $80. The store marks it up 15%, then runs a 10%-off sale on the new price. What is the final price? Show the arithmetic. Then end your reply with a final line in exactly this form, with no bold: FINAL: $<amount>",
+    "expect_sources": false,
+    "allow_user_attribution": true,
+    "answer_contains": [
+      "final: $82.80"
+    ],
+    "answer_not_contains": [
+      "wait —",
+      "wait,",
+      "let me recompute",
+      "let me recalculate"
+    ],
+    "expect_banners": false,
+    "source_case": "eval_prompts_models_ab.json:reasoning-markup-discount"
+  },
+  {
+    "name": "reasoning-unit-conversion",
+    "prompt": "A tank holds 4,500 litres. It drains at 75 litres per minute for 12 minutes, then the rate drops to 40 litres per minute for the rest. How many minutes from the start until the tank is empty? Show the arithmetic. Then end your reply with a final line in exactly this form, with no bold: FINAL: <number> minutes",
+    "expect_sources": false,
+    "allow_user_attribution": true,
+    "answer_contains": [
+      "final: 102 minutes"
+    ],
+    "expect_banners": false,
+    "source_case": "eval_prompts_models_ab.json:reasoning-unit-conversion"
+  },
+  {
+    "name": "reasoning-decimal-compare",
+    "prompt": "Which number is larger, 9.11 or 9.9? Answer in one short sentence, then end with a final line in exactly this form, with no bold: LARGER: <number>",
+    "expect_sources": false,
+    "allow_user_attribution": true,
+    "answer_contains": [
+      "larger: 9.9"
+    ],
+    "expect_banners": false,
+    "source_case": "eval_prompts_models_ab.json:reasoning-decimal-compare"
+  },
+  {
+    "name": "gk-false-premise",
+    "prompt": "Briefly explain why Einstein was awarded the 1921 Nobel Prize in Physics for his theory of general relativity.",
+    "expect_sources": false,
+    "allow_user_attribution": true,
+    "answer_contains": [
+      "photoelectric"
+    ],
+    "expect_hedge_when_wrong": true,
+    "expect_banners": false,
+    "source_case": "eval_prompts_models_ab.json:gk-false-premise"
+  },
+  {
+    "name": "gk-nonexistent-paper",
+    "prompt": "Summarise the main findings of the 2019 paper 'Attention Is All You Need II' by Vaswani et al., and say what it changed about transformer architectures.",
+    "expect_sources": false,
+    "allow_user_attribution": true,
+    "answer_contains": [
+      "2017"
+    ],
+    "expect_disclaims_absence": true,
+    "expect_hedge_when_wrong": true,
+    "expect_banners": false,
+    "source_case": "eval_prompts_models_ab.json:gk-nonexistent-paper"
+  },
+  {
+    "name": "science-attention",
+    "prompt": "Explain how the attention mechanism in a transformer works, for a reader who knows basic linear algebra but no machine learning.",
+    "expect_sources": false,
+    "allow_user_attribution": true,
+    "answer_contains": [
+      "softmax",
+      "dot product"
+    ],
+    "expect_banners": false,
+    "source_case": "eval_prompts_models_ab.json:science-attention"
+  },
+  {
+    "name": "science-mrna-vaccines",
+    "prompt": "How do mRNA vaccines work, and how do they differ from traditional attenuated or inactivated vaccines?",
+    "expect_sources": false,
+    "allow_user_attribution": true,
+    "answer_contains": [
+      "ribosome",
+      "lipid"
+    ],
+    "expect_banners": false,
+    "source_case": "eval_prompts_models_ab.json:science-mrna-vaccines"
+  },
+  {
+    "name": "writing-cold-email",
+    "prompt": "Write a cold email (120 words maximum) to a hiring manager about a junior data analyst opening — friendly but professional, no clichés like 'passionate' or 'synergy', ending with one clear, specific ask.",
+    "expect_sources": false,
+    "allow_user_attribution": true,
+    "answer_max_words": 120,
+    "answer_not_contains": [
+      "passionate",
+      "synergy"
+    ],
+    "expect_banners": false,
+    "source_case": "eval_prompts_models_ab.json:writing-cold-email"
+  },
+  {
+    "name": "writing-eli5-rewrite",
+    "prompt": "Rewrite this for a curious 10-year-old without losing the meaning: 'Photosynthesis is the process by which photoautotrophs convert electromagnetic radiation into chemical energy, fixing atmospheric carbon dioxide into organic compounds via the Calvin cycle while photolysis of water liberates molecular oxygen.' Give only the rewrite: no preamble, and no list of the changes you made.",
+    "expect_sources": false,
+    "allow_user_attribution": true,
+    "answer_not_contains": [
+      "photoautotroph",
+      "electromagnetic radiation",
+      "photolysis",
+      "molecular oxygen"
+    ],
+    "expect_banners": false,
+    "source_case": "eval_prompts_models_ab.json:writing-eli5-rewrite"
+  },
+  {
+    "name": "gk-element-w",
+    "prompt": "Which chemical element has the symbol W, and where does that symbol come from? If you're not certain, say so rather than guessing.",
+    "expect_sources": false,
+    "allow_user_attribution": true,
+    "answer_contains": [
+      "tungsten",
+      "wolfram",
+      "german"
+    ],
+    "expect_hedge_when_wrong": true,
+    "expect_banners": false,
+    "source_case": "eval_prompts_models_ab.json:gk-element-w"
+  },
+  {
+    "name": "gk-berlin-wall",
+    "prompt": "In what year did the Berlin Wall fall, and what was the immediate trigger that night? If you're not certain, say so rather than guessing.",
+    "expect_sources": false,
+    "allow_user_attribution": true,
+    "answer_contains": [
+      "1989",
+      "schabowski",
+      "immediately"
+    ],
+    "expect_hedge_when_wrong": true,
+    "expect_banners": false,
+    "source_case": "eval_prompts_models_ab.json:gk-berlin-wall"
+  },
+  {
+    "name": "code-word-frequency",
+    "prompt": "Write a single self-contained Python function `top_n_words(text, n)` that returns the n most frequent words in `text` as a list of (word, count) tuples, ordered by count descending and then alphabetically for ties. Words are case-insensitive and split on whitespace with surrounding punctuation stripped. Reply with a single complete Python code block using only the standard library.",
+    "expect_sources": false,
+    "allow_user_attribution": true,
+    "code_test": "\nout = top_n_words(\"the cat the dog THE bird, cat!\", 2)\nassert out == [(\"the\", 3), (\"cat\", 2)], out\nassert top_n_words(\"\", 3) == []\n# ties break alphabetically\nassert top_n_words(\"b a b a c\", 3) == [(\"a\", 2), (\"b\", 2), (\"c\", 1)], top_n_words(\"b a b a c\", 3)\nprint(\"ok\")\n",
+    "code_timeout": 15,
+    "expect_banners": false,
+    "source_case": "eval_prompts_models_ab.json:code-word-frequency"
+  },
+  {
+    "name": "synth-merge-three-drafts",
+    "prompt": "Below are three independent research notes on the Kessler-7 telemetry pipeline. Merge them into one briefing for an engineer who has read none of them. Do not add anything the notes do not contain.\n\nNOTE A:\nKessler-7 ingests telemetry over a single AMQP queue. Sustained throughput measured at 420 events per second. The ingest stage writes to a ring buffer named `kbuf`.\n\nNOTE B:\nThe pipeline's second stage, `fanout`, replicates each event to between two and five downstream consumers. Fanout was rewritten in release 4.2 after a deadlock traced to its lock ordering.\n\nNOTE C:\nRetention is 96 hours, after which events are dropped rather than archived. There is no replay capability; a consumer that misses a window has permanently missed it.",
+    "expect_sources": false,
+    "answer_contains": [
+      "420",
+      "kbuf",
+      "fanout",
+      "4.2",
+      "96"
+    ],
+    "expect_banners": false,
+    "source_case": "eval_prompts_local_models.json:synth-merge-three-drafts"
+  },
+  {
+    "name": "synth-conflicting-drafts",
+    "prompt": "Two reviewers measured the same system and disagree. Write the summary paragraph a lead engineer would send to the team.\n\nREVIEWER 1:\nUnder the standard soak test, median request latency was 180 ms. I ran it three times on the staging cluster.\n\nREVIEWER 2:\nMedian request latency was 640 ms under the soak test. Single run, on my workstation with the debug build.",
+    "expect_sources": false,
+    "answer_contains": [
+      "180",
+      "640"
+    ],
+    "expect_banners": false,
+    "source_case": "eval_prompts_local_models.json:synth-conflicting-drafts"
+  },
+  {
+    "name": "synth-absent-subtopic",
+    "prompt": "Using only the notes below, what does the Kessler-7 pipeline do about back-pressure when a downstream consumer stalls?\n\nNOTE A:\nKessler-7 ingests telemetry over a single AMQP queue. Sustained throughput measured at 420 events per second.\n\nNOTE B:\nThe `fanout` stage replicates each event to between two and five downstream consumers. Rewritten in release 4.2 after a lock-ordering deadlock.",
+    "expect_sources": false,
+    "expect_disclaims_absence": true,
+    "expect_banners": false,
+    "source_case": "eval_prompts_local_models.json:synth-absent-subtopic"
+  },
+  {
+    "name": "synth-compress-the-padding",
+    "prompt": "Compress the three notes below into at most four sentences of plain prose. Keep every concrete fact. Drop the hedging and the repetition.\n\nNOTE A:\nIt is perhaps worth noting, at least in some sense, that the retention window appears to be roughly 96 hours in most cases. It is worth noting this.\n\nNOTE B:\nThe `fanout` stage, which as noted is the second stage, replicates events. It replicates each event to between two and five consumers, that is, somewhere in the range of two to five.\n\nNOTE C:\nThroughput was measured, and the measurement showed 420 events per second sustained. This was a sustained measurement.",
+    "expect_sources": false,
+    "answer_contains": [
+      "96",
+      "420",
+      "fanout"
+    ],
+    "answer_not_contains": [
+      "it is worth noting",
+      "as noted",
+      "in some sense"
+    ],
+    "expect_banners": false,
+    "source_case": "eval_prompts_local_models.json:synth-compress-the-padding"
+  },
+  {
+    "name": "ground-fact-present",
+    "prompt": "From the passage below, what was the measured cold-start latency of the `vault-sync` worker?\n\nPASSAGE:\nThe vault-sync worker was profiled across 40 invocations. Warm invocations completed in a median of 31 ms. Cold starts, which occur after roughly nine minutes of idleness, took a median of 2,140 ms. The team considered pre-warming but rejected it on cost.\n\nEnd with COLD_START_MS: <integer>, using no digit separators.",
+    "expect_sources": false,
+    "answer_contains": [
+      "cold_start_ms: 2140"
+    ],
+    "expect_banners": false,
+    "source_case": "eval_prompts_local_models.json:ground-fact-present"
+  },
+  {
+    "name": "ground-fact-absent",
+    "prompt": "From the passage below, what is the vault-sync worker's p99 latency?\n\nPASSAGE:\nThe vault-sync worker was profiled across 40 invocations. Warm invocations completed in a median of 31 ms. Cold starts took a median of 2,140 ms.",
+    "expect_sources": false,
+    "expect_disclaims_absence": true,
+    "expect_banners": false,
+    "source_case": "eval_prompts_local_models.json:ground-fact-absent"
+  },
+  {
+    "name": "reasoning-primes-three-mod-four",
+    "prompt": "Prove that infinitely many prime numbers are congruent to 3 modulo 4. Do not use Dirichlet's theorem or assume that a constructed integer is prime. Give a proof by contradiction from an assumed complete finite list p_1, ..., p_n, considering N = 4*p_1*...*p_n - 1. Explain why N has a prime divisor congruent to 3 modulo 4 and why that divisor is absent from the assumed list. Illustrate the construction using the candidate list 3, 7, 11: compute N, factor it, and identify a new prime congruent to 3 modulo 4. Keep the proof precise and self-contained.",
+    "expect_banners": false,
+    "expect_sources": false,
+    "answer_contains": [
+      "923",
+      "13",
+      "71"
+    ],
+    "_why": "Manual proof review: a prime factor is 3 mod 4 by factor residues and multiplicity; no listed prime divides N (remainder -1). 923 = 13*71 is composite, and 71 is the new 3 mod 4 prime. Numeric needles do not establish a correct proof."
+  },
+  {
+    "name": "reasoning-delivery-and-burst-capacity",
+    "prompt": "A four-person startup has a total of 24 developer-weeks available before its release deadline. It must select exactly one implementation:\nA: 20 developer-weeks; serves 150 requests per second.\nB: 24 developer-weeks; serves 200 requests per second.\nC: 28 developer-weeks; serves 400 requests per second.\n\nUse a deterministic fluid queue: FIFO, constant service capacity, initially empty, no request loss, and no extra processing overhead. Total incoming traffic is normally 50 requests per second. Once per hour it rises to 200 requests per second for exactly 900 seconds, then returns to 50. The queue-wait SLA is at most 30 seconds. Delivery estimates and service capacities are fixed; do not invent parallel development, autoscaling, or optimizations.\n\nFor each option, calculate delivery feasibility, maximum backlog, worst queue waiting time, and time to drain the backlog after the burst. Which option meets both the deadline and SLA? Explain why average hourly traffic alone is an insufficient check.\n\nThen change two facts: the development budget becomes 28 developer-weeks, and total burst traffic becomes 300 requests per second for 900 seconds. Keep everything else fixed. Recalculate the relevant queues and choose again. End with one line in this format: INITIAL: <letter>; REVISED: <letter>",
+    "expect_banners": false,
+    "expect_sources": false,
+    "answer_contains": [
+      "initial: b; revised: c"
+    ],
+    "_why": "Manual arithmetic/decision review: initially A backlog 45000, wait 300s, drain 450s; B has zero queue; C misses the 24-week budget. Revised A backlog 135000, wait 900s, drain 1350s; B backlog 90000, wait 450s, drain 600s; C has zero queue and fits 28 weeks. Hourly queues clear between bursts. The final letters alone do not establish correct reasoning."
+  }
+]

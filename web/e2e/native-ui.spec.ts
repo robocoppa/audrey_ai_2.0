@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 
 const CONVERSATION_ID = "con_browser_test";
 
@@ -32,6 +32,14 @@ test("centers Audrey Auto with a glowing orbit and loading label", async ({ page
       await json(route, { items: browserModels() });
       return;
     }
+    if (url.pathname === "/api/skills") {
+      await json(route, { enabled: true, status: "ready", items: browserSkills() });
+      return;
+    }
+    if (url.pathname === "/api/projects") {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
     await route.abort("failed");
   });
 
@@ -41,7 +49,16 @@ test("centers Audrey Auto with a glowing orbit and loading label", async ({ page
   const portrait = loader.locator("img");
   const orbit = loader.locator(".audrey-loading-orbit");
   await expect(loader).toBeVisible();
-  await expect(loader).toHaveText("Loading");
+  await expect(loader).toHaveText("Loading...");
+  const dotCounts = await loader.locator(".audrey-loading-dots").evaluate((dots) => {
+    const animations = dots.getAnimations({ subtree: true });
+    for (const animation of animations) animation.pause();
+    return [100, 900, 1500, 1900].map((time) => {
+      for (const animation of animations) animation.currentTime = time;
+      return [...dots.children].filter((dot) => Number(getComputedStyle(dot).opacity) > 0.5).length;
+    });
+  });
+  expect(dotCounts).toEqual([1, 2, 3, 1]);
   await expect(portrait).toBeVisible();
   await expect.poll(
     () => portrait.evaluate((image) => (image as HTMLImageElement).naturalWidth),
@@ -781,6 +798,223 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(accessibility.violations).toEqual([]);
 });
 
+test("condenses a narrow laptop header into a bounded menu", async ({ page }) => {
+  await mockAudreyApi(page, undefined, [], browserPreferences(), {
+    ...browserUser(), role: "admin", groups: ["admins", "users"],
+  });
+  await page.goto("./");
+
+  for (const width of [1080, 760, 390]) {
+    await page.setViewportSize({ width, height: 740 });
+    const menu = page.getByRole("button", { name: "Menu", exact: true });
+    const actions = page.getByRole("group", { name: "Account and workspace actions" });
+    await expect(menu).toBeVisible();
+    await expect(page.locator(".brand-product")).toBeHidden();
+    await expect(actions).toBeHidden();
+    await expectInViewport(page, page.getByRole("link", { name: "Audrey home" }));
+    await expectInViewport(page, menu);
+    const brandBox = await page.getByRole("link", { name: "Audrey home" }).boundingBox();
+    const menuBox = await menu.boundingBox();
+    expect(brandBox!.x + brandBox!.width).toBeLessThanOrEqual(menuBox!.x);
+
+    await menu.click();
+    await expect(menu).toHaveAttribute("aria-expanded", "true");
+    for (const action of [
+      actions.getByRole("button", { name: "My Files", exact: true }),
+      actions.getByRole("button", { name: "Open account settings" }),
+      actions.getByRole("button", { name: "Admin Panel" }),
+      actions.getByRole("link", { name: "Log out" }),
+    ]) await expectInViewport(page, action);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await page.keyboard.press("Escape");
+    await expect(actions).toBeHidden();
+    await expect(menu).toBeFocused();
+  }
+
+  const menu = page.getByRole("button", { name: "Menu", exact: true });
+  await menu.click();
+  await page.getByRole("heading", { name: "Browser smoke" }).click();
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+  await page.setViewportSize({ width: 1280, height: 740 });
+  await expect(menu).toBeHidden();
+  await expect(page.getByRole("button", { name: "My Files", exact: true })).toBeVisible();
+});
+
+test("opens mobile history on demand and keeps chat and project navigation reachable", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 740 });
+  await mockAudreyApi(page, undefined, canonicalBrowserTurn());
+  const secondId = "con_mobile_second";
+  const conversations = [
+    browserConversation("Last chat"),
+    { ...browserConversation("Second chat"), id: secondId },
+    ...Array.from({ length: 24 }, (_, index) => ({
+      ...browserConversation(`Earlier chat ${index + 1}`), id: `con_mobile_older_${index + 1}`,
+    })),
+  ];
+  const project = {
+    id: "proj_mobile", name: "Mobile project", instructions: "Use the selected project files.",
+    created_at: "2026-10-09T00:00:00Z", updated_at: "2026-10-09T00:00:00Z",
+  };
+  const limits = { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 };
+  let creations = 0;
+  await page.route("**/api/conversations**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/conversations" && route.request().method() === "GET") {
+      const archived = url.searchParams.get("archived") === "true";
+      const search = (url.searchParams.get("q") ?? "").toLocaleLowerCase();
+      return json(route, {
+        items: conversations.filter((conversation) => Boolean(conversation.archived_at) === archived
+          && conversation.title.toLocaleLowerCase().includes(search)),
+        next_cursor: null,
+      });
+    }
+    if (url.pathname === "/api/conversations" && route.request().method() === "POST") {
+      creations += 1;
+      const conversation = {
+        ...browserConversation(""), id: "con_mobile_new", last_message_at: null,
+        default_mode: "auto", default_model_id: "auto",
+      };
+      return json(route, conversation, 201);
+    }
+    if (url.pathname.endsWith("/messages")) {
+      return json(route, { items: url.pathname.includes(CONVERSATION_ID) ? canonicalBrowserTurn() : [], next_cursor: null });
+    }
+    if (url.pathname.endsWith("/empty") && route.request().method() === "DELETE") {
+      return route.fulfill({ status: 204 });
+    }
+    return route.fallback();
+  });
+  await page.route("**/api/projects**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/projects") return json(route, { items: [project], next_cursor: null, limits });
+    if (url.pathname.endsWith("/conversations") || url.pathname.endsWith("/files")) {
+      return json(route, { items: [], next_cursor: null, limits });
+    }
+    return json(route, project);
+  });
+
+  await page.goto("./");
+  await expect(page.getByRole("heading", { name: "Last chat" })).toBeVisible();
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
+  const historyToggle = page.getByRole("button", { name: "Open conversation history" });
+  const drawer = page.getByRole("dialog", { name: "Conversations" });
+  await expect(page.locator(".sidebar")).toBeHidden();
+  await expect(historyToggle).toHaveAttribute("aria-expanded", "false");
+  await expectInViewport(page, page.getByRole("button", { name: "New chat", exact: true }));
+
+  await historyToggle.click();
+  await expect(drawer).toBeVisible();
+  await expect(drawer).toHaveAttribute("aria-modal", "true");
+  await expectInViewport(page, drawer);
+  await expect(drawer.getByRole("searchbox")).toBeVisible();
+  await expect(drawer.getByRole("region", { name: "Projects" })).toBeVisible();
+  await drawer.getByRole("button", { name: /^Earlier chat 24/u }).scrollIntoViewIfNeeded();
+  await expect(drawer.getByRole("button", { name: /^Earlier chat 24/u })).toBeInViewport();
+  const search = drawer.getByRole("searchbox");
+  await search.fill("Second");
+  await expect(drawer.getByRole("button", { name: /^Earlier chat/u })).toHaveCount(0);
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByRole("button", { name: /^Second chat/u })).toBeVisible();
+  await drawer.getByRole("button", { name: "Archived", exact: true }).click();
+  await expect(drawer.getByRole("button", { name: /^Second chat/u })).toHaveCount(0);
+  await expect(drawer).toBeVisible();
+  await drawer.getByRole("button", { name: "Active", exact: true }).click();
+  await expect(drawer.getByRole("button", { name: /^Second chat/u })).toBeVisible();
+  await search.clear();
+  await expect(drawer.getByRole("button", { name: /^Earlier chat 24/u })).toBeAttached();
+  await expect(drawer).toBeVisible();
+  await drawer.getByRole("button", { name: /^Second chat/u }).click();
+  await expect(page.getByRole("heading", { name: "Second chat" })).toBeVisible();
+  await expect(page.locator(".sidebar")).toBeHidden();
+
+  await historyToggle.click();
+  await drawer.getByRole("button", { name: "Mobile project", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Mobile project", exact: true })).toBeVisible();
+  await expect(page.locator(".sidebar")).toBeHidden();
+  for (const action of ["Upload file to project", "Choose from My Files"]) {
+    const button = page.getByRole("button", { name: action });
+    await button.scrollIntoViewIfNeeded();
+    await expectInViewport(page, button);
+  }
+
+  await historyToggle.click();
+  await drawer.getByRole("button", { name: "New project" }).click();
+  await expect(page.locator(".sidebar")).toBeHidden();
+  const editor = page.getByRole("dialog", { name: "New project" });
+  await expectInViewport(page, editor);
+  await editor.getByRole("button", { name: "Close new project" }).click();
+  await expect(historyToggle).toBeFocused();
+
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "New conversation", exact: true })).toBeVisible();
+  await expect(page.locator(".conversation-thread-slot:not([hidden]) .composer-model-picker img")).toBeVisible();
+  await expectInViewport(page, page.getByRole("textbox", { name: "Ask Audrey" }));
+  expect(creations).toBe(1);
+  await historyToggle.click();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".sidebar")).toBeHidden();
+  await expect(historyToggle).toBeFocused();
+  await historyToggle.click();
+  await page.getByRole("button", { name: "Dismiss conversation history" }).click({ position: { x: 380, y: 300 } });
+  await expect(page.locator(".sidebar")).toBeHidden();
+
+  await historyToggle.click();
+  await page.setViewportSize({ width: 1280, height: 740 });
+  const desktopSidebar = page.getByRole("complementary", { name: "Conversations" });
+  await expect(desktopSidebar).toBeVisible();
+  await expect(historyToggle).toBeHidden();
+  await desktopSidebar.getByRole("button", { name: "New conversation", exact: true }).focus();
+  await page.setViewportSize({ width: 390, height: 740 });
+  await expect(page.locator(".sidebar")).toBeHidden();
+  await expect(historyToggle).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test("keeps mobile settings, files, and a scrolling chat accessible without opening the keyboard", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 740 });
+  await mockAudreyApi(page, undefined, scrollingBrowserHistory());
+  await page.route("**/api/files**", (route) => json(route, browserFileListing(
+    Array.from({ length: 20 }, (_, index) => browserFile(`file_mobile_${index}`, `mobile-report-${index}.txt`, 100)),
+  )));
+  await page.goto("./");
+  await expect(page.locator("html")).toHaveCSS("overscroll-behavior-y", "none");
+  await expect(page.locator("body")).toHaveCSS("overscroll-behavior-y", "none");
+  const menu = page.getByRole("button", { name: "Menu", exact: true });
+  await menu.click();
+  await page.getByRole("button", { name: "Open account settings" }).click();
+  const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+  await expectInViewport(page, settings);
+  await expect(settings.getByRole("textbox", { name: "Profile name" })).not.toBeFocused();
+  await expect(settings.getByRole("button", { name: "Close settings" })).toBeFocused();
+  await settings.getByRole("button", { name: "Save preferences" }).scrollIntoViewIfNeeded();
+  await expect(settings.getByRole("button", { name: "Save preferences" })).toBeInViewport();
+  await settings.getByRole("button", { name: "Close settings" }).click();
+  await expect(menu).toBeFocused();
+
+  await menu.click();
+  await page.getByRole("button", { name: "My Files", exact: true }).click();
+  const files = page.getByRole("dialog", { name: "Your files" });
+  await expectInViewport(page, files);
+  await files.getByText("mobile-report-19.txt", { exact: true }).scrollIntoViewIfNeeded();
+  await expect(files.getByText("mobile-report-19.txt", { exact: true })).toBeInViewport();
+  await files.getByRole("button", { name: "Close files" }).click();
+
+  const viewport = page.locator(".thread-viewport");
+  const dock = page.locator(".composer-dock");
+  const jump = page.getByRole("button", { name: "Scroll to latest message" });
+  await expect.poll(() => viewport.evaluate((element) => element.scrollHeight > element.clientHeight + 100)).toBe(true);
+  const dockAtLatest = await dock.boundingBox();
+  await expectInViewport(page, dock);
+  await viewport.evaluate((element) => element.scrollTo({ top: 0 }));
+  await expect(jump).toBeVisible();
+  const dockWhileReading = await dock.boundingBox();
+  expect(Math.abs(dockWhileReading!.y - dockAtLatest!.y)).toBeLessThan(2);
+  await jump.click();
+  await expect(jump).toBeHidden();
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 2)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
 test("keeps saved answer images and citations inside a mobile message", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.route("**/answer-diagram.svg", async (route) => {
@@ -799,12 +1033,16 @@ test("keeps saved answer images and citations inside a mobile message", async ({
   await mockAudreyApi(page, undefined, messages);
 
   await page.goto("./");
+  const menu = page.getByRole("button", { name: "Menu", exact: true });
+  await menu.click();
   const mobileFiles = page.getByRole("button", { name: "My Files", exact: true });
   await expect(mobileFiles).toBeVisible();
   const mobileFilesBox = await mobileFiles.boundingBox();
   expect(mobileFilesBox).not.toBeNull();
   expect((mobileFilesBox?.x ?? -1)).toBeGreaterThanOrEqual(0);
   expect((mobileFilesBox?.x ?? 0) + (mobileFilesBox?.width ?? 0)).toBeLessThanOrEqual(390);
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
   const image = page.getByRole("img", { name: "Wide diagram" });
   await expect(image).toBeVisible();
   await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth))
@@ -1140,6 +1378,14 @@ test("searches, renames, archives, restores, and deletes a conversation", async 
     }
     if (url.pathname === "/api/models") {
       await json(route, { items: browserModels() });
+      return;
+    }
+    if (url.pathname === "/api/skills") {
+      await json(route, { enabled: true, status: "ready", items: browserSkills() });
+      return;
+    }
+    if (url.pathname === "/api/projects") {
+      await json(route, { items: [], next_cursor: null });
       return;
     }
     await route.abort("failed");
@@ -1951,7 +2197,7 @@ for (const viewport of [
         .getByRole("button", { name: /Automatic/u })).toBeFocused();
       await page.keyboard.press("Escape");
       await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeFocused();
-      await expect(page.getByRole("complementary", { name: "Conversations" })).toBeVisible();
+      await expect(page.locator(".sidebar"))[viewport.name === "desktop" ? "toBeVisible" : "toBeHidden"]();
     });
   }
 }
@@ -2006,14 +2252,18 @@ test("stacks the composer controls without narrow-screen overflow", async ({ pag
   const controlBoxes = await page.locator(".composer-control-rail > *").evaluateAll(
     (controls) => controls.map((control) => {
       const box = control.getBoundingClientRect();
-      return { x: box.x, y: box.y, width: box.width, right: box.right };
+      return { x: box.x, y: box.y, width: box.width, right: box.right, bottom: box.bottom };
     }),
   );
   expect(composerBox).not.toBeNull();
   expect(controlBoxes).toHaveLength(3);
-  const controlYs = controlBoxes.map(({ y }) => y);
-  expect(controlYs).toEqual([...controlYs].sort((left, right) => left - right));
-  expect(new Set(controlYs).size).toBe(3);
+  for (const [index, box] of controlBoxes.entries()) {
+    for (const other of controlBoxes.slice(index + 1)) {
+      const overlapsHorizontally = box.x < other.right - 1 && other.x < box.right - 1;
+      const overlapsVertically = box.y < other.bottom - 1 && other.y < box.bottom - 1;
+      expect(overlapsHorizontally && overlapsVertically).toBe(false);
+    }
+  }
   for (const box of controlBoxes) {
     expect(box.x).toBeGreaterThanOrEqual((composerBox?.x ?? 0) - 1);
     expect(box.right).toBeLessThanOrEqual(
@@ -3524,6 +3774,18 @@ async function mockAudreyApi(
     }
     await route.abort("failed");
   });
+}
+
+async function expectInViewport(page: Page, locator: Locator) {
+  await expect(locator).toBeVisible();
+  const bounds = await locator.boundingBox();
+  const viewport = page.viewportSize();
+  expect(bounds).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(bounds!.x).toBeGreaterThanOrEqual(-1);
+  expect(bounds!.y).toBeGreaterThanOrEqual(-1);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport!.width + 1);
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport!.height + 1);
 }
 
 async function json(route: Route, payload: unknown, status = 200) {

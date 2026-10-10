@@ -131,7 +131,7 @@ legacy function-call message forms are not implemented.
 `POST /v1/responses` supports completed and streamed output, JSON Schema,
 inline/public images, uploaded/public documents, caller-executed functions on
 permitted passthrough models, and owner-scoped storage/continuation. The bounded
-contract is in [Phase 13](docs/campaign-3/phase-13-responses-multimodal-input.md).
+contract is in [Phase 13](docs/campaign-4/phase-13-responses-multimodal-input.md).
 Background execution and the Conversations API remain unsupported.
 
 `reasoning.effort` uses the same model validation as Chat's `reasoning_effort`.
@@ -140,7 +140,7 @@ models only; it must match a model's advertised thinking values. No effort is
 inherited from a stored parent. Unsupported controls fail before fetching inputs
 or opening SSE. The response echoes the requested reasoning object when supplied;
 that echo does not measure reasoning tokens or prove a quality improvement.
-See [Phase 17](docs/campaign-3/phase-17-operations-and-api.md).
+See [Phase 17](docs/campaign-4/phase-17-operations-and-api.md).
 
 ## Pipeline shape
 
@@ -177,9 +177,13 @@ can search prior conversations via `chat_history_search`.
   custom-tools sidecar). `docs/lesson-python/` is a separate beginner course
   that teaches Python by reading the same real codebase.
 - **`docs/campaign-1/phase-N-deploy.md`** — original 31-phase build history.
-- **`docs/campaign-2/phase-N-deploy.md`** — post-1.0 feature work
+- **`docs/campaign-2/`** — post-1.0 feature work, phases 1–15
   (chat archive, prompt centralization, KB audit fixes, complexity-gate
-  fixes, Thinking/Planning banners, Grafana dashboards).
+  fixes, Thinking/Planning banners, Grafana dashboards, passthrough).
+- **`docs/campaign-3/`** — phases 16–43 (optimization pass, research mode,
+  web_fetch, video ingest, hybrid retrieval).
+- **`docs/campaign-4/`** — the current campaign (native application, skills,
+  Responses API). Start at `docs/campaign-4/README.md`.
 - **`docs/unraid-ollama.md`** — clean Ollama container recreation on Unraid.
 - **`monitoring/README.md`** — Prometheus + Grafana stack, including how to
   add a new dashboard via repo-managed provisioning.
@@ -224,6 +228,6 @@ AGENTS.md           # canonical agent guide
 ## Status
 
 Active development. Campaign 1 (phases 1-31) shipped the core orchestrator;
-Campaign 2 is post-1.0 feature work. See `docs/PROJECT_STATE.md`
+Campaigns 2 and 3 were post-1.0 feature work; Campaign 4 is current. See `docs/PROJECT_STATE.md`
 (gitignored, laptop-local) for the current priority, verified stack state,
 and per-phase behavioral facts.

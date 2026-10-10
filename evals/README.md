@@ -210,6 +210,12 @@ Feeding several results files merges them into one matrix (e.g. a sweep plus an
 convention: `<date>-<desc>-sweep-answers.md` + `-results.json` + `-compare.md`,
 plus the usual hand-written `-report.md` for the quality read.
 
+### Mixed cloud-model comparison
+
+`eval_prompts_cloud_models.json` reuses the same harness and on-box runner. Its 26 English cases cover hard coding, grounded research-note synthesis, present/absent source facts, factual caution, writing, explanations, and reasoning. Six cases execute Python assertions; the two deeper tasks require reading the proof and queue-capacity calculations. The present-fact case requests an ungrouped integer to avoid the older comma-format false failure. Correct negations are not rejected by semantic forbidden phrases.
+
+Select individual models with `MODELS`/`--models`, using `audrey_passthrough/<exact-tag>`. Supplied notes test evidence use; no live web retrieval is available on this path. Use `THINK=default` to omit request-level thinking controls; record effective deployment/provider defaults, which can differ. Run one broad pass before choosing any targeted repeats. Structural passes and executed-code passes are separate from the manual quality assessment. Copy the paired answers/results to laptop `evals/results/` before updating the standalone model field report. Harness/case files are live-mounted: no application or eval-image rebuild is needed for this addition.
+
 **The lineup loop:** sweep the candidates → read the compare table + answers →
 propose a `deep_panel*.workers` edit in `config.yaml` → redeploy → re-run the
 affected deep protocol (`run_all_evals.sh code-hard` or `deep`) and diff against
@@ -322,7 +328,7 @@ answers. Use both.
 ## Automatic skill selection — parked
 
 Production automatic selection remains disabled. Reopen only for a concrete
-English workflow and agreed criteria in [Phase 03](../docs/campaign-3/phase-03-skills.md).
+English workflow and agreed criteria in [Phase 03](../docs/campaign-4/phase-03-skills.md).
 Do not rerun completed studies or non-English cases. Fixtures and saved reports
 remain historical/regression evidence; measurements are in the model ledger.
 

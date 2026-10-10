@@ -125,7 +125,7 @@ a tighter slice instead of trying to cover everything at once.
 #### When the planner runs
 
 The graph node is at
-[`graph.py:389`](../../src/audrey/pipeline/graph.py#L389):
+[`graph.py:450`](../../src/audrey/pipeline/graph.py#L450):
 
 ```python
 async def node_planner(state: PipelineState) -> dict[str, Any]:
@@ -141,7 +141,7 @@ more than it saves.
 #### What the planner does
 
 When it does run, it makes one LLM call. The system prompt is fixed at
-[`prompts.py:62`](../../src/audrey/pipeline/prompts.py#L62):
+[`prompts.py:67`](../../src/audrey/pipeline/prompts.py#L67):
 
 ```text
 You decompose a user request into 2 or 3 focused sub-questions that, if
@@ -217,7 +217,7 @@ goes on. The planner is opt-in routing, not a hard requirement — when it
 works, it sharpens the panel; when it fails, the panel doesn't notice.
 
 When the planner *does* return subtasks, the log line at
-[`graph.py:402`](../../src/audrey/pipeline/graph.py#L402) shows the count
+[`graph.py:463`](../../src/audrey/pipeline/graph.py#L463) shows the count
 and the first 60 chars of each:
 
 ```python
@@ -270,7 +270,7 @@ workers run:
 #### Picking the pool
 
 `pool_key_for` at
-[`deep_panel.py:96`](../../src/audrey/pipeline/deep_panel.py#L96) does the
+[`deep_panel.py:115`](../../src/audrey/pipeline/deep_panel.py#L115) does the
 mapping:
 
 ```python
@@ -292,7 +292,7 @@ an unexpected model string into a mid-request `KeyError`; the operator still
 gets a warning in the logs.
 
 The pools themselves live in `config.yaml`. Open
-[`config.yaml:98`](../../config.yaml#L98):
+[`config.yaml:277`](../../config.yaml#L277):
 
 ```yaml
 deep_panel:
@@ -314,7 +314,7 @@ and the classifier output from Lesson 7 picks the task entry within it.
 #### Selecting healthy workers
 
 `select_workers` at
-[`deep_panel.py:145`](../../src/audrey/pipeline/deep_panel.py#L145) walks the
+[`deep_panel.py:164`](../../src/audrey/pipeline/deep_panel.py#L164) walks the
 configured worker list and filters:
 
 ```python
@@ -347,7 +347,7 @@ If `select_workers` returns nothing — every pool worker is unhealthy —
 the panel falls back to the model registry itself. This selection logic lives
 in a shared helper, `_prepare_panel`, that both the non-streaming `run_panel`
 and the streaming `run_panel_streaming` call, at
-[`deep_panel.py:367`](../../src/audrey/pipeline/deep_panel.py#L367):
+[`deep_panel.py:594`](../../src/audrey/pipeline/deep_panel.py#L594):
 
 ```python
 if not workers:
@@ -374,14 +374,14 @@ one local worker can run at a time, because they're all competing for the
 same GPU's VRAM.
 
 Per-worker dispatch *looks* parallel on the dispatcher side
-([`deep_panel.py:309-328`](../../src/audrey/pipeline/deep_panel.py#L309)),
+([`deep_panel.py:631-650`](../../src/audrey/pipeline/deep_panel.py#L631)),
 but execution serializes through the gate. A deep panel with two local
 workers runs them back to back, not side by side. Two cloud workers in the
 same panel run concurrently because they never touch the gate.
 
 This is also why tool-capable local workers hold the gate for the *entire*
 ReAct loop, not just one chat call. Look at
-[`deep_panel.py:151-172`](../../src/audrey/pipeline/deep_panel.py#L214):
+[`deep_panel.py:382-406`](../../src/audrey/pipeline/deep_panel.py#L382):
 
 ```python
 async with gate.acquire(model, location=location, user_id=user_id):
@@ -414,7 +414,7 @@ working as designed, not a worker cheating its way to a smaller number.
 
 If the planner produced subtasks, each worker gets one. `_prepare_panel`
 distributes them round-robin at
-[`deep_panel.py:386-394`](../../src/audrey/pipeline/deep_panel.py#L386):
+[`deep_panel.py:613-621`](../../src/audrey/pipeline/deep_panel.py#L613):
 
 ```python
 per_worker_messages: list[list[dict[str, Any]]] = []
@@ -443,7 +443,7 @@ answer the same question with different perspectives, and the synthesizer
 reconciles them.
 
 `_messages_for_subtask` at
-[`deep_panel.py:297`](../../src/audrey/pipeline/deep_panel.py#L297) builds
+[`deep_panel.py:513`](../../src/audrey/pipeline/deep_panel.py#L513) builds
 the per-worker message list by replacing the **last** user message with
 the subtask:
 
@@ -519,7 +519,7 @@ bypasses the validator. Defense in depth, costing nothing.
 #### Bundling the drafts
 
 `_format_drafts_for_synth` at
-[`synthesize.py:42`](../../src/audrey/pipeline/synthesize.py#L42) lays out
+[`synthesize.py:44`](../../src/audrey/pipeline/synthesize.py#L44) lays out
 the user message the synthesizer reads. The shape is:
 
 ```text
@@ -541,7 +541,7 @@ DRAFTS:
 
 The `[tool-grounded: N rounds]` tag isn't just labeling — it's a signal.
 The synthesizer prompt (read it at
-[`prompts.py:81`](../../src/audrey/pipeline/prompts.py#L81)) tells the
+[`prompts.py:129`](../../src/audrey/pipeline/prompts.py#L129)) tells the
 model to treat a tool-grounded draft as the factual spine of the answer:
 
 > FACTUAL ANCHORING: when one or more drafts are `[tool-grounded]`, treat
@@ -599,7 +599,7 @@ the count the synthesizer was told to expect.
 #### Three-tier failure handling
 
 The synthesizer can fail three different ways, and each gets its own
-handling — read [`synthesize.py:201`](../../src/audrey/pipeline/synthesize.py#L201):
+handling — read [`synthesize.py:216`](../../src/audrey/pipeline/synthesize.py#L216):
 
 ```python
 candidates = [primary] if primary == fallback else [primary, fallback]
@@ -622,7 +622,7 @@ for attempt, model in enumerate(candidates, start=1):
 The tiers:
 
 1. **Empty drafts list**: short-circuits before any LLM call —
-   [`synthesize.py:188-193`](../../src/audrey/pipeline/synthesize.py#L188)
+   [`synthesize.py:203-208`](../../src/audrey/pipeline/synthesize.py#L203)
    returns `synth_error="no_drafts"` with a placeholder message. Reflect
    will see this and pass it through (it's a deterministic failure, not a
    retryable one).
