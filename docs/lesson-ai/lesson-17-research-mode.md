@@ -99,9 +99,9 @@ facts — it only re-expresses what the researcher already found as claims and
 sources.
 
 The ledger types live in [`ledger.py`](../../src/audrey/pipeline/ledger.py): a
-[`Claim`](../../src/audrey/pipeline/ledger.py#L135) carries its text, the
+[`Claim`](../../src/audrey/pipeline/ledger.py#L144) carries its text, the
 `source_ids` that back it, a `risk` rating, and a `needs_hedge` flag; a
-[`Source`](../../src/audrey/pipeline/ledger.py#L120) carries a title, URL, and a
+[`Source`](../../src/audrey/pipeline/ledger.py#L129) carries a title, URL, and a
 `source_type` (official, primary_paper, scholarly, reference, news,
 company_claim, …). The controlling idea, stated at the top of the file: **the
 ledger is internal scaffolding the models reason over — it is not user-facing.**
@@ -127,7 +127,7 @@ writer makes it read well.
 > ledger refuses to pay that price: nearly every field has a `BeforeValidator`
 > that *coerces* instead of rejecting — see
 > [`_to_str_or_empty`](../../src/audrey/pipeline/ledger.py#L44) (null/int URL →
-> usable value) and [`_norm_risk`](../../src/audrey/pipeline/ledger.py#L107)
+> usable value) and [`_norm_risk`](../../src/audrey/pipeline/ledger.py#L116)
 > (off-enum risk → a sane default). The rule it encodes: **one malformed field
 > must never throw away a whole worker's work.** A blank URL is harmless — we
 > sanity-check URL shape later, when we decide what to show the user, not here.
@@ -164,7 +164,7 @@ and proceeds, exactly as the verify → write flow did before.
 
 When a ledger exists, the prose corrections are structured back against it
 ([`deep_panel.py:2110`](../../src/audrey/pipeline/deep_panel.py#L2110)) into a
-[`FactCheckResult`](../../src/audrey/pipeline/ledger.py#L195) — per-claim
+[`FactCheckResult`](../../src/audrey/pipeline/ledger.py#L204) — per-claim
 verdicts like `supported`, `unsupported`, `needs_hedge`. Those verdicts are what
 let the next steps drop an unsupported claim from the Sources list and soften a
 shaky one. As everywhere, this is fail-soft: any problem keeps the plain prose
@@ -290,7 +290,7 @@ ledger to build from.
 [`_render_sources_block`](../../src/audrey/pipeline/deep_panel.py#L1625) returns
 `""` when there's no ledger or no surviving source with a usable URL, so no
 `## Sources` header appears; the append step only runs on a clean answer at
-[`deep_panel.py:2110`](../../src/audrey/pipeline/deep_panel.py#L2110). The hedging
+[`deep_panel.py:2238`](../../src/audrey/pipeline/deep_panel.py#L2238). The hedging
 block is likewise empty with no claims to disposition. This is the §2.5 point:
 the deterministic shaping is *conditional on grounding*, so an ungrounded answer
 stays clean prose rather than sprouting empty scaffolding.

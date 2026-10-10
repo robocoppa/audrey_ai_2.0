@@ -131,7 +131,7 @@ Env says where this copy of Audrey is running.
 ```
 
 Open [`src/audrey/config.py`](../../src/audrey/config.py). The first important
-class is [`EnvOverrides`](../../src/audrey/config.py#L23), which inherits from
+class is [`EnvOverrides`](../../src/audrey/config.py#L24), which inherits from
 `pydantic_settings.BaseSettings`.
 
 The merge happens in `Config._apply_env_overrides` at
@@ -192,7 +192,7 @@ configures three things: also read variables from `.env` if the file
 is present, decode it as UTF-8, and silently drop env vars that don't
 match any declared field (instead of erroring).
 
-`alias="OLLAMA_HOST"` on [`config.py:31`](../../src/audrey/config.py#L31)
+`alias="OLLAMA_HOST"` on [`config.py:32`](../../src/audrey/config.py#L32)
 lets us write `cfg.env.ollama_host` in Python while the env var is
 spelled `OLLAMA_HOST` — Python's snake_case meets shell convention's
 SHOUTY_CASE.

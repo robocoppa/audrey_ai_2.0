@@ -47,7 +47,7 @@ OpenAPI remain service plumbing, not model-callable tools.
 > up advertising *zero* tools. `compose.yaml` orders Audrey's start after
 > the sidecar's healthcheck to avoid this; the admin rediscover route is
 > the manual recovery if it happens anyway. You saw this from Audrey's side
-> in earlier lessons — the sidecar's `/health` route ([app.py:294](../../tools-server/app.py#L294))
+> in earlier lessons — the sidecar's `/health` route ([app.py:506](../../tools-server/app.py#L506))
 > is what that healthcheck hits.
 
 ### 1.2 The five files
@@ -200,7 +200,7 @@ the model *name* a capability that physically lives in the orchestrator.
 
 The error handling tells you where a failure lives. Two distinct cases:
 
-- **`httpx.RequestError` → 502** ([app.py:506](../../tools-server/app.py#L506)).
+- **`httpx.RequestError` → 502** ([app.py:734](../../tools-server/app.py#L734)).
   The sidecar couldn't *reach* Audrey at all — connection refused, DNS,
   timeout. The bug is Audrey-side or network, not the sidecar.
 - **Audrey answered with `>= 400` → relay that status verbatim.** Audrey's
@@ -209,7 +209,7 @@ The error handling tells you where a failure lives. Two distinct cases:
 
 So a 502 from `kb_search` means "the proxy works, its upstream doesn't,"
 while any other 4xx is Audrey's own verdict on the query. `kb_image_search`
-([app.py:520](../../tools-server/app.py#L520)) is the same shape against
+([app.py:762](../../tools-server/app.py#L762)) is the same shape against
 `/v1/kb/query/image`, with one extra guard: it requires exactly one of
 `query` / `image_url` / `image_b64` and 422s if the model sends none.
 
@@ -221,7 +221,7 @@ The following sections take the External and Stateful kinds in depth.
 small but it models how to call a rate-limited, paid third-party service
 without abusing it. Two mechanisms carry the weight.
 
-**A TTL cache** ([brave.py:132](../../tools-server/brave.py#L132)). The
+**A TTL cache** ([brave.py:141](../../tools-server/brave.py#L141)). The
 client keeps an in-memory `OrderedDict` keyed by `(query, count)`, each
 entry stamped with a `time.monotonic()` expiry. The read path is small but
 does three things at once:
@@ -253,7 +253,7 @@ The point of all this is the free tier: Brave's quota is small, and a
 is keyed on `(query, count)` because a different `count` is a genuinely
 different result set.
 
-**Retry with backoff** ([brave.py:110](../../tools-server/brave.py#L110)).
+**Retry with backoff** ([brave.py:119](../../tools-server/brave.py#L119)).
 The actual fetch wraps the HTTP call in `tenacity`'s `AsyncRetrying`:
 
 ```python
@@ -273,7 +273,7 @@ off and tries again — 1s, then 2s, then 4s, capped at 15s. The exponential wai
 is what makes this *polite*: hammering a rate-limited API with immediate retries
 just deepens the limit. If all four attempts fail, `reraise=True` lets the last
 exception out. The 429 case remains a `BraveRateLimitError`, which the
-`web_search` handler catches and returns as 503 ([app.py:316](../../tools-server/app.py#L316));
+`web_search` handler catches and returns as 503 ([app.py:596](../../tools-server/app.py#L596));
 other HTTP status failures can currently escape as a generic server error.
 
 So from the model's seat, a rate-limited Brave looks like a tool that
@@ -284,7 +284,7 @@ concrete.
 
 > **Teaching aside — where the count limit actually binds.** Three layers
 > touch `count`: the request schema caps it at 10
-> ([app.py:146](../../tools-server/app.py#L146)), the cache key clamps to
+> ([app.py:220](../../tools-server/app.py#L220)), the cache key clamps to
 > 20, and `_fetch` passes it straight to Brave. They disagree — but it
 > doesn't matter, because the schema cap is the *real* ceiling: FastAPI
 > rejects `count > 10` with a 422 before any other layer sees it. The
@@ -393,7 +393,7 @@ and forces the authenticated `user:<id>` tag for `memory_store`. A model cannot
 write to or read from another user's memory by inventing a different scope value;
 the sidecar trusts that the scope Audrey sends is already authenticated.
 
-**Legacy migration on boot** ([db.py:179](../../tools-server/db.py#L179)).
+**Legacy migration on boot** ([db.py:229](../../tools-server/db.py#L229)).
 An earlier version of memory used SQLite. On first startup, if a legacy
 `memory.db` exists, `init()` reads every row, embeds it, upserts to Qdrant,
 then renames the file to `memory.db.migrated`. It's idempotent — the rename
@@ -457,7 +457,7 @@ The sidecar exposes three more operations on top of that store:
   source, so a crash mid-prune leaves recoverable source rows, never
   orphaned vectors pointing at deleted text.) Reached only via the admin
   route.
-- **`stats`** ([chat_archive.py:616](../../tools-server/chat_archive.py#L616))
+- **`stats`** ([chat_archive.py:2036](../../tools-server/chat_archive.py#L2036))
   returns row counts including `chunks_unindexed` — chunks in SQLite that
   never made it into Qdrant (an embed/upsert failure at write time). A
   non-zero value is the signal that the index has drifted from the source
@@ -498,7 +498,7 @@ on the *other* side of the wire than the tool's name suggests.
 **3. Why can the model call `chat_history_search` but not
 `chat_history/prune`?**
 
-`chat_history_search` ([`app.py:648`](../../tools-server/app.py#L648)) is a
+`chat_history_search` ([`app.py:916`](../../tools-server/app.py#L916)) is a
 normal route — visible in `/openapi.json`, so discovery turns it into a tool.
 `chat_history/prune` ([`app.py:1454`](../../tools-server/app.py#L1454)) is
 declared `include_in_schema=False`, so it never appears in the schema Audrey
@@ -512,8 +512,8 @@ do you look first?**
 
 The `user` payload filter, in two places. First, `recall` and `search` must
 filter on the exact `user` keyword field — see the `FieldCondition(key="user", …)`
-in `recall` ([`db.py:241`](../../tools-server/db.py#L241)) and `search`
-([`db.py:611`](../../tools-server/db.py#L611)) — never a substring of `tags`.
+in `recall` ([`db.py:354`](../../tools-server/db.py#L354)) and `search`
+([`db.py:613`](../../tools-server/db.py#L613)) — never a substring of `tags`.
 Second, confirm Audrey's dispatch is still overriding the model-supplied `user`
 argument with the *authenticated* user: the `_USER_SCOPED_TOOLS` membership
 check at [`dispatch.py:224`](../../src/audrey/tools/dispatch.py#L224) is what
@@ -525,9 +525,9 @@ guessing its id.
 see, and what keeps it from taking down the whole request?**
 
 After the retry budget exhausts, `brave.py` raises `BraveRateLimitError`
-([`brave.py:101`](../../tools-server/brave.py#L101)), and the `web_search`
+([`brave.py:110`](../../tools-server/brave.py#L110)), and the `web_search`
 handler converts it to a 503
-([`app.py:317`](../../tools-server/app.py#L317)). The model doesn't see a
+([`app.py:596`](../../tools-server/app.py#L596)). The model doesn't see a
 crash — it sees a *failed tool result*, which the ReAct loop (Lesson 9) feeds
 back like any other: the model can apologize, try a different approach, or
 answer without the web. That's the failure-isolation payoff of the separate

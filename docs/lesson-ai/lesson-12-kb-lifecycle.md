@@ -263,7 +263,7 @@ on the file's settled final state.
 
 **How the watcher implements it.** The asyncio side lives in
 `KBWatcher._run` —
-[`kb/watcher.py:156`](../../src/audrey/kb/watcher.py#L156):
+[`kb/watcher.py:159`](../../src/audrey/kb/watcher.py#L159):
 
 ```python
 async def _run(self) -> None:
@@ -349,7 +349,7 @@ tells us which: a text suffix (`.md`, `.txt`, `.pdf`, …) can only
 have lived in `kb_text`; an image suffix only in `kb_images`. We
 skip the wrong-collection call rather than firing both, which
 roughly halves watcher-driven Qdrant delete load on bulk operations
-([`kb/watcher.py:215`](../../src/audrey/kb/watcher.py#L215)):
+([`kb/watcher.py:221`](../../src/audrey/kb/watcher.py#L221)):
 
 ```python
 async def _delete_vectors(self, path: Path) -> None:

@@ -169,15 +169,38 @@ Open WebUI, cloudflared are managed **outside** root compose.
 - Edited eval case files baked into the image → `docker compose --profile eval
   build audrey-eval` before the next on-box eval.
 
-## 6. Editing config on the box vs. the repo
+## 6. Keep Tower config identical to the repository
 
-The running config is `/mnt/user/appdata/audrey_ai_2.0/config.yaml`. The clean
-flow is **edit in the repo → push → pull on the box → recreate**, so the box
-stays in sync with git. In-place `sed` edits on the box work for a quick,
-about-to-be-reverted experiment, but they **drift from git** and a later
-`git pull` can conflict/clobber. `sed` gotcha: use a delimiter other than `/`
-when the pattern contains a URL/`#`, and anchor loosely (the box's YAML
-indentation/quoting may differ from what a strict pattern assumes).
+The tracked `config.yaml` is the canonical configuration. Tower's
+`/mnt/user/appdata/audrey_ai_2.0/config.yaml` uses that same file. Make config
+changes in the laptop checkout, commit/push them through the user's normal
+workflow, pull on Tower, then recreate Audrey. Do not recommend in-place
+`sed` edits or a separate Tower config. Deployment secrets and host-specific
+environment values stay in the existing gitignored `.env`.
+
+A previous local edit remains dirty even when the incoming commit contains
+the same setting. If it blocks a pull and the user has chosen the repository
+configuration, run this **once on Tower**. It saves the old file before
+restoring the tracked version, and stops if any step fails:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+(
+  set -euo pipefail
+  mkdir -p testing-out
+  config_backup="$(mktemp testing-out/config-before-sync.XXXXXX.yaml)"
+  cp config.yaml "$config_backup"
+  printf 'Config backup: %s\n' "$config_backup"
+  git restore --source=HEAD --staged --worktree -- config.yaml
+  git pull --ff-only
+  git diff --exit-code HEAD -- config.yaml
+)
+```
+
+Success: the pull completes and the final diff prints nothing. The old file
+is retained at the printed backup path, outside tracked files. This is a
+one-time cleanup, not a new step for every pull. Rebuild/recreate the services
+affected by the pulled changes using the campaign deployment table.
 
 ## 7. Evals on the box
 

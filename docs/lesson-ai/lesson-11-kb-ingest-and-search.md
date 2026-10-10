@@ -202,7 +202,7 @@ them descending. Crucially, Qdrant has no idea what the vectors
 *mean* — it only knows how to find the K closest to a query
 vector, fast.
 
-[`kb/qdrant.py:41-42`](../../src/audrey/kb/qdrant.py#L41) pins the
+[`kb/qdrant.py:43-44`](../../src/audrey/kb/qdrant.py#L43) pins the
 two dims as module constants:
 
 ```python
@@ -228,7 +228,7 @@ The unit of storage in Qdrant is a **point** — an `(id, vector,
 payload)` triple. For text, one point per chunk. For images, one
 point per image. The journey from a Markdown file on disk to a row
 of points is `ingest_text_file` —
-[`kb/ingest.py:103-131`](../../src/audrey/kb/ingest.py#L103):
+[`kb/ingest.py:112-143`](../../src/audrey/kb/ingest.py#L112):
 
 ```python
 async def ingest_text_file(path, *, qdrant, embedder, chunk_tokens, overlap_tokens):
@@ -275,7 +275,7 @@ Five steps. Read top to bottom:
    ID and write the batch.
 
 **Concept spotlight — deterministic IDs.**
-[`kb/qdrant.py:151-87`](../../src/audrey/kb/qdrant.py#L151):
+[`kb/qdrant.py:151-152`](../../src/audrey/kb/qdrant.py#L151):
 
 ```python
 def point_id(*, source: str, kind: str, idx: int) -> str:
@@ -300,7 +300,7 @@ signal of a long document — a 50-page reference book mentions
 Chunking is how we slice documents into independently-searchable
 units.
 
-[`kb/chunk.py:98-122`](../../src/audrey/kb/chunk.py#L98):
+[`kb/chunk.py:98-141`](../../src/audrey/kb/chunk.py#L98):
 
 ```python
 def chunk_text(text, *, chunk_tokens=1000, overlap_tokens=100):
@@ -365,7 +365,7 @@ point while preserving the content that was already covered by the overlap.
 ### 2.4 The embedder, in code
 
 Now the actual class that turns text into vectors —
-[`kb/embed.py:107`](../../src/audrey/kb/embed.py#L107):
+[`kb/embed.py:106`](../../src/audrey/kb/embed.py#L106):
 
 ```python
 @dataclass(slots=True)
@@ -525,7 +525,7 @@ text "a black labrador" and an actual picture of a black lab land
 within a few cosine degrees of each other.
 
 `/v1/kb/query/image` (handler at
-[`routes/kb.py:691`](../../src/audrey/routes/kb.py#L691)) picks which
+[`routes/kb.py:791`](../../src/audrey/routes/kb.py#L791)) picks which
 encoder to call based on which field of the request body was supplied
 ([`routes/kb.py:808`](../../src/audrey/routes/kb.py#L808)):
 
@@ -704,7 +704,7 @@ qdrant-client. You'll see it as a per-file error logged by
 admin UI), restart Audrey so `ensure_collections` recreates it with
 the new dim, then run a full ingest. Same drill for `kb_images` /
 CLIP. The `TEXT_DIM = 768` constant in
-[`kb/qdrant.py:41`](../../src/audrey/kb/qdrant.py#L41) and the
+[`kb/qdrant.py:43`](../../src/audrey/kb/qdrant.py#L43) and the
 embedder config in `config.yaml` both have to move together; if
 they drift, you'll see it on the next ingest.
 
@@ -715,7 +715,7 @@ of material. Why?"**
 
 `_search_text_merged` pulls top-K from each collection then sorts by
 raw cosine score and slices to `top_k`
-([`routes/kb.py:510-512`](../../src/audrey/routes/kb.py#L510)). If
+([`routes/kb.py:611-612`](../../src/audrey/routes/kb.py#L611)). If
 the user's personal notes are closer matches to the query — likely
 when the notes use their exact phrasing — they can sweep all five
 slots. The global hits *are* in the candidate list; they just rank

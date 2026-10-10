@@ -89,7 +89,7 @@ current exception: if configured to use a local model, it calls Ollama directly
 without the fair gate. The in-flight cap, by contrast, is acquired exactly
 *once per request*, right at the route boundary in
 [`routes/openai/pipeline.py:178`](../../src/audrey/routes/openai/pipeline.py#L178) and
-[`routes/openai/pipeline.py:241`](../../src/audrey/routes/openai/pipeline.py#L241).
+[`routes/openai/pipeline.py:327`](../../src/audrey/routes/openai/pipeline.py#L327).
 The whole pipeline executes inside that single `async with` block.
 
 ### 2.2 The fair gate
@@ -219,14 +219,14 @@ flow:
    authenticated buckets like any other. (The constant lives in
    [`audrey/scheduling.py`](../../src/audrey/scheduling.py), shared
    between the gate and the in-flight registry so they can't drift.)
-3. **Fast path** (`fair_gate.py:104-108`): under the lock, if a
+3. **Fast path** (`fair_gate.py:103-107`): under the lock, if a
    slot is free *and* nobody is queued, just take it. No Future
    needed. This is the common case at low load.
-4. **Slow path** (`fair_gate.py:110-118`): create a Future, append
+4. **Slow path** (`fair_gate.py:110-119`): create a Future, append
    it to this user's deque, then `await fut` outside the lock. The
    release path will eventually resolve our Future and our
    `async with` body runs.
-5. **Cancellation handling** (`fair_gate.py:121-134`): if our
+5. **Cancellation handling** (`fair_gate.py:121-140`): if our
    coroutine is cancelled while parked, we clean ourselves out of
    the deque so the release path doesn't try to grant a slot to a
    dead Future. (There's a complementary defense in `_release`,
@@ -279,7 +279,7 @@ this form rather than as a plain semaphore.
 #### The done-future sweep
 
 Before picking, `_release` walks every deque and pops `done()`
-futures from the head ([`fair_gate.py:156-161`](../../src/audrey/pipeline/fair_gate.py#L156)).
+futures from the head ([`fair_gate.py:171-176`](../../src/audrey/pipeline/fair_gate.py#L171)).
 A future is `done()` if it's been resolved, cancelled, or had an
 exception set. Where do dead futures come from?
 
@@ -571,7 +571,7 @@ ghost. There's still a narrow race — a Future can be cancelled
 between marking itself done and the except clause running — so
 the load-bearing cleanup is actually the done-future sweep at
 the top of `_release`
-([`fair_gate.py:156`](../../src/audrey/pipeline/fair_gate.py#L156)),
+([`fair_gate.py:171`](../../src/audrey/pipeline/fair_gate.py#L171)),
 which pops cancelled futures off each deque before picking a
 winner. Without that sweep, the racy cancellation would
 silently turn into a "slot granted to nobody" bug — the gate

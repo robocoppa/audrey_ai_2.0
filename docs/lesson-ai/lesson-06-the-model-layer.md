@@ -81,7 +81,7 @@ These are the files we'll reference in this lesson, open each one as we go:
   - the ranked model registry.
 - [`src/audrey/models/health.py`](../../src/audrey/models/health.py#L18)
   - temporary model cooldowns.
-- [`src/audrey/models/ollama.py`](../../src/audrey/models/ollama.py#L29)
+- [`src/audrey/models/ollama.py`](../../src/audrey/models/ollama.py#L267)
   - Audrey's async HTTP client for Ollama.
 - [`src/audrey/pipeline/fast_path.py`](../../src/audrey/pipeline/fast_path.py#L81)
   - single-model selection.
@@ -111,14 +111,16 @@ Then `lifespan` passes those objects into `build_graph(...)` at
 [`main.py:180`](../../src/audrey/main.py#L180):
 
 ```python
-graph = build_graph(cfg, ollama, registry, health, gate, tool_registry)
+graph = build_graph(
+    cfg, ollama, registry, health, gate, tool_registry, archive_http,
+)
 ```
 
 This is the same closure idea from Lesson 5. The compiled graph keeps
 references to these objects. Every request uses the same `OllamaClient`, the
 same `ModelRegistry`, the same `HealthTracker`, and the same `FairLocalGate`.
 The same objects are also stored on `app.state` starting at
-[`main.py:265`](../../src/audrey/main.py#L265), so routes can reach them too.
+[`main.py:267`](../../src/audrey/main.py#L267), so routes can reach them too.
 
 That matters because health is process-local memory. If a model times out on
 one request, the next request should know to avoid it for a little while. That
@@ -231,7 +233,7 @@ startup. It should not silently treat a local model as "not local" and bypass
 the GPU gate.
 
 Now look at `ModelSpec` at
-[`registry.py:22`](../../src/audrey/models/registry.py#L22):
+[`registry.py:21`](../../src/audrey/models/registry.py#L21):
 
 ```python
 @dataclass(slots=True, frozen=True)
@@ -387,7 +389,7 @@ adjusted. Wall-clock time answers "what time is it?" Monotonic time answers
 "has enough time passed?"
 
 When a model fails, `record_failure(...)` increments the failure count and sets
-a cooldown at [`health.py:53`](../../src/audrey/models/health.py#L53):
+a cooldown at [`health.py:56`](../../src/audrey/models/health.py#L56):
 
 ```python
 backoff = min(self._base * (2 ** (state.consecutive_failures - 1)), self._max)
@@ -820,7 +822,7 @@ truncation/error message instead of silently retrying from scratch.
 #### Embeddings
 
 `embed(...)` calls `/api/embed` and expects one vector per input text, starting
-at [`ollama.py:223`](../../src/audrey/models/ollama.py#L249).
+at [`ollama.py:585`](../../src/audrey/models/ollama.py#L585).
 
 This is not used for normal chat answers. It supports the knowledge-base path:
 text needs to become embedding vectors before Audrey can store or search it in
@@ -849,9 +851,9 @@ Here is what happens after the request reaches the graph:
 1. The classifier labels the request as `general`.
 2. Complexity routing keeps it in fast mode because the prompt is short and the
    user chose `audrey_fast`; the forced-fast check lives at
-   [`graph.py:287`](../../src/audrey/pipeline/graph.py#L287).
+   [`graph.py:370`](../../src/audrey/pipeline/graph.py#L370).
 3. `node_fast_path` calls `run_fast_path(...)` at
-   [`graph.py:357`](../../src/audrey/pipeline/graph.py#L357).
+   [`graph.py:417`](../../src/audrey/pipeline/graph.py#L417).
 4. `run_fast_path(...)` calls `pick_fast_model(...)` at
    [`fast_path.py:540`](../../src/audrey/pipeline/fast_path.py#L540).
 5. `pick_fast_model(...)` asks the registry for the first healthy `general`

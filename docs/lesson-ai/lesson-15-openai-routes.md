@@ -168,7 +168,7 @@ mention:
   identity**. Audrey's user ID comes from the bearer token
   (`require_user → AuthedUser.email`); `payload.user` is logged for
   drift-debugging at
-  [`routes/openai/routes.py:180`](../../src/audrey/routes/openai/routes.py#L180)
+  [`routes/openai/routes.py:181`](../../src/audrey/routes/openai/routes.py#L181)
   and otherwise ignored. The field is in the schema purely for
   client compat.
 
@@ -206,7 +206,7 @@ Three things to notice in
   - **`VIRTUAL_MODELS` is validated in the route, not the schema.** A
     Pydantic `Literal[...]` would push this to the 422 layer with
     less-helpful error text. The route check at
-    [`routes/openai/routes.py:172`](../../src/audrey/routes/openai/routes.py#L172)
+    [`routes/openai/routes.py:169`](../../src/audrey/routes/openai/routes.py#L169)
     emits `"Unknown model 'X'. Supported virtual models: [...]"` —
     actionable enough that a developer trying `audrey_deeo` (typo)
     can fix it without grepping the source.
@@ -302,7 +302,7 @@ one return.
 The interesting wrinkle is `is_owui_task_request(messages)`. For the
 non-streaming path you're reading here, that check runs *inside the
 graph* — the complexity node calls it while choosing the mode at
-[`pipeline/graph.py:291`](../../src/audrey/pipeline/graph.py#L291),
+[`pipeline/graph.py:350`](../../src/audrey/pipeline/graph.py#L350),
 so `_generate_via_pipeline` itself never touches it (it just hands the
 graph a state dict and awaits the result). OWUI fires "generate title"
 and "generate tags" utility prompts that bundle the whole conversation
@@ -314,7 +314,7 @@ forces fast mode for these, it isn't overriding a choice the user made
 — it's declining to act on a choice nobody made, refusing to burn a
 full deep-panel run on a string OWUI will truncate to one line. The
 streaming path runs the *same* check inline at
-[`routes/openai/pipeline.py:254`](../../src/audrey/routes/openai/pipeline.py#L254)
+[`routes/openai/pipeline.py:324`](../../src/audrey/routes/openai/pipeline.py#L324)
 (because it bypasses the graph — §2.5); this is a deliberate two-gate
 behavior, not a streaming-path one-off.
 
@@ -501,7 +501,7 @@ Trace the cancel through:
      The route records `pipeline_outcome = "cancelled"` (so the
      metric reflects "user left," not "ok") and re-raises.
   3. **The inner `try/finally` at
-     [`routes/openai/pipeline.py:716`](../../src/audrey/routes/openai/pipeline.py#L716)**
+     [`routes/openai/pipeline.py:1081`](../../src/audrey/routes/openai/pipeline.py#L1081)**
      cancels the synth producer task explicitly:
 
      ```python
@@ -533,7 +533,7 @@ Trace the cancel through:
      `@asynccontextmanager` adds. The inflight semaphore is
      released; the gate's release path runs (Lesson 14 §2.5
      covered the gate's cancellation handling at
-     `fair_gate.py:120`). Other parked waiters wake up cleanly.
+     `fair_gate.py:121`). Other parked waiters wake up cleanly.
 
 Net result: the route releases the in-flight slot, unwinds any active gate
 contexts, cancels the synth producer when cancellation reaches that stage, and
@@ -557,7 +557,7 @@ notes cover the design rationale and the per-client wiring.
 
 The route-side fork is small. It splits into streaming
 (`_passthrough_stream_sse` at
-[`routes/openai/passthrough.py:187`](../../src/audrey/routes/openai/passthrough.py#L187))
+[`routes/openai/passthrough.py:374`](../../src/audrey/routes/openai/passthrough.py#L374))
 and non-streaming. The streaming variant *doesn't share*
 `_stream_deep_with_banners` because there are no banners — Ollama's
 own chunks get reshaped to OpenAI SSE format and forwarded
@@ -574,7 +574,7 @@ decision themselves."
 
 ### 2.9 Why `_options_from_request` exists
 
-[`routes/openai/responses.py:20`](../../src/audrey/routes/openai/responses.py#L20):
+[`routes/openai/responses.py:24`](../../src/audrey/routes/openai/responses.py#L24):
 
 ```python
 def _options_from_request(req: ChatCompletionRequest) -> dict[str, Any]:
@@ -656,7 +656,7 @@ disagree.
 does the client see? What does the archive write look like?**
 
 The `_stream_deep_with_banners` exception handler at
-[`routes/openai/pipeline.py:791`](../../src/audrey/routes/openai/pipeline.py#L791)
+[`routes/openai/pipeline.py:1089`](../../src/audrey/routes/openai/pipeline.py#L1089)
 catches the failure, sets `pipeline_outcome = "error"`, and yields
 two final frames: a delta containing `"\n\n[ollama error: ...]"`
 (or `"\n\n[internal error]"` for non-Ollama exceptions) and a stop
@@ -666,7 +666,7 @@ the HTTP response already started streaming and the status was
 committed to `200 OK` the moment the first frame went out.
 
 The archive write at
-[`routes/openai/pipeline.py:721`](../../src/audrey/routes/openai/pipeline.py#L721)
+[`routes/openai/pipeline.py:1104`](../../src/audrey/routes/openai/pipeline.py#L1104)
 runs in the `finally` block, which fires *after* the error
 handling. It captures whatever `final_content` accumulated up to
 the failure (which may be partial or empty if the failure came
@@ -709,7 +709,7 @@ Five things have to land cleanly:
   Starlette. It catches at
   [`routes/openai/pipeline.py:709`](../../src/audrey/routes/openai/pipeline.py#L709),
   records `outcome="cancelled"`, and re-raises.
-- **The inner `try/finally` at [`routes/openai/pipeline.py:791`](../../src/audrey/routes/openai/pipeline.py#L791)** cancels
+- **The inner `try/finally` at [`routes/openai/pipeline.py:1081`](../../src/audrey/routes/openai/pipeline.py#L1081)** cancels
   `synth_task` and awaits it — making sure the synth producer
   doesn't keep streaming into a queue nobody reads.
 - **The panel phase task** is the current weak point. In the normal path,
@@ -741,7 +741,7 @@ have selected `audrey_deep`. What runs and why?**
 
 Fast mode runs, not deep. The `is_owui_task_request(messages)`
 check at
-[`routes/openai/pipeline.py:254`](../../src/audrey/routes/openai/pipeline.py#L254)
+[`routes/openai/pipeline.py:324`](../../src/audrey/routes/openai/pipeline.py#L324)
 detects OWUI's utility prompts by a single tell: the latest user
 message opens with the `### Task:` header OWUI stamps on its
 internal prompts (the conversation is bundled into the body, but

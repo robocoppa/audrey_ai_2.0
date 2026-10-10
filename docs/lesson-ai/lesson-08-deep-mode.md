@@ -374,7 +374,7 @@ one local worker can run at a time, because they're all competing for the
 same GPU's VRAM.
 
 Per-worker dispatch *looks* parallel on the dispatcher side
-([`deep_panel.py:631-650`](../../src/audrey/pipeline/deep_panel.py#L631)),
+([`deep_panel.py:630-657`](../../src/audrey/pipeline/deep_panel.py#L630)),
 but execution serializes through the gate. A deep panel with two local
 workers runs them back to back, not side by side. Two cloud workers in the
 same panel run concurrently because they never touch the gate.
@@ -414,7 +414,7 @@ working as designed, not a worker cheating its way to a smaller number.
 
 If the planner produced subtasks, each worker gets one. `_prepare_panel`
 distributes them round-robin at
-[`deep_panel.py:613-621`](../../src/audrey/pipeline/deep_panel.py#L613):
+[`deep_panel.py:613-628`](../../src/audrey/pipeline/deep_panel.py#L613):
 
 ```python
 per_worker_messages: list[list[dict[str, Any]]] = []
@@ -495,7 +495,7 @@ fallback_synth: "glm-5.2:cloud"
 ```
 
 `pick_synthesizer` at
-[`synthesize.py:82`](../../src/audrey/pipeline/synthesize.py#L82) reads
+[`synthesize.py:83`](../../src/audrey/pipeline/synthesize.py#L83) reads
 them:
 
 ```python
@@ -519,7 +519,7 @@ bypasses the validator. Defense in depth, costing nothing.
 #### Bundling the drafts
 
 `_format_drafts_for_synth` at
-[`synthesize.py:44`](../../src/audrey/pipeline/synthesize.py#L44) lays out
+[`synthesize.py:43`](../../src/audrey/pipeline/synthesize.py#L43) lays out
 the user message the synthesizer reads. The shape is:
 
 ```text
@@ -563,7 +563,7 @@ needlessly hedged.
 #### Forwarding original system context
 
 The synthesizer runs against the same system messages the workers saw. Open
-[`synthesize.py:94`](../../src/audrey/pipeline/synthesize.py#L94):
+[`synthesize.py:95`](../../src/audrey/pipeline/synthesize.py#L95):
 
 ```python
 def _build_synth_messages(
@@ -622,7 +622,7 @@ for attempt, model in enumerate(candidates, start=1):
 The tiers:
 
 1. **Empty drafts list**: short-circuits before any LLM call —
-   [`synthesize.py:203-208`](../../src/audrey/pipeline/synthesize.py#L203)
+   [`synthesize.py:203-210`](../../src/audrey/pipeline/synthesize.py#L203)
    returns `synth_error="no_drafts"` with a placeholder message. Reflect
    will see this and pass it through (it's a deterministic failure, not a
    retryable one).

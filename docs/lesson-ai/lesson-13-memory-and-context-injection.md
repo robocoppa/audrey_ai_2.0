@@ -48,7 +48,7 @@ this as the present moment." Two functions in
 [`pipeline/context.py`](../../src/audrey/pipeline/context.py), no I/O,
 no skip path; the instruction defuses models that would otherwise
 reason about the timestamp as data. The node wrapper at
-[`graph.py:227`](../../src/audrey/pipeline/graph.py#L227) prepends it
+[`graph.py:257`](../../src/audrey/pipeline/graph.py#L257) prepends it
 to `state["messages"]`. That's the whole subsystem; the rest of the
 lesson is per-user.)
 
@@ -196,7 +196,7 @@ Three things happen on the way to `me`:
    The probe accepts only `role in {"user", "admin"}`. OWUI returns
    200 OK for `pending` users — accounts that exist but haven't been
    activated by an admin — but Audrey explicitly rejects those at
-   [`auth.py:113`](../../src/audrey/auth.py#L113), returning 401 with
+   [`auth.py:145`](../../src/audrey/auth.py#L145), returning 401 with
    "Account not activated." This is **fail-closed**: an unknown role
    string (a future OWUI version's new state, a garbled response)
    also fails, on the principle that auth code should refuse what it
@@ -292,7 +292,7 @@ no `httpx.RequestError` handling. Same posture for malformed JSON
 bodies and missing `results` arrays.
 
 Hits become a system message via
-[`memory_system_message`](../../src/audrey/pipeline/memory.py#L105):
+[`memory_system_message`](../../src/audrey/pipeline/memory.py#L114):
 
 ```text
 [Relevant memories from previous conversations with this user:]
@@ -436,7 +436,7 @@ client (see [`routes/openai/pipeline.py:200`](../../src/audrey/routes/openai/pip
 For a streaming-deep request, the reply is *only* fully known once
 the SSE stream has been fully emitted — so the archive call lives at
 the very end of `_stream_deep_with_banners` (see
-[`routes/openai/pipeline.py:721`](../../src/audrey/routes/openai/pipeline.py#L721)),
+[`routes/openai/pipeline.py:1104`](../../src/audrey/routes/openai/pipeline.py#L1104)),
 using the `final_content` string accumulated from synthesizer deltas. Two call
 sites, two different "the content is now known" moments, one writer.
 
@@ -578,7 +578,7 @@ What's going on?**
 
 OWUI's `role` is `pending` — the JWT is valid, but the user hasn't
 been activated by an admin in OWUI. Audrey fails them closed at
-[`auth.py:113`](../../src/audrey/auth.py#L113); the allowed set is
+[`auth.py:145`](../../src/audrey/auth.py#L145); the allowed set is
 `{"user", "admin"}` only. The 30-second cache means this state lingers
 for half a minute after the admin activates them in OWUI. To force
 immediate eviction, hit `POST /v1/admin/auth/clear` (or its

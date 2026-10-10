@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 9, 2026.** English user input only. Passed work stays closed.
+**Updated October 10, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -99,6 +99,11 @@ only a future diagnostic note for an actual reported failure.
 **Run deployment commands on Tower**, in `/mnt/user/appdata/audrey_ai_2.0`.
 Pull the user's committed changes there first. Run only the rows relevant to
 the slice; its handoff must state which rows apply.
+
+Tower uses the repository's tracked `config.yaml`; config changes go through
+the same commit/push/pull flow. Avoid in-place Tower edits. If an old edit blocks
+a pull, the [operations guide](../reference/box-operations.md#6-keep-tower-config-identical-to-the-repository)
+has the one-time backup and cleanup command.
 
 | Changed files | Tower action after pull |
 |---|---|

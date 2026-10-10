@@ -112,7 +112,7 @@ These are the files we'll reference in this lesson:
 
 - [`src/audrey/tools/discovery.py:223`](../../src/audrey/tools/discovery.py#L223)
   - turns OpenAPI specs into Ollama tool schemas.
-- [`src/audrey/tools/dispatch.py:79`](../../src/audrey/tools/dispatch.py#L79)
+- [`src/audrey/tools/dispatch.py:163`](../../src/audrey/tools/dispatch.py#L163)
   - executes one tool call, returns a `ToolResult`, never raises.
 - [`src/audrey/pipeline/react.py:487`](../../src/audrey/pipeline/react.py#L487)
   - the loop: chat, dispatch, repeat.

@@ -442,16 +442,18 @@ zero results shows as `✅`. Thin grounding does not look like failure.
 
 ## Debug flags
 
-All three are env-overridable — **use `.env`, not `config.yaml`**. `config.yaml`
-is tracked and bind-mounted: editing it leaves a diff every later `git pull`
-has to work around, and an on-box `sed -i` gives the container a stale file
-handle that a plain restart will not clear.
+All listed flags are env-overridable. On Tower, set the desired flag in the
+gitignored `.env`, updating its existing entry if present. For example, set
+`DEBUG_RESEARCH_TRACE=1`, then recreate Audrey and confirm the override:
 
 ```bash
-echo 'DEBUG_RESEARCH_TRACE=1' >> .env
 docker compose up -d --force-recreate audrey
-docker compose logs audrey | grep "ENV OVERRIDE"     # confirm it landed
+docker compose logs audrey | grep "ENV OVERRIDE"
 ```
+
+Keep tracked `config.yaml` identical to the repository. After the diagnostic,
+restore the previous environment value or remove the temporary entry, then
+recreate Audrey again.
 
 | flag | what it adds | visible to |
 |---|---|---|
@@ -460,20 +462,10 @@ docker compose logs audrey | grep "ENV OVERRIDE"     # confirm it landed
 | `DEBUG_RESEARCH_TRACE=1` | researcher notes, ledger, fact-check verdicts, writer guidance | client |
 | `COMPLEXITY_LOG_BREAKDOWN=1` | why a turn routed fast vs deep | log only |
 
-⚠️ The last two are **client-visible** — fine in an eval artifact, noise in
-OWUI. Comment them out afterwards.
-
-If you must edit `config.yaml` instead, a force-recreate is mandatory:
-
-```bash
-sed -i 's/^\(\s*\)debug_research_trace:.*/\1debug_research_trace: true/' config.yaml
-grep -n "debug_research_trace" config.yaml
-docker compose up -d --force-recreate audrey
-```
-
-⚠️ `config.yaml` is also `COPY`d into the image, so anything the app reads at
-**boot** (e.g. `passthrough.allowed_models`) needs `up -d --build`, not just a
-recreate.
+Config changes belong in the laptop repository and reach Tower through
+commit/push/pull. Config-only changes need `--force-recreate audrey`: the
+runtime bind mount overrides the image's copy. Use `--build` when application
+code or dependencies change.
 
 ---
 

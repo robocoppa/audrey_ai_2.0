@@ -177,14 +177,13 @@ now is just: **the pipeline is a graph, and each node is a function.**
 
 ### 2.3 What a node looks like
 
-Look at [`graph.py:248`](../../src/audrey/pipeline/graph.py#L248) —
+Look at [`graph.py:257`](../../src/audrey/pipeline/graph.py#L257) —
 the `node_datetime` function:
 
 ```python
 async def node_datetime(state: PipelineState) -> dict[str, Any]:
-    msg = datetime_system_message()
-    new_messages = [msg, *state["messages"]]
-    return {"messages": new_messages}
+    sys_msg = datetime_system_message()
+    return {"messages": [sys_msg, *state["messages"]]}
 ```
 
 That's it. A node is a function that:
@@ -239,7 +238,7 @@ follow along in `openai.py`.
    format at the end of this section).
 
 5. **`_stream_via_pipeline()`** at
-   [`pipeline.py:205`](../../src/audrey/routes/openai/pipeline.py#L205)
+   [`pipeline.py:274`](../../src/audrey/routes/openai/pipeline.py#L274)
    does the routing: `audrey_deep` / `audrey_cloud` / `audrey_local`
    always go through the deep panel; `audrey_fast` always uses the fast
    path; `audrey_auto` goes deep for long prompts or explicit depth cues.
@@ -412,7 +411,7 @@ and the underlying httpx call fails. Audrey's Ollama client wrapper
 catches the httpx error and re-raises it as the project's own typed
 `OllamaError`. That exception propagates up through the pipeline
 to the route handler, which catches it explicitly (see
-[`routes/openai/pipeline.py:129`](../../src/audrey/routes/openai/pipeline.py#L129))
+[`routes/openai/pipeline.py:179`](../../src/audrey/routes/openai/pipeline.py#L179))
 and converts it to **HTTP 502 Bad Gateway** with a JSON error body
 explaining the upstream failure:
 
