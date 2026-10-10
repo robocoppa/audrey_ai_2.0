@@ -123,7 +123,6 @@ it's best at, and the uploads flow's job is to keep them in step.
 | Periodic orphan cleanup | [`kb/reconcile.py`](../../src/audrey/kb/reconcile.py) | `KBReconciler`, `reconcile_once()`, scroll-and-check |
 | Per-user upload metadata | [`kb/uploads_db.py`](../../src/audrey/kb/uploads_db.py) | `UploadsDB`, sqlite schema, startup `reconcile_with_qdrant` |
 | Upload HTTP endpoints | [`routes/files.py`](../../src/audrey/routes/files.py) | `POST/GET/DELETE /v1/files` |
-| Upload UI page | [`routes/upload_ui.py`](../../src/audrey/routes/upload_ui.py) | `GET /upload` (static HTML) |
 
 
 ## 2. Read-along

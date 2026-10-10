@@ -19,13 +19,19 @@ Three strategies, in order of strength:
      block's first code line as the canonical anchor — the line the
      prose is showing the reader. If the cited line number doesn't
      match where that first line actually lives in the file, the script
-     prints the correct line so you can fix the cite in place.
+     prints the correct line so you can fix the cite in place. The
+     snippet may sit below the cited line in exactly two shapes: inside
+     the definition or block that opens at the cited line (cite the
+     `def`, show the body), or inside the range the cite or its label
+     states (`[`x.py:10-24`](x.py#L10)`). Any other distance is drift,
+     however small.
 
   2. **Label-symbol anchor.** When the cite has no snippet but its
      *visible label* is a code identifier — `` [`require_user`](...#L126) ``,
      `` [`Class.method`](...) `` — that symbol is a content anchor. The
      script finds where the symbol is *defined* (def/class/assignment)
-     and checks the cite points there. This closes the landmark
+     and checks the cite points there, or at the decorator stack directly
+     above it. This closes the landmark
      heuristic's blind spot: a cite that drifted to a different line
      which still *looks* load-bearing (another `def`) passes the shape
      check but fails here, because the named symbol isn't at the cited
@@ -121,12 +127,15 @@ MIN_SNIPPET_PREFIX = 12
 # stable when the cited block is a common pattern (e.g. `def __init__`).
 PREFER_NEAREST = True
 
-# When the snippet is found within this many lines of the cited line,
-# accept the cite as OK rather than propose a fix. Common case: the
-# cite points at a function signature and the displayed snippet shows
-# the function body, which lives a few lines later. The reader opens
-# the cite and the snippet is right there — no real drift.
-NEAR_CITE_RANGE = 10
+# There is deliberately no "near enough" distance. A ten-line tolerance
+# used to stand here so a cite on a `def` could show its body; it also
+# passed cites that had drifted up to ten lines onto unrelated code.
+# The body case is now recognized structurally (`_block_end`), and every
+# other mismatch is reported, however small.
+
+# How far a bracketed logical line (a multi-line signature or decorator
+# call) may run before the scan gives up on finding its end.
+_LOGICAL_LINE_MAX = 60
 
 # Patterns that mark "load-bearing" lines for the fallback heuristic.
 # Each is a Python regex applied with `re.match` (anchored at line start
@@ -162,6 +171,10 @@ CITE_RE = re.compile(r"\[([^\]]+)\]\(([^)]*#L\d+(?:-L\d+)?)\)")
 # (`app.py:117`) or plain prose yield no symbol and fall through.
 _LABEL_SYMBOL_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_.]*)(?:\(\))?`")
 
+# A line range stated in the label (`x.py:10-24`), used when the URL
+# fragment carries only the start line.
+_LABEL_RANGE_RE = re.compile(r":(\d+)-(\d+)\b")
+
 
 # ─── Data types ──────────────────────────────────────────────────────
 
@@ -177,6 +190,7 @@ class Cite:
     end: int            # cited line number (end of range; == start if not a range)
     snippet: str | None  # first code line of the following fenced block, if any
     label_symbol: str | None  # code identifier from the link label, if any
+    label_end: int | None = None  # range end stated in the label, if any
 
 
 @dataclass
@@ -253,6 +267,7 @@ def extract_cites(doc: Path) -> Iterable[Cite]:
                 doc=doc, doc_line=i + 1, url=url, target=target,
                 start=start, end=end, snippet=snippet,
                 label_symbol=_extract_label_symbol(label),
+                label_end=_extract_label_end(label, start),
             )
 
 
@@ -279,6 +294,20 @@ def _extract_label_symbol(label: str) -> str | None:
     if last in {"py", "yaml", "yml", "sh", "md", "txt"}:
         return None
     return last
+
+
+def _extract_label_end(label: str, start: int) -> int | None:
+    """Return the range end a label states for this cite, or None.
+
+    `x.py:10-24` cited as `#L10` → 24. The label's start must equal the
+    fragment's, so an unrelated `a:1-2` elsewhere in prose never widens
+    the cite.
+    """
+    for m in _LABEL_RANGE_RE.finditer(label):
+        a, b = int(m.group(1)), int(m.group(2))
+        if a == start and b > a:
+            return b
+    return None
 
 
 def _find_following_snippet(lines: list[str], cite_line_idx: int) -> str | None:
@@ -392,24 +421,36 @@ def check_cite(cite: Cite) -> Finding:
             return Finding(cite, "OK", "snippet matches cited line", None)
         # Snippet didn't match at the cited line. Look for it elsewhere
         # in the file using progressively shorter prefixes.
-        found = _find_snippet_line(text, cite.snippet, cite.start)
-        if found is not None:
-            if found == cite.start:
+        candidates = _find_snippet_candidates(text, cite.snippet)
+        if candidates:
+            if cite.start in candidates:
                 # Match landed exactly where the cite already points —
                 # this happens when the snippet's prefix matched the
                 # line but its full first line didn't (e.g. truncated
                 # `await classify_fn(...)` vs full call). Treat as OK.
                 return Finding(cite, "OK", "snippet prefix matches cited line", None)
-            # "Cite is in the neighborhood" — common when the cite
-            # points at a function signature and the snippet shows the
-            # function body. Accept as OK; the reader opens the cite
-            # and the snippet is right there.
-            if abs(found - cite.start) <= NEAR_CITE_RANGE:
-                return Finding(
-                    cite, "OK",
-                    f"snippet at line {found} is within {NEAR_CITE_RANGE} of cited line {cite.start}",
-                    None,
-                )
+            # The cite opens a span the snippet sits inside: the range
+            # the cite or its label states, or the definition/block that
+            # starts at the cited line (cite the `def`, show the body).
+            # The reader opens the cite and reads down to the snippet.
+            range_end = max(cite.end, cite.label_end or cite.start)
+            block_end = _block_end(text, cite.start)
+            for found in candidates:
+                if cite.start < found <= range_end:
+                    return Finding(
+                        cite, "OK",
+                        f"snippet at line {found} is inside the cited range "
+                        f"{cite.start}-{range_end}",
+                        None,
+                    )
+                if block_end is not None and cite.start < found <= block_end:
+                    return Finding(
+                        cite, "OK",
+                        f"snippet at line {found} is inside the block opened at "
+                        f"cited line {cite.start}",
+                        None,
+                    )
+            found = _nearest(candidates, cite.start)
             return Finding(
                 cite, "DRIFT",
                 f"snippet found at line {found}, not {cite.start}",
@@ -437,20 +478,28 @@ def check_cite(cite: Cite) -> Finding:
     # Strategy 2: label-symbol anchor. When the cite's visible label is a
     # code identifier (`require_user`, `Class.method`), it's a real content
     # anchor even without a fenced snippet. Verify the symbol is *defined*
-    # at or near the cited line. This catches the landmark heuristic's
-    # blind spot: a cite that drifted to a different-but-still-landmark
-    # line (e.g. `def some_other_fn`) — the shape check passes, but the
-    # symbol won't be there.
+    # at the cited line, or that the cited line is the decorator stack
+    # directly above that definition. This catches the landmark
+    # heuristic's blind spot: a cite that drifted to a different-but-
+    # still-landmark line (e.g. `def some_other_fn`) — the shape check
+    # passes, but the symbol won't be there.
     if cite.label_symbol is not None:
-        defined_at = _find_definition_line(text, cite.label_symbol, cite.start)
-        if defined_at is not None:
-            if abs(defined_at - cite.start) <= NEAR_CITE_RANGE:
+        definitions = _find_definition_lines(text, cite.label_symbol)
+        if definitions:
+            if cite.start in definitions:
                 return Finding(cite, "OK",
-                               f"label symbol {cite.label_symbol!r} defined near cited line", None)
+                               f"label symbol {cite.label_symbol!r} defined at cited line", None)
+            decorated = _decorated_definition(text, cite.start)
+            if decorated in definitions:
+                return Finding(
+                    cite, "OK",
+                    f"cited line decorates the definition of {cite.label_symbol!r}", None,
+                )
+            defined_at = _nearest(definitions, cite.start)
             return Finding(
                 cite, "DRIFT",
                 f"label symbol {cite.label_symbol!r} is defined at line "
-                f"{defined_at}, not near cited line {cite.start}",
+                f"{defined_at}, not at cited line {cite.start}",
                 proposed_line=defined_at,
             )
         # Symbol not defined anywhere — either removed (real drift) or the
@@ -480,16 +529,14 @@ def check_cite(cite: Cite) -> Finding:
     )
 
 
-def _find_definition_line(
-    text: list[str], symbol: str, near: int,
-) -> int | None:
-    """Locate where `symbol` is defined: `def symbol`, `class symbol`,
+def _find_definition_lines(text: list[str], symbol: str) -> list[int]:
+    """Every line where `symbol` is defined: `def symbol`, `class symbol`,
     `async def symbol`, or `symbol =` / `symbol:` (constant/field).
 
-    Returns the 1-indexed line nearest to `near`, or None if the symbol
-    is defined nowhere. A definition is a much stronger signal than a
-    bare mention — we only want the line that *introduces* the symbol,
-    not every call site, so the cite resolves to the right place.
+    Returns 1-indexed lines, empty if the symbol is defined nowhere. A
+    definition is a much stronger signal than a bare mention — we only
+    want the line that *introduces* the symbol, not every call site, so
+    the cite resolves to the right place.
     """
     pat = re.compile(
         r"^\s*(?:async\s+def\s+|def\s+|class\s+)"
@@ -497,10 +544,84 @@ def _find_definition_line(
         + r"\b"
         + r"|^\s*" + re.escape(symbol) + r"\s*[:=]"
     )
-    candidates = [i + 1 for i, line in enumerate(text) if pat.match(line)]
-    if not candidates:
+    return [i + 1 for i, line in enumerate(text) if pat.match(line)]
+
+
+def _nearest(candidates: list[int], near: int) -> int:
+    """The candidate to propose as a fix: the one nearest `near` when
+    PREFER_NEAREST is set, else the first in the file."""
+    if PREFER_NEAREST:
+        return min(candidates, key=lambda x: abs(x - near))
+    return candidates[0]
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def _strip_trailing_comment(line: str) -> str:
+    """Drop a trailing `# comment` so `def f():  # note` still ends in `:`."""
+    return re.sub(r"\s+#.*$", "", line).rstrip()
+
+
+def _logical_end(text: list[str], idx: int) -> int:
+    """0-indexed last physical line of the logical line starting at `idx`.
+
+    Follows open brackets across lines, so a multi-line signature or
+    decorator call counts as one line. A rough count (it ignores brackets
+    inside strings), which is enough for headers.
+    """
+    depth = 0
+    last = min(len(text), idx + _LOGICAL_LINE_MAX)
+    for k in range(idx, last):
+        code = _strip_trailing_comment(text[k])
+        depth += sum(code.count(c) for c in "([{") - sum(code.count(c) for c in ")]}")
+        if depth <= 0:
+            return k
+    return idx
+
+
+def _decorated_definition(text: list[str], start: int) -> int | None:
+    """If the 1-indexed `start` begins a decorator stack, the 1-indexed
+    line of the `def`/`class` it decorates; else None."""
+    i = start - 1
+    if i >= len(text) or not text[i].lstrip().startswith("@"):
         return None
-    return min(candidates, key=lambda x: abs(x - near))
+    while i < len(text) and text[i].lstrip().startswith("@"):
+        i = _logical_end(text, i) + 1
+    if i < len(text) and re.match(r"^\s*(?:async\s+def|def|class)\s", text[i]):
+        return i + 1
+    return None
+
+
+def _block_end(text: list[str], start: int) -> int | None:
+    """1-indexed last line of the block opened at `start`, or None.
+
+    A block opener is a `def`/`class` (its signature may span lines), a
+    decorator stack above one, or any other header ending in `:` (a YAML
+    mapping key, an `if`/`try`/`except` line). The block runs until the
+    first non-blank line indented no deeper than the opener. A cite on
+    the opener legitimately shows a snippet from anywhere in the block.
+    """
+    if not 1 <= start <= len(text) or text[start - 1].lstrip().startswith("#"):
+        return None
+    header = start - 1
+    decorated = _decorated_definition(text, start)
+    if decorated is not None:
+        header = decorated - 1
+    opener_indent = _indent(text[start - 1])
+    header_end = _logical_end(text, header)
+    if not _strip_trailing_comment(text[header_end]).endswith(":"):
+        return None
+    last = header_end
+    for k in range(header_end + 1, len(text)):
+        line = text[k]
+        if not line.strip():
+            continue
+        if _indent(line) <= opener_indent:
+            break
+        last = k
+    return last + 1
 
 
 def _is_landmark(line: str) -> bool:
@@ -512,18 +633,16 @@ def _is_landmark(line: str) -> bool:
     return False
 
 
-def _find_snippet_line(
-    text: list[str], snippet: str, near: int,
-) -> int | None:
-    """Locate `snippet` (or a long-enough prefix of it) in `text`.
+def _find_snippet_candidates(text: list[str], snippet: str) -> list[int]:
+    """Every line where `snippet` (or a long-enough prefix of it) occurs.
 
     Tries the full snippet first, then shorter prefixes down to
-    MIN_SNIPPET_PREFIX chars. Returns 1-indexed line numbers.
-
-    When multiple matches exist and PREFER_NEAREST is set, returns
-    the match closest to `near`. This biases corrections toward "the
-    block moved slightly" rather than "a totally different block in
-    the file happens to start the same way".
+    MIN_SNIPPET_PREFIX chars, and returns the 1-indexed matches for the
+    longest prefix that matches anywhere (empty if none). The caller
+    accepts the cite when any match sits where the cite allows, and
+    otherwise proposes the nearest one (`_nearest`), which biases
+    corrections toward "the block moved slightly" rather than "a totally
+    different block in the file happens to start the same way".
     """
     snippet = snippet.strip()
     # Try full snippet down to MIN_SNIPPET_PREFIX-char prefix — but
@@ -542,12 +661,9 @@ def _find_snippet_line(
             i + 1 for i, line in enumerate(text)
             if line.lstrip().startswith(needle)
         ]
-        if not candidates:
-            continue
-        if PREFER_NEAREST:
-            return min(candidates, key=lambda x: abs(x - near))
-        return candidates[0]
-    return None
+        if candidates:
+            return candidates
+    return []
 
 
 # ─── Reporting ───────────────────────────────────────────────────────

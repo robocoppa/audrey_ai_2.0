@@ -135,7 +135,7 @@ class is [`EnvOverrides`](../../src/audrey/config.py#L24), which inherits from
 `pydantic_settings.BaseSettings`.
 
 The merge happens in `Config._apply_env_overrides` at
-[`config.py:178`](../../src/audrey/config.py#L178). Read it top to bottom
+[`config.py:166`](../../src/audrey/config.py#L166). Read it top to bottom
 — it's just a list of "if env var X was set, write its value into the
 right slot of the YAML dict." The YAML dict is the merged result;
 `Config.raw` exposes it.
@@ -145,7 +145,7 @@ right slot of the YAML dict." The YAML dict is the merged result;
 You set `GPU_CONCURRENCY=2` in the environment Python sees at boot.
 Here's what happens:
 
-1. `lifespan()` calls [`get_config()`](../../src/audrey/config.py#L757).
+1. `lifespan()` calls [`get_config()`](../../src/audrey/config.py#L745).
 2. `get_config()` creates `EnvOverrides()`.
 3. Pydantic Settings sees `GPU_CONCURRENCY=2`, matches it to
    `gpu_concurrency`, and converts it to an integer.
@@ -281,7 +281,7 @@ Not every startup failure means the same thing.
 
 If `config.yaml` is missing or malformed, Audrey cannot know which models,
 tools, timeouts, and routing rules to use. There is no honest degraded mode.
-[`_load_yaml()`](../../src/audrey/config.py#L274) lets that exception crash
+[`_load_yaml()`](../../src/audrey/config.py#L262) lets that exception crash
 startup.
 
 If Qdrant is unreachable, Audrey loses some KB functionality, but it can still
@@ -373,7 +373,7 @@ returned, because it captured that object.
 
 Audrey's graph does the same thing with `tool_registry`. The snippet below is
 the **correct pattern Audrey uses** in
-[`rediscover_tools` (main.py:569)](../../src/audrey/main.py#L569). It refreshes
+[`rediscover_tools` (main.py:570)](../../src/audrey/main.py#L570). It refreshes
 the existing registry object in place:
 
 ```python

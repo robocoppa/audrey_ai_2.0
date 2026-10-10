@@ -84,10 +84,10 @@ def test_clean_cite_with_matching_snippet_exits_0(tmp_path):
 
 
 def test_drifted_cite_proposes_correct_line(tmp_path):
-    """Snippet moved far enough that NEAR_CITE_RANGE tolerance can't
-    excuse the drift — checker should propose the new line."""
+    """Snippet moved well away from the cite — checker should propose
+    the new line."""
     repo = _setup_minimal_repo(tmp_path)
-    # 20 padding lines push the snippet well past NEAR_CITE_RANGE.
+    # 20 padding lines push the snippet far from the cited line.
     pad = "\n".join(f"# pad {i}" for i in range(20))
     _write(
         repo / "src" / "lib.py",
@@ -183,8 +183,8 @@ def test_snippet_not_found_but_cited_line_is_landmark_is_softer(tmp_path):
 
 
 def test_prefer_nearest_match_when_multiple(tmp_path):
-    """Duplicate snippet shape — when both candidates are outside
-    NEAR_CITE_RANGE, checker proposes the one closer to the cite.
+    """Duplicate snippet shape — when neither candidate sits where the
+    cite allows, checker proposes the one closer to the cite.
     Stabilizes corrections when the same pattern (e.g.
     `def __init__(self):`) appears in many places."""
     repo = _setup_minimal_repo(tmp_path)
@@ -209,8 +209,8 @@ def test_prefer_nearest_match_when_multiple(tmp_path):
     #   77  class B:
     #   78      def __init__(self):    ← B's init
     #   79          pass
-    # Cite at line 60 (in the middle pad). Both inits are outside
-    # NEAR_CITE_RANGE=10. Distance from 60: A's at 33 → 27, B's at
+    # Cite at line 60 (in the middle pad), which opens no block, so
+    # neither init is acceptable. Distance from 60: A's at 33 → 27, B's at
     # 78 → 18. Nearest is B's at 78.
     _write(
         repo / "docs" / "lessons" / "01.md",
@@ -230,8 +230,7 @@ def test_prefer_nearest_match_when_multiple(tmp_path):
 
 
 def test_range_cite_proposes_shifted_range(tmp_path):
-    """Range cite drifts far enough that NEAR_CITE_RANGE can't excuse
-    it — proposal preserves the span."""
+    """Range cite drifts off its code — proposal preserves the span."""
     repo = _setup_minimal_repo(tmp_path)
     pad = "\n".join(f"# pad {i}" for i in range(25))
     _write(
@@ -555,4 +554,173 @@ def test_cite_with_no_following_fence_uses_landmark(tmp_path):
     )
     proc = _run(repo)
     # Should pass via landmark (def fn() at line 1); no snippet match.
+    assert proc.returncode == 0, proc.stdout
+
+
+# ─── No "near enough": where a snippet may sit away from the cite ─────
+
+
+def test_snippet_a_few_lines_off_is_drift(tmp_path):
+    """A cite that drifted onto unrelated code a few lines away is
+    drift. A ten-line tolerance once passed these silently."""
+    repo = _setup_minimal_repo(tmp_path)
+    _write(
+        repo / "src" / "lib.py",
+        "x = 1\n"
+        "y = 2\n"
+        "z = 3\n"
+        "def hello():\n"
+        "    return 'hi'\n",
+    )
+    _write(
+        repo / "docs" / "lessons" / "01.md",
+        "# Lesson\n\n"
+        "Open [`src/lib.py:1`](../../src/lib.py#L1):\n\n"
+        "```python\n"
+        "def hello():\n"
+        "    return 'hi'\n"
+        "```\n",
+    )
+    proc = _run(repo)
+    assert proc.returncode == 1, proc.stdout
+    assert "fix: change #L1 → #L4" in proc.stdout, proc.stdout
+
+
+def test_snippet_deep_inside_definition_opened_at_cite_passes(tmp_path):
+    """Cite the `def` (with a multi-line signature), show code from far
+    down its body: accepted however long the body is."""
+    repo = _setup_minimal_repo(tmp_path)
+    body = "\n".join(f"    step_{i} = {i}" for i in range(15))
+    _write(
+        repo / "src" / "lib.py",
+        "async def run(\n"
+        "    a: int,\n"
+        "    b: int,\n"
+        ") -> int:\n"
+        f"{body}\n"
+        "    return a + b\n",
+    )
+    _write(
+        repo / "docs" / "lessons" / "01.md",
+        "# Lesson\n\n"
+        "Read [`src/lib.py:1`](../../src/lib.py#L1) down to the end:\n\n"
+        "```python\n"
+        "return a + b\n"
+        "```\n",
+    )
+    proc = _run(repo)
+    assert proc.returncode == 0, proc.stdout
+    assert "drift: 0" in proc.stdout, proc.stdout
+
+
+def test_snippet_past_the_cited_definition_is_drift(tmp_path):
+    """The block ends where the indentation does: a snippet from the
+    next function is not inside the cited one."""
+    repo = _setup_minimal_repo(tmp_path)
+    _write(
+        repo / "src" / "lib.py",
+        "def first():\n"
+        "    return 1\n"
+        "\n"
+        "def second():\n"
+        "    return 2\n",
+    )
+    _write(
+        repo / "docs" / "lessons" / "01.md",
+        "# Lesson\n\n"
+        "Open [`src/lib.py:1`](../../src/lib.py#L1):\n\n"
+        "```python\n"
+        "return 2\n"
+        "```\n",
+    )
+    proc = _run(repo)
+    assert proc.returncode == 1, proc.stdout
+    assert "fix: change #L1 → #L5" in proc.stdout, proc.stdout
+
+
+def test_snippet_inside_label_range_passes(tmp_path):
+    """A label can state the span (`lib.py:1-5`) while the link carries
+    only its start; a snippet inside that span is accepted."""
+    repo = _setup_minimal_repo(tmp_path)
+    _write(
+        repo / "src" / "lib.py",
+        '"""Module notes.\n'
+        "\n"
+        "Two collections:\n"
+        "  - text\n"
+        '"""\n'
+        "TEXT_DIM = 768\n",
+    )
+    _write(
+        repo / "docs" / "lessons" / "01.md",
+        "# Lesson\n\n"
+        "[`src/lib.py:1-5`](../../src/lib.py#L1) opens with:\n\n"
+        "```python\n"
+        "Two collections:\n"
+        "```\n",
+    )
+    proc = _run(repo)
+    assert proc.returncode == 0, proc.stdout
+
+
+def test_snippet_inside_yaml_block_passes(tmp_path):
+    """A YAML mapping key opens a block like a `def` does."""
+    repo = _setup_minimal_repo(tmp_path)
+    _write(
+        repo / "src" / "config.yaml",
+        "pool:\n"
+        "  code:\n"
+        "    workers: [a, b]\n"
+        "other: 1\n",
+    )
+    _write(
+        repo / "docs" / "lessons" / "01.md",
+        "# Lesson\n\n"
+        "Pools start at [`config.yaml:1`](../../src/config.yaml#L1):\n\n"
+        "```yaml\n"
+        "workers: [a, b]\n"
+        "```\n",
+    )
+    proc = _run(repo)
+    assert proc.returncode == 0, proc.stdout
+
+
+def test_label_symbol_one_line_off_is_drift(tmp_path):
+    """A symbol label must sit on its definition, not next to it."""
+    repo = _setup_minimal_repo(tmp_path)
+    _write(
+        repo / "src" / "lib.py",
+        "import os\n"
+        "class Widget:\n"
+        "    pass\n",
+    )
+    _write(
+        repo / "docs" / "lessons" / "01.md",
+        "# Lesson\n\n"
+        "See [`Widget`](../../src/lib.py#L1).\n",
+    )
+    proc = _run(repo)
+    assert proc.returncode == 1, proc.stdout
+    assert "fix: change #L1 → #L2" in proc.stdout, proc.stdout
+
+
+def test_label_symbol_cited_at_its_decorator_passes(tmp_path):
+    """Citing the decorator stack directly above a definition is
+    citing the definition."""
+    repo = _setup_minimal_repo(tmp_path)
+    _write(
+        repo / "src" / "lib.py",
+        "@register(\n"
+        "    name='w',\n"
+        ")\n"
+        "@dataclass(frozen=True)\n"
+        "class Widget:\n"
+        "    size: int\n",
+    )
+    _write(
+        repo / "docs" / "lessons" / "01.md",
+        "# Lesson\n\n"
+        "See [`Widget`](../../src/lib.py#L1).\n",
+    )
+    proc = _run(repo)
     assert proc.returncode == 0, proc.stdout

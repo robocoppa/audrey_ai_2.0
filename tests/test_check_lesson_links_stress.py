@@ -185,7 +185,7 @@ def test_stress_many_random_shifts(tmp_path):
             )
         (repo / "docs" / "lessons" / "00.md").write_text("\n".join(lesson_parts))
 
-        shift = rng.randint(15, 60)  # Big enough to exceed NEAR_CITE_RANGE
+        shift = rng.randint(1, 60)  # Any shift, even one line, is drift
         src_path.write_text("\n" * shift + source)
 
         proc = _run(repo)

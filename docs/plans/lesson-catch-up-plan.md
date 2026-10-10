@@ -5,16 +5,13 @@ Audrey has gained its own application, identity, file and media pipeline,
 retrieval upgrades, skills, Projects and a second API. This plan sets out the
 lessons that cover that work and the refreshes the existing lessons need.
 
-**Decisions were made 2026-10-08** (see [Decisions](#decisions-2026-10-08)).
-Lessons are written **one at a time**: each goes through its own gated cycle
-(see [Process](#process--one-lesson-per-cycle)), and the next cycle starts only
-after the user has reviewed the finished lesson.
+**The structure was decided 2026-10-10** (see [Decisions](#decisions-2026-10-10));
+it replaces the sequence of 2026-10-08. Work happens **one cycle at a time**:
+each new lesson or refresh unit goes through its own gated cycle (see
+[Process](#process--one-lesson-per-cycle)), and the next cycle starts only after
+the user has reviewed the finished one.
 
-**A restructure was proposed 2026-10-10 and awaits a decision** (next
-section). If approved, it replaces the 2026-10-08 sequence under
-[Lessons](#lessons).
-
-## Proposed restructure (2026-10-10, awaiting decision)
+## The restructure (approved 2026-10-10)
 
 ### Why reassess
 
@@ -74,7 +71,6 @@ docs and completed plans that name old numbers are history; the course README
 gets a one-line old-to-new map. The renumber runs, scripted and checked, in
 the cycle that writes the first inserted lesson, so the course never has a gap.
 
-Alternative, if numbers should never move: call the inserts 12a and 12b.
 
 ### The course after the restructure (Lessons 0–33)
 
@@ -119,57 +115,11 @@ Alternative, if numbers should never move: call the inserts 12a and 12b.
 | 32 | **The Responses API II** | New |
 | 33 | **Operating Audrey** | New, closing lesson |
 
-### New lessons in the restructure
-
-Cards below give the question, the coverage, the files in scope and the
-prerequisites. Where a lesson matches a 2026-10-08 card under
-[Lessons](#lessons), only the differences are listed.
-
-- **13 — The application database.** As the old L19 card. Builds on L5 and
-  L12 §2.10.
-- **14 — Identity and access.** As the old L20 card. Builds on L2, L4 and 13.
-  In the same cycle: L15 §2.1 (was L13) becomes a recap, and the identity rows
-  of the replacement checklist are done.
-- **20 — The native run.** As the old L21 card. Builds on L4, 13, 14 and 17.
-  Adds what the native path skips: utility-prompt routing and the
-  compatibility archive hooks (its terminal transaction records the archive
-  delivery instead).
-- **21 — One event spine, several wire formats.** As the old L22 card. Builds
-  on 17 and 20. L17's streaming sections, rewritten in cycle 7, become the
-  worked example.
-- **22 — The browser side.** As the old L23 card. Builds on L4 and 21.
-- **23 — Durable side effects.** As the old L24 card. Builds on 13, 15, 18
-  §2.8 and 20. Updates L15 §2.3–2.6 and L18 §2.8.
-- **24–27 — Files, jobs and leases, media to text, reaching outside safely.**
-  As the old L25–L28 cards, prerequisites renumbered.
-- **28 — Asking about your files.** "Find where this video mentions the
-  budget": searching one file, paging through it, and still covering every
-  file. One scope object for both retrievers; filename resolution and its
-  notices; pooled results with a guaranteed slot per file; deleted-file
-  exclusion; `list_my_files`, `get_file_text` paging and `kb_search` filters,
-  declared like every user-scoped tool; `audrey_video` as a retrieval
-  specialist. (The fusion core moved to L11.) Files: scope and coverage parts
-  of `src/audrey/routes/kb.py`, file-tool routes in `tools-server/app.py`, the
-  video virtual model. Builds on L9, L11, 24 and 26.
-- **29–32 — Skills, Projects, the Responses API I and II.** As the old L30–L33
-  cards. Skills now build on 28 (file intents choose the document and video
-  workflows).
-- **33 — Operating Audrey.** "When one component is down, how does ordinary
-  chat keep working, and how do you see what is wrong and what the models
-  cost?" Degraded startup and per-capability degradation, recapped across the
-  course; one sanitized readiness snapshot (components, tools, skills, queues,
-  workers, gate pressure) for admins and Prometheus; provider telemetry (one
-  terminal outcome per call, usage where zero differs from unknown); reading
-  the dashboards; the course wrap-up, moved from the research lesson's
-  footer. The declaration catalogue moved to L9. Files: `src/audrey/readiness.py`,
-  `src/audrey/metrics.py`, usage and outcome parts of
-  `src/audrey/models/ollama.py`, `src/audrey/routes/app/capabilities.py`.
-
 ### Writing order (one reviewed cycle each)
 
 1. **System map:** rewrite L0, L4 and L5; client examples in L1–L3. Replaces
-   the L18 cycle. The audit filed for L18 on 2026-10-09 covers the same files;
-   its approved fixes are implemented (October 10).
+   the L18 cycle. The platform audit of these files (filed 2026-10-09) has been
+   drained; its record is in the course AUDIT.
 2. **Tool policy:** L9, plus the sidecar lesson's §2.1, §2.3, §2.4 and §2.7.
 3. **Search:** L11, plus L12 §2.9–2.10.
 4. **New 13, the application database,** with the 13–17 renumber.
@@ -192,37 +142,6 @@ the 2026-10-08 sequence, because the platform map is absorbed).
   course paused.
 - **Changes:** decision 1 (sequence and numbering), and decision 4: most
   refreshes become their own early cycles instead of a batch after Part 2.
-
-### Decisions needed
-
-1. The rule: rewrite replaced subsystems in place; new lessons only for new ones.
-2. Placement: insert 13 and 14 with the renumber (recommended), insert as
-   12a and 12b, or append as before.
-3. The writing order above, system map first.
-4. The cite checker's tolerance (`AUDIT.md`, course tooling): a change to a
-   repository script, so it needs approval.
-
-## Lesson 18 audit decisions — October 10, 2026
-
-The user approved the platform audit fixes. Seven are implemented; two findings
-are accepted as intentional behavior. This closes the audit prerequisite for
-the platform lesson; outline/restructure approval is still required before prose.
-Tower deployment and browser acceptance remain pending.
-
-| Finding | Decision |
-|---|---|
-| Tool catalog authentication | Require an active account; retain token scopes |
-| Empty tool rediscovery | Return 503; preserve the existing registry and skills |
-| Entrypoint description | Describe the current service lifecycle |
-| Compose comments | Describe current services, media jobs, and isolation |
-| Missing custom-tools icon | Use the tracked image |
-| Legacy upload page | Remove page, router, unused setting, and obsolete tests |
-| Duplicate cache policy | Preserve upstream policy; add a fallback only when absent |
-| Repeated scoping audit | Retain the defensive check |
-| API schema proxy | Retain for API discovery; protected routes still require auth |
-
-The separate cite-checker proposal and older planner/polling findings remain
-undecided; they are not part of this implementation.
 
 ## Baseline
 
@@ -268,65 +187,17 @@ C3 and C4 below are Campaigns 3 and 4 in `docs/campaign-3/` and
 | C4 14, 17A: bot accounts and tokens, model telemetry | None |
 | C4 06, 16: router assessment (no change), retired document authoring | Nothing to teach |
 
-## Lessons
-
-**Appended as Lessons 18–34; Lessons 0–17 are not renumbered.** The
-[research-mode plan](lesson-research-mode-plan.md#placement--new-lesson-17-no-renumbering)
-explains why renumbering is the most disruptive edit in this course. Numbers
-below are provisional until a lesson ships; once published, they are fixed.
-
-The order follows dependencies: each lesson needs only those above it. Part 2
-(L18–L24) is the core a solo maintainer needs first: data safety, security,
-and the main chat path.
-
-| # | Lesson | Part |
-|---|---|---|
-| 18 | The platform map: Audrey after Open WebUI | 2 — Audrey as an application |
-| 19 | The application database | 2 |
-| 20 | Identity and access | 2 |
-| 21 | The native run | 2 |
-| 22 | One event spine, several wire formats | 2 |
-| 23 | The browser side | 2 |
-| 24 | Durable side effects: outboxes, the archive, personal data | 2 |
-| 25 | Files as durable objects | 3 — Files, media and retrieval |
-| 26 | Background jobs and leases | 3 |
-| 27 | From media to text | 3 |
-| 28 | Reaching outside safely | 3 |
-| 29 | Hybrid retrieval and file-scoped search | 3 |
-| 30 | Skills | 4 — Shaping a turn, and running it |
-| 31 | Projects | 4 |
-| 32 | The Responses API I: one pipeline, a second protocol | 4 |
-| 33 | The Responses API II: tools, inputs and stored responses | 4 |
-| 34 | Readiness, degradation and telemetry | 4 |
+## Lesson cards
 
 Each card gives the learner's question, what the lesson covers, the files in
 scope for its audit pass, what it builds on, and which older sections it
-updates in the same cycle. Phase docs are background for the writer only;
-lesson prose must not cite phase numbers.
+updates in the same cycle. Numbers are the final ones: lessons 13–17 are
+written as 15–19 once the renumber has run. Phase docs are background for the
+writer only; lesson prose must not cite phase numbers.
 
-### Part 2 — Audrey as an application
+### Inserted after L12
 
-**L18 — The platform map: Audrey after Open WebUI** (`lesson-18-the-platform-map.md`)
-
-- **Question:** "Open WebUI is gone. What are Audrey's pieces now, where does
-  each kind of data live, and what path does one message from the browser take?"
-- **Covers:** The Compose services read as a trust map, not as Docker:
-  `audrey-ui` serves the client and proxies same-origin `/api` and `/v1`;
-  `audrey` is API-only; `media-worker` reaches neither the internet nor Ollama;
-  `media-fetcher` has download egress only. Two front doors (native `/api`, and
-  `/v1` for Chat Completions and Responses) feed one pipeline. Which store is
-  authoritative and which is a rebuildable projection: application SQLite,
-  uploads SQLite, Qdrant, the chat archive. One shallow trace of a native
-  message from Send to the settled answer, which later lessons deepen.
-- **Files:** `compose.yaml` (as a map), `web/docker/default.conf.template`,
-  `src/audrey/main.py` (routers and lifespan additions),
-  `src/audrey/routes/app/__init__.py`.
-- **Builds on:** L4, L5. **Background:** C4 phase 02.
-- **Updates:** the course README, L0's course map, L17's footer, and every
-  item assigned to L18 in the
-  [replacement checklist](#replacing-the-open-webui-material).
-
-**L19 — The application database** (`lesson-19-the-application-database.md`)
+**L13 — The application database** (`lesson-13-the-application-database.md`)
 
 - **Question:** "Where does a conversation live now, and what makes it safe to
   change that storage while real data is in it?"
@@ -347,7 +218,7 @@ lesson prose must not cite phase numbers.
   scratch, as Lessons 1–3 teach foundations.
 - **Updates:** L5 §2.3 (startup now opens the store and runs migrations).
 
-**L20 — Identity and access** (`lesson-20-identity-and-access.md`)
+**L14 — Identity and access** (`lesson-14-identity-and-access.md`)
 
 - **Question:** "A request arrives from the browser, a bot with a token, an
   eval script, or the tools sidecar. How does Audrey decide who it is and what
@@ -365,11 +236,14 @@ lesson prose must not cite phase numbers.
   `src/audrey/model_catalog.py`, `src/audrey/routes/app/{me,admin,models}.py`,
   bootstrap in `src/audrey/admin_cli.py`, identity and token parts of
   `src/audrey/app_state/store.py`.
-- **Builds on:** L13 §2.1, L19. **Background:** C4 phases 02, 14; C3 phase 31.
-- **Updates:** L13 §2.1 rewritten around Audrey principals, plus the identity
-  items in the [replacement checklist](#replacing-the-open-webui-material).
+- **Builds on:** L2 (dependencies), L4, L13. **Background:** C4 phases 02, 14;
+  C3 phase 31.
+- **Updates:** L15 §2.1 (was L13) becomes a recap of this lesson, plus the
+  identity items in the [replacement checklist](#replacing-the-open-webui-material).
 
-**L21 — The native run** (`lesson-21-the-native-run.md`)
+### Part 3 — The native application
+
+**L20 — The native run** (`lesson-20-the-native-run.md`)
 
 - **Question:** "What happens between pressing Send and a finished answer, and
   why does closing the tab not lose it?"
@@ -379,16 +253,17 @@ lesson prose must not cite phase numbers.
   explicit cancellation that drains owned work. Startup settling interrupted
   runs. The bounded, process-local replay buffer and cursor, and the fallback
   to durable reads. Retrying a failed turn. How the native path enters the same
-  graph as `/v1`, and what it deliberately excludes (utility-prompt routing).
+  streaming driver as `/v1`, and what it deliberately skips: utility-prompt
+  routing and the compatibility archive hooks (its terminal transaction records
+  the archive delivery instead).
 - **Files:** `src/audrey/routes/app/runs.py`,
   `src/audrey/routes/app/conversations.py`, run and message parts of
   `src/audrey/app_state/repositories.py`, `src/audrey/pipeline/streaming.py`,
   `src/audrey/conversation_titles.py`.
-- **Builds on:** L4, L15 (streaming, cancellation), L19, L20.
-- **Updates:** L4 (point the walk-through's native path at this lesson's
-  substance, without a numbered forward reference).
+- **Builds on:** L4, L17 (streaming, cancellation), L13, L14.
+- **Updates:** L4's native trace, where anything it summarizes changed.
 
-**L22 — One event spine, several wire formats** (`lesson-22-run-events.md`)
+**L21 — One event spine, several wire formats** (`lesson-21-run-events.md`)
 
 - **Question:** "The browser, a Chat Completions client and a Responses client
   all watch an answer being produced. How does one pipeline speak three
@@ -402,10 +277,11 @@ lesson prose must not cite phase numbers.
   activity becomes Sources, Models and Tool calls without leaking retrieved text.
 - **Files:** `src/audrey/pipeline/{run_events,agui,run_observations,streaming}.py`,
   `src/audrey/routes/openai/streaming.py`.
-- **Builds on:** L15 (SSE, `asyncio.Queue`, banners), L21.
-- **Updates:** L15's streaming sections (see the refresh table).
+- **Builds on:** L17 (SSE, `asyncio.Queue`, banners), L20.
+- **Updates:** none. L17's streaming sections, rewritten in cycle 7, are its
+  worked example.
 
-**L23 — The browser side** (`lesson-23-the-browser-side.md`)
+**L22 — The browser side** (`lesson-22-the-browser-side.md`)
 
 - **Question:** "What does the browser own, and how does it talk to Audrey?"
 - **Covers:** nginx serving the static build and proxying `/api` and `/v1`
@@ -416,12 +292,12 @@ lesson prose must not cite phase numbers.
 - **Files:** `web/docker/default.conf.template`, `web/src/api.ts`,
   `web/src/agentTransport.ts`, `web/src/App.tsx`, run and stream parts of
   `web/src/ChatWorkspace.tsx`.
-- **Builds on:** L18, L22.
+- **Builds on:** L4, L21.
 - **Needs:** a short TypeScript reading primer inside the lesson; the learner
   knows neither TypeScript nor React.
-- **Updates:** L15's client framing (with L22's items).
+- **Updates:** any client framing left in L17.
 
-**L24 — Durable side effects** (`lesson-24-durable-side-effects.md`)
+**L23 — Durable side effects** (`lesson-23-durable-side-effects.md`)
 
 - **Question:** "If the box restarts halfway through archiving a chat or
   deleting someone's data, what guarantees the work finishes, and that deleted
@@ -436,12 +312,12 @@ lesson prose must not cite phase numbers.
   `tools-server/chat_archive.py`, `src/audrey/chat_projection.py`,
   `src/audrey/routes/user_data.py`, `src/audrey/user_data_purge.py`,
   `src/audrey/user_data_visibility.py`.
-- **Builds on:** L13 (archive capture), L16 §2.8 (archive read side), L19.
-- **Updates:** L13 §2.3–2.6 and L16 §2.8 (delivery is now an outbox).
+- **Builds on:** L15 (archive capture), L18 §2.8 (archive read side), L13.
+- **Updates:** L15 §2.3–2.6 and L18 §2.8 (delivery is now an outbox).
 
-### Part 3 — Files, media and retrieval
+### Part 4 — Files and media
 
-**L25 — Files as durable objects** (`lesson-25-files.md`)
+**L24 — Files as durable objects** (`lesson-24-files.md`)
 
 - **Question:** "A 300 MB video crosses a tunnel that caps bodies at 100 MB,
   shows Pending, can be deleted mid-processing, and never reappears. How?"
@@ -455,11 +331,12 @@ lesson prose must not cite phase numbers.
   `src/audrey/kb/uploads_db.py`, `src/audrey/kb/storage_lifecycle.py`,
   `src/audrey/kb/file_deletion.py`, `src/audrey/routes/app/files.py`,
   `src/audrey/kb/extract.py`, sidecar ingest in `src/audrey/kb/ingest.py`.
-- **Builds on:** L12 (uploads flow), L24. **Background:** C3 phases 32, 40;
+- **Builds on:** L12 (uploads flow), L23. **Background:** C3 phases 32, 40;
   C4 phases 04, 11.
-- **Updates:** L12 §2.9–2.10.
+- **Updates:** L12 §2.9–2.10 pointers (cycle 3 already brought the flow
+  itself up to date).
 
-**L26 — Background jobs and leases** (`lesson-26-jobs-and-leases.md`)
+**L25 — Background jobs and leases** (`lesson-25-jobs-and-leases.md`)
 
 - **Question:** "Who picks up a pending video, what happens if that worker
   dies mid-job, and how does Audrey stop two workers processing the same file?"
@@ -472,9 +349,9 @@ lesson prose must not cite phase numbers.
 - **Files:** job-lifecycle parts of `src/audrey/routes/files.py` and
   `src/audrey/kb/uploads_db.py`, `src/audrey/media/{worker,fetcher,service}.py`,
   `require_service` in `src/audrey/auth.py`.
-- **Builds on:** L25. **Background:** C3 phases 33, 34, 41.
+- **Builds on:** L24. **Background:** C3 phases 33, 34, 41.
 
-**L27 — From media to text** (`lesson-27-media-to-text.md`)
+**L26 — From media to text** (`lesson-26-media-to-text.md`)
 
 - **Question:** "What does 'processing' do to a video, an MP3 or a scanned PDF
   before a model can answer questions about it?"
@@ -488,10 +365,10 @@ lesson prose must not cite phase numbers.
 - **Files:** `src/audrey/media/{audio,stt,frames,framegate,describe,ocr}.py`,
   `src/audrey/routes/media.py`, `src/audrey/pipeline/vision.py`,
   `src/audrey/pipeline/summarise.py`.
-- **Builds on:** L6 (`OllamaClient`), L11 (ingest), L26.
+- **Builds on:** L6 (`OllamaClient`), L11 (ingest), L16 (the gate), L25.
   **Background:** C3 phases 35–38; C4 phases 07–09.
 
-**L28 — Reaching outside safely** (`lesson-28-outbound-requests.md`)
+**L27 — Reaching outside safely** (`lesson-27-outbound-requests.md`)
 
 - **Question:** "When a model or a user hands Audrey a URL, what stops it
   reaching inside the home network, and why does downloading live in its own
@@ -505,29 +382,26 @@ lesson prose must not cite phase numbers.
 - **Files:** `tools-server/fetch.py`, `src/audrey/net/{public_fetch,remote_input}.py`,
   `src/audrey/kb/remote_input_worker.py`, `src/audrey/media/fetch.py`, the
   networks in `compose.yaml`.
-- **Builds on:** L16 §2.5, L26. **Background:** C3 phases 29, 30, 41;
+- **Builds on:** L18 §2.5, L25, L26. **Background:** C3 phases 29, 30, 41;
   C4 phase 13.
 
-**L29 — Hybrid retrieval and file-scoped search** (`lesson-29-hybrid-retrieval.md`)
+**L28 — Asking about your files** (`lesson-28-asking-about-your-files.md`)
 
-- **Question:** "Why did a six-word quote from a transcript return nothing
-  while a vague paraphrase found it, and what changed so both work?"
-- **Covers:** Lexical versus semantic retrieval. BM25 sparse vectors beside
-  dense vectors in Qdrant. Reciprocal rank fusion, and the evidence rule that
-  replaced a single score floor. The migration that added sparse vectors to
-  existing points. Scoping a search to one file or artifact with one scope
-  object for both retrievers. Pooled results and a guaranteed slot per file.
-  The file tools (`list_my_files`, `get_file_text`, `kb_search` filters) and
-  how their user binding is declared. `audrey_video` as a retrieval specialist.
-- **Files:** `src/audrey/kb/{bm25,fusion,qdrant}.py`, `src/audrey/routes/kb.py`,
-  `scripts/ops/migrate_bm25.py`, file-tool routes in `tools-server/app.py`,
-  `TOOL_DECLARATIONS` in `src/audrey/tools/discovery.py`.
-- **Builds on:** L11, L16, L25. **Background:** C3 phases 39, 40, 42, 43.
-- **Updates:** L11 (pointer; private-read isolation), L16 (tool list).
+- **Question:** "Find where this video mentions the budget": how does Audrey
+  search one file, page through it, and still cover every file?
+- **Covers:** One scope object applied to both retrievers. Filename
+  resolution and its notices. Pooled results with a guaranteed slot per file.
+  Deleted-file exclusion. `list_my_files`, `get_file_text` paging and
+  `kb_search` filters, declared like every user-scoped tool. `audrey_video` as
+  a retrieval specialist. (The fusion core is taught in L11.)
+- **Files:** scope and coverage parts of `src/audrey/routes/kb.py`, file-tool
+  routes in `tools-server/app.py`, the video virtual model and its skill.
+- **Builds on:** L9, L11, L24, L26. **Background:** C3 phases 40, 42, 43.
+- **Updates:** L18 (the file tools in the tool list).
 
-### Part 4 — Shaping a turn, and running it
+### Part 5 — Shaping a turn, and the second API
 
-**L30 — Skills** (`lesson-30-skills.md`)
+**L29 — Skills** (`lesson-29-skills.md`)
 
 - **Question:** "What is a skill, how is one chosen (by the user or
   automatically), and how can it change which tools a model may call without
@@ -543,9 +417,10 @@ lesson prose must not cite phase numbers.
 - **Files:** `src/audrey/skills/`, `skills/*/SKILL.md`, skill integration
   points in `src/audrey/pipeline/` and `src/audrey/tools/`,
   `src/audrey/routes/app/capabilities.py`.
-- **Builds on:** L7, L9. **Background:** C4 phase 03.
+- **Builds on:** L7, L9, L28 (file intents choose the document and video
+  workflows). **Background:** C4 phase 03.
 
-**L31 — Projects** (`lesson-31-projects.md`)
+**L30 — Projects** (`lesson-30-projects.md`)
 
 - **Question:** "When a conversation lives in a Project, what extra context
   reaches the model, and what keeps it from leaking or overriding Audrey's rules?"
@@ -557,9 +432,9 @@ lesson prose must not cite phase numbers.
   models receive the text context but no tools. Transactional delete and ungroup.
 - **Files:** `src/audrey/app_state/projects.py`,
   `src/audrey/routes/app/projects.py`, `src/audrey/project_context.py`.
-- **Builds on:** L21, L29, L30. **Background:** C4 phase 15.
+- **Builds on:** L20, L28, L29. **Background:** C4 phase 15.
 
-**L32 — The Responses API I: one pipeline, a second protocol** (`lesson-32-responses-api.md`)
+**L31 — The Responses API I: one pipeline, a second protocol** (`lesson-31-responses-api.md`)
 
 - **Question:** "Bots can call `/v1/responses` instead of
   `/v1/chat/completions`. What is different about that protocol, and how does
@@ -571,9 +446,9 @@ lesson prose must not cite phase numbers.
 - **Files:** `/v1/responses` in `src/audrey/routes/openai/routes.py`,
   `src/audrey/routes/openai/structured_outputs.py`, the Responses adapter in
   `src/audrey/routes/openai/streaming.py`.
-- **Builds on:** L10, L15, L22. **Background:** C4 phase 05.
+- **Builds on:** L10, L17, L21. **Background:** C4 phase 05.
 
-**L33 — The Responses API II: tools, inputs and stored responses** (`lesson-33-responses-tools-and-storage.md`)
+**L32 — The Responses API II: tools, inputs and stored responses** (`lesson-32-responses-tools-and-storage.md`)
 
 - **Question:** "How does a bot hand Audrey its own functions, files and URLs,
   and pick up a conversation it stored earlier?"
@@ -583,140 +458,191 @@ lesson prose must not cite phase numbers.
   Reasoning-effort validation against a model's advertised thinking values.
 - **Files:** `src/audrey/routes/openai/{client_tools,client_tool_generation,file_inputs,response_storage,reasoning}.py`,
   `src/audrey/app_state/responses.py`.
-- **Builds on:** L19, L28, L32. **Background:** C4 phases 13, 17B.
-- **Updates:** L10 and L15 (pointers; passthrough tool-result turns, reasoning
+- **Builds on:** L13, L27, L31. **Background:** C4 phases 13, 17B.
+- **Updates:** L10 and L17 (pointers; passthrough tool-result turns, reasoning
   controls, unknown fields dropped).
 
-**L34 — Readiness, degradation and telemetry** (`lesson-34-readiness-and-telemetry.md`)
+### Closing
 
-- **Question:** "When one component is down, how does Audrey keep ordinary
-  chat working, and how do you see what is wrong and what the models cost?"
-- **Covers:** The tool declaration catalogue validated at discovery: a
-  model-visible route that is not declared is refused. Bounded discovery and
-  rediscovery. Per-capability degradation inside custom-tools. Degraded startup
-  instead of refusing to boot. One sanitized readiness snapshot for admins and
-  Prometheus: components, tools, skills, queues, workers, gate pressure.
-  Provider telemetry: exactly one terminal outcome per call, and reported token
-  usage where a valid zero differs from unknown. Reading the model dashboard.
-- **Files:** `src/audrey/readiness.py`, `tools-server/capabilities.py`,
-  `src/audrey/tools/discovery.py`, `src/audrey/metrics.py`, usage and outcome
-  parts of `src/audrey/models/ollama.py`, `src/audrey/routes/app/capabilities.py`.
-- **Builds on:** L3 (Prometheus), L5, L9, L16. **Background:** C4 phases 01, 17A.
-- **Updates:** L5 §2.6 (the readiness log became a snapshot), L9, L16.
+**L33 — Operating Audrey** (`lesson-33-operating-audrey.md`)
 
-## Lesson 18 — proposed outline (2026-10-09, awaiting go-ahead)
+- **Question:** "When one component is down, how does ordinary chat keep
+  working, and how do you see what is wrong and what the models cost?"
+- **Covers:** Degraded startup and per-capability degradation, recapped across
+  the course. One sanitized readiness snapshot (components, tools, skills,
+  queues, workers, gate pressure) for admins and Prometheus. Provider
+  telemetry: exactly one terminal outcome per call, and reported token usage
+  where a valid zero differs from unknown. Reading the dashboards. The course
+  wrap-up, moved from the research lesson's footer. (The tool declaration
+  catalogue is taught in L9.)
+- **Files:** `src/audrey/readiness.py`, `src/audrey/metrics.py`, usage and
+  outcome parts of `src/audrey/models/ollama.py`,
+  `src/audrey/routes/app/capabilities.py`.
+- **Builds on:** L3 (Prometheus), L5, L9, L18, and the course as a whole.
+  **Background:** C4 phases 01, 17A.
+- **Updates:** L19's footer (the wrap-up moves here).
 
-The Lesson 18 audit is closed in source (October 10). Writing still awaits
-approval of this outline or the proposed restructure above. Target length is
-that of Lesson 4 (a map, not a deep dive).
+## Cycle 1 — the system map: proposed outline (2026-10-10, awaiting go-ahead)
 
-**Opening question:** "Open WebUI is gone. What are Audrey's pieces now, where
-does each kind of data live, and what path does one message from the browser
-take?"
+Rewrites L0 and L4, refreshes L5, swaps the client examples in L1–L3, and
+updates the course README. The platform audit is drained. This cycle's audit
+added one finding about the native entry point (in the AUDIT); its drain
+decides how L4 §2.5 orders the steps of a first turn.
+
+**L0 — Introduction (rewrite)**
+
+- What Audrey is now: a self-hosted AI application on one home server. A
+  browser app, an OpenAI-compatible API for bots and scripts, and the pipeline
+  that routes each turn across local and cloud models, tools and the knowledge
+  base.
+- The pipeline paragraph (fast, deep, research), kept and brought up to date.
+- The supporting pieces: fair scheduling; identity (Cloudflare Access for the
+  browser, personal tokens for bots); conversations and runs the server owns;
+  files, media and the knowledge base; durable side effects; metrics.
+- How it was built, briefly, and how the course is organized: its parts named
+  by substance, with no lesson numbers beyond the next lesson. The author is
+  described without pronouns.
+
+**L1–L3 — client examples**
+
+- L1: the dataclass example becomes `Principal`, the native identity record
+  (frozen; durable ids versus mutable profile fields); the httpx bullet drops
+  the Open WebUI probe.
+- L2: the five mentions of Open WebUI as the client become the native app or
+  an API client; the streaming bullet says OpenAI framing serves `/v1` clients
+  while the browser receives AG-UI events.
+- L3: the httpx example becomes the Cloudflare Access public-key fetch
+  (`_fetch_keys` in `identity/cloudflare_access.py`): one GET, a status check,
+  JSON, and network errors translated into Audrey's own exception. The
+  satellite list and the test notes lose Open WebUI; the closing pointer starts
+  the trace at the native app.
+
+**L4 — The platform and the request lifecycle (rewrite)**
+
+Opening question: "You type a question into Audrey and press Send. What runs
+where, in what order, until the answer has finished streaming, and how does a
+bot calling the API reach the same pipeline?"
 
 1. **Context**
-   - 1.1 *From an API behind someone else's app to an application.* Why Audrey
-     now owns identity, conversations and files: history that cannot be lost
-     with another app's database, one identity for browser and bots, file
-     workflows and provenance. Lessons 4–17 still describe the pipeline core;
-     this lesson redraws everything around it.
-   - 1.2 *The whole-system map:* browser → Cloudflare Access → cloudflared →
-     `audrey-ui` → `audrey` → Ollama, Qdrant, custom-tools and two SQLite
-     databases; the media worker and fetcher pulling jobs from `audrey`; bots
-     and evals calling `/v1` directly. Slogan: "The browser renders; Audrey
-     decides; the sidecars do risky work in a box."
+   - 1.1 *From an API behind someone else's app to an application:* why Audrey
+     owns identity, conversations and files.
+   - 1.2 *The whole-system map:* browser → Cloudflare Access → tunnel →
+     `audrey-ui` → `audrey` → Ollama, Qdrant, custom-tools and the SQLite
+     stores; the media worker and fetcher pulling jobs from `audrey`; bots on
+     `/v1`. Slogan: "The browser renders; Audrey decides; the sidecars do risky
+     work in a box."
 2. **Read-along**
-   - 2.1 *The containers as a trust map* (`compose.yaml`): what each service
-     may reach, and why. Loopback-only UI, LAN-published API, unpublished
-     tools, a worker with no route out, a fetcher with egress but no Ollama
-     address. Spotlight: Docker networks, and why DNS isolation is not network
-     isolation (`internal: true`). Read-only mounts and the single writer.
-   - 2.2 *One origin for the browser* (the nginx template): static files plus
-     forwarded `/api` and `/v1`; request-time DNS (containers get new
-     addresses); unbuffered streaming; same-origin security headers; the
-     Access assertion passed through for Audrey to verify, never trusted by
-     the proxy. Spotlight: same-origin, and why it simplifies auth and CSP.
-   - 2.3 *Two front doors, one pipeline* (the routers in `main.py` and
-     `routes/app/__init__.py`): native `/api` resources versus `/v1`
-     compatibility and service routes; health and metrics at the root.
-   - 2.4 *What the lifespan owns now* (`main.py`): a table grouping identity,
-     canonical state, model layer, tools and skills, KB stack, durable
-     workers, native runs, titles and readiness, against Lesson 5's
-     `app.state`; why shutdown stops producers before the queues they feed.
-   - 2.5 *Where data lives:* authority versus projection. Application SQLite,
-     uploads SQLite and the files on disk are authorities; Qdrant and the chat
-     archive are projections. Slogan: "If you can rebuild it, it's a projection."
-   - 2.6 *One message, end to end:* the browser posts only the newest user
-     message to `/api/agent`; Audrey verifies the caller, records the message
-     and run before streaming, runs the same graph, and streams typed events
-     back unbuffered (`X-Audrey-Run-ID`, reconnect, Stop). Each later topic is
-     named by substance, not lesson number.
-3. **Comprehension questions** (scenarios): every chat 502s after `audrey` is
-   rebuilt; a media job fails to reach Ollama, so should the worker join
-   `ollama-net`?; an unauthenticated LAN call to `/v1/kb/query`; what a wiped
-   Qdrant volume loses; a restart mid-answer; why the public entry point holds
-   no Linux capabilities.
+   - 2.1 *One origin for the browser* (the nginx template): the static app plus
+     forwarded `/api` and `/v1`; request-time DNS; unbuffered streams; the
+     Access assertion passed through for Audrey to verify. Spotlight:
+     same-origin.
+   - 2.2 *Two front doors, one pipeline:* the native `/api` routes and the
+     OpenAI-compatible `/v1` routes. Who is calling, in two sentences.
+   - 2.3 *The pipeline graph, and what a node looks like* (today's §2.2–2.3,
+     kept).
+   - 2.4 *Two drivers over the same building blocks:* the graph serves
+     non-streaming `/v1` requests; the streaming driver serves the native app
+     and streaming `/v1`, deciding fast or deep itself.
+   - 2.5 *One message, end to end:* the browser posts only the newest message
+     to `/api/agent`. Audrey checks the caller, loads the conversation the
+     caller owns, checks model access, picks a skill, and reloads history from
+     its own database (the browser's transcript is never trusted). It records
+     the message and the run in one transaction, launches the run as a task the
+     server owns, and streams the run's events back as AG-UI
+     (`X-Audrey-Run-ID`; reconnect and Stop by run id). The run enters the
+     streaming driver, fast or deep runs, and events reach the browser. Each
+     later topic is named by substance.
+   - 2.6 *Where data lives, and where to look:* authority versus projection
+     (the application and uploads databases and the files on disk are
+     authorities; Qdrant and the chat archive are projections: "If you can
+     rebuild it, it's a projection"), then the "If you're asking…, look in…"
+     table brought up to date.
+3. **Comprehension questions** (scenarios): a page refresh mid-answer; a bot
+   streaming through `/v1`, and which driver serves it; why the browser sends
+   only the newest message; what a wiped Qdrant volume loses; every chat
+   failing right after `audrey` is rebuilt; Ollama failing mid-answer.
 
-**This cycle also updates:** the course README (out-of-scope line, Part 2 in
-the map); L0's framing; L17's closing section (kept as the Part 1 recap,
-ending with a pointer to the next lesson); and the L18 rows of the
-replacement checklist below (L1, L2, L3, L4, L5, L6, L7, L8).
+**L5 — Configuration and startup (refresh)**
+
+- §2.1 becomes *The containers as a trust map:* the five runtime services and
+  what each may reach (loopback-only UI, LAN-published API, unpublished tools,
+  a media worker with no route out, a fetcher with download egress only),
+  read-only mounts and the single writer. Spotlight: Docker networks, and why
+  DNS isolation is not network isolation. Then today's env → Python content.
+- §2.2 *The config stack:* kept.
+- §2.3 *What the lifespan owns now:* a table grouping identity, canonical state
+  (the store, migrations, interrupted runs settled), the model layer and
+  catalog, tools and skills, the KB stack, durable workers, native runs,
+  titles and readiness; shutdown stops producers before the queues they feed.
+- §2.4 `app.state`: the list brought up to date.
+- §2.5 *Graph closures and rediscover:* kept, plus the guard that keeps the
+  live registry when discovery comes back empty.
+- §2.6 *The readiness log* becomes the readiness snapshot, briefly, with
+  degraded startup named; the details belong to the closing lesson.
+- Questions refreshed for the new startup.
+
+**README:** the out-of-scope line about Open WebUI becomes "React internals;
+the course covers the browser boundary".
+
+**Not in this cycle:** the Open WebUI mentions in L6–L8 and the utility-prompt
+relabel (cycle 6); identity in depth (L14); the research lesson's footer (when
+L20 ships).
 
 ## Replacing the Open WebUI material
 
 Open WebUI material is **replaced, not appended to**: after its cycle, a
 passage describes the native app (or an API client) as the client. It survives
 only where code still carries compatibility behavior, labelled as such. About
-110 mentions across 14 files; the identity-specific ones wait for L20, which
-explains the mechanism they need.
+110 mentions across 14 files; the identity-specific ones wait for L14, which
+explains the mechanism they need. Existing lessons keep their current numbers
+here; 13–17 become 15–19 in cycle 4.
 
 | Where | What it says now | Replace with | Cycle |
 |---|---|---|---|
-| lesson-ai README | "Frontend integration (Open WebUI)" is out of scope | The course covers the browser boundary (L23); React internals stay out of scope | L18 |
-| L0 (2) | Audrey sits behind Open WebUI, which authenticates every request | The native app and API clients; Audrey-owned identity in one sentence | L18 |
-| L1 (1), L2 (5), L5 (1), L6 (1), L8 (1) | Open WebUI named as *the* client in examples | The native app or an API client | L18 |
-| L3 (3 of 11) | "No Open WebUI required"; a trace starting "OWUI sends POST" | Current dependency list; the trace starts at the native app | L18 |
-| L4 (17) | The walk-through starts in Open WebUI; auth asks Open WebUI who owns the token | The native app sends the request, with `/v1` clients as the second door; identity in two sentences (Access assertion or personal token) | L18 |
-| L7 (3) | Open WebUI utility prompts force fast mode | Keep, relabelled: applies to `/v1` compatibility requests; native requests skip it | L18 |
-| L3 (8 of 11) | The httpx "real example" is the Open WebUI token check | A current httpx example; the Open WebUI adapter is dormant | L20 |
-| L11 (1), L12 (2) | The user id comes from the Open WebUI session or JWT | The authenticated Audrey principal and its private namespace | L20 |
-| L13 §2.1 | Identity via Open WebUI's `/api/v1/auths/` | Rewritten around Audrey principals | L20 |
-| L13 §2.3–2.6 | Archive stitching keyed on Open WebUI chat ids | Native conversation ids; `/v1` stitching as compatibility | L24 |
-| L15 (15) | Virtual models and SSE framed for Open WebUI | The native app via run events; `/v1` clients | L22, L23 |
+| lesson-ai README | "Frontend integration (Open WebUI)" is out of scope | The course covers the browser boundary (L22); React internals stay out of scope | Cycle 1 |
+| L0 (2) | Audrey sits behind Open WebUI, which authenticates every request | The native app and API clients; Audrey-owned identity in one sentence | Cycle 1 |
+| L1 (1), L2 (5), L5 (1) | Open WebUI named as *the* client in examples | The native app or an API client | Cycle 1 |
+| L6 (1), L8 (1) | Open WebUI named as *the* client in examples | The native app or an API client | Cycle 6 |
+| L3 (3 of 11) | "No Open WebUI required"; a trace starting "OWUI sends POST" | Current dependency list; the trace starts at the native app | Cycle 1 |
+| L4 (17) | The walk-through starts in Open WebUI; auth asks Open WebUI who owns the token | The native app sends the request, with `/v1` clients as the second door; identity in two sentences (Access assertion or personal token) | Cycle 1 |
+| L7 (3) | Open WebUI utility prompts force fast mode | Keep, relabelled: applies to `/v1` compatibility requests; native requests skip it | Cycle 6 |
+| L3 (8 of 11) | The httpx "real example" is the Open WebUI token check | A current httpx example; the Open WebUI adapter is dormant | Cycle 1 |
+| L11 (1), L12 (2) | The user id comes from the Open WebUI session or JWT | The authenticated user's stable id and private namespace (mechanism in L14) | Cycle 3 |
+| L13 §2.1 | Identity via Open WebUI's `/api/v1/auths/` | A recap of L14 | With L14 |
+| L13 §2.3–2.6 | Archive stitching keyed on Open WebUI chat ids | Native conversation ids; `/v1` stitching as compatibility | With L23 |
+| L15 (15) | Virtual models and SSE framed for Open WebUI | The compatibility door for `/v1` clients; the native app via run events | Cycle 7, then L21–L22 |
 
 ## Refreshing Lessons 0–17
 
 Besides the Open WebUI items above, these sections changed underneath their
-lessons. Most ride along with the new lesson that replaces the old picture.
-The **refresh batch** holds lessons whose subject changed but which no new
-lesson replaces; do it after Part 2, without numbered forward references.
-Items marked † are stale *snippets or values* found by the 2026-10-08 cite
-pass: the cites were re-anchored, but the shown code or number is out of date.
-Items marked ‡ were found by the 2026-10-10 snippet check (every snippet line
-compared with the cited code). The "When" column is the 2026-10-08 plan; under
-the proposed restructure each row moves to the cycle that rewrites its lesson.
+lessons. Each row is done in the cycle that rewrites its lesson (the "When"
+column; cycle numbers are from the writing order), without numbered forward
+references. Items marked † are stale *snippets or values* found by the
+2026-10-08 cite pass; items marked ‡ were found by the 2026-10-10 snippet check
+(every snippet line compared with the cited code).
 
 | Lesson | Now stale | When |
 |---|---|---|
-| L5 | Startup opens the store and migrates, loads skills and the model catalog, starts durable workers; readiness | L19, L34 |
-| L6 | Thinking descriptors and per-role thinking, model catalog and direct models, vision sidecar; † the cloud-cap snippet (the cap now logs the dropped worker) | Refresh batch |
-| L7 | Schema-pinned router without thinking; failed classify no longer escalates. ‡ §2.3 `node_classify` and §2.7 complexity snippets predate skill routing (`routing_messages`) and research (`audrey_research` is forced deep); utility-prompt detection now applies to compatibility requests only | Refresh batch |
-| L8 | Per-role thinking, shared stage lifecycle, worker-exception handling. ‡ §2.3 pool snippet, §2.4 synthesizer example and question 3 use retired model names | Refresh batch |
-| L9 | † §2.7 snippet and prose still show `_USER_SCOPED_TOOLS`; user binding is now declared per tool in `TOOL_DECLARATIONS`. † Truncation default is 6000, not 2000, and the result now says what was cut. Compaction counted in tool messages with failures evicted first; per-worker search budget. ‡ §2.8 `_truncate` snippet: the marker now gives shown and total characters and says a retry will not help, and `_truncate_payload` (drops whole list items so JSON stays valid) is tried first. ‡ §2.9 dispatch goes through `_dispatch_observed` after the search budget stubs excess calls | Refresh batch, L34 |
-| L10 | Client tool calls and results through passthrough; Responses function tools | L33 |
-| L11 | Hybrid retrieval, private-read isolation, resident embedder. ‡ §2.2 ingest snippet lacks the thread offload and sparse vectors; ‡ §2.5 `kb_query` snippet predates caller resolution, file and artifact scope, deleted-file exclusion and the hybrid branch, which is on by default, so §2.6's raw-score merge is the hybrid-off path | L29 |
-| L12 | † §2.9 upload steps: storage is now reserved atomically and committed after ingest; statuses, tombstones, durable deletion | L25 |
-| L14 | Queue grants have explicit owners; cancellation releases slots. ‡ §2.2 step 5: a waiter cancelled after its grant re-releases the slot | Refresh batch |
-| L15 | † §2.3 shows retired `_delta_frame`/`_stop_frame` (now `OpenAIStreamAdapter._frame`); §2.5–2.7 deep stream and cancellation run through `StreamStageRunner` and `OpenAIStreamSession`; typed passthrough outcomes; reasoning controls; a Responses route. ‡ §2.5 error handler and §2.7 cancellation snippets show `pipeline_outcome` and `synth_task.cancel()`: the deep stream now records outcomes on `runner.terminal`, drains owned tasks with `runner.cancel_and_drain()`, and archives through `runner.finalize` | L22, L33 |
-| L16 | `list_my_files`, `get_file_text`; † `_USER_SCOPED_TOOLS` prose; capability supervisor; archive outboxes; `kb_search` scope. ‡ §2.4 teaches Brave only, with a 429 becoming 503 and other errors escaping as 500: `web_search` now alternates Brave and SearXNG with cross-fallback, returns 503 only when both fail, and normalizes non-429 errors. ‡ §2.6 the user filter is now the shared `_user_filter` helper | L24, L29, L34 |
-| L17 | Footer ends the course | L18 |
+| L5 | Startup opens the store and migrates, loads skills and the model catalog, starts durable workers; readiness | Cycle 1; a store pointer with L13 |
+| L6 | Thinking descriptors and per-role thinking, model catalog and direct models, vision sidecar; † the cloud-cap snippet (the cap now logs the dropped worker) | Cycle 6 |
+| L7 | Schema-pinned router without thinking; failed classify no longer escalates. ‡ §2.3 `node_classify` and §2.7 complexity snippets predate skill routing (`routing_messages`) and research (`audrey_research` is forced deep); utility-prompt detection now applies to compatibility requests only | Cycle 6 |
+| L8 | Per-role thinking, shared stage lifecycle, worker-exception handling. ‡ §2.3 pool snippet, §2.4 synthesizer example and question 3 use retired model names | Cycle 6 |
+| L9 | † §2.7 snippet and prose still show `_USER_SCOPED_TOOLS`; user binding is now declared per tool in `TOOL_DECLARATIONS`. † Truncation default is 6000, not 2000, and the result now says what was cut. Compaction counted in tool messages with failures evicted first; per-worker search budget. ‡ §2.8 `_truncate` snippet: the marker now gives shown and total characters and says a retry will not help, and `_truncate_payload` (drops whole list items so JSON stays valid) is tried first. ‡ §2.9 dispatch goes through `_dispatch_observed` after the search budget stubs excess calls | Cycle 2 |
+| L10 | Client tool calls and results through passthrough; Responses function tools | Cycle 6; with L32 |
+| L11 | Hybrid retrieval, private-read isolation, resident embedder. ‡ §2.2 ingest snippet lacks the thread offload and sparse vectors; ‡ §2.5 `kb_query` snippet predates caller resolution, file and artifact scope, deleted-file exclusion and the hybrid branch, which is on by default, so §2.6's raw-score merge is the hybrid-off path | Cycle 3 |
+| L12 | † §2.9 upload steps: storage is now reserved atomically and committed after ingest; statuses, tombstones, durable deletion; the upload page is retired | Cycle 3 |
+| L13 (→15) | §2.1 identity through Open WebUI; §2.3–2.6 archive capture and stitching | With L14 (§2.1); with L23 (§2.3–2.6) |
+| L14 (→16) | Queue grants have explicit owners; cancellation releases slots. ‡ §2.2 step 5: a waiter cancelled after its grant re-releases the slot | Cycle 6 |
+| L15 (→17) | † §2.3 shows retired `_delta_frame`/`_stop_frame` (now `OpenAIStreamAdapter._frame`); §2.5–2.7 deep stream and cancellation run through `StreamStageRunner` and `OpenAIStreamSession`; typed passthrough outcomes; reasoning controls; a Responses route. ‡ §2.5 error handler and §2.7 cancellation snippets show `pipeline_outcome` and `synth_task.cancel()`: the deep stream now records outcomes on `runner.terminal`, drains owned tasks with `runner.cancel_and_drain()`, and archives through `runner.finalize` | Cycle 7 |
+| L16 (→18) | `list_my_files`, `get_file_text`; † `_USER_SCOPED_TOOLS` prose; capability supervisor; archive outboxes; `kb_search` scope. ‡ §2.4 teaches Brave only, with a 429 becoming 503 and other errors escaping as 500: `web_search` now alternates Brave and SearXNG with cross-fallback, returns 503 only when both fail, and normalizes non-429 errors. ‡ §2.6 the user filter is now the shared `_user_filter` helper | Cycle 2 (§2.1, §2.3, §2.4, §2.6, §2.7); with L23 (§2.8); with L28 (`kb_search` scope) |
+| L17 (→19) | Footer ends the course | With L20 (points onward); the wrap-up moves to L33 |
 
 ## Out of scope
 
 - The eval harness, probes and smoke scripts. They are measurement tooling,
   and the course explains production code, not how it is tested.
 - Container, Unraid and Cloudflare operations, beyond the trust boundaries
-  L18 and L28 need.
+  L5 and L27 need.
 - Retired document authoring, and the router assessment that changed nothing.
 - React internals (the browser lesson covers the boundary only).
 - The Python course: paused after Lesson 6; the user will resume it later.
@@ -724,12 +650,15 @@ the proposed restructure each row moves to the cycle that rewrites its lesson.
 ## Process — one lesson per cycle
 
 From `AGENTS.md` "Lesson workflow". Do not skip or merge steps, and do not
-start the next lesson's cycle until the user has reviewed this one.
+start the next cycle until the user has reviewed this one. A refresh cycle runs
+the same steps over the sections it rewrites.
 
 1. Confirm the card's scope with the user; it may split or merge.
 2. Audit the in-scope files. File findings with severity and `file:line`
    under a new lesson heading in `docs/lesson-ai/AUDIT.md` "Open" (gitignored;
-   back it up before editing).
+   back it up before editing). Findings and drain decisions are recorded only
+   there: this plan and every other tracked doc may point at the AUDIT but
+   never list them.
 3. Drain this lesson's findings with the user. Code changes need explicit
    approval, even for obvious nits.
 4. Propose an outline, including this cycle's refresh and replacement items;
@@ -757,29 +686,47 @@ Hard rules for the writer:
   incidents; the lesson explains why the code is shaped the way it is.
 - Define every new concept on first use (see the learner profile in `AGENTS.md`).
 
-## Done before Lesson 18 (2026-10-08)
+## Done so far
 
 - **AUDIT untracked.** `.gitignore` named the pre-rename `docs/lessons/` path;
   it now ignores `docs/lesson-ai/AUDIT.md`, and the file was removed from the
   index (kept on disk). Earlier commits still contain it.
-- **AUDIT "Open" re-validated.** Three findings were already fixed by later
-  work and moved to Resolved; the 2026-06-30 research-mode drain items were
-  relabelled; two findings stay open (the ungated planner call, and the 50 ms
-  stream poll, deferred by trigger).
+- **AUDIT "Open" re-validated** against current source on 2026-10-08 (the
+  record is in the AUDIT).
 - **Cite sweep.** 270 of 370 cites had drifted. All were re-anchored by
   content, and the checker reported 305 ok, 0 broken, 64 verified soft hints
   and 1 known false positive (recorded in AUDIT "Accepted"). Snippet content
   that changed, rather than moved, is marked † in the refresh table.
-- **Correction, 2026-10-10.** That "305 ok" was wrong. The checker accepts a
-  cite up to ten lines from its anchor, and bare `file:line` cites only need
-  to land on a definition-shaped line. A strict re-check, plus a hand check of
-  every bare cite, found 84 still pointing at the wrong line; all are fixed.
-  Now 366 cites are exact and 4 deliberately cite a `def` line whose snippet
-  shows the body. Four snippets with stale values were updated. Snippets and
-  prose describing changed behavior are marked ‡ in the refresh table. The
-  checker fix is filed in AUDIT under course tooling.
+- **Strict cite re-check (2026-10-10).** That "305 ok" was overstated. A
+  strict re-check and a hand check of every bare `file:line` cite fixed 84 more
+  cites and 4 stale snippet values; snippets and prose describing changed
+  behavior are marked ‡ in the refresh table.
+- **Cite checker tightened (2026-10-10).** It no longer accepts a cite that is
+  merely near its anchor: a snippet may sit below the cited line only inside the
+  block that opens there or inside the range the cite or its label states, and
+  a symbol label must sit on its definition or the decorator above it. The
+  full sweep afterwards: 370 cites, 0 drift, 0 broken.
+- **Platform audit drained (2026-10-10)** by the user; the record is in the
+  AUDIT.
+- **Restructure decided (2026-10-10).** See the decisions below.
+
+## Decisions (2026-10-10)
+
+1. **The rule:** approved. Rewrite a lesson when new code replaced how its
+   subsystem works; write a new lesson only for a new subsystem.
+2. **Placement:** the application database and identity lessons are inserted
+   as 13 and 14; the cycle that writes 13 renumbers 13–17 to 15–19. The rest
+   append as 20–33.
+3. **Writing order:** approved, system map first.
+4. **Platform audit:** drained by the user (record in the AUDIT).
+5. **Cite checker:** the ten-line tolerance replaced by structural rules; done.
+6. **Audit findings are always gitignored:** findings and drain decisions live
+   only in gitignored files, and tracked docs, this plan included, point at
+   them without listing them.
 
 ## Decisions (2026-10-08)
+
+Items 1, 4 and 5 are superseded by the decisions of 2026-10-10 above.
 
 1. **Sequence and numbering:** approved; Lessons 18–34, appended, numbers
    fixed as each ships.

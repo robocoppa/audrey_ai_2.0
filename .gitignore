@@ -24,6 +24,18 @@ docs/lesson-python/_LESSON-*-HANDOFF.md
 docs/reviews/
 docs/campaign-4/phase-01-audit-remediation-plan.md
 
+# Audit findings are always local (user rule, 2026-10-10): any AUDIT file, and
+# any audit or review findings doc wherever it lands. Tracked docs may point at
+# these files but never reproduce their findings or drain decisions.
+**/AUDIT.md
+**/AUDIT-*.md
+**/*-audit-findings*.md
+# The July 2026 security review's working docs are findings documents too.
+# They were tracked before this rule; these lines take effect once they are
+# untracked (`git rm --cached`), which the user runs.
+docs/plans/security-review-remediation-plan.md
+docs/plans/security-item-1-unpublish-ports.md
+
 # OpenClaw builder's guide — laptop-local; references Unraid LAN IP
 # and personal channel tokens. Reference doc for building agents.
 docs/guides/openclaw-builders-guide.md
