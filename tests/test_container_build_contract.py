@@ -62,6 +62,7 @@ def test_native_ui_build_is_self_contained_and_not_duplicated_in_backend():
     assert "web-build" not in audrey
     assert "src/audrey/static/app" not in audrey
     assert "native_ui_router" not in main
+    assert "upload_ui_router" not in main
     assert "src/audrey/static/app" not in project
     assert "COPY --from=build --chown=101:101 /workspace/dist" in ui
     assert (
@@ -117,6 +118,11 @@ def test_native_ui_build_is_self_contained_and_not_duplicated_in_backend():
             "web/src/assets/models/audrey2.png"
         )
     }
+    icon_prefix = "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/"
+    for service in ("audrey", "audrey-ui", "custom-tools"):
+        icon = compose["services"][service]["labels"]["net.unraid.docker.icon"]
+        assert icon.startswith(icon_prefix)
+        assert (ROOT / icon.removeprefix(icon_prefix)).is_file(), icon
 
 
 def test_native_ui_proxy_preserves_auth_streams_uploads_and_static_boundaries():
@@ -135,6 +141,45 @@ def test_native_ui_proxy_preserves_auth_streams_uploads_and_static_boundaries():
     assert "try_files $uri =404;" in template
     assert "try_files $uri $uri/ /index.html;" in template
     assert "default-src 'self'" in template
+
+
+def test_native_ui_proxy_keeps_upstream_cache_policy_and_error_security_headers():
+    template = _text(UI_NGINX_TEMPLATE)
+
+    # API streams/downloads choose their own policy. The proxy only supplies
+    # no-store when the backend omitted one, including on an error response.
+    assert 'map $upstream_http_cache_control $audrey_api_cache_control' in template
+    assert re.search(
+        r'map \$upstream_http_cache_control \$audrey_api_cache_control \{'
+        r'\s*default "";\s*"" "no-store";\s*\}', template,
+    )
+    assert '~^/(api|v1)(/|$) $audrey_api_cache_control;' in template
+    assert '/openapi.json $audrey_api_cache_control;' in template
+    assert 'add_header Cache-Control $audrey_cache_control always;' in template
+    assert 'proxy_hide_header Cache-Control' not in template
+
+    # Successful content-addressed assets keep the long cache lifetime; failed
+    # asset requests do not acquire that policy. Static HTML stays no-store.
+    assert 'map $status $audrey_asset_cache_control' in template
+    assert re.search(
+        r'map \$status \$audrey_asset_cache_control \{\s*default "no-store";',
+        template,
+    )
+    for status in (200, 206, 304):
+        assert f'{status} "public, max-age=31536000, immutable";' in template
+    assert '~^/assets/ $audrey_asset_cache_control;' in template
+    assert re.search(r'map \$uri \$audrey_cache_control \{\s*default "no-store";', template)
+
+    # A location-level add_header would suppress these inherited security
+    # headers. Keep the entire policy at server scope rather than duplicating
+    # it for static/API/error locations.
+    server_header_block = template.split('location = /healthz', 1)[0]
+    assert len(re.findall(r'^\s*add_header ', template, re.MULTILINE)) == 5
+    for name in (
+        'Content-Security-Policy', 'Permissions-Policy',
+        'Referrer-Policy', 'X-Content-Type-Options',
+    ):
+        assert re.search(rf'add_header {name} [^\n]+ always;', server_header_block)
 
 
 def test_native_ui_uses_a_small_transparent_branded_favicon():

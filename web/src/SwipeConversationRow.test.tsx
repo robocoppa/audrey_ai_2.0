@@ -53,6 +53,22 @@ describe("mobile conversation swipes", () => {
     expect(archive).toHaveBeenCalledOnce();
   });
 
+  it("preserves capture transferred from a child button but cancels when the row loses capture", () => {
+    const { target, archive, swipe } = row();
+    const wrapper = target.closest(".swipe-conversation-row")!;
+    swipe(56);
+    pointer(target, "lostpointercapture", 206);
+    pointer(wrapper, "pointermove", 290);
+    pointer(wrapper, "pointerup", 290);
+    expect(archive).toHaveBeenCalledOnce();
+
+    archive.mockClear();
+    swipe(140);
+    pointer(wrapper, "lostpointercapture", 290);
+    pointer(wrapper, "pointerup", 290);
+    expect(archive).not.toHaveBeenCalled();
+  });
+
   it("keeps ordinary taps and vertical scrolling while cancelling short horizontal swipes", () => {
     const { target, swipe, archive, remove, open } = row();
     fireEvent.click(target);

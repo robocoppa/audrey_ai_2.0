@@ -15,8 +15,14 @@ they are not ongoing task lists.
   Log out stay at the bottom. Right swipe archives/restores; left reveals
   Delete/Cancel. Project sits beside Model; empty/short chats have no jump arrow. Loading periods
   animate, profile avoids field autofocus, and pull-to-refresh requires a
-  deliberate downward pull followed by release.
-  Rebuild only `audrey-ui` for this followup.
+  deliberate downward pull followed by release. Desktop Archive/Delete and
+  composer controls are larger; Model focus highlights only the outer control.
+  Async history actions preserve a chat selected while the request is pending.
+  These UI changes rebuild `audrey-ui`.
+- **Platform audit fixes:** implemented October 10: authenticated tool catalog,
+  safe rediscovery, retired legacy upload page, corrected cache headers, and
+  current lifecycle/Compose comments and icon. Rebuild `audrey` and `audrey-ui`;
+  recreate `custom-tools` for its icon label. Deployment remains pending.
 - **3D.6 — native automatic English skill selection:** built; deployed
   document/video selection and successful video file reads are confirmed.
   `skills.auto_select: true` is now the repository default at the user's request,
@@ -53,7 +59,7 @@ they are not ongoing task lists.
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
 | 10 | [Answer provenance](phase-10-ordinary-answer-provenance.md) | Complete; immediate answer summaries await acceptance |
 | 11 | [File explorer](phase-11-native-file-explorer.md) | Complete |
-| 12 | [Navigation](phase-12-sidebar-navigation.md) | Desktop complete; compact/mobile followup awaits acceptance |
+| 12 | [Navigation](phase-12-sidebar-navigation.md) | Desktop/mobile followup built; browser acceptance pending |
 | 13 | [Responses extensions](phase-13-responses-multimodal-input.md) | Complete |
 | 14 | [Bots and tokens](phase-14-bot-accounts-and-token-lifetimes.md) | Complete |
 | 15 | [Composer and Projects](phase-15-composer-and-projects.md) | Complete; menus below composer await acceptance |

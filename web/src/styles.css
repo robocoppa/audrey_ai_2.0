@@ -6011,3 +6011,58 @@ body,
 @media (prefers-reduced-motion: reduce) {
   .swipe-conversation-content { transition: none; }
 }
+
+/* Desktop controls: larger actions and one focus ring per composer control. */
+@media (min-width: 1101px) {
+  .conversation-actions button {
+    min-height: 2.75rem;
+    padding: 0.65rem 1rem;
+    border-color: var(--border-strong);
+    border-radius: 0.65rem;
+    background: var(--surface-raised);
+    color: var(--text-soft);
+    font-size: 0.85rem;
+    font-weight: 650;
+  }
+
+  .conversation-actions button:hover:not(:disabled) {
+    border-color: var(--accent);
+    background: var(--surface-active);
+    color: var(--text);
+  }
+
+  .conversation-actions .danger-button {
+    border-color: rgb(255 145 164 / 30%);
+    background: rgb(255 145 164 / 6%);
+    color: var(--danger);
+  }
+
+  .conversation-actions .danger-button:hover:not(:disabled) {
+    border-color: var(--danger);
+    background: rgb(255 145 164 / 12%);
+    color: var(--danger);
+  }
+
+  .compact-model-picker,
+  .composer-rail-control {
+    min-height: 3.75rem;
+    padding: 0.55rem 0.75rem;
+  }
+
+  .composer-control-label {
+    font-size: 0.625rem;
+  }
+
+  .compact-model-picker select,
+  .composer-project-picker select {
+    font-size: 0.95rem;
+  }
+
+  .compact-model-picker select:focus-visible,
+  .composer-project-picker select:focus-visible {
+    border-color: transparent;
+    outline: none;
+    background: transparent;
+    box-shadow: none;
+  }
+}

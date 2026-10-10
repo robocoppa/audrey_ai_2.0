@@ -134,7 +134,10 @@ export function SwipeConversationRow({
       onPointerMove={pointerMove}
       onPointerUp={pointerEnd}
       onPointerCancel={cancelGesture}
-      onLostPointerCapture={cancelGesture}
+      onLostPointerCapture={(event) => {
+        // Capture moving from the child button to this row also bubbles here.
+        if (event.target === event.currentTarget) cancelGesture();
+      }}
       onClickCapture={(event) => {
         if (event.target instanceof Element && event.target.closest(".swipe-conversation-actions")) return;
         if (Date.now() < ignoreClickUntil.current) {

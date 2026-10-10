@@ -1,9 +1,10 @@
-"""Audrey FastAPI entrypoint.
+"""Audrey's API entrypoint and shared service lifecycle.
 
-Wires the orchestrator, tool registry, and KB stack into a single
-FastAPI app. The KB pieces (Qdrant client, text/image embedders, and
-the optional filesystem watcher) are instantiated in the lifespan and
-attached to `app.state` so routes and the ReAct loop can read them.
+The lifespan owns authentication, durable application state and run recovery,
+model orchestration, tools and skills, the knowledge-base stack, and background
+workers for native runs, titles, archive delivery, file deletion and data purge.
+These services live on `app.state`; routers expose native and compatible APIs.
+The browser application is served separately by audrey-ui.
 """
 
 from __future__ import annotations
@@ -14,16 +15,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import Response
 
 from audrey import __version__
 from audrey.app_state import ApplicationStore
-from audrey.auth import AuthedUser, require_admin
+from audrey.auth import AuthedUser, require_admin, require_principal
 from audrey.chat_projection import ChatProjectionPromoter
 from audrey.config import get_config
 from audrey.conversation_titles import ConversationTitleGenerator
-from audrey.identity import build_cloudflare_access_verifier
+from audrey.identity import Principal, build_cloudflare_access_verifier
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.file_deletion import FileDeletionWorker, FileOperationLocks
 from audrey.kb.qdrant import QdrantKB
@@ -48,7 +49,6 @@ from audrey.routes.kb import router as kb_router
 from audrey.routes.media import router as media_router
 from audrey.routes.openai import VIRTUAL_MODELS
 from audrey.routes.openai import router as openai_router
-from audrey.routes.upload_ui import router as upload_ui_router
 from audrey.routes.user_data import router as user_data_router
 from audrey.skills import SkillRegistry
 from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, discover_all
@@ -501,7 +501,6 @@ app.include_router(application_router)
 app.include_router(kb_router)
 app.include_router(files_router)
 app.include_router(media_router)
-app.include_router(upload_ui_router)
 app.include_router(user_data_router)
 app.include_router(admin_router)
 
@@ -530,8 +529,10 @@ async def metrics(request: Request) -> Response:
 
 
 @app.get("/v1/tools", tags=["tools"])
-async def list_tools() -> dict[str, list[dict]]:
-    """Inspect what tools are currently registered for the ReAct loop."""
+async def list_tools(
+    _principal: Principal = Depends(require_principal),
+) -> dict[str, list[dict]]:
+    """Let an active account inspect the registered ReAct tool catalogue."""
     reg = app.state.tools
     return {
         "tools": [
@@ -567,6 +568,12 @@ async def rediscover_tools(
     reg = app.state.tools
     tool_servers = list(cfg.tools.get("servers", []) or [])
     fresh = await discover_all(tool_servers)
+    if tool_servers and not fresh.by_name:
+        log.warning("tools: rediscover returned no records; keeping the live registry")
+        raise HTTPException(
+            status_code=503,
+            detail="Tool discovery returned no records; existing tools are unchanged.",
+        )
     reg.by_name.clear()
     reg.by_name.update(fresh.by_name)
     audit_user_scoping(reg)

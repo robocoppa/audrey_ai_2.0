@@ -1,7 +1,12 @@
 # Campaign 4 Phase 12 — navigation
 
-**Status:** Desktop navigation accepted. Compact/mobile followup built;
+**Status:** Earlier desktop navigation accepted. Desktop/mobile followup built;
 browser acceptance pending.
+
+Desktop Archive/Delete use larger action buttons. Composer controls,
+including Project, have larger targets; model focus highlights only
+the outer control, without a second glow on the select text. An archive/delete
+request finishing after navigation preserves the newly selected chat and draft.
 
 The desktop sidebar starts with one full-width **New conversation** action.
 Workspace, the sidebar username, and the old Files/+ New pair are removed.

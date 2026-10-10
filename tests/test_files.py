@@ -275,9 +275,8 @@ def test_video_mimes_are_disjoint_from_text_and_image():
 
 
 def test_every_extension_is_dot_prefixed_and_lowercase():
-    # `extOf()` in upload.html lowercases and keeps the dot; a bare or
-    # uppercase entry here would never match and would silently block
-    # that format at the pre-check.
+    # Browser and API pre-checks use normalized filename suffixes. A bare or
+    # uppercase entry would fail to match the supported format.
     for ext in ALLOWED_EXTENSIONS:
         assert ext.startswith(".") and ext == ext.lower()
 

@@ -303,6 +303,11 @@ export function ChatWorkspace({
       || model.roles?.some((role) => user.groups.includes(role))),
   );
 
+  const removeFromCurrentViewRef = useRef(removeFromCurrentView);
+  useEffect(() => {
+    removeFromCurrentViewRef.current = removeFromCurrentView;
+  });
+
   function selectConversation(conversation: Conversation | null) {
     const previousId = selectedIdRef.current;
     if (previousId && previousId !== conversation?.id) {
@@ -551,15 +556,15 @@ export function ChatWorkspace({
 
   function removeFromCurrentView(conversationId: string, closeThread = false) {
     const remaining = conversations.filter(({ id }) => id !== conversationId);
-    setConversations(remaining);
+    setConversations((current) => current.filter(({ id }) => id !== conversationId));
     setProjectConversations((current) => current.filter(({ id }) => id !== conversationId));
     if (closeThread) {
       setOpenedConversations((current) =>
         current.filter(({ id }) => id !== conversationId),
       );
     }
-    if (selectedId === conversationId) {
-      if (selectedProjectId) {
+    if (selectedIdRef.current === conversationId) {
+      if (selectedProjectIdRef.current) {
         selectConversation(null);
       } else {
         const nextOrdinary = remaining.find(({ project_id }) => !project_id) ?? null;
@@ -629,7 +634,7 @@ export function ChatWorkspace({
     setError("");
     try {
       await updateConversation(conversation.id, { archived: conversation.archived_at === null });
-      removeFromCurrentView(conversation.id, true);
+      removeFromCurrentViewRef.current(conversation.id, true);
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
@@ -643,7 +648,7 @@ export function ChatWorkspace({
     try {
       await deleteConversation(conversationId);
       setConfirmDeleteId(null);
-      removeFromCurrentView(conversationId, true);
+      removeFromCurrentViewRef.current(conversationId, true);
     } catch (reason) {
       setError(messageOf(reason));
     } finally {

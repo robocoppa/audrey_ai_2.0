@@ -1,14 +1,16 @@
-# Audrey 2.0 — compose for the three services we rebuild often.
+# Audrey 2.0 — five runtime services plus the optional eval image.
 #
-# Scope: `audrey`, `audrey-ui`, and `custom-tools`. `ollama`, `qdrant`, and
-# `open-webui` stay under the Unraid UI so the GPU passthrough +
-# persistence config stays where you've been managing it.
+# Scope: `audrey`, `audrey-ui`, `custom-tools`, `media-worker`, and
+# `media-fetcher`. `ollama` and `qdrant` remain Unraid-managed; monitoring
+# has its own Compose file. Open WebUI is a stopped migration client.
 #
 # Usage (on Unraid, from /mnt/user/appdata/audrey_ai_2.0):
 #   docker compose up -d --build audrey         # rebuild + restart audrey
 #   docker compose up -d --build audrey-ui      # rebuild + restart the browser UI
 #   docker compose up -d --build custom-tools   # rebuild + restart tools
-#   docker compose up -d --build                # all services (audrey-eval excluded)
+#   docker compose up -d --build media-worker   # rebuild + restart media processing
+#   docker compose up -d --build media-fetcher  # rebuild + restart URL downloads
+#   docker compose up -d --build                # five runtime services (eval excluded)
 #   docker compose logs -f audrey               # tail logs
 #   docker compose stop audrey                  # stop without removing
 #
@@ -137,7 +139,7 @@ services:
     image: audrey-custom-tools
     container_name: custom-tools
     labels:
-      net.unraid.docker.icon: "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/images/toolbox.png"
+      net.unraid.docker.icon: "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/web/src/assets/models/audrey2.png"
     restart: unless-stopped
     networks:
       - ollama-net
@@ -149,7 +151,8 @@ services:
     # The only legitimate caller is Audrey, over ollama-net DNS:
     #   Audrey → custom-tools  (config.yaml tools.servers = http://custom-tools:8001)
     # The in-container healthcheck hits 127.0.0.1:8001 and is unaffected.
-    # Debug access from the laptop, if ever needed: tunnel it like audrey above.
+    # Debug through the container's Python HTTP client on ollama-net; keep
+    # port 8001 unpublished rather than adding a public debug route.
     env_file:
       - .env
     environment:
@@ -172,8 +175,8 @@ services:
       start_period: 10s
       retries: 3
 
-  # The isolated media sidecar. Claims video and scanned-PDF jobs from
-  # Audrey, performs bounded CPU work, and posts results back. No ports,
+  # The isolated media sidecar. Claims video, audio, and scanned-PDF jobs
+  # from Audrey, performs bounded CPU work, and posts results back. No ports,
   # direct model access, or database — it is an HTTP client with ffmpeg,
   # Whisper, Poppler, and Tesseract.
   media-worker:
@@ -186,9 +189,9 @@ services:
     # Docker's default is 10s, after which a stop becomes SIGKILL. The worker
     # drains on SIGTERM — it finishes the job in hand rather than abandoning
     # it to a lease expiry — but only if it is given long enough to. A demux
-    # is seconds; Phase 35's whisper pass will be minutes, and at the default
-    # every `compose stop` mid-transcription would throw that work away and
-    # wait out `lease_minutes` before anything retried it.
+    # takes seconds; Whisper transcription can take minutes. The default
+    # Docker grace period would discard an in-flight transcription and delay
+    # its retry until the lease expires.
     stop_grace_period: 180s
     depends_on:
       audrey:
@@ -246,8 +249,8 @@ services:
       # claim untrue for the upload bytes themselves.
       - /mnt/user/appdata/runtime:/data:ro
     # ffmpeg on a large file is CPU-hungry and this box also serves chat.
-    # Cap it so a 300 MB video can't starve audrey of cores. Raise it if
-    # Phase 35's whisper turns out to be the bottleneck it probably is.
+    # Cap it so a 300 MB video can't starve audrey of cores. Change the cap
+    # only after measuring transcription throughput and chat latency.
     cpus: 2.0
 
   # Phase 41: the yt-dlp sidecar. Claims download jobs from audrey over HTTP,
@@ -348,8 +351,8 @@ networks:
   # which has the only gateway of the two. Verify after any change here:
   #   docker exec audrey python3 -c "import socket;print(socket.gethostbyname('ollama'))"
   #
-  # Consequence for Phase 35: whisper weights must be baked into the image at
-  # build time. The worker cannot download anything at runtime, on purpose.
+  # Whisper weights are baked into the image at build time. The worker
+  # cannot download models at runtime, on purpose.
   media-net:
     driver: bridge
     internal: true

@@ -168,8 +168,8 @@ prerequisites. Where a lesson matches a 2026-10-08 card under
 ### Writing order (one reviewed cycle each)
 
 1. **System map:** rewrite L0, L4 and L5; client examples in L1–L3. Replaces
-   the L18 cycle. The audit filed for L18 on 2026-10-09 covers the same files
-   and still awaits its drain.
+   the L18 cycle. The audit filed for L18 on 2026-10-09 covers the same files;
+   its approved fixes are implemented (October 10).
 2. **Tool policy:** L9, plus the sidecar lesson's §2.1, §2.3, §2.4 and §2.7.
 3. **Search:** L11, plus L12 §2.9–2.10.
 4. **New 13, the application database,** with the 13–17 renumber.
@@ -199,9 +199,30 @@ the 2026-10-08 sequence, because the platform map is absorbed).
 2. Placement: insert 13 and 14 with the renumber (recommended), insert as
    12a and 12b, or append as before.
 3. The writing order above, system map first.
-4. The L18 audit findings, now cycle 1's.
-5. The cite checker's tolerance (`AUDIT.md`, course tooling): a change to a
+4. The cite checker's tolerance (`AUDIT.md`, course tooling): a change to a
    repository script, so it needs approval.
+
+## Lesson 18 audit decisions — October 10, 2026
+
+The user approved the platform audit fixes. Seven are implemented; two findings
+are accepted as intentional behavior. This closes the audit prerequisite for
+the platform lesson; outline/restructure approval is still required before prose.
+Tower deployment and browser acceptance remain pending.
+
+| Finding | Decision |
+|---|---|
+| Tool catalog authentication | Require an active account; retain token scopes |
+| Empty tool rediscovery | Return 503; preserve the existing registry and skills |
+| Entrypoint description | Describe the current service lifecycle |
+| Compose comments | Describe current services, media jobs, and isolation |
+| Missing custom-tools icon | Use the tracked image |
+| Legacy upload page | Remove page, router, unused setting, and obsolete tests |
+| Duplicate cache policy | Preserve upstream policy; add a fallback only when absent |
+| Repeated scoping audit | Retain the defensive check |
+| API schema proxy | Retain for API discovery; protected routes still require auth |
+
+The separate cite-checker proposal and older planner/polling findings remain
+undecided; they are not part of this implementation.
 
 ## Baseline
 
@@ -585,9 +606,9 @@ lesson prose must not cite phase numbers.
 
 ## Lesson 18 — proposed outline (2026-10-09, awaiting go-ahead)
 
-Audit filed under "Lesson 18" in `docs/lesson-ai/AUDIT.md`; the write waits on
-the user's drain of those findings and approval of this outline. Target length
-is that of Lesson 4 (a map, not a deep dive).
+The Lesson 18 audit is closed in source (October 10). Writing still awaits
+approval of this outline or the proposed restructure above. Target length is
+that of Lesson 4 (a map, not a deep dive).
 
 **Opening question:** "Open WebUI is gone. What are Audrey's pieces now, where
 does each kind of data live, and what path does one message from the browser

@@ -1110,24 +1110,141 @@ test("swipes any mobile chat to archive, restore, or confirm deletion without op
   await expect(row).toHaveCount(0);
   await drawer.getByRole("button", { name: "Active", exact: true }).click();
   await expect(row).toBeVisible();
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
+  const readsAfterBrowsingViews = otherMessageReads;
 
   await swipe(-140);
   expect(deleted).toBe(false);
   const cancel = row.getByRole("button", { name: /Cancel/u });
   await expect(cancel).toBeVisible();
   await cancel.click();
-  await expect(row.getByRole("button", { name: /Delete/u })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Confirm delete conversation Another chat", exact: true })).toHaveCount(0);
   expect(deleted).toBe(false);
   await swipe(-140);
-  await row.getByRole("button", { name: /Delete/u }).click();
+  await row.getByRole("button", { name: "Confirm delete conversation Another chat", exact: true }).click();
   await expect.poll(() => deleted).toBe(true);
   await expect(row).toHaveCount(0);
   await expect(drawer).toBeVisible();
-  expect(otherMessageReads).toBe(0);
+  expect(otherMessageReads).toBe(readsAfterBrowsingViews);
   await touch.detach();
   await page.keyboard.press("Escape");
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
   await expect(projectControl).toHaveValue("");
+});
+
+test("gives desktop chat actions and aligned composer pickers comfortable controls with one focus ring", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockAudreyApi(page, undefined, canonicalBrowserTurn());
+  await page.goto("./");
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
+  for (const button of [
+    page.getByRole("button", { name: "Archive", exact: true }),
+    page.getByRole("button", { name: "Delete conversation", exact: true }),
+  ]) {
+    await expectInViewport(page, button);
+    const box = (await button.boundingBox())!;
+    expect(box.height).toBeGreaterThanOrEqual(44);
+  }
+  const model = page.locator(".compact-model-picker");
+  const project = page.locator(".composer-project-picker");
+  const modelBox = (await model.boundingBox())!;
+  const projectBox = (await project.boundingBox())!;
+  expect(modelBox.height).toBeGreaterThanOrEqual(60);
+  expect(projectBox.height).toBeGreaterThanOrEqual(60);
+  expect(Math.abs(modelBox.y - projectBox.y)).toBeLessThan(1);
+  expect(Math.abs(modelBox.height - projectBox.height)).toBeLessThan(1);
+  for (const control of [model, project]) {
+    expect(await control.locator("select").evaluate((select) => Number.parseFloat(getComputedStyle(select).fontSize)))
+      .toBeGreaterThanOrEqual(15);
+    expect(await control.locator(".composer-control-label").evaluate((label) => Number.parseFloat(getComputedStyle(label).fontSize)))
+      .toBeGreaterThanOrEqual(10);
+  }
+  await page.keyboard.press("Tab");
+  for (const control of [model, project]) {
+    const select = control.locator("select");
+    await select.focus();
+    await expect(select).toBeFocused();
+    await expect(select).toHaveCSS("box-shadow", "none");
+    await expect(control).not.toHaveCSS("box-shadow", "none");
+  }
+});
+
+test("retains the chosen chat when another chat finishes a pending archive or deletion", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockAudreyApi(page, undefined, canonicalBrowserTurn());
+  let conversations = [
+    browserConversation("Archive candidate"),
+    { ...browserConversation("Kept chat"), id: "con_kept" },
+    { ...browserConversation("Delete candidate"), id: "con_pending_delete" },
+  ];
+  let archiveStarted = false;
+  let deleteStarted = false;
+  let releaseArchive = () => {};
+  let releaseDelete = () => {};
+  const archiveGate = new Promise<void>((resolve) => { releaseArchive = resolve; });
+  const deleteGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
+  await page.route("**/api/conversations**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      return json(route, {
+        items: conversations.filter((item) => Boolean(item.archived_at) === (url.searchParams.get("archived") === "true")),
+        next_cursor: null,
+      });
+    }
+    const id = url.pathname.split("/")[3];
+    if (url.pathname.endsWith("/messages")) {
+      const messages = canonicalBrowserTurn().map((message) => ({
+        ...message,
+        id: `${message.id}_${id}`,
+        content: message.role === "assistant" && id === "con_kept" ? "Kept conversation answer." : message.content,
+      }));
+      return json(route, { items: messages, next_cursor: null });
+    }
+    const conversation = conversations.find((item) => item.id === id);
+    if (!conversation) return route.fallback();
+    if (id === CONVERSATION_ID && request.method() === "PATCH") {
+      archiveStarted = true;
+      await archiveGate;
+      conversations = conversations.map((item) => item.id === id ? { ...item, archived_at: "2026-10-10T00:01:00Z" } : item);
+      return json(route, conversations.find((item) => item.id === id));
+    }
+    if (id === "con_pending_delete" && request.method() === "DELETE") {
+      deleteStarted = true;
+      await deleteGate;
+      conversations = conversations.filter((item) => item.id !== id);
+      return route.fulfill({ status: 204 });
+    }
+    return json(route, conversation);
+  });
+
+  await page.goto("./");
+  const history = page.getByRole("navigation", { name: "Conversation history" });
+  await expect(page.getByRole("heading", { name: "Archive candidate", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await expect.poll(() => archiveStarted).toBe(true);
+  const kept = history.getByRole("button", { name: /^Kept chat/u });
+  await kept.click();
+  await expect(page.getByText("Kept conversation answer.")).toBeVisible();
+  await page.getByRole("textbox", { name: "Ask Audrey" }).fill("Keep this draft after archive");
+  releaseArchive();
+  await expect(history.getByRole("button", { name: /^Archive candidate/u })).toHaveCount(0);
+  await expect(kept).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toHaveValue("Keep this draft after archive");
+
+  await history.getByRole("button", { name: /^Delete candidate/u }).click();
+  await expect(page.getByRole("heading", { name: "Delete candidate", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Delete conversation", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm delete conversation", exact: true }).click();
+  await expect.poll(() => deleteStarted).toBe(true);
+  await kept.click();
+  await expect(page.getByText("Kept conversation answer.")).toBeVisible();
+  await page.getByRole("textbox", { name: "Ask Audrey" }).fill("Keep this draft after deletion");
+  releaseDelete();
+  await expect(history.getByRole("button", { name: /^Delete candidate/u })).toHaveCount(0);
+  await expect(kept).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: "Kept chat", exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toHaveValue("Keep this draft after deletion");
 });
 
 test("keeps mobile files and a scrolling chat accessible through the streamlined drawer", async ({ page }) => {

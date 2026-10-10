@@ -3,9 +3,27 @@ map $http_x_forwarded_proto $audrey_forwarded_proto {
     "" $scheme;
 }
 
+# Leave an upstream cache policy intact. An empty add_header value emits
+# nothing, so API streams/downloads retain their own single Cache-Control.
+map $upstream_http_cache_control $audrey_api_cache_control {
+    default "";
+    "" "no-store";
+}
+
+# Only successful asset responses are immutable. Missing assets must remain
+# recoverable after a deployment, even when the request hits an error response.
+map $status $audrey_asset_cache_control {
+    default "no-store";
+    200 "public, max-age=31536000, immutable";
+    206 "public, max-age=31536000, immutable";
+    304 "public, max-age=31536000, immutable";
+}
+
 map $uri $audrey_cache_control {
     default "no-store";
-    ~^/assets/ "public, max-age=31536000, immutable";
+    ~^/(api|v1)(/|$) $audrey_api_cache_control;
+    /openapi.json $audrey_api_cache_control;
+    ~^/assets/ $audrey_asset_cache_control;
 }
 
 server {
@@ -23,9 +41,10 @@ server {
     index index.html;
     client_max_body_size ${AUDREY_UI_MAX_BODY_SIZE};
 
-    # Do not attach the immutable asset policy to an asset 404: A browser or
-    # edge cache must be able to recover after the next deployment.
-    add_header Cache-Control $audrey_cache_control;
+    # Keep these at server scope so static and API responses inherit the same
+    # security headers. The maps preserve upstream cache policy without adding
+    # a duplicate; responses without one (including errors) use no-store.
+    add_header Cache-Control $audrey_cache_control always;
     add_header Content-Security-Policy "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'" always;
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
     add_header Referrer-Policy "same-origin" always;
