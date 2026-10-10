@@ -5,7 +5,7 @@ Menus below the composer are built; browser acceptance is pending.
 
 ## Composer
 
-The centered dock has a 56 rem desktop maximum and two rows: message field plus Send/Stop above an equal-height Model, **Add files**, and **Tools & skills** rail. Narrow screens wrap the controls without clipping.
+The centered dock has a 56 rem desktop maximum: message field plus Send/Stop above an equal-height **Model**, **Project**, **Add files**, and **Tools & skills** rail. Compact screens use two columns, keeping Project beside Model and Files beside Tools. Project selection moves the current conversation through the existing owner-scoped API.
 
 Add files explains uploading a new file or choosing Ready files from My Files. Tools & skills uses server names/descriptions and explains Automatic; it selects a skill that may narrow tools rather than pretending to be an individual-tool permission editor.
 

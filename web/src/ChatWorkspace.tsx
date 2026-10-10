@@ -26,6 +26,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -38,6 +39,7 @@ import cloudPortrait from "./assets/models/cloudModel.png";
 import localPortrait from "./assets/models/localModel.png";
 
 import { AudreyLoader } from "./AudreyLoader";
+import { ScrollToLatest } from "./ScrollToLatest";
 import {
   cancelRun,
   createConversation,
@@ -165,15 +167,26 @@ export function ChatWorkspace({
   preferences,
   models,
   skills,
+  navigationOpen,
+  onNavigationOpenChange: setNavigationOpen,
+  mobileMenuHost,
+  mobileNewChatHost,
+  menuActions,
 }: {
+  navigationOpen: boolean;
+  onNavigationOpenChange: (open: boolean) => void;
+  mobileMenuHost: HTMLElement | null;
+  mobileNewChatHost: HTMLElement | null;
+  menuActions: ReactNode;
   user: CurrentUser;
   preferences: UserPreferences;
   models: AudreyModel[];
   skills: SkillSummary[];
 }) {
   const [compactNavigation, setCompactNavigation] = useState(() =>
-    window.matchMedia?.("(max-width: 900px)").matches ?? false);
-  const [navigationOpen, setNavigationOpen] = useState(false);
+    window.matchMedia?.("(max-width: 1100px)").matches ?? false);
+  const [projectsExpanded, setProjectsExpanded] = useState(false);
+  const [conversationMenuHost, setConversationMenuHost] = useState<HTMLDivElement | null>(null);
   const navigationRef = useRef<HTMLElement>(null);
   const navigationToggleRef = useRef<HTMLButtonElement>(null);
   const lastFocusedRef = useRef<HTMLElement | null>(null);
@@ -183,10 +196,10 @@ export function ChatWorkspace({
     if (compactNavigation && navigationOpen) {
       window.requestAnimationFrame(() => navigationToggleRef.current?.focus({ preventScroll: true }));
     }
-  }, [compactNavigation, navigationOpen]);
+  }, [compactNavigation, navigationOpen, setNavigationOpen]);
 
   useEffect(() => {
-    const viewport = window.matchMedia?.("(max-width: 900px)");
+    const viewport = window.matchMedia?.("(max-width: 1100px)");
     if (!viewport) return;
     const rememberFocus = (event: FocusEvent) => {
       if (event.target instanceof HTMLElement && event.target !== document.body) {
@@ -201,10 +214,12 @@ export function ChatWorkspace({
         : document.activeElement;
       const focusInHistory = focused instanceof HTMLElement && navigationRef.current?.contains(focused);
       const focusInCompactControls = focused instanceof HTMLElement
-        && (focused.closest(".workspace-mobile-navigation") || focused.closest(".conversation-drawer-header"));
+        && focused.closest(".topbar-mobile-menu, .topbar-mobile-new-chat, .conversation-drawer-header, .session-controls-drawer, .conversation-menu-actions, .projects-category-toggle");
+      const focusInDesktopActions = focused instanceof HTMLElement
+        && focused.closest(".session-controls:not(.session-controls-drawer)");
       setCompactNavigation(event.matches);
       setNavigationOpen(false);
-      if (event.matches && focusInHistory) {
+      if (event.matches && (focusInHistory || focusInDesktopActions)) {
         window.requestAnimationFrame(() => navigationToggleRef.current?.focus({ preventScroll: true }));
       } else if (!event.matches && focusInCompactControls) {
         window.requestAnimationFrame(() => navigationRef.current?.querySelector<HTMLButtonElement>(".new-conversation")?.focus({ preventScroll: true }));
@@ -216,7 +231,7 @@ export function ChatWorkspace({
       document.removeEventListener("focusin", rememberFocus);
       viewport.removeEventListener("change", updateViewport);
     };
-  }, []);
+  }, [setNavigationOpen]);
 
   useEffect(() => {
     if (!compactNavigation || !navigationOpen) return;
@@ -686,34 +701,35 @@ export function ChatWorkspace({
 
   return (
     <div className="workspace" data-navigation-open={navigationOpen}>
-      <div className="workspace-mobile-navigation" inert={compactNavigation && navigationOpen ? true : undefined}>
+      {mobileMenuHost ? createPortal(
         <button
-          className="workspace-history-toggle"
+          id="app-mobile-menu-toggle"
+          className="workspace-header-button"
           type="button"
           ref={navigationToggleRef}
-          aria-label="Open conversation history"
+          aria-label="Menu"
           aria-expanded={navigationOpen}
           aria-controls="conversation-navigation"
           onClick={() => setNavigationOpen(true)}
         >
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
             <path d="M4 5h16M4 12h16M4 19h16" />
           </svg>
-          <span>Chats</span>
-        </button>
+        </button>, mobileMenuHost,
+      ) : null}
+      {mobileNewChatHost ? createPortal(
         <button
-          className="workspace-new-conversation"
+          className="workspace-header-button"
           type="button"
           aria-label="New chat"
           onClick={startConversation}
           disabled={creating || loading || catalogUnavailable}
         >
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
             <path d="M12 5v14M5 12h14" />
           </svg>
-          <span>{creating ? "Creating…" : "New chat"}</span>
-        </button>
-      </div>
+        </button>, mobileNewChatHost,
+      ) : null}
       {compactNavigation && !navigationOpen && error ? (
         <p className="workspace-mobile-error" role="alert">{error}</p>
       ) : null}
@@ -738,13 +754,19 @@ export function ChatWorkspace({
         inert={compactNavigation && !navigationOpen ? true : undefined}
       >
         <div className="conversation-drawer-header">
-          <strong>Conversations</strong>
+          <strong>Menu</strong>
           <button className="conversation-drawer-close" type="button" aria-label="Close conversation history" onClick={closeNavigation}>
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
               <path d="M6 6l12 12M6 18 18 6" />
             </svg>
           </button>
         </div>
+        {compactNavigation ? (
+          <>
+            {menuActions}
+            <div className="conversation-menu-actions" ref={setConversationMenuHost} />
+          </>
+        ) : null}
         <div className="sidebar-primary-action">
           <button
             className="new-conversation"
@@ -761,7 +783,20 @@ export function ChatWorkspace({
 
         <section className="projects-sidebar" aria-labelledby="projects-sidebar-title">
           <header>
-            <h2 id="projects-sidebar-title">Projects</h2>
+            <h2 id="projects-sidebar-title">
+              {compactNavigation ? (
+                <button
+                  className="projects-category-toggle"
+                  type="button"
+                  aria-expanded={projectsExpanded}
+                  aria-controls="sidebar-projects"
+                  onClick={() => setProjectsExpanded((expanded) => !expanded)}
+                >
+                  <span>Projects</span>
+                  <span aria-hidden="true">{projectsExpanded ? "⌄" : "›"}</span>
+                </button>
+              ) : "Projects"}
+            </h2>
             <button type="button" onClick={() => {
               setNavigationOpen(false);
               setNewProjectOpen(true);
@@ -770,92 +805,95 @@ export function ChatWorkspace({
               <span>New</span>
             </button>
           </header>
-          {projectsLoading ? <p className="sidebar-status" role="status">Loading projects…</p> : null}
-          {!projectsLoading && projects.length === 0 ? (
-            <p className="sidebar-status">No projects yet.</p>
-          ) : null}
-          {projects.length ? (
-            <ul className="project-sidebar-list">
-              {projects.map((project) => {
-                const expanded = expandedProjectId === project.id;
-                const current = selectedProjectId === project.id;
-                return (
-                  <li key={project.id} className={current ? "project-sidebar-row current" : "project-sidebar-row"}>
-                    <div className="project-sidebar-main">
-                      <button
-                        className="project-sidebar-link"
-                        type="button"
-                        onClick={() => openProject(project)}
-                        aria-current={current && selectedId === null ? "page" : undefined}
-                        title={project.name}
-                      >
-                        <span className="project-folder-icon" aria-hidden="true">◇</span>
-                        <span>{project.name}</span>
-                      </button>
-                      <button
-                        className="project-sidebar-toggle"
-                        type="button"
-                        onClick={() => {
-                          if (expanded) {
-                            setExpandedProjectId(null);
-                          } else {
-                            openProject(project);
-                          }
-                        }}
-                        aria-label={`${expanded ? "Collapse" : "Expand"} project ${project.name}`}
-                        aria-expanded={expanded}
-                      >
-                        <span aria-hidden="true">{expanded ? "⌄" : "›"}</span>
-                      </button>
-                    </div>
-                    {expanded ? (
-                      <nav className="project-conversation-list" aria-label={`${project.name} conversations`}>
-                        {projectConversationsLoading ? (
-                          <p className="sidebar-status" role="status">Loading conversations…</p>
-                        ) : null}
-                        {!projectConversationsLoading && projectHistoryConversations.length === 0 ? (
-                          <p className="sidebar-status">
-                            {searchQuery ? "No matching titles." : view === "archived" ? "No archived conversations." : "No conversations yet."}
-                          </p>
-                        ) : null}
-                        {projectHistoryConversations.map((conversation) => (
-                          <button
-                            key={conversation.id}
-                            className={conversation.id === selectedId ? "project-conversation active" : "project-conversation"}
-                            type="button"
-                            onClick={() => openConversation(conversation)}
-                            aria-current={conversation.id === selectedId ? "page" : undefined}
-                            title={conversation.title || "New conversation"}
-                          >
-                            <span>{conversation.title || "New conversation"}</span>
-                            <small>{modelLabel(models, conversation)}</small>
-                          </button>
-                        ))}
-                        {projectConversationsNextCursor ? (
-                          <button
-                            className="project-load-more"
-                            type="button"
-                            onClick={() => void loadMoreProjectConversations()}
-                            disabled={projectConversationsLoading}
-                          >
-                            {projectConversationsLoading ? "Loading…" : "Load older"}
-                          </button>
-                        ) : null}
-                      </nav>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          ) : null}
-          {projectsNextCursor ? (
-            <button className="project-load-more" type="button" onClick={() => void loadMoreProjects()} disabled={projectsLoadingMore}>
-              {projectsLoadingMore ? "Loading…" : "Load more projects"}
-            </button>
-          ) : null}
-          {projectsError ? <p className="sidebar-error">{projectsError}</p> : null}
+          <div id="sidebar-projects" hidden={compactNavigation && !projectsExpanded}>
+            {projectsLoading ? <p className="sidebar-status" role="status">Loading projects…</p> : null}
+            {!projectsLoading && projects.length === 0 ? (
+              <p className="sidebar-status">No projects yet.</p>
+            ) : null}
+            {projects.length ? (
+              <ul className="project-sidebar-list">
+                {projects.map((project) => {
+                  const expanded = expandedProjectId === project.id;
+                  const current = selectedProjectId === project.id;
+                  return (
+                    <li key={project.id} className={current ? "project-sidebar-row current" : "project-sidebar-row"}>
+                      <div className="project-sidebar-main">
+                        <button
+                          className="project-sidebar-link"
+                          type="button"
+                          onClick={() => openProject(project)}
+                          aria-current={current && selectedId === null ? "page" : undefined}
+                          title={project.name}
+                        >
+                          <span className="project-folder-icon" aria-hidden="true">◇</span>
+                          <span>{project.name}</span>
+                        </button>
+                        <button
+                          className="project-sidebar-toggle"
+                          type="button"
+                          onClick={() => {
+                            if (expanded) {
+                              setExpandedProjectId(null);
+                            } else {
+                              openProject(project);
+                            }
+                          }}
+                          aria-label={`${expanded ? "Collapse" : "Expand"} project ${project.name}`}
+                          aria-expanded={expanded}
+                        >
+                          <span aria-hidden="true">{expanded ? "⌄" : "›"}</span>
+                        </button>
+                      </div>
+                      {expanded ? (
+                        <nav className="project-conversation-list" aria-label={`${project.name} conversations`}>
+                          {projectConversationsLoading ? (
+                            <p className="sidebar-status" role="status">Loading conversations…</p>
+                          ) : null}
+                          {!projectConversationsLoading && projectHistoryConversations.length === 0 ? (
+                            <p className="sidebar-status">
+                              {searchQuery ? "No matching titles." : view === "archived" ? "No archived conversations." : "No conversations yet."}
+                            </p>
+                          ) : null}
+                          {projectHistoryConversations.map((conversation) => (
+                            <button
+                              key={conversation.id}
+                              className={conversation.id === selectedId ? "project-conversation active" : "project-conversation"}
+                              type="button"
+                              onClick={() => openConversation(conversation)}
+                              aria-current={conversation.id === selectedId ? "page" : undefined}
+                              title={conversation.title || "New conversation"}
+                            >
+                              <span>{conversation.title || "New conversation"}</span>
+                              <small>{modelLabel(models, conversation)}</small>
+                            </button>
+                          ))}
+                          {projectConversationsNextCursor ? (
+                            <button
+                              className="project-load-more"
+                              type="button"
+                              onClick={() => void loadMoreProjectConversations()}
+                              disabled={projectConversationsLoading}
+                            >
+                              {projectConversationsLoading ? "Loading…" : "Load older"}
+                            </button>
+                          ) : null}
+                        </nav>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+            {projectsNextCursor ? (
+              <button className="project-load-more" type="button" onClick={() => void loadMoreProjects()} disabled={projectsLoadingMore}>
+                {projectsLoadingMore ? "Loading…" : "Load more projects"}
+              </button>
+            ) : null}
+            {projectsError ? <p className="sidebar-error">{projectsError}</p> : null}
+          </div>
         </section>
 
+        {compactNavigation ? <h2 className="sidebar-chats-heading">Chats</h2> : null}
         <label className="conversation-search">
           <span>Search titles</span>
           <input
@@ -991,6 +1029,9 @@ export function ChatWorkspace({
           >
             <ConversationThread
               conversation={opened}
+              compactNavigation={compactNavigation}
+              menuOpen={navigationOpen}
+              menuHost={compactNavigation && opened.id === selectedId ? conversationMenuHost : null}
               models={models}
               projects={projects}
               skills={skills}
@@ -1018,6 +1059,9 @@ export function ChatWorkspace({
 
 function ConversationThread({
   conversation,
+  compactNavigation,
+  menuOpen,
+  menuHost,
   models,
   projects,
   skills,
@@ -1028,6 +1072,9 @@ function ConversationThread({
   onOpenProject,
 }: {
   conversation: Conversation;
+  compactNavigation: boolean;
+  menuOpen: boolean;
+  menuHost: HTMLElement | null;
   models: AudreyModel[];
   projects: AudreyProject[];
   skills: SkillSummary[];
@@ -1240,105 +1287,115 @@ function ConversationThread({
     }
   }
 
+  const conversationHeader = (
+    <header className="thread-header">
+      <div className="thread-title">
+        {conversationProject ? (
+          <nav className="project-breadcrumb" aria-label="Project breadcrumb">
+            <button type="button" onClick={() => onOpenProject(conversationProject.id)}>{conversationProject.name}</button>
+            <span aria-hidden="true">›</span>
+            <span>Conversation</span>
+          </nav>
+        ) : (
+          <span>Conversation</span>
+        )}
+        {editingTitle ? (
+          <form className="rename-conversation" onSubmit={(event) => void renameConversation(event)}>
+            <input
+              aria-label="Conversation title"
+              value={titleDraft}
+              onChange={(event) => setTitleDraft(event.target.value)}
+              maxLength={200}
+              autoFocus
+            />
+            <button type="submit" disabled={mutation !== null}>Save</button>
+            <button
+              type="button"
+              onClick={() => {
+                setTitleDraft(conversation.title);
+                setEditingTitle(false);
+              }}
+            >
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <div className="conversation-title-display">
+            <h1>{conversation.title || "New conversation"}</h1>
+            <button
+              className="conversation-title-button"
+              type="button"
+              onClick={() => setEditingTitle(true)}
+              aria-label="Rename conversation"
+            >
+              Edit
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="thread-controls">
+        <div className="conversation-actions">
+          <button
+            type="button"
+            onClick={() => void toggleArchived()}
+            disabled={runActive || mutation !== null}
+          >
+            {archived ? "Restore" : "Archive"}
+          </button>
+          <button
+            className={confirmingDelete ? "danger-button confirming-delete" : "danger-button"}
+            type="button"
+            aria-label={confirmingDelete ? "Confirm delete conversation" : "Delete conversation"}
+            aria-pressed={confirmingDelete}
+            title={confirmingDelete ? "Click again to delete" : "Delete conversation"}
+            onClick={() => {
+              if (confirmingDelete) {
+                void removeConversation();
+              } else {
+                setConfirmingDelete(true);
+              }
+            }}
+            onBlur={() => setConfirmingDelete(false)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setConfirmingDelete(false);
+            }}
+            disabled={runActive || mutation !== null}
+          >
+            {mutation === "delete" ? "Deleting…" : confirmingDelete ? "✓" : "Delete"}
+          </button>
+        </div>
+      </div>
+      {compactNavigation && mutationError ? (
+        <p className="conversation-mutation-error" role="alert">{mutationError}</p>
+      ) : null}
+    </header>
+  );
+  const projectPicker = (
+    <label className="composer-rail-control composer-project-picker">
+      <span className="composer-control-label">Project</span>
+      <select
+        value={conversation.project_id ?? ""}
+        onChange={(event) => void moveToProject(event.target.value || null)}
+        disabled={runActive || mutation !== null}
+        aria-label="Move conversation to project"
+      >
+        <option value="">No project</option>
+        {conversation.project_id && !conversationProject ? (
+          <option value={conversation.project_id}>Current project</option>
+        ) : null}
+        {projects.map((project) => (
+          <option key={project.id} value={project.id}>{project.name}</option>
+        ))}
+      </select>
+    </label>
+  );
+
   return (
     <>
+      {compactNavigation && menuHost ? createPortal(conversationHeader, menuHost) : null}
       <div className="thread-header-shell">
-        <header className="thread-header">
-          <div className="thread-title">
-            {conversationProject ? (
-              <nav className="project-breadcrumb" aria-label="Project breadcrumb">
-                <button type="button" onClick={() => onOpenProject(conversationProject.id)}>{conversationProject.name}</button>
-                <span aria-hidden="true">›</span>
-                <span>Conversation</span>
-              </nav>
-            ) : (
-              <span>Conversation</span>
-            )}
-            {editingTitle ? (
-              <form className="rename-conversation" onSubmit={(event) => void renameConversation(event)}>
-                <input
-                  aria-label="Conversation title"
-                  value={titleDraft}
-                  onChange={(event) => setTitleDraft(event.target.value)}
-                  maxLength={200}
-                  autoFocus
-                />
-                <button type="submit" disabled={mutation !== null}>Save</button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTitleDraft(conversation.title);
-                    setEditingTitle(false);
-                  }}
-                >
-                  Cancel
-                </button>
-              </form>
-            ) : (
-              <div className="conversation-title-display">
-                <h1>{conversation.title || "New conversation"}</h1>
-                <button
-                  className="conversation-title-button"
-                  type="button"
-                  onClick={() => setEditingTitle(true)}
-                  aria-label="Rename conversation"
-                >
-                  Edit
-                </button>
-              </div>
-            )}
-          </div>
-          <div className="thread-controls">
-            <div className="conversation-actions">
-              <label className="project-move-control">
-                <span>Project</span>
-                <select
-                  value={conversation.project_id ?? ""}
-                  onChange={(event) => void moveToProject(event.target.value || null)}
-                  disabled={runActive || mutation !== null}
-                  aria-label="Move conversation to project"
-                >
-                  <option value="">No project</option>
-                  {conversation.project_id && !conversationProject ? (
-                    <option value={conversation.project_id}>Current project</option>
-                  ) : null}
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>{project.name}</option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                onClick={() => void toggleArchived()}
-                disabled={runActive || mutation !== null}
-              >
-                {archived ? "Restore" : "Archive"}
-              </button>
-              <button
-                className={confirmingDelete ? "danger-button confirming-delete" : "danger-button"}
-                type="button"
-                aria-label={confirmingDelete ? "Confirm delete conversation" : "Delete conversation"}
-                aria-pressed={confirmingDelete}
-                title={confirmingDelete ? "Click again to delete" : "Delete conversation"}
-                onClick={() => {
-                  if (confirmingDelete) {
-                    void removeConversation();
-                  } else {
-                    setConfirmingDelete(true);
-                  }
-                }}
-                onBlur={() => setConfirmingDelete(false)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") setConfirmingDelete(false);
-                }}
-                disabled={runActive || mutation !== null}
-              >
-                {mutation === "delete" ? "Deleting…" : confirmingDelete ? "✓" : "Delete"}
-              </button>
-            </div>
-          </div>
-        </header>
-        {mutationError ? <p className="conversation-mutation-error" role="alert">{mutationError}</p> : null}
+        {!compactNavigation ? conversationHeader : null}
+        {mutationError && (!compactNavigation || !menuOpen) ? <p className="conversation-mutation-error" role="alert">{mutationError}</p> : null}
         {recoveredRunId ? (
           <div className="recovered-run" role="status" aria-label="Audrey is answering">
             <span className="recovered-run-orb" aria-hidden="true" />
@@ -1364,6 +1421,7 @@ function ConversationThread({
         <AudreyThread
           key={threadRevision}
           conversationId={conversation.id}
+          projectPicker={projectPicker}
           models={models}
           skills={skills}
           canBrowseDirectModels={canBrowseDirectModels}
@@ -1384,6 +1442,7 @@ function ConversationThread({
 
 function AudreyThread({
   conversationId,
+  projectPicker,
   models,
   skills,
   canBrowseDirectModels,
@@ -1398,6 +1457,7 @@ function AudreyThread({
   onRunStarted,
 }: {
   conversationId: string;
+  projectPicker: ReactNode;
   canBrowseDirectModels: boolean;
   models: AudreyModel[];
   skills: SkillSummary[];
@@ -2053,14 +2113,7 @@ function AudreyThread({
             className="composer-dock"
             data-picker-open={attachmentPickerOpen || skillPickerOpen}
           >
-            <ThreadPrimitive.ScrollToBottom
-              className="scroll-bottom"
-              aria-label="Scroll to latest message"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 5v14m5.5-5.5L12 19l-5.5-5.5" />
-              </svg>
-            </ThreadPrimitive.ScrollToBottom>
+            <ScrollToLatest />
             {readOnly ? (
               <p className="archived-notice" role="status">
                 This conversation is archived. Restore it to continue.
@@ -2184,6 +2237,7 @@ function AudreyThread({
                       disabled={modeDisabled || attachmentBusy || retrying}
                       onChange={changeModel}
                     />
+                    {projectPicker}
                     <button
                       ref={attachButtonRef}
                       className="composer-rail-control attach-button"

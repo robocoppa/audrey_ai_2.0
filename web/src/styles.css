@@ -345,6 +345,12 @@ button:disabled {
   display: none;
 }
 
+.conversation-thread-slot > .thread-root,
+.conversation-thread-slot > .audrey-loader,
+.conversation-thread-slot > .thread-loading {
+  grid-row: 2;
+}
+
 .thread-header {
   display: flex;
   align-items: center;
@@ -825,6 +831,10 @@ a:focus-visible {
     rgb(7 16 31 / 96%) 2rem,
     var(--surface-deep) 100%
   );
+}
+
+.composer-dock:has(.composer-model-picker) {
+  margin-block: auto;
 }
 
 .composer-dock[data-picker-open="true"] {
@@ -1313,7 +1323,7 @@ a:focus-visible {
 .composer-control-rail {
   display: grid;
   min-width: 0;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.45rem;
   padding-top: 0.5rem;
   border-top: 1px solid var(--border);
@@ -1708,7 +1718,8 @@ a:focus-visible {
   transform: none;
 }
 
-.compact-model-picker select {
+.compact-model-picker select,
+.composer-project-picker select {
   width: 100%;
   min-width: 0;
   padding: 0 1.2rem 0 0;
@@ -1723,7 +1734,8 @@ a:focus-visible {
   text-overflow: ellipsis;
 }
 
-.compact-model-picker:focus-within {
+.compact-model-picker:focus-within,
+.composer-project-picker:focus-within {
   border-color: var(--border-strong);
   background: var(--surface-active);
   box-shadow: var(--focus-glow);
@@ -4708,10 +4720,6 @@ a:focus-visible {
   .composer-control-rail {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
-  .compact-model-picker-shell {
-    grid-column: 1 / -1;
-  }
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -4744,6 +4752,11 @@ a:focus-visible {
   margin: 0 0.4rem 0.75rem;
   padding: 0 0 0.7rem;
   border-bottom: 1px solid var(--border);
+}
+
+.projects-sidebar > div {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .projects-sidebar > header {
@@ -5502,26 +5515,16 @@ a:focus-visible {
 }
 
 
-/* Compact navigation keeps the workspace full-height while history is a drawer. */
+/* Compact navigation shares one left drawer for menu actions and history. */
 html,
 body,
 #root {
   overscroll-behavior-y: none;
 }
 
-.session-menu {
-  position: relative;
-}
-
-.session-menu-panel {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-}
-
-.session-menu-toggle,
+.topbar-mobile-menu,
+.topbar-mobile-new-chat,
 .compact-menu-label,
-.workspace-mobile-navigation,
 .conversation-drawer-header {
   display: none;
 }
@@ -5560,78 +5563,75 @@ body,
 
 @media (max-width: 1100px) {
   .topbar {
-    display: flex;
-    justify-content: space-between;
-    gap: 1rem;
+    display: grid;
+    grid-template-columns: 2.65rem minmax(0, 1fr) 2.65rem;
+    align-items: center;
+    gap: 0.85rem;
     padding: 0.65rem 1rem;
   }
 
   .brand {
     width: auto;
-    justify-content: flex-start;
+    justify-content: center;
   }
 
   .brand-product,
-  .session-account-name {
+  .session-account-name,
+  .session-controls:not(.session-controls-drawer) {
     display: none;
   }
 
-  .topbar > .session-controls {
-    padding-right: 0;
+  .topbar-mobile-menu,
+  .topbar-mobile-new-chat {
+    display: grid;
   }
 
-  .session-menu-toggle {
+  .workspace-header-button {
     display: grid;
     width: 2.65rem;
     height: 2.65rem;
     place-items: center;
     padding: 0;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     border-radius: 0.75rem;
-    background: var(--surface-raised);
+    background: rgb(52 153 250 / 9%);
     color: var(--text-soft);
   }
 
-  .session-menu-panel {
-    position: absolute;
-    z-index: 35;
-    top: calc(100% + 0.6rem);
-    right: 0;
-    display: none;
-    width: min(17rem, calc(100vw - 2rem));
-    max-height: calc(100dvh - 5.5rem);
-    overflow-y: auto;
-    overscroll-behavior: contain;
+  .workspace-header-button:hover,
+  .workspace-header-button:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--surface-active);
+    color: var(--accent);
+    box-shadow: var(--focus-glow);
+  }
+
+  .session-controls-drawer {
     align-items: stretch;
-    padding: 0.6rem;
-    border: 1px solid var(--border-strong);
-    border-radius: 0.85rem;
-    background: var(--surface-raised);
-    box-shadow: var(--shadow-md);
-  }
-
-  .session-menu-panel.is-open {
-    display: flex;
     flex-direction: column;
-  }
-
-  .session-menu-panel .topbar-files-action {
-    margin: 0;
-    padding: 0 0 0.6rem;
-    border-right: 0;
+    gap: 0.45rem;
+    margin: 0 0.4rem 0.75rem;
+    padding-bottom: 0.75rem;
     border-bottom: 1px solid var(--border);
   }
 
-  .session-menu-panel .account-actions {
+  .session-controls-drawer .topbar-files-action {
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .session-controls-drawer .account-actions {
     align-items: stretch;
     flex-direction: column;
     gap: 0.3rem;
   }
 
-  .session-menu-panel .my-files-button,
-  .session-menu-panel .session-name,
-  .session-menu-panel .admin-button,
-  .session-menu-panel .logout-button {
+  .session-controls-drawer .my-files-button,
+  .session-controls-drawer .session-name,
+  .session-controls-drawer .admin-button,
+  .session-controls-drawer .logout-button {
     display: flex;
     width: 100%;
     max-width: none;
@@ -5647,43 +5647,15 @@ body,
   .compact-menu-label {
     display: inline;
   }
-}
 
-@media (max-width: 900px) {
   .workspace {
     position: relative;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
   }
 
-  .workspace-mobile-navigation {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding: 0.35rem 0.8rem;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface-deep);
-  }
-
-  .workspace-mobile-navigation button {
-    display: inline-flex;
-    min-height: 2.5rem;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.45rem 0.65rem;
-    border: 1px solid transparent;
-    border-radius: 0.6rem;
-    background: transparent;
-    color: var(--text-soft);
-    font-size: 0.8rem;
-    font-weight: 650;
-  }
-
-  .workspace-mobile-navigation .workspace-new-conversation {
-    border-color: rgb(99 181 255 / 25%);
-    background: rgb(52 153 250 / 9%);
-    color: var(--accent);
+  .sidebar-primary-action {
+    display: none;
   }
 
   .conversation-drawer-backdrop {
@@ -5756,7 +5728,7 @@ body,
   .workspace-mobile-error {
     position: absolute;
     z-index: 6;
-    top: 3.25rem;
+    top: 0.8rem;
     right: 0.8rem;
     left: 0.8rem;
     margin: 0;
@@ -5769,7 +5741,7 @@ body,
   }
 
   .chat-column {
-    grid-row: 2;
+    grid-row: 1;
   }
 
   .thread-header {
@@ -5788,16 +5760,63 @@ body,
     flex-wrap: wrap;
   }
 
-  .project-move-control {
-    min-width: 0;
-    width: auto;
+  .conversation-menu-actions:empty {
+    display: none;
+  }
+
+  .conversation-menu-actions {
+    margin: 0 0.4rem 0.75rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .conversation-menu-actions .thread-header {
+    padding: 0;
+  }
+
+  .conversation-menu-actions .conversation-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .conversation-menu-actions .conversation-actions button {
+    min-height: 2.75rem;
+  }
+
+  .thread-header-shell:empty {
+    display: none;
+  }
+
+  .sidebar .projects-sidebar > div {
+    overflow: visible;
+  }
+
+  .projects-sidebar h2 {
     flex: 1;
   }
 
-  .project-move-control select {
-    min-width: 0;
-    max-width: min(14rem, 100%);
-    flex: 1;
+  .projects-sidebar > header .projects-category-toggle {
+    width: 100%;
+    min-height: 2.65rem;
+    justify-content: space-between;
+    padding: 0.45rem 0.35rem;
+    color: var(--text-soft);
+    font-size: 0.85rem;
+    font-weight: 650;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .sidebar-chats-heading {
+    margin: 0 0.4rem 0.65rem;
+    color: var(--text-soft);
+    font-size: 0.85rem;
+    font-weight: 650;
+  }
+
+  .composer-control-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .conversation-title-display h1 {
@@ -5851,10 +5870,6 @@ body,
   .conversation-actions button {
     min-height: 2.35rem;
     padding: 0.45rem 0.55rem;
-  }
-
-  .project-move-control > span {
-    display: none;
   }
 
   .composer {

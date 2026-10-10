@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -212,72 +212,104 @@ describe("App", () => {
     );
   });
 
-  it("dismisses the header menu outside it and with Escape, restoring keyboard focus", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockImplementation((path: string) => {
-      const payload = path === "/api/me"
-        ? {
-            id: "usr_example",
-            email: "alice@example.com",
-            display_name: "Alice",
-            role: "user",
-            status: "active",
-            groups: ["users"],
-            auth_provider: "cloudflare_access",
-          }
-        : path === "/api/me/preferences"
-          ? DEFAULT_PREFERENCES
-          : path === "/api/files"
-            ? {
-                items: [],
-                total_bytes: 0,
-                server_time: "2026-09-01T00:00:00+00:00",
-                limits: {
-                  max_upload_bytes: 50_000_000,
-                  max_user_bytes: 1_000_000_000,
-                  allowed_extensions: [".txt"],
-                  chunked_max_bytes: 2_000_000_000,
-                  part_size: 8_000_000,
-                  fetch_hosts: [],
-                  max_images_per_turn: 4,
-                },
-              }
-            : collectionPayload(path);
-      return Promise.resolve(new Response(JSON.stringify(payload), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
+  it.each(["user", "admin"] as const)(
+    "opens files and account dialogs from unified mobile navigation for a %s",
+    async (role) => {
+      vi.stubGlobal("innerWidth", 390);
+      vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+        matches: query === "(max-width: 1100px)",
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })));
+      vi.stubGlobal("fetch", vi.fn().mockImplementation((path: string, request?: RequestInit) => {
+        const payload = path === "/api/me"
+          ? {
+              id: "usr_example",
+              email: "alice@example.com",
+              display_name: "Alice",
+              role,
+              status: "active",
+              groups: role === "admin" ? ["admins", "users"] : ["users"],
+              auth_provider: "cloudflare_access",
+            }
+          : path === "/api/me/preferences"
+            ? DEFAULT_PREFERENCES
+            : path === "/api/conversations" && request?.method === "POST"
+              ? {
+                  id: "con_mobile",
+                  title: "New conversation",
+                  default_mode: "auto",
+                  default_model_id: "auto",
+                  created_at: "2026-09-01T00:00:00+00:00",
+                  updated_at: "2026-09-01T00:00:00+00:00",
+                  last_message_at: null,
+                  archived_at: null,
+                }
+              : path === "/api/files"
+                ? {
+                    items: [],
+                    total_bytes: 0,
+                    server_time: "2026-09-01T00:00:00+00:00",
+                    limits: {
+                      max_upload_bytes: 50_000_000,
+                      max_user_bytes: 1_000_000_000,
+                      allowed_extensions: [".txt"],
+                      chunked_max_bytes: 2_000_000_000,
+                      part_size: 8_000_000,
+                      fetch_hosts: [],
+                      max_images_per_turn: 4,
+                    },
+                  }
+                : collectionPayload(path);
+        return Promise.resolve(new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
       }));
-    }));
-    render(<App />);
+      render(<App />);
 
-    const toggle = await screen.findByRole("button", { name: "Menu" });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: "My Files" })).toHaveFocus();
+      const toggle = await screen.findByRole("button", { name: "Menu" });
+      const topbar = toggle.closest("header");
+      expect(toggle).toHaveAttribute("id", "app-mobile-menu-toggle");
+      expect(document.querySelector(".topbar-mobile-menu")).toContainElement(toggle);
+      expect(document.querySelector(".topbar-mobile-new-chat")).toContainElement(
+        screen.getByRole("button", { name: "New chat" }),
+      );
 
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(toggle).toHaveFocus();
+      fireEvent.click(toggle);
+      const navigation = screen.getByRole("dialog", { name: "Conversations" });
+      const actions = within(navigation);
+      expect(actions.getByRole("link", { name: "Log out" })).toHaveAttribute("href", "/cdn-cgi/access/logout");
+      expect(actions.queryByRole("button", { name: "Admin Panel" }) !== null).toBe(role === "admin");
+      fireEvent.click(actions.getByRole("button", { name: "My Files" }));
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      const files = await screen.findByRole("dialog", { name: "Your files" });
+      expect(topbar).not.toContainElement(files);
+      fireEvent.click(screen.getByRole("button", { name: "Close files" }));
+      expect(toggle).toHaveFocus();
 
-    fireEvent.click(toggle);
-    fireEvent.pointerDown(screen.getByRole("link", { name: "Audrey home" }));
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
+      fireEvent.click(toggle);
+      fireEvent.click(actions.getByRole("button", { name: "Open account settings" }));
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      const settings = await screen.findByRole("dialog", { name: "Settings" });
+      expect(topbar).not.toContainElement(settings);
+      expect(screen.getByRole("button", { name: "Close settings" })).toHaveFocus();
+      fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+      expect(toggle).toHaveFocus();
 
-    fireEvent.click(toggle);
-    fireEvent.click(screen.getByRole("button", { name: "My Files" }));
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(await screen.findByRole("dialog", { name: "Your files" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Close files" }));
-    expect(toggle).toHaveFocus();
-
-    fireEvent.click(toggle);
-    fireEvent.click(screen.getByRole("button", { name: "Open account settings" }));
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(await screen.findByRole("dialog", { name: "Settings" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
-    expect(toggle).toHaveFocus();
-    expect(screen.queryByRole("button", { name: "Admin Panel" })).not.toBeInTheDocument();
-  });
+      if (role === "admin") {
+        fireEvent.click(toggle);
+        fireEvent.click(actions.getByRole("button", { name: "Admin Panel" }));
+        expect(toggle).toHaveAttribute("aria-expanded", "false");
+        const administration = await screen.findByRole("dialog", { name: "Access control" });
+        expect(topbar).not.toContainElement(administration);
+        fireEvent.click(screen.getByRole("button", { name: "Close administration" }));
+        expect(toggle).toHaveFocus();
+      }
+    },
+  );
 
   it("reports degraded capabilities without blocking the workspace", async () => {
     const fetchMock = vi.fn().mockImplementation((path: string) => {

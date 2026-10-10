@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import { AudreyLoader } from "./AudreyLoader";
 import { AdminPanel } from "./AdminPanel";
@@ -77,6 +77,11 @@ export function App() {
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [sessionRevision, setSessionRevision] = useState(0);
   const [filesOpen, setFilesOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const [mobileMenuHost, setMobileMenuHost] = useState<HTMLDivElement | null>(null);
+  const [mobileNewChatHost, setMobileNewChatHost] = useState<HTMLDivElement | null>(null);
   const [showAccessHandoff, setShowAccessHandoff] = useState(hasCloudflareAccessMessage);
 
   useEffect(() => {
@@ -197,6 +202,25 @@ export function App() {
     return <SessionTimeout session={session} onRetry={retrySession} />;
   }
 
+  const sessionActions = {
+    user: session.user,
+    capabilityHealth,
+    healthUnavailable,
+    onOpenFiles: () => {
+      setNavigationOpen(false);
+      setFilesOpen(true);
+    },
+    onOpenSettings: () => {
+      setNavigationOpen(false);
+      setSettingsOpen(true);
+    },
+    onOpenAdministration: () => {
+      setNavigationOpen(false);
+      setAdminOpen(true);
+    },
+    onNavigate: () => setNavigationOpen(false),
+  };
+
   return (
     <div className="app-shell app-shell-ready">
       <svg className="brand-filter" aria-hidden="true">
@@ -207,19 +231,44 @@ export function App() {
           />
         </filter>
       </svg>
-      <header className="topbar">
+      <header className="topbar" inert={navigationOpen ? true : undefined}>
+        <div className="topbar-mobile-menu" ref={setMobileMenuHost} />
         <a className="brand" href="/" aria-label="Audrey home">
           <span className="brand-wordmark" aria-hidden="true">
             <img src={builtryteWordmark} alt="" />
           </span>
           <span className="brand-product">Ask Audrey</span>
         </a>
-        <ReadySessionControls
+        <div className="topbar-mobile-new-chat" ref={setMobileNewChatHost} />
+        <SessionActions {...sessionActions} variant="header" />
+      </header>
+
+      <main className="native-main">
+        <Suspense fallback={<AudreyLoader fullscreen label="Loading Audrey workspace" />}>
+          <ChatWorkspace
+            key={workspaceRevision}
+            user={session.user}
+            preferences={session.preferences}
+            models={session.models}
+            skills={session.skills}
+            navigationOpen={navigationOpen}
+            onNavigationOpenChange={setNavigationOpen}
+            mobileMenuHost={mobileMenuHost}
+            mobileNewChatHost={mobileNewChatHost}
+            menuActions={<SessionActions {...sessionActions} variant="drawer" />}
+          />
+        </Suspense>
+      </main>
+      {filesOpen ? (
+        <FileManager onClose={() => {
+          setFilesOpen(false);
+          restoreHeaderActionFocus("app-my-files-action");
+        }} />
+      ) : null}
+      {settingsOpen ? (
+        <AccountSettings
           user={session.user}
           preferences={session.preferences}
-          capabilityHealth={capabilityHealth}
-          healthUnavailable={healthUnavailable}
-          onOpenFiles={() => setFilesOpen(true)}
           onUserChange={(user) => {
             setSession((current) =>
               current.status === "ready" ? { ...current, user } : current,
@@ -249,32 +298,27 @@ export function App() {
               })
               .catch(() => undefined);
           }}
-          onAdministrationChanged={() => {
+          onClose={() => {
+            setSettingsOpen(false);
+            restoreHeaderActionFocus("app-account-action");
+          }}
+        />
+      ) : null}
+      {adminOpen ? (
+        <AdminPanel
+          currentUserId={session.user.id}
+          onChanged={() => {
             void listModels().then(({ items }) => {
               setSession((current) =>
                 current.status === "ready" ? { ...current, models: items } : current,
               );
             });
           }}
+          onClose={() => {
+            setAdminOpen(false);
+            restoreHeaderActionFocus("app-administration-action");
+          }}
         />
-      </header>
-
-      <main className="native-main">
-        <Suspense fallback={<AudreyLoader fullscreen label="Loading Audrey workspace" />}>
-          <ChatWorkspace
-            key={workspaceRevision}
-            user={session.user}
-            preferences={session.preferences}
-            models={session.models}
-            skills={session.skills}
-          />
-        </Suspense>
-      </main>
-      {filesOpen ? (
-        <FileManager onClose={() => {
-          setFilesOpen(false);
-          restoreHeaderActionFocus("app-my-files-action");
-        }} />
       ) : null}
     </div>
   );
@@ -358,190 +402,96 @@ function SessionTimeout({
   );
 }
 
-function ReadySessionControls({
+function SessionActions({
   user,
-  preferences,
   capabilityHealth,
   healthUnavailable,
+  variant,
   onOpenFiles,
-  onUserChange,
-  onPreferencesChange,
-  onDataPurgeAttempted,
-  onAdministrationChanged,
+  onOpenSettings,
+  onOpenAdministration,
+  onNavigate,
 }: {
   user: CurrentUser;
-  preferences: UserPreferences;
   capabilityHealth: CapabilityHealth | null;
   healthUnavailable: boolean;
+  variant: "header" | "drawer";
   onOpenFiles: () => void;
-  onUserChange: (user: CurrentUser) => void;
-  onPreferencesChange: (preferences: UserPreferences) => void;
-  onDataPurgeAttempted: () => void;
-  onAdministrationChanged: () => void;
+  onOpenSettings: () => void;
+  onOpenAdministration: () => void;
+  onNavigate: () => void;
 }) {
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const menuToggleRef = useRef<HTMLButtonElement>(null);
-  const menuPanelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    menuPanelRef.current?.querySelector<HTMLElement>("button, a[href]")?.focus();
-    const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) {
-        setMenuOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setMenuOpen(false);
-        menuToggleRef.current?.focus();
-      }
-    };
-    const closeOnDesktop = () => {
-      if (window.innerWidth > 1100) setMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOutside);
-    window.addEventListener("keydown", closeOnEscape);
-    window.addEventListener("resize", closeOnDesktop);
-    return () => {
-      document.removeEventListener("pointerdown", closeOutside);
-      window.removeEventListener("keydown", closeOnEscape);
-      window.removeEventListener("resize", closeOnDesktop);
-    };
-  }, [menuOpen]);
-
+  const idPrefix = variant === "drawer" ? "app-drawer" : "app";
   const healthDetails = capabilityHealth
     ? `Chat: ${capabilityHealth.chat.status} · Tools: ${capabilityHealth.tools.status} · Knowledge: ${capabilityHealth.knowledge.status}`
     : undefined;
 
   return (
-    <div className="session-controls" role="group" aria-label="Session controls">
-      <div
-        className="session-menu"
-        ref={menuRef}
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget)) setMenuOpen(false);
-        }}
-      >
+    <div
+      className={`session-controls${variant === "drawer" ? " session-controls-drawer" : ""}`}
+      role="group"
+      aria-label={variant === "drawer" ? "Menu actions" : "Session controls"}
+    >
+      {capabilityHealth?.status === "unavailable" ? (
+        <span className="capability-badge capability-badge-unavailable" role="status" title={healthDetails}>
+          Models offline
+        </span>
+      ) : capabilityHealth?.status === "degraded" ? (
+        <span className="capability-badge" role="status" title={healthDetails}>
+          Some features degraded
+        </span>
+      ) : healthUnavailable ? (
+        <span className="capability-badge" role="status">
+          Status unavailable
+        </span>
+      ) : null}
+      <div className="topbar-files-action" role="group" aria-label="File actions">
         <button
-          id="app-session-menu-toggle"
-          className="session-menu-toggle"
+          id={`${idPrefix}-my-files-action`}
+          className="my-files-button"
           type="button"
-          ref={menuToggleRef}
-          aria-label="Menu"
-          aria-expanded={menuOpen}
-          aria-controls="app-session-menu"
-          onClick={() => setMenuOpen((current) => !current)}
+          onClick={onOpenFiles}
         >
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-            <path d={menuOpen ? "M6 6l12 12M6 18 18 6" : "M4 6h16M4 12h16M4 18h16"} />
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 7.5h7l2 2h9v8.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7.5Z" />
+            <path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1.5" />
           </svg>
+          <span>My Files</span>
         </button>
-        <div
-          id="app-session-menu"
-          className={`session-menu-panel${menuOpen ? " is-open" : ""}`}
-          ref={menuPanelRef}
-          role="group"
-          aria-label="Account and workspace actions"
-        >
-          {capabilityHealth?.status === "unavailable" ? (
-            <span className="capability-badge capability-badge-unavailable" role="status" title={healthDetails}>
-              Models offline
-            </span>
-          ) : capabilityHealth?.status === "degraded" ? (
-            <span className="capability-badge" role="status" title={healthDetails}>
-              Some features degraded
-            </span>
-          ) : healthUnavailable ? (
-            <span className="capability-badge" role="status">
-              Status unavailable
-            </span>
-          ) : null}
-          <div className="topbar-files-action" role="group" aria-label="File actions">
-            <button
-              id="app-my-files-action"
-              className="my-files-button"
-              type="button"
-              onClick={() => {
-                setMenuOpen(false);
-                onOpenFiles();
-              }}
-            >
-              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M3 7.5h7l2 2h9v8.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7.5Z" />
-                <path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1.5" />
-              </svg>
-              <span>My Files</span>
-            </button>
-          </div>
-          <div className="account-actions" role="group" aria-label="Signed in user">
-            <button
-              id="app-account-action"
-              className="session-name"
-              type="button"
-              aria-label="Open account settings"
-              title={`${user.display_name || user.email} · Account settings`}
-              onClick={() => {
-                setMenuOpen(false);
-                setSettingsOpen(true);
-              }}
-            >
-              <span className="session-account-name">{firstName(user)}</span>
-              <span className="compact-menu-label">Account settings</span>
-            </button>
-            {user.groups.includes("admins") ? (
-              <button
-                id="app-administration-action"
-                className="admin-button"
-                type="button"
-                onClick={() => {
-                  setMenuOpen(false);
-                  setAdminOpen(true);
-                }}
-              >
-                Admin Panel
-              </button>
-            ) : null}
-            {user.auth_provider === "cloudflare_access" ? (
-              <a className="logout-button" href="/cdn-cgi/access/logout" onClick={() => setMenuOpen(false)}>Log out</a>
-            ) : null}
-          </div>
-        </div>
       </div>
-      {settingsOpen ? (
-        <AccountSettings
-          user={user}
-          preferences={preferences}
-          onUserChange={onUserChange}
-          onPreferencesChange={onPreferencesChange}
-          onDataPurgeAttempted={onDataPurgeAttempted}
-          onClose={() => {
-            setSettingsOpen(false);
-            restoreHeaderActionFocus("app-account-action");
-          }}
-        />
-      ) : null}
-      {adminOpen ? (
-        <AdminPanel
-          currentUserId={user.id}
-          onChanged={onAdministrationChanged}
-          onClose={() => {
-            setAdminOpen(false);
-            restoreHeaderActionFocus("app-administration-action");
-          }}
-        />
-      ) : null}
+      <div className="account-actions" role="group" aria-label="Signed in user">
+        <button
+          id={`${idPrefix}-account-action`}
+          className="session-name"
+          type="button"
+          aria-label="Open account settings"
+          title={`${user.display_name || user.email} · Account settings`}
+          onClick={onOpenSettings}
+        >
+          <span className="session-account-name">{firstName(user)}</span>
+          <span className="compact-menu-label">Account settings</span>
+        </button>
+        {user.groups.includes("admins") ? (
+          <button
+            id={`${idPrefix}-administration-action`}
+            className="admin-button"
+            type="button"
+            onClick={onOpenAdministration}
+          >
+            Admin Panel
+          </button>
+        ) : null}
+        {user.auth_provider === "cloudflare_access" ? (
+          <a className="logout-button" href="/cdn-cgi/access/logout" onClick={onNavigate}>Log out</a>
+        ) : null}
+      </div>
     </div>
   );
 }
 
 function restoreHeaderActionFocus(actionId: string) {
   document.getElementById(
-    window.innerWidth <= 1100 ? "app-session-menu-toggle" : actionId,
+    window.innerWidth <= 1100 ? "app-mobile-menu-toggle" : actionId,
   )?.focus();
 }
 
