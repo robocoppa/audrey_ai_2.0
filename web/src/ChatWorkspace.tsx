@@ -40,6 +40,7 @@ import localPortrait from "./assets/models/localModel.png";
 
 import { AudreyLoader } from "./AudreyLoader";
 import { ScrollToLatest } from "./ScrollToLatest";
+import { SwipeConversationRow } from "./SwipeConversationRow";
 import {
   cancelRun,
   createConversation,
@@ -172,12 +173,14 @@ export function ChatWorkspace({
   mobileMenuHost,
   mobileNewChatHost,
   menuActions,
+  menuFooter,
 }: {
   navigationOpen: boolean;
   onNavigationOpenChange: (open: boolean) => void;
   mobileMenuHost: HTMLElement | null;
   mobileNewChatHost: HTMLElement | null;
   menuActions: ReactNode;
+  menuFooter: ReactNode;
   user: CurrentUser;
   preferences: UserPreferences;
   models: AudreyModel[];
@@ -186,7 +189,6 @@ export function ChatWorkspace({
   const [compactNavigation, setCompactNavigation] = useState(() =>
     window.matchMedia?.("(max-width: 1100px)").matches ?? false);
   const [projectsExpanded, setProjectsExpanded] = useState(false);
-  const [conversationMenuHost, setConversationMenuHost] = useState<HTMLDivElement | null>(null);
   const navigationRef = useRef<HTMLElement>(null);
   const navigationToggleRef = useRef<HTMLButtonElement>(null);
   const lastFocusedRef = useRef<HTMLElement | null>(null);
@@ -214,7 +216,7 @@ export function ChatWorkspace({
         : document.activeElement;
       const focusInHistory = focused instanceof HTMLElement && navigationRef.current?.contains(focused);
       const focusInCompactControls = focused instanceof HTMLElement
-        && focused.closest(".topbar-mobile-menu, .topbar-mobile-new-chat, .conversation-drawer-header, .session-controls-drawer, .conversation-menu-actions, .projects-category-toggle");
+        && focused.closest(".topbar-mobile-menu, .topbar-mobile-new-chat, .conversation-drawer-header, .session-controls-drawer, .mobile-menu-footer, .projects-category-toggle");
       const focusInDesktopActions = focused instanceof HTMLElement
         && focused.closest(".session-controls:not(.session-controls-drawer)");
       setCompactNavigation(event.matches);
@@ -287,6 +289,7 @@ export function ChatWorkspace({
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const listKeyRef = useRef("");
   const selectedIdRef = useRef<string | null>(null);
@@ -621,6 +624,19 @@ export function ChatWorkspace({
     openConversation(conversation);
   }
 
+  async function archiveFromSidebar(conversation: Conversation) {
+    setArchivingId(conversation.id);
+    setError("");
+    try {
+      await updateConversation(conversation.id, { archived: conversation.archived_at === null });
+      removeFromCurrentView(conversation.id, true);
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setArchivingId(null);
+    }
+  }
+
   async function deleteFromSidebar(conversationId: string) {
     setDeletingId(conversationId);
     setError("");
@@ -754,246 +770,270 @@ export function ChatWorkspace({
         inert={compactNavigation && !navigationOpen ? true : undefined}
       >
         <div className="conversation-drawer-header">
-          <strong>Menu</strong>
+          <strong className="drawer-user-name" title={user.display_name || user.email}>
+            {user.display_name.trim() || user.email.split("@", 1)[0]}
+          </strong>
           <button className="conversation-drawer-close" type="button" aria-label="Close conversation history" onClick={closeNavigation}>
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
               <path d="M6 6l12 12M6 18 18 6" />
             </svg>
           </button>
         </div>
-        {compactNavigation ? (
-          <>
-            {menuActions}
-            <div className="conversation-menu-actions" ref={setConversationMenuHost} />
-          </>
-        ) : null}
-        <div className="sidebar-primary-action">
-          <button
-            className="new-conversation"
-            type="button"
-            onClick={startConversation}
-            disabled={creating || loading || catalogUnavailable}
-          >
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            <span>{creating ? "Creating…" : "New conversation"}</span>
-          </button>
-        </div>
-
-        <section className="projects-sidebar" aria-labelledby="projects-sidebar-title">
-          <header>
-            <h2 id="projects-sidebar-title">
-              {compactNavigation ? (
-                <button
-                  className="projects-category-toggle"
-                  type="button"
-                  aria-expanded={projectsExpanded}
-                  aria-controls="sidebar-projects"
-                  onClick={() => setProjectsExpanded((expanded) => !expanded)}
-                >
-                  <span>Projects</span>
-                  <span aria-hidden="true">{projectsExpanded ? "⌄" : "›"}</span>
-                </button>
-              ) : "Projects"}
-            </h2>
-            <button type="button" onClick={() => {
-              setNavigationOpen(false);
-              setNewProjectOpen(true);
-            }} aria-label="New project">
-              <span aria-hidden="true">＋</span>
-              <span>New</span>
+        <div className="sidebar-content">
+          {compactNavigation ? menuActions : null}
+          <div className="sidebar-primary-action">
+            <button
+              className="new-conversation"
+              type="button"
+              onClick={startConversation}
+              disabled={creating || loading || catalogUnavailable}
+            >
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              <span>{creating ? "Creating…" : "New conversation"}</span>
             </button>
-          </header>
-          <div id="sidebar-projects" hidden={compactNavigation && !projectsExpanded}>
-            {projectsLoading ? <p className="sidebar-status" role="status">Loading projects…</p> : null}
-            {!projectsLoading && projects.length === 0 ? (
-              <p className="sidebar-status">No projects yet.</p>
-            ) : null}
-            {projects.length ? (
-              <ul className="project-sidebar-list">
-                {projects.map((project) => {
-                  const expanded = expandedProjectId === project.id;
-                  const current = selectedProjectId === project.id;
-                  return (
-                    <li key={project.id} className={current ? "project-sidebar-row current" : "project-sidebar-row"}>
-                      <div className="project-sidebar-main">
-                        <button
-                          className="project-sidebar-link"
-                          type="button"
-                          onClick={() => openProject(project)}
-                          aria-current={current && selectedId === null ? "page" : undefined}
-                          title={project.name}
-                        >
-                          <span className="project-folder-icon" aria-hidden="true">◇</span>
-                          <span>{project.name}</span>
-                        </button>
-                        <button
-                          className="project-sidebar-toggle"
-                          type="button"
-                          onClick={() => {
-                            if (expanded) {
-                              setExpandedProjectId(null);
-                            } else {
-                              openProject(project);
-                            }
-                          }}
-                          aria-label={`${expanded ? "Collapse" : "Expand"} project ${project.name}`}
-                          aria-expanded={expanded}
-                        >
-                          <span aria-hidden="true">{expanded ? "⌄" : "›"}</span>
-                        </button>
-                      </div>
-                      {expanded ? (
-                        <nav className="project-conversation-list" aria-label={`${project.name} conversations`}>
-                          {projectConversationsLoading ? (
-                            <p className="sidebar-status" role="status">Loading conversations…</p>
-                          ) : null}
-                          {!projectConversationsLoading && projectHistoryConversations.length === 0 ? (
-                            <p className="sidebar-status">
-                              {searchQuery ? "No matching titles." : view === "archived" ? "No archived conversations." : "No conversations yet."}
-                            </p>
-                          ) : null}
-                          {projectHistoryConversations.map((conversation) => (
-                            <button
-                              key={conversation.id}
-                              className={conversation.id === selectedId ? "project-conversation active" : "project-conversation"}
-                              type="button"
-                              onClick={() => openConversation(conversation)}
-                              aria-current={conversation.id === selectedId ? "page" : undefined}
-                              title={conversation.title || "New conversation"}
-                            >
-                              <span>{conversation.title || "New conversation"}</span>
-                              <small>{modelLabel(models, conversation)}</small>
-                            </button>
-                          ))}
-                          {projectConversationsNextCursor ? (
-                            <button
-                              className="project-load-more"
-                              type="button"
-                              onClick={() => void loadMoreProjectConversations()}
-                              disabled={projectConversationsLoading}
-                            >
-                              {projectConversationsLoading ? "Loading…" : "Load older"}
-                            </button>
-                          ) : null}
-                        </nav>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : null}
-            {projectsNextCursor ? (
-              <button className="project-load-more" type="button" onClick={() => void loadMoreProjects()} disabled={projectsLoadingMore}>
-                {projectsLoadingMore ? "Loading…" : "Load more projects"}
-              </button>
-            ) : null}
-            {projectsError ? <p className="sidebar-error">{projectsError}</p> : null}
           </div>
-        </section>
 
-        {compactNavigation ? <h2 className="sidebar-chats-heading">Chats</h2> : null}
-        <label className="conversation-search">
-          <span>Search titles</span>
-          <input
-            type="search"
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Search conversations"
-            maxLength={200}
-          />
-        </label>
-        <div className="conversation-views" aria-label="Conversation view">
-          <button
-            type="button"
-            aria-pressed={view === "active"}
-            onClick={() => changeView("active")}
-          >
-            Active
-          </button>
-          <button
-            type="button"
-            aria-pressed={view === "archived"}
-            onClick={() => changeView("archived")}
-          >
-            Archived
-          </button>
-        </div>
-
-        {!catalogUnavailable && loading ? (
-          <p className="sidebar-status">Loading conversations…</p>
-        ) : null}
-        {catalogUnavailable ? (
-          <p className="sidebar-error" role="alert">No models are enabled for this account.</p>
-        ) : null}
-        {!catalogUnavailable && !loading && historyConversations.length === 0 ? (
-          <p className="sidebar-status">
-            {searchQuery
-              ? "No matching conversation titles."
-              : view === "archived"
-                ? "No archived conversations."
-                : "No conversations yet."}
-          </p>
-        ) : null}
-        <nav className="conversation-list" aria-label="Conversation history">
-          {historyConversations.map((conversation) => (
-            <div className="conversation-row" key={conversation.id}>
-              <button
-                className={conversation.id === selectedId ? "conversation active" : "conversation"}
-                type="button"
-                onClick={() => openConversation(conversation)}
-                aria-current={conversation.id === selectedId ? "page" : undefined}
-              >
-                <span>{conversation.title || "New conversation"}</span>
-                <small>{modelLabel(models, conversation)}</small>
+          <section className="projects-sidebar" aria-labelledby="projects-sidebar-title">
+            <header>
+              <h2 id="projects-sidebar-title">
+                {compactNavigation ? (
+                  <button
+                    className="projects-category-toggle"
+                    type="button"
+                    aria-expanded={projectsExpanded}
+                    aria-controls="sidebar-projects"
+                    onClick={() => setProjectsExpanded((expanded) => !expanded)}
+                  >
+                    <span>Projects</span>
+                    <span aria-hidden="true">{projectsExpanded ? "⌄" : "›"}</span>
+                  </button>
+                ) : "Projects"}
+              </h2>
+              <button type="button" onClick={() => {
+                setNavigationOpen(false);
+                setNewProjectOpen(true);
+              }} aria-label="New project">
+                <span aria-hidden="true">＋</span>
+                <span>New</span>
               </button>
-              <button
-                className={confirmDeleteId === conversation.id
-                  ? "conversation-delete confirming-delete"
-                  : "conversation-delete"}
-                type="button"
-                aria-label={`${confirmDeleteId === conversation.id ? "Confirm delete" : "Delete"} conversation ${conversation.title || "New conversation"}`}
-                aria-pressed={confirmDeleteId === conversation.id}
-                title={confirmDeleteId === conversation.id ? "Click again to delete" : "Delete conversation"}
-                onClick={() => {
-                  if (confirmDeleteId === conversation.id) {
-                    void deleteFromSidebar(conversation.id);
-                  } else {
-                    setConfirmDeleteId(conversation.id);
-                  }
-                }}
-                onBlur={() => setConfirmDeleteId((current) =>
-                  current === conversation.id ? null : current)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") setConfirmDeleteId(null);
-                }}
-                disabled={deletingId !== null}
-              >
-                {deletingId === conversation.id ? (
-                  <span aria-hidden="true">…</span>
-                ) : confirmDeleteId === conversation.id ? (
-                  <span aria-hidden="true">✓</span>
-                ) : (
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v6m4-6v6" />
-                  </svg>
-                )}
-              </button>
+            </header>
+            <div id="sidebar-projects" hidden={compactNavigation && !projectsExpanded}>
+              {projectsLoading ? <p className="sidebar-status" role="status">Loading projects…</p> : null}
+              {!projectsLoading && projects.length === 0 ? (
+                <p className="sidebar-status">No projects yet.</p>
+              ) : null}
+              {projects.length ? (
+                <ul className="project-sidebar-list">
+                  {projects.map((project) => {
+                    const expanded = expandedProjectId === project.id;
+                    const current = selectedProjectId === project.id;
+                    return (
+                      <li key={project.id} className={current ? "project-sidebar-row current" : "project-sidebar-row"}>
+                        <div className="project-sidebar-main">
+                          <button
+                            className="project-sidebar-link"
+                            type="button"
+                            onClick={() => openProject(project)}
+                            aria-current={current && selectedId === null ? "page" : undefined}
+                            title={project.name}
+                          >
+                            <span className="project-folder-icon" aria-hidden="true">◇</span>
+                            <span>{project.name}</span>
+                          </button>
+                          <button
+                            className="project-sidebar-toggle"
+                            type="button"
+                            onClick={() => {
+                              if (expanded) {
+                                setExpandedProjectId(null);
+                              } else {
+                                openProject(project);
+                              }
+                            }}
+                            aria-label={`${expanded ? "Collapse" : "Expand"} project ${project.name}`}
+                            aria-expanded={expanded}
+                          >
+                            <span aria-hidden="true">{expanded ? "⌄" : "›"}</span>
+                          </button>
+                        </div>
+                        {expanded ? (
+                          <nav className="project-conversation-list" aria-label={`${project.name} conversations`}>
+                            {projectConversationsLoading ? (
+                              <p className="sidebar-status" role="status">Loading conversations…</p>
+                            ) : null}
+                            {!projectConversationsLoading && projectHistoryConversations.length === 0 ? (
+                              <p className="sidebar-status">
+                                {searchQuery ? "No matching titles." : view === "archived" ? "No archived conversations." : "No conversations yet."}
+                              </p>
+                            ) : null}
+                            {projectHistoryConversations.map((conversation) => (
+                              <SwipeConversationRow
+                                key={`${conversation.id}-${compactNavigation && navigationOpen}`}
+                                title={conversation.title || "New conversation"}
+                                enabled={compactNavigation && navigationOpen}
+                                disabled={deletingId !== null || archivingId !== null}
+                                archiveLabel={conversation.archived_at ? "Restore" : "Archive"}
+                                onArchive={() => void archiveFromSidebar(conversation)}
+                                onDelete={() => void deleteFromSidebar(conversation.id)}
+                              >
+                                <button
+                                  className={conversation.id === selectedId ? "project-conversation active" : "project-conversation"}
+                                  type="button"
+                                  onClick={() => openConversation(conversation)}
+                                  aria-current={conversation.id === selectedId ? "page" : undefined}
+                                  title={conversation.title || "New conversation"}
+                                >
+                                  <span>{conversation.title || "New conversation"}</span>
+                                  <small>{modelLabel(models, conversation)}</small>
+                                </button>
+                              </SwipeConversationRow>
+                            ))}
+                            {projectConversationsNextCursor ? (
+                              <button
+                                className="project-load-more"
+                                type="button"
+                                onClick={() => void loadMoreProjectConversations()}
+                                disabled={projectConversationsLoading}
+                              >
+                                {projectConversationsLoading ? "Loading…" : "Load older"}
+                              </button>
+                            ) : null}
+                          </nav>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+              {projectsNextCursor ? (
+                <button className="project-load-more" type="button" onClick={() => void loadMoreProjects()} disabled={projectsLoadingMore}>
+                  {projectsLoadingMore ? "Loading…" : "Load more projects"}
+                </button>
+              ) : null}
+              {projectsError ? <p className="sidebar-error">{projectsError}</p> : null}
             </div>
-          ))}
-        </nav>
-        {nextCursor ? (
-          <button
-            className="load-conversations"
-            type="button"
-            onClick={() => void loadMore()}
-            disabled={loadingMore}
-          >
-            {loadingMore ? "Loading…" : "Load older"}
-          </button>
-        ) : null}
-        {error ? <p className="sidebar-error" role="alert">{error}</p> : null}
+          </section>
+
+          {compactNavigation ? (
+            <>
+              <h2 className="sidebar-chats-heading">Chats</h2>
+              <p className="conversation-swipe-hint">Swipe right to {view === "archived" ? "restore" : "archive"}, left to delete</p>
+            </>
+          ) : null}
+          <label className="conversation-search">
+            <span>Search titles</span>
+            <input
+              type="search"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder="Search conversations"
+              maxLength={200}
+            />
+          </label>
+          <div className="conversation-views" aria-label="Conversation view">
+            <button
+              type="button"
+              aria-pressed={view === "active"}
+              onClick={() => changeView("active")}
+            >
+              Active
+            </button>
+            <button
+              type="button"
+              aria-pressed={view === "archived"}
+              onClick={() => changeView("archived")}
+            >
+              Archived
+            </button>
+          </div>
+
+          {!catalogUnavailable && loading ? (
+            <p className="sidebar-status">Loading conversations…</p>
+          ) : null}
+          {catalogUnavailable ? (
+            <p className="sidebar-error" role="alert">No models are enabled for this account.</p>
+          ) : null}
+          {!catalogUnavailable && !loading && historyConversations.length === 0 ? (
+            <p className="sidebar-status">
+              {searchQuery
+                ? "No matching conversation titles."
+                : view === "archived"
+                  ? "No archived conversations."
+                  : "No conversations yet."}
+            </p>
+          ) : null}
+          <nav className="conversation-list" aria-label="Conversation history">
+            {historyConversations.map((conversation) => (
+              <SwipeConversationRow
+                key={`${conversation.id}-${compactNavigation && navigationOpen}`}
+                title={conversation.title || "New conversation"}
+                enabled={compactNavigation && navigationOpen}
+                disabled={deletingId !== null || archivingId !== null}
+                archiveLabel={conversation.archived_at ? "Restore" : "Archive"}
+                onArchive={() => void archiveFromSidebar(conversation)}
+                onDelete={() => void deleteFromSidebar(conversation.id)}
+              >
+                <div className="conversation-row">
+                  <button
+                    className={conversation.id === selectedId ? "conversation active" : "conversation"}
+                    type="button"
+                    onClick={() => openConversation(conversation)}
+                    aria-current={conversation.id === selectedId ? "page" : undefined}
+                  >
+                    <span>{conversation.title || "New conversation"}</span>
+                    <small>{modelLabel(models, conversation)}</small>
+                  </button>
+                  {!compactNavigation ? <button
+                    className={confirmDeleteId === conversation.id
+                      ? "conversation-delete confirming-delete"
+                      : "conversation-delete"}
+                    type="button"
+                    aria-label={`${confirmDeleteId === conversation.id ? "Confirm delete" : "Delete"} conversation ${conversation.title || "New conversation"}`}
+                    aria-pressed={confirmDeleteId === conversation.id}
+                    title={confirmDeleteId === conversation.id ? "Click again to delete" : "Delete conversation"}
+                    onClick={() => {
+                      if (confirmDeleteId === conversation.id) {
+                        void deleteFromSidebar(conversation.id);
+                      } else {
+                        setConfirmDeleteId(conversation.id);
+                      }
+                    }}
+                    onBlur={() => setConfirmDeleteId((current) =>
+                      current === conversation.id ? null : current)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setConfirmDeleteId(null);
+                    }}
+                    disabled={deletingId !== null}
+                  >
+                    {deletingId === conversation.id ? (
+                      <span aria-hidden="true">…</span>
+                    ) : confirmDeleteId === conversation.id ? (
+                      <span aria-hidden="true">✓</span>
+                    ) : (
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v6m4-6v6" />
+                      </svg>
+                    )}
+                  </button> : null}
+                </div>
+              </SwipeConversationRow>
+            ))}
+          </nav>
+          {nextCursor ? (
+            <button
+              className="load-conversations"
+              type="button"
+              onClick={() => void loadMore()}
+              disabled={loadingMore}
+            >
+              {loadingMore ? "Loading…" : "Load older"}
+            </button>
+          ) : null}
+          {error ? <p className="sidebar-error" role="alert">{error}</p> : null}
+        </div>
+        {compactNavigation ? menuFooter : null}
       </aside>
 
       <section className="chat-column" aria-label="Audrey conversation" inert={compactNavigation && navigationOpen ? true : undefined}>
@@ -1030,8 +1070,6 @@ export function ChatWorkspace({
             <ConversationThread
               conversation={opened}
               compactNavigation={compactNavigation}
-              menuOpen={navigationOpen}
-              menuHost={compactNavigation && opened.id === selectedId ? conversationMenuHost : null}
               models={models}
               projects={projects}
               skills={skills}
@@ -1060,8 +1098,6 @@ export function ChatWorkspace({
 function ConversationThread({
   conversation,
   compactNavigation,
-  menuOpen,
-  menuHost,
   models,
   projects,
   skills,
@@ -1073,8 +1109,6 @@ function ConversationThread({
 }: {
   conversation: Conversation;
   compactNavigation: boolean;
-  menuOpen: boolean;
-  menuHost: HTMLElement | null;
   models: AudreyModel[];
   projects: AudreyProject[];
   skills: SkillSummary[];
@@ -1392,10 +1426,9 @@ function ConversationThread({
 
   return (
     <>
-      {compactNavigation && menuHost ? createPortal(conversationHeader, menuHost) : null}
       <div className="thread-header-shell">
         {!compactNavigation ? conversationHeader : null}
-        {mutationError && (!compactNavigation || !menuOpen) ? <p className="conversation-mutation-error" role="alert">{mutationError}</p> : null}
+        {mutationError ? <p className="conversation-mutation-error" role="alert">{mutationError}</p> : null}
         {recoveredRunId ? (
           <div className="recovered-run" role="status" aria-label="Audrey is answering">
             <span className="recovered-run-orb" aria-hidden="true" />

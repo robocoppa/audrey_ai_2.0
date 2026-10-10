@@ -5515,6 +5515,15 @@ a:focus-visible {
 }
 
 
+.sidebar-content {
+  display: contents;
+}
+
+.swipe-conversation-row {
+  position: relative;
+  min-width: 0;
+}
+
 /* Compact navigation shares one left drawer for menu actions and history. */
 html,
 body,
@@ -5524,9 +5533,51 @@ body,
 
 .topbar-mobile-menu,
 .topbar-mobile-new-chat,
-.compact-menu-label,
 .conversation-drawer-header {
   display: none;
+}
+
+.pull-to-refresh {
+  position: fixed;
+  z-index: 20;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  font-weight: 650;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+}
+
+.pull-to-refresh[data-ready="true"] {
+  border-color: var(--border-strong);
+  color: var(--accent);
+}
+
+.pull-to-refresh svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pull-to-refresh[data-refreshing="true"] svg {
+    animation: refresh-spin 0.9s linear infinite;
+  }
+}
+
+@keyframes refresh-spin {
+  to { transform: rotate(360deg); }
 }
 
 .audrey-loading-dots {
@@ -5577,7 +5628,7 @@ body,
 
   .brand-product,
   .session-account-name,
-  .session-controls:not(.session-controls-drawer) {
+  .session-controls:not(.session-controls-drawer, .mobile-menu-footer) {
     display: none;
   }
 
@@ -5622,16 +5673,24 @@ body,
     border: 0;
   }
 
-  .session-controls-drawer .account-actions {
+  .mobile-menu-footer {
+    align-items: stretch;
+    flex-direction: column;
+    flex: none;
+    margin-top: 0.65rem;
+    padding: 0.65rem 0.4rem 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .mobile-menu-footer .account-actions {
     align-items: stretch;
     flex-direction: column;
     gap: 0.3rem;
   }
 
   .session-controls-drawer .my-files-button,
-  .session-controls-drawer .session-name,
-  .session-controls-drawer .admin-button,
-  .session-controls-drawer .logout-button {
+  .mobile-menu-footer .admin-button,
+  .mobile-menu-footer .logout-button {
     display: flex;
     width: 100%;
     max-width: none;
@@ -5642,10 +5701,6 @@ body,
     border-radius: 0.6rem;
     font-size: 0.85rem;
     white-space: nowrap;
-  }
-
-  .compact-menu-label {
-    display: inline;
   }
 
   .workspace {
@@ -5676,7 +5731,7 @@ body,
     display: none;
     width: min(22rem, calc(100vw - 2.5rem));
     height: 100dvh;
-    overflow-y: auto;
+    overflow: hidden;
     overscroll-behavior: contain;
     padding: max(0.8rem, env(safe-area-inset-top)) 0.8rem max(0.8rem, env(safe-area-inset-bottom));
     border-right: 1px solid var(--border-strong);
@@ -5697,6 +5752,15 @@ body,
     padding-inline: 0.4rem;
   }
 
+  .drawer-user-name {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text);
+    font-size: 1rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .conversation-drawer-close {
     display: grid;
     width: 2.75rem;
@@ -5711,6 +5775,14 @@ body,
 
   .sidebar > * {
     flex-shrink: 0;
+  }
+
+  .sidebar > .sidebar-content {
+    display: block;
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .sidebar .conversation-list,
@@ -5760,30 +5832,6 @@ body,
     flex-wrap: wrap;
   }
 
-  .conversation-menu-actions:empty {
-    display: none;
-  }
-
-  .conversation-menu-actions {
-    margin: 0 0.4rem 0.75rem;
-    padding-bottom: 0.75rem;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .conversation-menu-actions .thread-header {
-    padding: 0;
-  }
-
-  .conversation-menu-actions .conversation-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.45rem;
-  }
-
-  .conversation-menu-actions .conversation-actions button {
-    min-height: 2.75rem;
-  }
-
   .thread-header-shell:empty {
     display: none;
   }
@@ -5813,6 +5861,80 @@ body,
     color: var(--text-soft);
     font-size: 0.85rem;
     font-weight: 650;
+  }
+
+  .conversation-swipe-hint {
+    margin: -0.2rem 0.4rem 0.65rem;
+    color: var(--muted);
+    font-size: 0.7rem;
+    line-height: 1.4;
+  }
+
+  .sidebar .conversation {
+    padding-right: 0.75rem;
+  }
+
+  .swipe-conversation-row[data-enabled="true"] {
+    overflow: hidden;
+    border-radius: 0.6rem;
+    touch-action: pan-y;
+  }
+
+  .swipe-conversation-content {
+    position: relative;
+    z-index: 1;
+    background: var(--surface);
+    transition: transform 160ms ease;
+  }
+
+  .swipe-conversation-row[data-dragging="true"] .swipe-conversation-content {
+    transition: none;
+  }
+
+  .swipe-conversation-preview,
+  .swipe-conversation-actions {
+    position: absolute;
+    inset: 0 0 0 auto;
+    display: flex;
+    width: 176px;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 0.35rem;
+    background: rgb(255 145 164 / 12%);
+    color: var(--danger);
+    font-size: 0.78rem;
+    font-weight: 650;
+  }
+
+  .swipe-conversation-preview[data-direction="archive"],
+  .swipe-conversation-actions[data-action="archive"] {
+    inset: 0 auto 0 0;
+    background: rgb(52 153 250 / 14%);
+    color: var(--accent);
+  }
+
+  .swipe-conversation-action,
+  .swipe-conversation-cancel {
+    min-height: 2.65rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid currentColor;
+    border-radius: 0.5rem;
+    background: transparent;
+    color: inherit;
+    font-size: 0.75rem;
+    font-weight: 650;
+  }
+
+  .swipe-conversation-cancel {
+    border-color: var(--border);
+    color: var(--text-soft);
+  }
+
+  .swipe-conversation-action:focus-visible,
+  .swipe-conversation-cancel:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .composer-control-rail {
@@ -5884,4 +6006,8 @@ body,
     width: min(10.8rem, 24dvh);
     height: min(10.8rem, 24dvh);
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swipe-conversation-content { transition: none; }
 }

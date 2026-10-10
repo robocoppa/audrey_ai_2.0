@@ -10,10 +10,12 @@ they are not ongoing task lists.
 ## Current work
 
 - **12 — compact/mobile navigation:** unified left drawer built; browser
-  acceptance pending. Header: Menu, builtryte logo, New chat. Menu actions and
-  current-chat controls precede collapsible Projects and chat history. Project
-  sits beside Model; empty/short chats have no jump arrow. Loading periods
-  animate, profile avoids field autofocus, and page overscroll is suppressed.
+  acceptance pending. Header: Menu, builtryte logo, New chat. Drawer: user name,
+  My Files, collapsible Projects, and swipeable chat history; Admin Panel and
+  Log out stay at the bottom. Right swipe archives/restores; left reveals
+  Delete/Cancel. Project sits beside Model; empty/short chats have no jump arrow. Loading periods
+  animate, profile avoids field autofocus, and pull-to-refresh requires a
+  deliberate downward pull followed by release.
   Rebuild only `audrey-ui` for this followup.
 - **3D.6 — native automatic English skill selection:** built; deployed
   document/video selection and successful video file reads are confirmed.
@@ -62,9 +64,9 @@ they are not ongoing task lists.
 ## Remaining work
 
 1. Accept the compact/mobile layout on a phone and a narrow laptop window:
-   unified left menu/history, New chat, Project beside Model, empty-screen fit,
-   profile keyboard behavior, and normal scrolling. No upload or scripted live
-   eval is required.
+   left menu/footer, chat swipes, New chat, Project beside Model, empty-screen fit,
+   profile keyboard behavior, normal scrolling, and deliberate pull-to-refresh.
+   No upload or scripted live eval is required.
 2. Accept the below-composer menus and immediate per-answer tool summaries in
    the browser, reusing the existing Ready video. Recorded video reads are passed;
    the remaining defect was their display, not missing tool execution.

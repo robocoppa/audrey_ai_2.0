@@ -213,7 +213,7 @@ describe("App", () => {
   });
 
   it.each(["user", "admin"] as const)(
-    "opens files and account dialogs from unified mobile navigation for a %s",
+    "opens files and role-scoped administration from the mobile menu for a %s",
     async (role) => {
       vi.stubGlobal("innerWidth", 390);
       vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
@@ -281,22 +281,16 @@ describe("App", () => {
       fireEvent.click(toggle);
       const navigation = screen.getByRole("dialog", { name: "Conversations" });
       const actions = within(navigation);
-      expect(actions.getByRole("link", { name: "Log out" })).toHaveAttribute("href", "/cdn-cgi/access/logout");
-      expect(actions.queryByRole("button", { name: "Admin Panel" }) !== null).toBe(role === "admin");
+      expect(actions.getByText("Alice", { exact: true })).toHaveClass("drawer-user-name");
+      expect(actions.queryByRole("button", { name: "Open account settings" })).not.toBeInTheDocument();
+      const footer = within(actions.getByRole("group", { name: "Account actions" }));
+      expect(footer.getByRole("link", { name: "Log out" })).toHaveAttribute("href", "/cdn-cgi/access/logout");
+      expect(footer.queryByRole("button", { name: "Admin Panel" }) !== null).toBe(role === "admin");
       fireEvent.click(actions.getByRole("button", { name: "My Files" }));
       expect(toggle).toHaveAttribute("aria-expanded", "false");
       const files = await screen.findByRole("dialog", { name: "Your files" });
       expect(topbar).not.toContainElement(files);
       fireEvent.click(screen.getByRole("button", { name: "Close files" }));
-      expect(toggle).toHaveFocus();
-
-      fireEvent.click(toggle);
-      fireEvent.click(actions.getByRole("button", { name: "Open account settings" }));
-      expect(toggle).toHaveAttribute("aria-expanded", "false");
-      const settings = await screen.findByRole("dialog", { name: "Settings" });
-      expect(topbar).not.toContainElement(settings);
-      expect(screen.getByRole("button", { name: "Close settings" })).toHaveFocus();
-      fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
       expect(toggle).toHaveFocus();
 
       if (role === "admin") {

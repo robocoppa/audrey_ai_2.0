@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 
 import { AudreyLoader } from "./AudreyLoader";
+import { PullToRefresh } from "./PullToRefresh";
 import { AdminPanel } from "./AdminPanel";
 import builtryteWordmark from "./assets/brand/builtryte-wordmark.png";
 import { AccountSettings } from "./AccountSettings";
@@ -243,6 +244,8 @@ export function App() {
         <SessionActions {...sessionActions} variant="header" />
       </header>
 
+      {!navigationOpen && !filesOpen && !settingsOpen && !adminOpen ? <PullToRefresh /> : null}
+
       <main className="native-main">
         <Suspense fallback={<AudreyLoader fullscreen label="Loading Audrey workspace" />}>
           <ChatWorkspace
@@ -256,6 +259,7 @@ export function App() {
             mobileMenuHost={mobileMenuHost}
             mobileNewChatHost={mobileNewChatHost}
             menuActions={<SessionActions {...sessionActions} variant="drawer" />}
+            menuFooter={<SessionActions {...sessionActions} variant="footer" />}
           />
         </Suspense>
       </main>
@@ -415,24 +419,24 @@ function SessionActions({
   user: CurrentUser;
   capabilityHealth: CapabilityHealth | null;
   healthUnavailable: boolean;
-  variant: "header" | "drawer";
+  variant: "header" | "drawer" | "footer";
   onOpenFiles: () => void;
   onOpenSettings: () => void;
   onOpenAdministration: () => void;
   onNavigate: () => void;
 }) {
-  const idPrefix = variant === "drawer" ? "app-drawer" : "app";
+  const idPrefix = variant === "header" ? "app" : "app-drawer";
   const healthDetails = capabilityHealth
     ? `Chat: ${capabilityHealth.chat.status} · Tools: ${capabilityHealth.tools.status} · Knowledge: ${capabilityHealth.knowledge.status}`
     : undefined;
 
   return (
     <div
-      className={`session-controls${variant === "drawer" ? " session-controls-drawer" : ""}`}
+      className={`session-controls${variant === "drawer" ? " session-controls-drawer" : variant === "footer" ? " mobile-menu-footer" : ""}`}
       role="group"
-      aria-label={variant === "drawer" ? "Menu actions" : "Session controls"}
+      aria-label={variant === "footer" ? "Account actions" : variant === "drawer" ? "Menu actions" : "Session controls"}
     >
-      {capabilityHealth?.status === "unavailable" ? (
+      {variant !== "footer" && (capabilityHealth?.status === "unavailable" ? (
         <span className="capability-badge capability-badge-unavailable" role="status" title={healthDetails}>
           Models offline
         </span>
@@ -444,8 +448,8 @@ function SessionActions({
         <span className="capability-badge" role="status">
           Status unavailable
         </span>
-      ) : null}
-      <div className="topbar-files-action" role="group" aria-label="File actions">
+      ) : null)}
+      {variant !== "footer" ? <div className="topbar-files-action" role="group" aria-label="File actions">
         <button
           id={`${idPrefix}-my-files-action`}
           className="my-files-button"
@@ -458,9 +462,9 @@ function SessionActions({
           </svg>
           <span>My Files</span>
         </button>
-      </div>
-      <div className="account-actions" role="group" aria-label="Signed in user">
-        <button
+      </div> : null}
+      {variant !== "drawer" ? <div className="account-actions" role="group" aria-label="Signed in user">
+        {variant === "header" ? <button
           id={`${idPrefix}-account-action`}
           className="session-name"
           type="button"
@@ -469,8 +473,7 @@ function SessionActions({
           onClick={onOpenSettings}
         >
           <span className="session-account-name">{firstName(user)}</span>
-          <span className="compact-menu-label">Account settings</span>
-        </button>
+        </button> : null}
         {user.groups.includes("admins") ? (
           <button
             id={`${idPrefix}-administration-action`}
@@ -484,7 +487,7 @@ function SessionActions({
         {user.auth_provider === "cloudflare_access" ? (
           <a className="logout-button" href="/cdn-cgi/access/logout" onClick={onNavigate}>Log out</a>
         ) : null}
-      </div>
+      </div> : null}
     </div>
   );
 }

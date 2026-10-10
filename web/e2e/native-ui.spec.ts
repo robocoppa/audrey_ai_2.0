@@ -828,12 +828,14 @@ test("unifies compact navigation in a left drawer with a symmetric header", asyn
     const drawerBox = (await drawer.boundingBox())!;
     expect(drawerBox.x).toBe(0);
     const actions = drawer.getByRole("group", { name: "Menu actions" });
-    for (const action of [
-      actions.getByRole("button", { name: "My Files", exact: true }),
-      actions.getByRole("button", { name: "Open account settings" }),
-      actions.getByRole("button", { name: "Admin Panel" }),
-      actions.getByRole("link", { name: "Log out" }),
-    ]) await expectInViewport(page, action);
+    await expectInViewport(page, drawer.getByText("Alice", { exact: true }));
+    await expectInViewport(page, actions.getByRole("button", { name: "My Files", exact: true }));
+    await expect(drawer.getByRole("button", { name: "Open account settings" })).toHaveCount(0);
+    const footer = drawer.locator(".mobile-menu-footer");
+    await expectInViewport(page, footer.getByRole("button", { name: "Admin Panel" }));
+    await expectInViewport(page, footer.getByRole("link", { name: "Log out" }));
+    const footerBox = (await footer.boundingBox())!;
+    expect(drawerBox.y + drawerBox.height - footerBox.y - footerBox.height).toBeLessThan(24);
     await expect(drawer.getByRole("button", { name: "Projects", exact: true })).toHaveAttribute("aria-expanded", "false");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     await page.keyboard.press("Escape");
@@ -924,13 +926,15 @@ test("opens mobile history on demand and keeps chat and project navigation reach
   await expect(drawer).toBeVisible();
   await expect(drawer).toHaveAttribute("aria-modal", "true");
   await expectInViewport(page, drawer);
-  await expect(drawer.getByRole("heading", { name: "Last chat" })).toBeVisible();
   await expect(drawer.getByRole("button", { name: "Projects", exact: true })).toHaveAttribute("aria-expanded", "false");
   await expect(drawer.getByRole("button", { name: "Mobile project", exact: true })).toHaveCount(0);
   await expect(drawer.getByRole("searchbox")).toBeVisible();
   await expect(drawer.getByRole("region", { name: "Projects" })).toBeVisible();
   await drawer.getByRole("button", { name: /^Earlier chat 24/u }).scrollIntoViewIfNeeded();
   await expect(drawer.getByRole("button", { name: /^Earlier chat 24/u })).toBeInViewport();
+  await expectInViewport(page, drawer.getByText("Alice", { exact: true }));
+  await expectInViewport(page, drawer.locator(".mobile-menu-footer").getByRole("link", { name: "Log out" }));
+  await expect(drawer.getByRole("button", { name: "Admin Panel" })).toHaveCount(0);
   const search = drawer.getByRole("searchbox");
   await search.fill("Second");
   await expect(drawer.getByRole("button", { name: /^Earlier chat/u })).toHaveCount(0);
@@ -949,8 +953,6 @@ test("opens mobile history on demand and keeps chat and project navigation reach
   await expect(page.locator(".sidebar")).toBeHidden();
 
   await historyToggle.click();
-  await expect(drawer.getByRole("heading", { name: "Second chat" })).toBeVisible();
-  await expect(drawer.getByRole("heading", { name: "Last chat" })).toHaveCount(0);
   await drawer.getByRole("button", { name: "Projects", exact: true }).click();
   await drawer.getByRole("button", { name: "Mobile project", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Mobile project", exact: true })).toBeVisible();
@@ -993,55 +995,56 @@ test("opens mobile history on demand and keeps chat and project navigation reach
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
-test("manages the selected mobile chat through the drawer and composer project control", async ({ page }) => {
+test("swipes any mobile chat to archive, restore, or confirm deletion without opening it", async ({ page, context }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockAudreyApi(page, undefined, canonicalBrowserTurn());
-  let conversation = { ...browserConversation("Mobile controls"), project_id: null as string | null };
-  const second = { ...browserConversation("Remaining chat"), id: "con_mobile_remaining" };
+  const selected = { ...browserConversation("Selected chat"), project_id: null as string | null };
+  let other = { ...browserConversation("Another chat"), id: "con_mobile_other" };
   const project = {
     id: "proj_mobile_controls", name: "Reference project", instructions: "",
     created_at: "2026-10-10T00:00:00Z", updated_at: "2026-10-10T00:00:00Z",
   };
-  const patches: Array<Record<string, unknown>> = [];
+  const patches: Array<{ id: string; patch: Record<string, unknown> }> = [];
   let archiveAttempts = 0;
   let deleted = false;
+  let otherMessageReads = 0;
   await page.route("**/api/conversations**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (url.pathname === "/api/conversations" && request.method() === "GET") {
       const archived = url.searchParams.get("archived") === "true";
       return json(route, {
-        items: [...(deleted ? [] : [conversation]), second]
+        items: [selected, ...(deleted ? [] : [other])]
           .filter((item) => Boolean(item.archived_at) === archived),
         next_cursor: null,
       });
     }
     if (url.pathname.endsWith("/messages")) {
+      if (url.pathname.includes(other.id)) otherMessageReads += 1;
       return json(route, {
         items: url.pathname.includes(CONVERSATION_ID) ? canonicalBrowserTurn() : [], next_cursor: null,
       });
     }
-    if (url.pathname === `/api/conversations/${CONVERSATION_ID}`) {
+    const item = url.pathname.endsWith(`/${other.id}`) ? other : selected;
+    if (url.pathname === `/api/conversations/${item.id}`) {
       if (request.method() === "PATCH") {
-        const patch = request.postDataJSON() as { title?: string; archived?: boolean; project_id?: string | null };
-        patches.push(patch);
-        if (patch.archived && ++archiveAttempts === 1) {
-          return json(route, { detail: "Cannot archive this conversation right now." }, 409);
+        const patch = request.postDataJSON() as { archived?: boolean; project_id?: string | null };
+        patches.push({ id: item.id, patch });
+        if (item.id === other.id) {
+          if (patch.archived && ++archiveAttempts === 1) {
+            return json(route, { detail: "Cannot archive this conversation right now." }, 409);
+          }
+          other = { ...other, archived_at: patch.archived ? "2026-10-10T00:01:00Z" : null };
+          return json(route, other);
         }
-        conversation = {
-          ...conversation,
-          title: patch.title ?? conversation.title,
-          archived_at: patch.archived === undefined ? conversation.archived_at
-            : patch.archived ? "2026-10-10T00:01:00Z" : null,
-          project_id: patch.project_id === undefined ? conversation.project_id : patch.project_id,
-        };
-        return json(route, conversation);
+        selected.project_id = patch.project_id === undefined ? selected.project_id : patch.project_id;
+        return json(route, selected);
       }
-      if (request.method() === "DELETE") {
+      if (request.method() === "DELETE" && item.id === other.id) {
         deleted = true;
         return route.fulfill({ status: 204 });
       }
-      return json(route, conversation);
+      return json(route, item);
     }
     return route.fallback();
   });
@@ -1049,7 +1052,7 @@ test("manages the selected mobile chat through the drawer and composer project c
     const url = new URL(route.request().url());
     if (url.pathname === "/api/projects") return json(route, { items: [project], next_cursor: null });
     if (url.pathname.endsWith("/conversations")) {
-      return json(route, { items: conversation.project_id === project.id ? [conversation] : [], next_cursor: null });
+      return json(route, { items: selected.project_id === project.id ? [selected] : [], next_cursor: null });
     }
     if (url.pathname.endsWith("/files")) return json(route, { items: [] });
     return json(route, project);
@@ -1057,72 +1060,77 @@ test("manages the selected mobile chat through the drawer and composer project c
 
   await page.goto("./");
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
-  // A short chat must fill the screen and keep its composer at the bottom.
-  for (const width of [390, 320]) {
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 640 });
-    await expect.poll(() => page.locator(".conversation-thread-slot:not([hidden]) .thread-viewport").evaluate((viewport) => {
-      const main = document.querySelector(".native-main")!.getBoundingClientRect();
-      const thread = viewport.getBoundingClientRect();
-      const dock = viewport.querySelector(".composer-dock")!.getBoundingClientRect();
-      return {
-        fillsMain: Math.abs(thread.top - main.top) < 1 && Math.abs(thread.bottom - main.bottom) < 1,
-        dockedAtBottom: main.bottom - dock.bottom >= 0 && main.bottom - dock.bottom < 20,
-      };
-    })).toEqual({ fillsMain: true, dockedAtBottom: true });
-    await expect(page.getByRole("button", { name: "Scroll to latest message" })).toBeHidden();
-  }
-  await page.setViewportSize({ width: 390, height: 844 });
-  const menu = page.locator("#app-mobile-menu-toggle");
-  const drawer = page.getByRole("dialog", { name: "Conversations" });
-  await menu.click();
-  await expect(drawer.getByRole("heading", { name: "Mobile controls", exact: true })).toBeVisible();
-  await drawer.getByRole("button", { name: "Rename conversation" }).click();
-  await drawer.getByRole("textbox", { name: "Conversation title" }).fill("Mobile renamed");
-  await drawer.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(drawer.getByRole("heading", { name: "Mobile renamed", exact: true })).toBeVisible();
-  await drawer.getByRole("button", { name: "Archive", exact: true }).click();
-  await expect(drawer.getByRole("alert")).toContainText("Cannot archive this conversation right now.");
-  expect(conversation.archived_at).toBeNull();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("alert")).toContainText("Cannot archive this conversation right now.");
-  await menu.click();
-  await drawer.getByRole("button", { name: "Archive", exact: true }).click();
-  await expect.poll(() => conversation.archived_at).not.toBeNull();
-  await drawer.getByRole("button", { name: "Archived", exact: true }).click();
-  await expect(drawer.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toHaveCount(0);
-  await expect(page.getByText("This conversation is archived. Restore it to continue.")).toBeVisible();
-  await menu.click();
-  await drawer.getByRole("button", { name: "Restore", exact: true }).click();
-  await expect.poll(() => conversation.archived_at).toBeNull();
-  await drawer.getByRole("button", { name: "Active", exact: true }).click();
-  const history = drawer.getByRole("navigation", { name: "Conversation history" });
-  await history.getByRole("button", { name: /^Mobile renamed/u }).click();
-  await expect(page.locator(".sidebar")).toBeHidden();
   const projectControl = page.getByRole("combobox", { name: "Move conversation to project" });
   await expectInViewport(page, projectControl);
   await projectControl.selectOption(project.id);
   await expect(projectControl).toHaveValue(project.id);
-  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
   await projectControl.selectOption("");
   await expect(projectControl).toHaveValue("");
-  expect(patches).toContainEqual({ title: "Mobile renamed" });
-  expect(patches).toContainEqual({ project_id: project.id });
-  expect(patches).toContainEqual({ project_id: null });
 
+  const menu = page.locator("#app-mobile-menu-toggle");
+  const drawer = page.getByRole("dialog", { name: "Conversations" });
   await menu.click();
-  await expect(drawer.getByRole("heading", { name: "Mobile renamed", exact: true })).toBeVisible();
-  await drawer.getByRole("button", { name: "Delete conversation", exact: true }).click();
+  const row = drawer.locator(".swipe-conversation-row").filter({ hasText: "Another chat" });
+  await expect(row).toBeVisible();
+  await expect(drawer.getByRole("heading", { name: "Selected chat", exact: true })).toHaveCount(0);
+  await expect(drawer.getByRole("button", { name: /Delete conversation/u })).toHaveCount(0);
+  await expect(drawer.getByRole("button", { name: "Open account settings" })).toHaveCount(0);
+  const touch = await context.newCDPSession(page);
+  await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+  const swipe = async (dx: number, dy = 0, release = true) => {
+    const box = (await row.boundingBox())!;
+    const start = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [start] });
+    for (const progress of [0.4, 1]) {
+      await touch.send("Input.dispatchTouchEvent", {
+        type: "touchMove", touchPoints: [{ x: start.x + dx * progress, y: start.y + dy * progress }],
+      });
+    }
+    if (release) await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  };
+
+  await swipe(40);
+  await swipe(15, 100);
+  expect(patches.filter(({ id }) => id === other.id)).toEqual([]);
+  expect(otherMessageReads).toBe(0);
+  await expect(drawer).toBeVisible();
+
+  await swipe(140, 0, false);
+  expect(archiveAttempts).toBe(0);
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await expect(drawer.getByRole("alert")).toContainText("Cannot archive this conversation right now.");
+  expect(other.archived_at).toBeNull();
+  await swipe(140);
+  await expect.poll(() => other.archived_at).not.toBeNull();
+  await expect(row).toHaveCount(0);
+  await drawer.getByRole("button", { name: "Archived", exact: true }).click();
+  await expect(row).toBeVisible();
+  await swipe(140);
+  await expect.poll(() => other.archived_at).toBeNull();
+  await expect(row).toHaveCount(0);
+  await drawer.getByRole("button", { name: "Active", exact: true }).click();
+  await expect(row).toBeVisible();
+
+  await swipe(-140);
   expect(deleted).toBe(false);
-  await drawer.getByRole("button", { name: "Confirm delete conversation", exact: true }).click();
+  const cancel = row.getByRole("button", { name: /Cancel/u });
+  await expect(cancel).toBeVisible();
+  await cancel.click();
+  await expect(row.getByRole("button", { name: /Delete/u })).toHaveCount(0);
+  expect(deleted).toBe(false);
+  await swipe(-140);
+  await row.getByRole("button", { name: /Delete/u }).click();
   await expect.poll(() => deleted).toBe(true);
-  await expect(drawer.getByRole("heading", { name: "Remaining chat", exact: true })).toBeVisible();
-  await expect(drawer.getByRole("heading", { name: "Mobile renamed", exact: true })).toHaveCount(0);
-  await expect(history.getByRole("button", { name: /^Mobile renamed/u })).toHaveCount(0);
+  await expect(row).toHaveCount(0);
+  await expect(drawer).toBeVisible();
+  expect(otherMessageReads).toBe(0);
+  await touch.detach();
+  await page.keyboard.press("Escape");
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
+  await expect(projectControl).toHaveValue("");
 });
 
-test("keeps mobile settings, files, and a scrolling chat accessible without opening the keyboard", async ({ page }) => {
+test("keeps mobile files and a scrolling chat accessible through the streamlined drawer", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 740 });
   await mockAudreyApi(page, undefined, scrollingBrowserHistory());
   await page.route("**/api/files**", (route) => json(route, browserFileListing(
@@ -1133,17 +1141,9 @@ test("keeps mobile settings, files, and a scrolling chat accessible without open
   await expect(page.locator("body")).toHaveCSS("overscroll-behavior-y", "none");
   const menu = page.getByRole("button", { name: "Menu", exact: true });
   await menu.click();
-  await page.getByRole("button", { name: "Open account settings" }).click();
-  const settings = page.getByRole("dialog", { name: "Settings", exact: true });
-  await expectInViewport(page, settings);
-  await expect(settings.getByRole("textbox", { name: "Profile name" })).not.toBeFocused();
-  await expect(settings.getByRole("button", { name: "Close settings" })).toBeFocused();
-  await settings.getByRole("button", { name: "Save preferences" }).scrollIntoViewIfNeeded();
-  await expect(settings.getByRole("button", { name: "Save preferences" })).toBeInViewport();
-  await settings.getByRole("button", { name: "Close settings" }).click();
-  await expect(menu).toBeFocused();
-
-  await menu.click();
+  const drawer = page.getByRole("dialog", { name: "Conversations" });
+  await expect(drawer.getByRole("button", { name: "Open account settings" })).toHaveCount(0);
+  await expect(drawer.getByText("Alice", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "My Files", exact: true }).click();
   const files = page.getByRole("dialog", { name: "Your files" });
   await expectInViewport(page, files);
@@ -1165,6 +1165,91 @@ test("keeps mobile settings, files, and a scrolling chat accessible without open
   await expect(jump).toBeHidden();
   await expect.poll(() => viewport.evaluate((element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 2)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test("refreshes mobile chat only after releasing a deliberate pull", async ({ page, context }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let identityReads = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/me") identityReads += 1;
+  });
+  await mockAudreyApi(page, undefined, []);
+  await page.goto("./");
+  const viewport = page.locator(".conversation-thread-slot:not([hidden]) .thread-viewport");
+  await expect(viewport).toBeVisible();
+  const initialReads = identityReads;
+  const touch = await context.newCDPSession(page);
+  await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+  const bounds = (await viewport.boundingBox())!;
+  const start = { x: bounds.x + bounds.width - 18, y: bounds.y + 24 };
+
+  await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [start] });
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchMove", touchPoints: [{ x: start.x, y: start.y + 60 }],
+  });
+  await expect(page.locator(".pull-to-refresh")).toHaveText("Pull to refresh");
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await expect(page.locator(".pull-to-refresh")).toBeHidden();
+  expect(identityReads).toBe(initialReads);
+
+  await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [start] });
+  await touch.send("Input.dispatchTouchEvent", {
+    type: "touchMove", touchPoints: [{ x: start.x, y: start.y + 140 }],
+  });
+  await expect(page.locator(".pull-to-refresh")).toHaveText("Release to refresh");
+  expect(identityReads).toBe(initialReads);
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+
+  await expect.poll(() => identityReads).toBe(initialReads + 1);
+  await expect(page.locator(".composer-input")).toBeVisible();
+  await expect(page.locator(".pull-to-refresh")).toBeHidden();
+  await touch.detach();
+});
+
+test("preserves mobile scrolling and composer gestures without refreshing", async ({ page, context }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let identityReads = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/me") identityReads += 1;
+  });
+  await mockAudreyApi(page, undefined, scrollingBrowserHistory());
+  await page.goto("./");
+  const viewport = page.locator(".conversation-thread-slot:not([hidden]) .thread-viewport");
+  await expect(viewport).toBeVisible();
+  await expect.poll(() => viewport.evaluate((element) => element.scrollHeight > element.clientHeight + 100))
+    .toBe(true);
+  const initialReads = identityReads;
+  const touch = await context.newCDPSession(page);
+  await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+  const bounds = (await viewport.boundingBox())!;
+  const start = { x: bounds.x + bounds.width - 18, y: bounds.y + 30 };
+  const drag = async (x: number, y: number, dx: number, dy: number) => {
+    await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchMove", touchPoints: [{ x: x + dx, y: y + dy }],
+    });
+    await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect(page.locator(".pull-to-refresh")).toBeHidden();
+    expect(identityReads).toBe(initialReads);
+  };
+
+  await viewport.evaluate((element) => element.scrollTo({ top: 100 }));
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await drag(start.x, start.y, 0, 140);
+
+  await viewport.evaluate((element) => element.scrollTo({ top: 0 }));
+  await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBe(0);
+  await drag(start.x, start.y, -150, 100);
+  await drag(start.x, start.y + 150, 0, -120);
+
+  await viewport.evaluate((element) => element.scrollTo({ top: 0 }));
+  const input = page.locator(".composer-input");
+  await input.fill("Keep this unsent message");
+  const inputBounds = (await input.boundingBox())!;
+  await drag(inputBounds.x + 20, inputBounds.y + 10, 0, 140);
+  await expect(input).toHaveValue("Keep this unsent message");
+  expect(identityReads).toBe(initialReads);
+  await touch.detach();
 });
 
 test("keeps saved answer images and citations inside a mobile message", async ({ page }) => {
