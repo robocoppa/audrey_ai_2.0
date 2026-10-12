@@ -15,6 +15,11 @@ Conversation history scrolls independently below the primary action.
 **My Files** lives in the desktop top bar as an accented folder action,
 separated from username, Admin Panel, and Log out. The app shell owns its dialog.
 
+The desktop wordmark is centered over the sidebar. Its divider follows that
+sidebar boundary, with equal space between the visible logo and divider,
+and between the divider and **Ask Audrey**. The product label uses a single
+line in title case with softer weight and tracking; both parts align vertically in the header.
+
 ## Compact and mobile layout
 
 - At widths up to 1,100 px, the top bar contains matching **Menu** and

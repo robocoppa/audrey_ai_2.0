@@ -634,6 +634,21 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(page.getByRole("group", { name: "File actions" }))
     .toHaveCSS("border-right-style", "solid");
   await expect(page.locator(".brand-product")).toHaveText("Ask Audrey");
+  const brandProductBox = await page.locator(".brand-product").boundingBox();
+  const productTextBox = await page.locator(".brand-product").evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const rect = range.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, height: rect.height };
+  });
+  expect(brandProductBox).not.toBeNull();
+  const dividerCenter = (brandProductBox?.x ?? 0) + 0.5;
+  const logoClearance = dividerCenter - ((brandBox?.x ?? 0) + (brandBox?.width ?? 0));
+  const productClearance = productTextBox.x - dividerCenter;
+  expect(Math.abs(logoClearance - productClearance)).toBeLessThan(2);
+  expect(Math.abs((brandProductBox?.x ?? 0) - ((sidebarBox?.x ?? 0) + (sidebarBox?.width ?? 0))))
+    .toBeLessThan(2);
+  expect(productTextBox.height).toBeLessThan(30);
   await expect.poll(
     () => page.locator(".brand-product").evaluate(
       (element) => Number.parseFloat(getComputedStyle(element).fontSize),

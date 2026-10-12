@@ -2161,12 +2161,10 @@ a:focus-visible {
 }
 
 .brand {
-  position: relative;
-  display: flex;
-  width: 17rem;
+  display: grid;
+  grid-template-columns: 17rem max-content;
+  width: max-content;
   align-items: center;
-  justify-content: center;
-  gap: 0.7rem;
   min-width: 0;
   border-radius: 0.75rem;
   color: var(--text);
@@ -2176,7 +2174,8 @@ a:focus-visible {
 .brand-wordmark {
   position: relative;
   display: block;
-  width: 12.5rem;
+  justify-self: center;
+  width: 10.5rem;
   height: 3.25rem;
   overflow: hidden;
   flex: 0 0 auto;
@@ -2186,24 +2185,25 @@ a:focus-visible {
 .brand-wordmark img {
   position: absolute;
   top: -1.25rem;
-  left: -2.5rem;
+  left: -3.5rem;
   width: 17.5rem;
   max-width: none;
   filter: url("#light-wordmark-on-dark");
 }
 
 .brand-product {
-  position: absolute;
-  top: 50%;
-  left: calc(100% + 0.95rem);
-  transform: translateY(-50%);
-  padding-left: 0.8rem;
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  /* Match the centered wordmark's clearance to the sidebar boundary. */
+  padding-left: calc((17rem - 10.5rem) / 2);
   border-left: 1px solid var(--border);
-  color: var(--muted);
+  color: var(--text-soft);
   font-size: 1.05rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.015em;
+  white-space: nowrap;
 }
 
 .session-badge {
@@ -5633,6 +5633,7 @@ body,
   }
 
   .brand {
+    display: flex;
     width: auto;
     justify-content: center;
   }
