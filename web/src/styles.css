@@ -2194,7 +2194,9 @@ a:focus-visible {
 .brand-product {
   display: flex;
   min-height: 2.75rem;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
   /* Match the centered wordmark's clearance to the sidebar boundary. */
   padding-left: calc((17rem - 10.5rem) / 2);
   border-left: 1px solid var(--border);

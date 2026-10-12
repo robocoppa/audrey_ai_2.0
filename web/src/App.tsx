@@ -235,7 +235,10 @@ export function App() {
           <span className="brand-wordmark" aria-hidden="true">
             <img src={builtryteWordmark} alt="" />
           </span>
-          <span className="brand-product">Ask Audrey</span>
+          <span className="brand-product">
+            <span>Ask </span>
+            <span>Audrey</span>
+          </span>
         </a>
         <div className="topbar-mobile-new-chat" ref={setMobileNewChatHost} />
         <SessionActions {...sessionActions} variant="header" />

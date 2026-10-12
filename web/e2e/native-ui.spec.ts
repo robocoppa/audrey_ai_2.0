@@ -648,7 +648,13 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(Math.abs(logoClearance - productClearance)).toBeLessThan(2);
   expect(Math.abs((brandProductBox?.x ?? 0) - ((sidebarBox?.x ?? 0) + (sidebarBox?.width ?? 0))))
     .toBeLessThan(2);
-  expect(productTextBox.height).toBeLessThan(30);
+  const askLineBox = await page.locator(".brand-product > span").first().boundingBox();
+  const audreyLineBox = await page.locator(".brand-product > span").last().boundingBox();
+  expect(askLineBox).not.toBeNull();
+  expect(audreyLineBox).not.toBeNull();
+  expect((askLineBox?.y ?? 0) + (askLineBox?.height ?? 0))
+    .toBeLessThanOrEqual((audreyLineBox?.y ?? 0) + 1);
+  expect(Math.abs((askLineBox?.x ?? 0) - (audreyLineBox?.x ?? 0))).toBeLessThan(1);
   await expect.poll(
     () => page.locator(".brand-product").evaluate(
       (element) => Number.parseFloat(getComputedStyle(element).fontSize),

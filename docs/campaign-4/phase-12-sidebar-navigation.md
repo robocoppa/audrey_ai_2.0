@@ -17,8 +17,9 @@ separated from username, Admin Panel, and Log out. The app shell owns its dialog
 
 The desktop wordmark is centered over the sidebar. Its divider follows that
 sidebar boundary, with equal space between the visible logo and divider,
-and between the divider and **Ask Audrey**. The product label uses a single
-line in title case with softer weight and tracking; both parts align vertically in the header.
+and between the divider and **Ask Audrey**. The product label stacks **Ask**
+above **Audrey**, using softer weight and tracking; the stack is centered
+vertically beside the wordmark.
 
 ## Compact and mobile layout
 
