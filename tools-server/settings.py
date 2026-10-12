@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     # "facts about the user" — a false hit actively misleads the model.
     memory_similarity_threshold: float = Field(default=0.5, alias="MEMORY_SIMILARITY_THRESHOLD")
 
+    # Private collection snapshots, outside Qdrant storage. No chat waits
+    # for a backup. Startup attempts one; failures retry in five minutes.
+    memory_backup_enabled: bool = Field(default=True, alias="MEMORY_BACKUP_ENABLED")
+    memory_backup_interval_s: float = Field(default=86400, ge=60, alias="MEMORY_BACKUP_INTERVAL_S")
+    memory_backup_retry_s: float = Field(default=300, ge=1, alias="MEMORY_BACKUP_RETRY_S")
+    memory_backup_retain: int = Field(default=7, ge=1, le=100, alias="MEMORY_BACKUP_RETAIN")
+    memory_backup_timeout_s: float = Field(default=120, ge=1, alias="MEMORY_BACKUP_TIMEOUT_S")
+
     # Ollama URL for nomic-embed-text calls
     ollama_url: str = Field(default="http://ollama:11434", alias="OLLAMA_URL")
     ollama_embed_timeout_s: float = Field(default=10.0, alias="OLLAMA_EMBED_TIMEOUT_S")
@@ -158,6 +166,11 @@ class Settings(BaseSettings):
     def chat_archive_db_path(self) -> Path:
         """SQLite source-of-truth for the chat archive."""
         return self.data_dir / "chat_archive.db"
+
+    @property
+    def memory_backup_dir(self) -> Path:
+        """Private bundles on the custom-tools persistent volume."""
+        return self.data_dir / "backups" / "memory"
 
     @property
     def memory_db_path(self) -> Path:

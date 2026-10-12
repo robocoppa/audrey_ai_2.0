@@ -2742,8 +2742,8 @@ async def requeue_job(
     # before upserting, so a re-run that produces a transcript would clear
     # these anyway — but a re-run that produces *no* transcript never calls it,
     # and the old chunks would stay searchable under a row claiming none. The
-    # reconcile sweep can't catch that either: it exempts `chunks = 0` rows by
-    # design. So the points go now, and if this raises, the row is left alone
+    # startup recovery reports missing points, but never sweeps stale content
+    # or infers deletion from it. So the points go now; if this raises, the row is left alone
     # and the caller retries against unchanged state.
     #
     # Text only. A transcript is the only thing this path ever puts in Qdrant;

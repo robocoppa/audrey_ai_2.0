@@ -190,6 +190,7 @@ class RunResponse(BaseModel):
     skill_version: int
     skill_digest: str
     skill_reason: str
+    title_pending: bool = False
 
 
 class RunCreateResponse(RunResponse):
@@ -496,6 +497,8 @@ class NativeRunManager:
         self._runs: dict[str, _LiveRun] = {}
         self._completed: deque[str] = deque()
         self._lock = asyncio.Lock()
+        self._title_tasks: dict[str, asyncio.Task[None]] = {}
+        self._stopping = False
 
     async def launch(
         self,
@@ -511,6 +514,7 @@ class NativeRunManager:
         resolved_skill: ResolvedSkill | None = None,
         model_tools: ToolRegistry | None = None,
         initial_sources: tuple[SourceSnapshot, ...] = (),
+        generate_title: bool = False,
     ) -> None:
         live: _LiveRun
         live = _LiveRun(
@@ -549,6 +553,55 @@ class NativeRunManager:
                 ),
                 name=f"audrey.native_run.{started.run.run_id}",
             )
+            if generate_title:
+                self._title_tasks[started.run.run_id] = asyncio.create_task(
+                    self._generate_title_after_run(live),
+                    name=f"audrey.conversation_title.{started.run.run_id}",
+                )
+
+    def title_pending(self, run_id: str) -> bool:
+        task = self._title_tasks.get(run_id)
+        return task is not None and not task.done()
+
+    async def _generate_title_after_run(self, live: _LiveRun) -> None:
+        """Auxiliary GPU work starts only after the answer releases its resources."""
+
+        try:
+            assert live.task is not None
+            await asyncio.shield(live.task)
+            if self._stopping or live.terminal_event is None:
+                return
+            if live.terminal_event.status != "succeeded":
+                return
+            generator = getattr(self._app.state, "conversation_titles", None)
+            if generator is None:
+                return
+            conversation = live.started.conversation
+            current = await self._store.conversations.get(
+                user_id=live.owner_user_id,
+                conversation_id=conversation.conversation_id,
+            )
+            if current is None or current.updated_at != conversation.updated_at:
+                return
+            title = await generator.generate(
+                user_id=live.storage_namespace,
+                user_content=live.started.user_message.content,
+            )
+            await self._store.conversations.apply_generated_title(
+                user_id=live.owner_user_id,
+                conversation_id=conversation.conversation_id,
+                expected_title=conversation.title,
+                expected_updated_at=conversation.updated_at,
+                title=title,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception(
+                "conversation title update failed run_id=%s", live.started.run.run_id,
+            )
+        finally:
+            self._title_tasks.pop(live.started.run.run_id, None)
 
     async def _execute(
         self,
@@ -756,6 +809,10 @@ class NativeRunManager:
         return await self._store.conversations.get_run(user_id=user_id, run_id=run_id)
 
     async def stop(self) -> None:
+        self._stopping = True
+        title_tasks = tuple(self._title_tasks.values())
+        for task in title_tasks:
+            task.cancel()
         async with self._lock:
             active = [
                 live
@@ -771,6 +828,8 @@ class NativeRunManager:
                 *(live.task for live in active if live.task is not None),
                 return_exceptions=True,
             )
+        if title_tasks:
+            await asyncio.gather(*title_tasks, return_exceptions=True)
 
 
 def _store(request: Request) -> ApplicationStore:
@@ -791,7 +850,7 @@ def _title_generator(request: Request) -> ConversationTitleGenerator | None:
     return getattr(request.app.state, "conversation_titles", None)
 
 
-def _run_response(record: RunRecord) -> RunResponse:
+def _run_response(record: RunRecord, *, title_pending: bool = False) -> RunResponse:
     return RunResponse(
         id=record.run_id,
         conversation_id=record.conversation_id,
@@ -810,6 +869,7 @@ def _run_response(record: RunRecord) -> RunResponse:
         skill_version=record.skill_version,
         skill_digest=record.skill_digest,
         skill_reason=record.skill_reason,
+        title_pending=title_pending,
     )
 
 
@@ -1095,18 +1155,12 @@ async def create_run(
         attachments,
         include_images=selected_model.kind != "direct",
     )
-    automatic_title: str | None = None
-    title_generator = _title_generator(request)
-    if title_generator is not None:
-        if (
-            not conversation.title.strip()
-            and conversation.last_message_at is None
-            and conversation.archived_at is None
-        ):
-            automatic_title = await title_generator.generate(
-                user_id=principal.storage_namespace,
-                user_content=payload.content,
-            )
+    generate_title = (
+        _title_generator(request) is not None
+        and not conversation.title.strip()
+        and conversation.last_message_at is None
+        and conversation.archived_at is None
+    )
     try:
         started = await store.conversations.begin_run(
             user_id=principal.user_id,
@@ -1114,7 +1168,6 @@ async def create_run(
             user_content=payload.content,
             mode=selected_model.mode,
             model_id=selected_model.id,
-            automatic_title=automatic_title,
             attachments=attachments,
             skill_id=resolved_skill.spec.id if resolved_skill else "",
             skill_version=resolved_skill.spec.version if resolved_skill else 0,
@@ -1195,8 +1248,11 @@ async def create_run(
         resolved_skill=resolved_skill,
         model_tools=model_tools,
         initial_sources=project_context.sources if project_context is not None else (),
+        generate_title=generate_title and started.user_message.sequence_no == 1,
     )
-    base = _run_response(started.run).model_dump()
+    base = _run_response(
+        started.run, title_pending=manager.title_pending(started.run.run_id),
+    ).model_dump()
     return RunCreateResponse(
         **base,
         user_message_id=started.user_message.message_id,
@@ -1261,7 +1317,7 @@ async def get_run(
     )
     if record is None:
         raise HTTPException(status_code=404, detail="Run not found.")
-    return _run_response(record)
+    return _run_response(record, title_pending=_manager(request).title_pending(run_id))
 
 
 @router.post("/runs/{run_id}/cancel", response_model=RunResponse)
@@ -1276,7 +1332,7 @@ async def cancel_run(
     )
     if record is None:
         raise HTTPException(status_code=404, detail="Run not found.")
-    return _run_response(record)
+    return _run_response(record, title_pending=_manager(request).title_pending(run_id))
 
 
 @router.get("/runs/{run_id}/events")

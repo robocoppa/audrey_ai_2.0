@@ -632,6 +632,20 @@ async def _stream_via_pipeline(
             # them under the same identity as the already-emitted banner. The
             # success marker waits for the upstream stream to actually start;
             # a pre-token Ollama failure may safely fall back once.
+            # Plain Fast still needs server-owned context. Recall uses the
+            # platform registry, while no model tools are offered on this
+            # branch: recalled facts are useful, tool-calling guidance is not.
+            memory_cfg = (cfg.raw.get("agentic", {}) or {}).get("memory", {}) or {}
+            messages_with_context = await _prepare_stream_context(
+                tools=app.state.tools,
+                http=app.state.archive_http,
+                user_id=user_id,
+                messages=messages,
+                memory_enabled=bool(memory_cfg.get("enabled", True)),
+                memory_top_k=int(memory_cfg.get("top_k", 3)),
+                memory_timeout_s=float(memory_cfg.get("timeout_s", 5)),
+                cfg=cfg,
+            )
             fast_cfg = cfg.raw.get("fast_path", {}) or {}
             no_thinking = bool(fast_cfg.get("no_thinking", False))
             no_thinking_prose = resolve_no_thinking_prose(
@@ -646,7 +660,7 @@ async def _stream_via_pipeline(
                 health,
                 app.state.gate,
                 task=task,
-                messages=messages,
+                messages=messages_with_context,
                 options=options,
                 timeout_s=timeout,
                 user_id=user_id,
@@ -1536,23 +1550,19 @@ async def _drain_q_now(
         yield delta_frame(item)
 
 
-async def _phase_thinking(
-    *, ollama, tools, http, model_tools, user_id: str, messages,
+async def _prepare_stream_context(
+    *, tools, http, user_id: str, messages,
     memory_enabled, memory_top_k, memory_timeout_s,
-    planning_enabled, planning_min_tokens, planning_max_subtasks,
-    prompt_tokens, router_cfg, cfg=None,
+    model_tools: ToolRegistry | None = None, cfg=None,
 ):
-    """Run datetime injection + memory recall + planner. Returns (messages_with_context, subtasks).
+    """Add server time and best-effort owner recall to graph-free streams.
 
-    Used by the streaming deep path. Mirrors the non-streaming graph's
-    `node_datetime` → `node_memory_recall` → planner sequence in
-    `pipeline/graph.py`. Both paths call the same underlying helpers
-    (`datetime_system_message`, `recall_for_request`, `memory_system_message`,
-    `compose_system_messages`, `planner_plan`) in the same order; only the
-    orchestration shape differs (graph nodes pass state in/out, this returns
-    a tuple). If you add a new context-injection step here, add the matching
-    node in `pipeline/graph.py` too — otherwise streaming-deep and
-    non-streaming runs will silently disagree.
+    The platform registry supplies server-owned recall. Only tools actually
+    offered to the answering model may contribute tool-calling guidance;
+    plain Fast passes no model registry because it cannot dispatch tools.
+    Original messages and multimodal parts are preserved without mutation.
+    The graph has its own date and recall nodes, so its branch must not call
+    this helper as well.
     """
     # Datetime first so it sits at the top of the system-message stack.
     # Mirrors what node_datetime does for the non-streaming graph.
@@ -1562,17 +1572,50 @@ async def _phase_thinking(
             tools, http=http, user_id=user_id, messages=messages,
             top_k=memory_top_k, timeout_s=memory_timeout_s,
         )
-        include_store_hint = MEMORY_STORE_TOOL in model_tools.by_name
+        include_store_hint = (
+            model_tools is not None and MEMORY_STORE_TOOL in model_tools.by_name
+        )
         sys_msg = memory_system_message(
             hits, user_id=user_id, include_store_hint=include_store_hint, cfg=cfg,
         )
-        chat_history_available = "chat_history_search" in model_tools.by_name
+        chat_history_available = (
+            model_tools is not None and "chat_history_search" in model_tools.by_name
+        )
         composed = compose_system_messages(
             memory_hint=sys_msg,
             chat_history_guidance=chat_history_available,
         )
         if composed:
             msgs = [msgs[0], *composed, *messages]
+
+    return msgs
+
+
+async def _phase_thinking(
+    *, ollama, tools, http, model_tools, user_id: str, messages,
+    memory_enabled, memory_top_k, memory_timeout_s,
+    planning_enabled, planning_min_tokens, planning_max_subtasks,
+    prompt_tokens, router_cfg, cfg=None,
+):
+    """Run datetime injection + memory recall + planner. Returns (messages_with_context, subtasks).
+
+    Used by streaming Deep and Research. Context preparation is shared
+    with plain Fast streams. Mirrors the non-streaming graph's
+    `node_datetime` → `node_memory_recall` → planner sequence in
+    `pipeline/graph.py`. Both paths call the same underlying helpers
+    (`datetime_system_message`, `recall_for_request`, `memory_system_message`,
+    `compose_system_messages`, `planner_plan`) in the same order; only the
+    orchestration shape differs (graph nodes pass state in/out, this returns
+    a tuple). If you add a new context-injection step here, add the matching
+    node in `pipeline/graph.py` too — otherwise streaming-deep and
+    non-streaming runs will silently disagree.
+    """
+    msgs = await _prepare_stream_context(
+        tools=tools, http=http, model_tools=model_tools,
+        user_id=user_id, messages=messages,
+        memory_enabled=memory_enabled, memory_top_k=memory_top_k,
+        memory_timeout_s=memory_timeout_s, cfg=cfg,
+    )
 
     subtasks: list[str] = []
     if planning_enabled and prompt_tokens >= planning_min_tokens:

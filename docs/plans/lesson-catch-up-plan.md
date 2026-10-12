@@ -118,8 +118,8 @@ the cycle that writes the first inserted lesson, so the course never has a gap.
 ### Writing order (one reviewed cycle each)
 
 1. **System map:** rewrite L0, L4 and L5; client examples in L1–L3. Replaces
-   the L18 cycle. The platform audit of these files (filed 2026-10-09) has been
-   drained; its record is in the course AUDIT.
+   the L18 cycle. The platform audit of these files (filed 2026-10-09) is
+   recorded in the local, gitignored course AUDIT.
 2. **Tool policy:** L9, plus the sidecar lesson's §2.1, §2.3, §2.4 and §2.7.
 3. **Search:** L11, plus L12 §2.9–2.10.
 4. **New 13, the application database,** with the 13–17 renumber.
@@ -206,7 +206,9 @@ writer only; lesson prose must not cite phase numbers.
   Ordered, additive migrations and the schema version. Typed records and
   repositories, and why routes never write SQL. Owner scoping, where foreign
   and missing return the same 404. Authority versus projection: the search
-  archive and Qdrant can be rebuilt from canonical rows. Online backups before
+  archive and Qdrant's search collections can be rebuilt from canonical rows
+  and source files, while saved memories live only in Qdrant (L4 §2.6
+  introduces the distinction). Online backups before
   migrations, and verified restores. The dormant history import as an
   idempotent, owner-bound operation.
 - **Files:** `src/audrey/app_state/` (`store.py`, `migrations.py`,
@@ -482,12 +484,23 @@ writer only; lesson prose must not cite phase numbers.
   **Background:** C4 phases 01, 17A.
 - **Updates:** L19's footer (the wrap-up moves here).
 
-## Cycle 1 — the system map: proposed outline (2026-10-10, awaiting go-ahead)
+## Cycle 1 — the system map (outline approved 2026-10-10; written, awaiting review)
 
 Rewrites L0 and L4, refreshes L5, swaps the client examples in L1–L3, and
-updates the course README. The platform audit is drained. This cycle's audit
-added one finding about the native entry point (in the AUDIT); its drain
-decides how L4 §2.5 orders the steps of a first turn.
+updates the course README. Audit records live in the gitignored AUDIT.
+The lessons describe current source behavior; L4 includes background first-turn
+titles, shared stream context, backup recovery, and catalog-preserving startup.
+
+**As written** (beyond the outline): L4's graph section now shows the
+`research` node; §2.4 shows that the streaming driver also runs the graph for a
+tool-capable fast turn; §2.5 says the browser polls a run after a reload rather
+than resuming the event stream; §2.6 names saved memories as the one authority
+inside Qdrant. L5 fixes the stale env-override snippet (`_set`), the service
+name (`audrey`, formerly `audrey-ai`), recreate-not-restart after a
+config change, and the tool-discovery answer (there is now a background retry).
+The course README gained a list of published lessons, which L0 points at.
+
+The approved outline follows.
 
 **L0 — Introduction (rewrite)**
 
@@ -599,14 +612,14 @@ here; 13–17 become 15–19 in cycle 4.
 
 | Where | What it says now | Replace with | Cycle |
 |---|---|---|---|
-| lesson-ai README | "Frontend integration (Open WebUI)" is out of scope | The course covers the browser boundary (L22); React internals stay out of scope | Cycle 1 |
-| L0 (2) | Audrey sits behind Open WebUI, which authenticates every request | The native app and API clients; Audrey-owned identity in one sentence | Cycle 1 |
-| L1 (1), L2 (5), L5 (1) | Open WebUI named as *the* client in examples | The native app or an API client | Cycle 1 |
+| lesson-ai README | "Frontend integration (Open WebUI)" is out of scope | The course covers the browser boundary (L22); React internals stay out of scope | Cycle 1 (done, in review) |
+| L0 (2) | Audrey sits behind Open WebUI, which authenticates every request | The native app and API clients; Audrey-owned identity in one sentence | Cycle 1 (done, in review) |
+| L1 (1), L2 (5), L5 (1) | Open WebUI named as *the* client in examples | The native app or an API client | Cycle 1 (done, in review) |
 | L6 (1), L8 (1) | Open WebUI named as *the* client in examples | The native app or an API client | Cycle 6 |
-| L3 (3 of 11) | "No Open WebUI required"; a trace starting "OWUI sends POST" | Current dependency list; the trace starts at the native app | Cycle 1 |
-| L4 (17) | The walk-through starts in Open WebUI; auth asks Open WebUI who owns the token | The native app sends the request, with `/v1` clients as the second door; identity in two sentences (Access assertion or personal token) | Cycle 1 |
+| L3 (3 of 11) | "No Open WebUI required"; a trace starting "OWUI sends POST" | Current dependency list; the trace starts at the native app | Cycle 1 (done, in review) |
+| L4 (17) | The walk-through starts in Open WebUI; auth asks Open WebUI who owns the token | The native app sends the request, with `/v1` clients as the second door; identity in two sentences (Access assertion or personal token) | Cycle 1 (done, in review) |
 | L7 (3) | Open WebUI utility prompts force fast mode | Keep, relabelled: applies to `/v1` compatibility requests; native requests skip it | Cycle 6 |
-| L3 (8 of 11) | The httpx "real example" is the Open WebUI token check | A current httpx example; the Open WebUI adapter is dormant | Cycle 1 |
+| L3 (8 of 11) | The httpx "real example" is the Open WebUI token check | A current httpx example; the Open WebUI adapter is dormant | Cycle 1 (done, in review) |
 | L11 (1), L12 (2) | The user id comes from the Open WebUI session or JWT | The authenticated user's stable id and private namespace (mechanism in L14) | Cycle 3 |
 | L13 §2.1 | Identity via Open WebUI's `/api/v1/auths/` | A recap of L14 | With L14 |
 | L13 §2.3–2.6 | Archive stitching keyed on Open WebUI chat ids | Native conversation ids; `/v1` stitching as compatibility | With L23 |
@@ -623,7 +636,7 @@ references. Items marked † are stale *snippets or values* found by the
 
 | Lesson | Now stale | When |
 |---|---|---|
-| L5 | Startup opens the store and migrates, loads skills and the model catalog, starts durable workers; readiness | Cycle 1; a store pointer with L13 |
+| L5 | Startup opens the store and migrates, loads skills and the model catalog, starts durable workers; readiness | Cycle 1 (done, in review); a store pointer with L13 |
 | L6 | Thinking descriptors and per-role thinking, model catalog and direct models, vision sidecar; † the cloud-cap snippet (the cap now logs the dropped worker) | Cycle 6 |
 | L7 | Schema-pinned router without thinking; failed classify no longer escalates. ‡ §2.3 `node_classify` and §2.7 complexity snippets predate skill routing (`routing_messages`) and research (`audrey_research` is forced deep); utility-prompt detection now applies to compatibility requests only | Cycle 6 |
 | L8 | Per-role thinking, shared stage lifecycle, worker-exception handling. ‡ §2.3 pool snippet, §2.4 synthesizer example and question 3 use retired model names | Cycle 6 |
@@ -706,8 +719,7 @@ Hard rules for the writer:
   block that opens there or inside the range the cite or its label states, and
   a symbol label must sit on its definition or the decorator above it. The
   full sweep afterwards: 370 cites, 0 drift, 0 broken.
-- **Platform audit drained (2026-10-10)** by the user; the record is in the
-  AUDIT.
+- **Platform audit (2026-10-10).** The review record is in the local AUDIT.
 - **Restructure decided (2026-10-10).** See the decisions below.
 
 ## Decisions (2026-10-10)
@@ -718,7 +730,7 @@ Hard rules for the writer:
    as 13 and 14; the cycle that writes 13 renumbers 13–17 to 15–19. The rest
    append as 20–33.
 3. **Writing order:** approved, system map first.
-4. **Platform audit:** drained by the user (record in the AUDIT).
+4. **Platform audit:** its review record is in the local AUDIT.
 5. **Cite checker:** the ten-line tolerance replaced by structural rules; done.
 6. **Audit findings are always gitignored:** findings and drain decisions live
    only in gitignored files, and tracked docs, this plan included, point at

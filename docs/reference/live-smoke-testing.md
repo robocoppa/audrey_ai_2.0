@@ -55,7 +55,8 @@ Laptop hermetic verification does not prove deployed behavior.
 Short checks return results in the launching shell. For short direct Ollama
 probes use `FOREGROUND=1` and a compact summary if supported; Telegram is skipped
 unless `NOTIFY=1`. Detached runners are for long jobs needing disconnect safety.
-API evals normally save to laptop `evals/results/`. If a necessary Tower report
+Pings, exit codes and reports follow the [testing protocol](testing-protocol.md),
+shared with ai-sec. API evals normally save to laptop `evals/results/`. If a necessary Tower report
 is saved remotely, supply an explicit laptop copy step; do not rerun to retrieve
 it. See [evals](../../evals/README.md) only for an actual evaluation task.
 

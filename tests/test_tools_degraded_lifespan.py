@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
+
+import pytest
 
 _TOOLS_SERVER = Path(__file__).resolve().parent.parent / "tools-server"
 if str(_TOOLS_SERVER) not in sys.path:
@@ -57,11 +60,25 @@ class _WebClient:
         pass
 
 
-async def test_lifespan_yields_with_qdrant_down(monkeypatch):
+@pytest.mark.parametrize("backup_enabled", [False, True])
+async def test_lifespan_yields_with_qdrant_down(monkeypatch, backup_enabled):
     memory = _DeadQdrantMemory()
     archive = _ArchiveSource()
     maintainer = _Maintainer()
     brave = _WebClient()
+    backup_started = asyncio.Event()
+    backup_closed = False
+
+    class _BlockedBackup:
+        async def backup(self):
+            backup_started.set()
+            await asyncio.Event().wait()
+
+        async def close(self):
+            nonlocal backup_closed
+            backup_closed = True
+
+    monkeypatch.setattr(tools_app, "MemoryBackup", lambda **_kwargs: _BlockedBackup())
 
     monkeypatch.setattr(tools_app, "MemoryStore", lambda **_kwargs: memory)
     monkeypatch.setattr(tools_app, "ChatArchiveStore", lambda **_kwargs: archive)
@@ -72,12 +89,15 @@ async def test_lifespan_yields_with_qdrant_down(monkeypatch):
     )
     monkeypatch.setattr(tools_app, "BraveClient", lambda **_kwargs: brave)
     monkeypatch.setattr(tools_app.settings, "searxng_url", "")
+    monkeypatch.setattr(tools_app.settings, "memory_backup_enabled", backup_enabled)
     monkeypatch.setattr(
         tools_app.settings, "capability_retry_interval_s", 60.0
     )
     monkeypatch.setattr(tools_app.settings, "capability_probe_timeout_s", 0.5)
 
     async with tools_app.lifespan(tools_app.app):
+        if backup_enabled:
+            await asyncio.wait_for(backup_started.wait(), timeout=1)
         states = tools_app.app.state.capabilities.snapshot()
         assert await tools_app.health() == {"status": "ok"}
         assert states["web_search"].available is True
@@ -90,6 +110,8 @@ async def test_lifespan_yields_with_qdrant_down(monkeypatch):
         assert schema_state["qdrant"]["available"] is False
 
     assert maintainer.started is False
+    assert backup_closed is True
+    assert backup_started.is_set() is backup_enabled
     tools_app.app.state.capabilities = (
         tools_app.CapabilityRegistry.all_available()
     )

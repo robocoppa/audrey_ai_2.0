@@ -57,6 +57,7 @@ from db import EmbedError, MemoryEntry, MemoryStore
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.openapi.utils import get_openapi
 from fetch import FetchError, fetch_readable
+from memory_backup import MemoryBackup, MemoryBackupScheduler
 from pydantic import BaseModel, Field
 from searxng import SearxngClient, SearxngError
 from settings import settings
@@ -134,6 +135,21 @@ async def lifespan(app: FastAPI):
         probe_timeout_s=settings.capability_probe_timeout_s,
     )
     await capability_supervisor.start()
+    memory_backups = MemoryBackupScheduler(
+        MemoryBackup(
+            qdrant_url=settings.qdrant_url,
+            collection=settings.memory_collection,
+            directory=settings.memory_backup_dir,
+            archive_path=settings.chat_archive_db_path,
+            retain=settings.memory_backup_retain,
+            timeout_s=settings.memory_backup_timeout_s,
+        ),
+        interval_s=settings.memory_backup_interval_s,
+        retry_s=settings.memory_backup_retry_s,
+        enabled=settings.memory_backup_enabled,
+    )
+    app.state.memory_backups = memory_backups
+    memory_backups.start()
     log.info(
         "custom-tools ready. brave=%s searxng=%s audrey=%s capabilities=%s",
         "configured" if settings.brave_api_key else "UNSET",
@@ -144,6 +160,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await memory_backups.stop()
         await capability_supervisor.stop()
         await brave.aclose()
         if searxng is not None:

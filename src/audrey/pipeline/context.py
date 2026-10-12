@@ -9,10 +9,10 @@ about right now.
 Coverage:
 - The graph runs `node_datetime` first, before memory_recall — every
   non-streaming request gets the message.
-- The streaming deep route bypasses the graph for orchestration, so
-  it calls `datetime_system_message()` directly inside `_phase_thinking`.
-- The streaming fast path goes through the graph too (via the
-  tool-capable branch), so it's covered.
+- Streaming Deep, Research and plain Fast prepare date and memory
+  context through `_prepare_stream_context` in the streaming route.
+- Tool-capable Fast streams run through the graph and its context nodes.
+- Passthrough models receive caller messages without this pipeline context.
 
 Native runs also prepend a preference message after resolving the authenticated
 Audrey owner. It contains server-computed local time from the owner's validated

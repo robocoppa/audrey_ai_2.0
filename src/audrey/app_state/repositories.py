@@ -235,6 +235,61 @@ class ConversationsRepository:
             row = self._conversation_row_locked(user_id, conversation_id)
         return _conversation_from_row(row) if row is not None else None
 
+    async def apply_generated_title(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        expected_title: str,
+        expected_updated_at: str,
+        title: str,
+    ) -> bool:
+        """Replace the first-turn fallback only while its revision is unchanged."""
+
+        write = asyncio.create_task(asyncio.to_thread(
+            self._apply_generated_title_sync,
+            user_id, conversation_id, expected_title, expected_updated_at, title,
+        ))
+        try:
+            return await asyncio.shield(write)
+        except asyncio.CancelledError:
+            # Shutdown must finish this SQLite write before closing the store.
+            await write
+            raise
+
+    def _apply_generated_title_sync(
+        self,
+        user_id: str,
+        conversation_id: str,
+        expected_title: str,
+        expected_updated_at: str,
+        title: str,
+    ) -> bool:
+        user_id = _required(user_id, "user id")
+        conversation_id = _required(conversation_id, "conversation id")
+        title = _normalize_title(title)
+        if not title or title == expected_title:
+            return False
+        with self._lock:
+            try:
+                cursor = self._conn.execute(
+                    "UPDATE app_conversations SET title = ?, updated_at = ? "
+                    "WHERE user_id = ? AND conversation_id = ? "
+                    "AND title = ? AND updated_at = ? AND archived_at IS NULL "
+                    "AND EXISTS (SELECT 1 FROM app_users "
+                    "WHERE app_users.user_id = app_conversations.user_id "
+                    "AND app_users.status = 'active')",
+                    (
+                        title, _utc_now(), user_id, conversation_id,
+                        expected_title, expected_updated_at,
+                    ),
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+        return cursor.rowcount == 1
+
     async def list_for_user(
         self,
         *,

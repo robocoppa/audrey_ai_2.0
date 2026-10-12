@@ -45,17 +45,20 @@ That's it. Run that file with `uvicorn` (an ASGI server) and `GET
 
 Audrey is one HTTP surface that has to do three different things:
 
-1. **Authenticate every protected route.** Bearer tokens validated
-   against OWUI on every request to chat completions, file uploads,
-   admin routes, memory recall.
+1. **Authenticate every protected route.** Every request to start a
+   chat, upload a file, read memories or run an admin action has to
+   prove who is calling: the browser app with a signed identity header
+   from Cloudflare Access, a bot or script with a personal access
+   token.
 2. **Validate the request schemas for every endpoint.**
    `ChatCompletionRequest`, `KBIngestRequest`, file-upload metadata,
-   admin actions — all coming from arbitrary clients (OWUI, direct
-   `curl`s, anything reaching our public URL).
-3. **Stream Server-Sent Events back.** Chat completions return tokens
-   as they arrive from Ollama, not in a single response. The shape
-   has to be OpenAI-compatible (`data: {...}\n\n` framing) so OWUI
-   and other clients consume it correctly.
+   admin actions — all coming from arbitrary clients (the browser app,
+   bots and scripts, direct `curl`s).
+3. **Stream Server-Sent Events back.** Answers arrive token by token
+   as Ollama generates them, not in a single response. Clients of the
+   OpenAI-compatible API expect OpenAI's framing (`data: {...}\n\n`);
+   the browser app receives the same answer as AG-UI events, a
+   different vocabulary over the same streaming mechanism.
 
 Without a framework, each of those becomes hand-rolled work in every
 route. With FastAPI, you get all three for free:
@@ -244,8 +247,9 @@ async def chat_completions(
     ...
 ```
 
-`require_user` is a function that validates the `Authorization`
-header. If it fails it raises `HTTPException(401)` and the route never
+`require_user` is a function that validates the caller's credentials:
+the browser's Cloudflare Access header, or an `Authorization: Bearer`
+token. If it fails it raises `HTTPException(401)` and the route never
 runs. If it succeeds, `me` contains the user's identity. Concise +
 hard to forget.
 
@@ -314,11 +318,12 @@ failure — you never write validation code yourself.
 
 The boundary between "stuff arriving from the network" and "stuff
 your code can trust" is one of the highest-bug-density places in any
-program. For Audrey, that boundary is a public-internet-reachable
-chat completion endpoint that:
+program. For Audrey, that boundary is a chat completion endpoint,
+reachable from the browser through the tunnel and from bots on the
+home network, that:
 
-- Accepts JSON from arbitrary clients (OWUI, but also direct
-  `curl`s, and eventually anything with our tunnel hostname).
+- Accepts JSON from arbitrary clients (bots and scripts, direct
+  `curl`s, anything that can reach the API).
 - Forwards parts of that JSON to Ollama, where bad input can either
   silently produce nonsense or, worse, send odd parameters to a
   cloud-billed model.
@@ -345,9 +350,9 @@ Concrete value Pydantic adds, with examples drawn from the real
   sampling values itself. The lesson here is the split: Pydantic gives
   you type-validation for nothing, and range-validation is a
   deliberate choice you opt into per field.
-- **The schema is the contract.** When OWUI's request format changes
-  in some future version, the Pydantic model is the single place
-  that has to be updated. Without it, the contract lives implicitly
+- **The schema is the contract.** When clients start sending a new
+  field, the Pydantic model is the single place that has to be
+  updated. Without it, the contract lives implicitly
   across however many `payload.get(...)` calls exist in the codebase.
 
 It's also **runtime-checked**, which is different from being just

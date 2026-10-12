@@ -266,6 +266,90 @@ nohup env MODEL=audrey_research CASES=<file>.json LABEL=<label> \
   entry recorded this as a struck-through misdiagnosis; the real issue was
   SearXNG. Check the actual provider state before prescribing.
 
+## 10. Memory backups and isolated restore verification
+
+`custom-tools` takes a snapshot of its configured memory collection (normally
+`kb_memory`) in a background task at startup, then every 24 hours. Chat and tool
+startup do not wait for it. Failures retry after five minutes. Each completed
+bundle contains the snapshot, an online SQLite copy of `chat_archive.db` (including
+account purge cutoffs), and a manifest with SHA-256 checksums, sizes, collection,
+Qdrant version, and creation time. Files are mode 600; bundle directories are 700.
+
+Bundles live at `/app/data/backups/memory` inside `custom-tools`, bound to
+`/mnt/user/appdata/custom-tools/backups/memory` on Tower. This is outside Qdrant's
+volume. Seven completed bundles are retained by default. Include this private
+directory in the normal host backup and off-host copy; these snapshots alone do
+not protect against loss of Tower. The application database has its separate
+`audrey-admin backup-app-state` command.
+
+The `.env.example` lists `MEMORY_BACKUP_ENABLED`, `MEMORY_BACKUP_INTERVAL_S`,
+`MEMORY_BACKUP_RETRY_S`, `MEMORY_BACKUP_RETAIN`, and `MEMORY_BACKUP_TIMEOUT_S`.
+The default timeout is two minutes per backup/verification, with a short cleanup
+budget afterward. No `.env` change is needed to enable the defaults.
+
+**Deployment on Tower**, from `/mnt/user/appdata/audrey_ai_2.0` after the normal
+pull, rebuild/recreate only `custom-tools` for this feature:
+
+```bash
+docker compose up -d --build custom-tools
+```
+
+Allow the first startup backup to finish (its budget is two minutes). Then run
+this short foreground check **on Tower**, from that same checkout. It requires
+Qdrant to be reachable, but no Audrey token, upload, or model generation:
+
+```bash
+docker compose exec -T custom-tools /opt/venv/bin/python /app/memory_backup.py verify --latest
+```
+
+Success: exit 0 and JSON with `status: passed`,
+`production_collection_unchanged: true`, `disposable_collection_deleted: true`,
+`archive_integrity: ok`, and equal `restored_count` / `owner_payloads_checked`.
+It checks local checksums and archive integrity, uploads the snapshot to a new
+random `audrey_memory_verify_...` collection, checks every restored point's
+owner/key/id and count, then deletes that collection. It cannot accept a
+production restore target. Output contains counts and paths, never memory text
+or owner identities. A zero count is valid when no memories have been saved.
+
+If a backup is still running, the shared lock reports that instead of starting
+another write; retry when it finishes. If no completed bundle exists, inspect
+`custom-tools` logs for `memory backup` before retrying. A manual backup can be
+made on Tower with:
+
+```bash
+docker compose exec -T custom-tools /opt/venv/bin/python /app/memory_backup.py backup
+```
+
+It prints `status: ok` and its manifest path when complete; then the verification
+command above checks that bundle. Keep bundle contents private; only the compact
+check output is suitable for pasting or sharing.
+
+### Recovering production memory later
+
+The verifier deliberately does not restore production. A real recovery is an
+operator operation performed with memory writes stopped and a reviewed backup.
+Restoring rolls back additions and corrections after the snapshot, and can bring
+back memories deleted since it was taken. Individual memory deletions have no
+separate tombstone log; reconcile those deletions before reopening access.
+
+Preserve the **current** archive SQLite database and its purge cutoffs. Do not
+replace it with the older bundled archive over a surviving current database.
+After restoring memory, reapply every current account-purge cutoff to Qdrant
+before serving requests, preserving memories updated after that cutoff. The
+ordinary maintainer retries only unfinished purges, so a restore needs this
+explicit step even for purges previously marked complete. The bundled archive
+copy provides receipts if the current archive has also been lost; it cannot
+recover deletion requests made after the bundle.
+
+Qdrant snapshots support the same minor server version (at least the source
+patch) or the next minor version. The verifier enforces that bound and uses
+`priority=snapshot` when recovering its empty disposable collection. A manifest's
+live point count is labelled as an observation before snapshot creation; it is
+not an atomic snapshot count because user writes keep running. Verification
+compares the restored collection's exact count with its complete payload scroll.
+See [Qdrant snapshot operations](https://qdrant.tech/documentation/operations/snapshots/)
+and the [snapshot upload API](https://api.qdrant.tech/v-1-18-x/api-reference/snapshots/recover-from-uploaded-snapshot).
+
 ---
 
 _Keep this in sync with reality: when a container/port changes, update §3. The

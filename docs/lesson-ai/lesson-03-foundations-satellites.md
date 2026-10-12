@@ -28,11 +28,12 @@ Audrey is a *gateway*. It rarely does the actual work itself; mostly
 it forwards requests to other services and waits for replies. In one
 chat completion, Audrey typically makes:
 
-- **A GET to OWUI** (`http://open-webui:8080/api/v1/auths/`) to
-  validate the bearer token. Fast on the local network, but still an
-  outbound HTTP call Audrey must await.
-- **A GET to Ollama for `/api/tags`** at startup, to find out which
-  models are loaded.
+- **Now and then, a GET to Cloudflare** for the public keys that verify
+  a browser's sign-in. Audrey caches them, so most requests skip this,
+  but when the cache runs out it's an outbound call Audrey must await.
+- **A GET to Ollama's `/api/tags`**, which lists the installed models.
+  Audrey uses it to check that Ollama is up and to build the list of
+  models a person may pick.
 - **One or more POSTs to Ollama's `/api/chat`** to actually generate
   tokens. Each can take 10s–3min for cloud models.
 - **POSTs to custom-tools** (`http://custom-tools:8001/web_search`,
@@ -75,48 +76,64 @@ you're done.
 
 ### A real example from Audrey
 
-Here's `_probe_owui` from [`src/audrey/auth.py`](../../src/audrey/auth.py),
-which is what runs every time a user makes a chat-completion request
-and we need to verify their bearer token. Slightly simplified:
+When you use Audrey in a browser, Cloudflare Access adds a signed
+token to each request, and Audrey checks the signature with
+Cloudflare's *public* keys before trusting it. Those keys are
+published as JSON at a fixed URL on your Cloudflare team's domain,
+and Cloudflare changes them from time to time, so Audrey fetches
+them over HTTP and caches them. (What the keys are for, and how the
+signature check works, belongs to the lesson on identity later in
+the course.) Here's the fetch,
+[`_fetch_keys`](../../src/audrey/identity/cloudflare_access.py#L155),
+with the part that converts each key into a usable object left out:
 
 ```python
-async def _probe_owui(owui_url: str, token: str) -> AuthedUser:
-    """Validate a token by asking OWUI who owns it. Raises on failure."""
-    url = f"{owui_url.rstrip('/')}/api/v1/auths/"
+async def _fetch_keys(self) -> dict[str, jwt.PyJWK]:
     try:
-        async with httpx.AsyncClient(timeout=5.0) as http:
-            r = await http.get(url, headers={"Authorization": f"Bearer {token}"})
-    except httpx.HTTPError as e:
-        # Network error, DNS failure, timeout — OWUI is broken or unreachable.
-        # Return 502 so the client knows it's a backend problem, not their fault.
-        raise HTTPException(status_code=502, detail="Auth backend unreachable.") from e
+        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+            response = await client.get(self.jwks_url)
+            response.raise_for_status()
+            payload: Any = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise CloudflareAccessUnavailableError(
+            "Cloudflare Access signing keys are unavailable"
+        ) from exc
 
-    if r.status_code == 401:
-        # OWUI rejected the token.
-        raise HTTPException(status_code=401, detail="Token rejected by OWUI.")
-    if r.status_code >= 400:
-        # OWUI itself errored — log and surface as 502.
-        raise HTTPException(status_code=502, detail=f"Auth probe failed ({r.status_code}).")
-
-    body = r.json()
-    return AuthedUser(
-        email=body["email"],
-        role=body["role"].lower(),
-        owui_id=body["id"],
-    )
+    if not isinstance(payload, dict) or not isinstance(payload.get("keys"), list):
+        raise CloudflareAccessUnavailableError("Cloudflare Access JWKS is malformed")
+    ...
 ```
 
-Read top to bottom. The whole function is one HTTP round trip
-wrapped in error handling that translates network-level outcomes
-into HTTP-level outcomes for our own caller. Key things to notice:
+Read top to bottom. The whole function is one HTTP round trip,
+wrapped in error handling that turns every way the network can let
+you down into one error Audrey understands. Key things to notice:
 
-- `async with httpx.AsyncClient(timeout=5.0) as http:` — opens a
-  client with a 5-second hard timeout. The `async with` guarantees
-  the connection pool is cleaned up even if the request raises.
-- `await http.get(...)` — yields control to the event loop while
-  OWUI thinks. Other users' requests can make progress here.
-- `raise HTTPException(...)` — FastAPI's way of saying "stop here,
-  return this status code to the client." See Lesson 2 §1.
+- `async with httpx.AsyncClient(timeout=self.timeout_s) as client:` —
+  opens a client with a hard timeout (five seconds by default). The
+  `async with` guarantees the connection pool is cleaned up even if
+  the request raises.
+- `await client.get(...)` — yields control to the event loop while
+  Cloudflare answers. Other users' requests can make progress here.
+- `response.raise_for_status()` — turns a 4xx or 5xx answer into an
+  exception, so a bad status lands in the same `except` as a network
+  failure.
+- `except (httpx.HTTPError, ValueError)` — one clause catches all
+  three ways this can fail: the network (`httpx.HTTPError` covers
+  timeouts, refused connections and DNS failures), a bad status (the
+  exception `raise_for_status` raised is an `httpx.HTTPError` too),
+  and a body that isn't JSON (`response.json()` raises a
+  `ValueError`).
+- `raise CloudflareAccessUnavailableError(...) from exc` — Audrey's
+  own exception type. Callers don't need to know about httpx; they
+  need to know "the keys are unavailable." `from exc` keeps the
+  original error attached for the log.
+
+Translating errors at the boundary pays off one layer up. The
+identity code catches `CloudflareAccessUnavailableError` and answers
+`502 Bad Gateway` ("our upstream is broken"), while a token that
+fails its check gets `401 Unauthorized` ("you're not signed in"). A
+person seeing those two codes knows whether to sign in again or to
+wait.
 
 ### Useful httpx methods
 
@@ -147,8 +164,8 @@ into HTTP-level outcomes for our own caller. Key things to notice:
   the entire Ollama client. Every chat completion in the system
   ultimately goes through one of its `chat()` / `chat_stream()`
   methods, which are httpx calls under the hood.
-- [`src/audrey/auth.py`](../../src/audrey/auth.py) — OWUI token
-  probe (the example above).
+- [`src/audrey/identity/cloudflare_access.py`](../../src/audrey/identity/cloudflare_access.py) —
+  the signing-key fetch (the example above).
 - [`src/audrey/tools/dispatch.py`](../../src/audrey/tools/dispatch.py) —
   dispatching tool calls to the custom-tools server.
 - [`src/audrey/kb/embed.py`](../../src/audrey/kb/embed.py) — image
@@ -355,9 +372,9 @@ and shows the offending line for failures.
 
 ### Why Audrey needs pytest
 
-Audrey ships with a hermetic test suite (no live Ollama / Qdrant /
-OWUI required), wall-clock target sub-second for the whole run.
-Several of those tests are *regression guards* for specific bugs
+Audrey ships with a hermetic test suite: it needs no live Ollama,
+Qdrant or custom-tools, and the whole run takes a minute or two on a
+laptop. Several of those tests are *regression guards* for specific bugs
 that already bit us in production:
 
 - **`test_two_user_round_robin_skips_last_granted`** — guards the
@@ -384,8 +401,8 @@ that already bit us in production:
 
 Without a test framework, those would be ad-hoc scripts that nobody
 runs. With `pytest tests/ -q` in the dev workflow, the whole battery
-runs in well under a second — fast enough that it's painless to run
-before every commit.
+runs in a minute or two, and a single test file in seconds, so it's
+easy to run before every commit.
 
 A second thing pytest specifically buys you: parametrization. The
 `_BREVITY_CUES` test in `test_reflect.py` covers every entry in the
@@ -448,7 +465,7 @@ means any `async def test_*` is auto-detected — you don't need
 ### Where you'll see it in Audrey
 
 - [`tests/`](../../tests/) — the full hermetic test suite (no live
-  Ollama / Qdrant / OWUI required). Run with
+  Ollama, Qdrant or custom-tools required). Run with
   `.venv/bin/pytest tests/ -q`.
 - The test suite itself is what later lessons use to demonstrate
   testing patterns.
@@ -464,8 +481,10 @@ foundations was to get you to the place where every piece of Audrey
 you read from here on lands somewhere familiar.
 
 
-[Lesson 4 — The request lifecycle, end-to-end](lesson-04-request-lifecycle.md)
+[Lesson 4 — The platform and the request lifecycle](lesson-04-request-lifecycle.md)
 is where we stop touring libraries and start walking real code. We
-trace one chat-completion request from "OWUI sends POST" to "user
-sees the answer," touching every major component without going deep
-on any. Think of it as the map; later lessons fill in each region.
+trace one message from the moment you press Send in the browser to
+the moment the answer finishes on screen, and see how a bot calling
+the API reaches the same pipeline, touching every major component
+without going deep on any. Think of it as the map; later lessons fill
+in each region.

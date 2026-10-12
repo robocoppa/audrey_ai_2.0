@@ -1036,10 +1036,10 @@ kb:
   # thing that was reaching for that job and should not have been.
   max_user_bytes: 10737418240
 
-  # Phase 15: sqlite index over the per-user upload metadata. Qdrant is
-  # still authoritative for the file's content; this is a fast index for
-  # list + quota that doesn't require scrolling the whole collection.
-  # Reconciled against Qdrant at startup.
+  # SQLite owns upload identity, ownership, metadata, quotas, and job state.
+  # Files and sidecars hold the source content; Qdrant is its search index.
+  # Startup backfills missing legacy catalog rows and reports index gaps,
+  # but never deletes existing records merely because search points are absent.
   uploads_db_path: "/data/uploads.sqlite"
 
   # A DELETE first writes a durable tombstone, then removes Qdrant points and
@@ -1733,8 +1733,9 @@ classification:
 # ─── Native conversation titles ───────────────────────────────────────
 title_generation:
   # A title is a label, not a second answer. Keep this on the small router
-  # model, disable thinking when supported, and fail back to a cleaned prompt
-  # rather than making conversation creation depend on an auxiliary call.
+  # model and disable thinking when supported. Save the first prompt and
+  # fallback title immediately; generate a better title after the answer,
+  # replacing it only if the conversation revision remains unchanged.
   enabled: true
   model: "qwen3.5:4b"
   timeout_s: 10

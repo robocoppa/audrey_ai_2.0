@@ -41,6 +41,17 @@ Audrey supplies a stable `archive_id` and `created_at` on this internal write.
 If its local delivery outbox retries after a timeout or restart, message and
 chunk ids collide deliberately instead of duplicating the turn.
 
+## Memory backups
+
+The configured memory collection is snapshotted in the background at startup
+and daily. Seven private bundles are retained under the persistent
+`/app/data/backups/memory`; each also includes an online archive SQLite copy
+preserving account purge receipts. Backup failures retry without blocking chat.
+`python /app/memory_backup.py verify --latest` checks a backup by restoring a
+unique disposable collection, validating its payload ownership, and deleting it.
+It cannot restore production. Deployment, verification and production recovery
+limits are in [Box operations](../docs/reference/box-operations.md#10-memory-backups-and-isolated-restore-verification).
+
 ## Adding new tools later
 
 Add the tagged route to `app.py`, declare its identity and dependencies in

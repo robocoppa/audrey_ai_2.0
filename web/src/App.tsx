@@ -55,10 +55,6 @@ const ACCESS_BOOTSTRAP_WAIT_SECONDS = ACCESS_BOOTSTRAP_DELAYS_MS.reduce(
   0,
 ) / 1_000;
 
-function hasCloudflareAccessMessage() {
-  return new URLSearchParams(window.location.search).has("__cf_access_message");
-}
-
 function clearCloudflareAccessMessage() {
   const search = new URLSearchParams(window.location.search);
   if (!search.has("__cf_access_message")) return;
@@ -83,7 +79,7 @@ export function App() {
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [mobileMenuHost, setMobileMenuHost] = useState<HTMLDivElement | null>(null);
   const [mobileNewChatHost, setMobileNewChatHost] = useState<HTMLDivElement | null>(null);
-  const [showAccessHandoff, setShowAccessHandoff] = useState(hasCloudflareAccessMessage);
+  const [showAccessHandoff, setShowAccessHandoff] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -187,8 +183,9 @@ export function App() {
       return (
         <AudreyLoader
           fullscreen
-          label="Authenticating with Cloudflare"
-          message="Authenticating with Cloudflare"
+          label="Processing Cloudflare Authentication"
+          message="Processing Cloudflare Authentication"
+          detail="Please wait..."
         />
       );
     }
@@ -449,10 +446,10 @@ function SessionActions({
           Status unavailable
         </span>
       ) : null)}
-      {variant !== "footer" ? <div className="topbar-files-action" role="group" aria-label="File actions">
+      {variant !== "drawer" ? <div className="topbar-files-action" role="group" aria-label="File actions">
         <button
           id={`${idPrefix}-my-files-action`}
-          className="my-files-button"
+          className={`my-files-button${variant === "footer" ? " menu-navigation-action" : ""}`}
           type="button"
           onClick={onOpenFiles}
         >
@@ -477,7 +474,7 @@ function SessionActions({
         {user.groups.includes("admins") ? (
           <button
             id={`${idPrefix}-administration-action`}
-            className="admin-button"
+            className={`admin-button${variant === "footer" ? " menu-navigation-action" : ""}`}
             type="button"
             onClick={onOpenAdministration}
           >
@@ -485,7 +482,7 @@ function SessionActions({
           </button>
         ) : null}
         {user.auth_provider === "cloudflare_access" ? (
-          <a className="logout-button" href="/cdn-cgi/access/logout" onClick={onNavigate}>Log out</a>
+          <a className={`logout-button${variant === "footer" ? " menu-navigation-action" : ""}`} href="/cdn-cgi/access/logout" onClick={onNavigate}>Log out</a>
         ) : null}
       </div> : null}
     </div>

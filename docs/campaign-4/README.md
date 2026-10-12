@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 10, 2026.** English user input only. Passed work stays closed.
+**Updated October 12, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -10,19 +10,21 @@ they are not ongoing task lists.
 ## Current work
 
 - **12 — compact/mobile navigation:** unified left drawer built; browser
-  acceptance pending. Header: Menu, builtryte logo, New chat. Drawer: user name,
-  My Files, collapsible Projects, and swipeable chat history; Admin Panel and
-  Log out stay at the bottom. Right swipe archives/restores; left reveals
+  acceptance pending. Header: Menu, builtryte logo, New chat. Drawer: Username -
+  My chats, search, Active/Archived, and history. The uniform bottom group holds
+  collapsible My projects with a plus button and separators, My Files, Admin Panel,
+  then Log out; expanded projects scroll independently. Right swipe archives/restores; left reveals
   Delete/Cancel. Project sits beside Model; empty/short chats have no jump arrow. Loading periods
   animate, profile avoids field autofocus, and pull-to-refresh requires a
   deliberate downward pull followed by release. Desktop Archive/Delete and
   composer controls are larger; Model focus highlights only the outer control.
   Async history actions preserve a chat selected while the request is pending.
   These UI changes rebuild `audrey-ui`.
-- **Platform audit fixes:** implemented October 10: authenticated tool catalog,
-  safe rediscovery, retired legacy upload page, corrected cache headers, and
-  current lifecycle/Compose comments and icon. Rebuild `audrey` and `audrey-ui`;
-  recreate `custom-tools` for its icon label. Deployment remains pending.
+- **Course review:** the platform and system-map reviews are recorded in
+  the local, gitignored [AUDIT](../lesson-ai/AUDIT.md). The current checkout
+  requires rebuilding `audrey`, `custom-tools`, and `audrey-ui` after pull;
+  deployment remains pending. Memory backup operation and verification are in
+  the [backup guide](../reference/box-operations.md#10-memory-backups-and-isolated-restore-verification).
 - **3D.6 — native automatic English skill selection:** built; deployed
   document/video selection and successful video file reads are confirmed.
   `skills.auto_select: true` is now the repository default at the user's request,
@@ -30,7 +32,8 @@ they are not ongoing task lists.
   and Project metadata; explicit choices win and unclear targets abstain.
   Remaining browser acceptance is pending.
 - **Composer/provenance followup:** built, awaiting browser acceptance. Files and
-  Tools & skills open below the composer. Sources, Models, and Tool calls stay
+  Tools & skills open below the composer; Files and Tools match the Model/Project
+  control styling on mobile and desktop. Sources, Models, and Tool calls stay
   beside each completed answer immediately, even with progress display off.
   Kimi K3 is included in the tool capability gate used by native panel workers.
 - **18A — admin controls and project presentation:** accepted October 7.

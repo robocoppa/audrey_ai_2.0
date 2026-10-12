@@ -6,6 +6,7 @@ import asyncio
 import base64
 import io
 import json
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -421,15 +422,6 @@ def test_native_run_create_stream_persist_and_resume_are_canonical(tmp_path):
             assert run["events_url"] == f"/api/runs/{run['id']}/events"
             assert run["agui_events_url"] == f"/api/runs/{run['id']}/ag-ui-events"
             assert "user_id" not in created.text
-            titled = client.get(
-                f"/api/conversations/{conversation.conversation_id}"
-            )
-            assert titled.status_code == 200
-            assert titled.json()["title"] == "Native Answer Request"
-            assert title_generator.calls == [
-                (owner.storage_namespace, "Answer natively.")
-            ]
-
             streamed = client.get(run["events_url"])
             assert streamed.status_code == 200
             assert streamed.headers["content-type"].startswith("text/event-stream")
@@ -448,6 +440,20 @@ def test_native_run_create_stream_persist_and_resume_are_canonical(tmp_path):
             assert [event["sequence"] for event in events] == list(range(1, 10))
             assert owner.user_id not in streamed.text
             assert owner.storage_namespace not in streamed.text
+
+            async def finish_title():
+                await asyncio.gather(*tuple(_manager._title_tasks.values()))
+
+            assert client.portal is not None
+            client.portal.call(finish_title)
+            titled = client.get(
+                f"/api/conversations/{conversation.conversation_id}"
+            )
+            assert titled.status_code == 200
+            assert titled.json()["title"] == "Native Answer Request"
+            assert title_generator.calls == [
+                (owner.storage_namespace, "Answer natively.")
+            ]
 
             resumed = client.get(run["events_url"], headers={"Last-Event-ID": "5"})
             assert [event["sequence"] for event in _sse_events(resumed.text)] == [
@@ -1755,4 +1761,248 @@ def test_project_context_is_model_only_and_persists_private_file_sources(
             for message in captured["routing_messages"]
         )
     finally:
+        store.close()
+
+
+class _BlockedTitleGenerator:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.cancelled = False
+        self.calls = 0
+
+    async def generate(self, **_kwargs: Any) -> str:
+        self.calls += 1
+        self.started.set()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        return "Generated after answering"
+
+
+async def test_title_generation_does_not_delay_saving_or_answer_cleanup(tmp_path):
+    cleanup_started = asyncio.Event()
+    cleanup_release = asyncio.Event()
+
+    async def stream_with_cleanup(*args, **kwargs):
+        async for frame in _successful_stream(*args, **kwargs):
+            yield frame
+        cleanup_started.set()
+        await cleanup_release.wait()
+
+    generator = _BlockedTitleGenerator()
+    app, store, owner, manager = await asyncio.to_thread(
+        _native_app, tmp_path, stream_factory=stream_with_cleanup,
+        title_generator=generator,
+    )
+    conversation = await store.conversations.create(user_id=owner.user_id)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test",
+        ) as client:
+            response = await asyncio.wait_for(client.post(
+                f"/api/conversations/{conversation.conversation_id}/runs",
+                json={"content": "Persist before title generation."},
+            ), timeout=2)
+            assert response.status_code == 202
+            run = response.json()
+            assert run["title_pending"]
+            await asyncio.wait_for(cleanup_started.wait(), timeout=2)
+            events = await client.get(run["events_url"])
+            assert _sse_events(events.text)[-1]["status"] == "succeeded"
+            assert not generator.started.is_set()
+            records = await store.conversations.list_messages(
+                user_id=owner.user_id,
+                conversation_id=conversation.conversation_id,
+            )
+            assert records is not None
+            assert [record.content for record in records] == [
+                "Persist before title generation.", "native answer",
+            ]
+            assert records[-1].status == "completed"
+            current = await store.conversations.get(
+                user_id=owner.user_id,
+                conversation_id=conversation.conversation_id,
+            )
+            assert current is not None
+            assert current.title == "Persist before title generation."
+            cleanup_release.set()
+            await asyncio.wait_for(generator.started.wait(), timeout=2)
+            # Stop on a completed answer does not depend on an auxiliary title.
+            stopped = await client.post(run["cancel_url"])
+            assert stopped.json()["status"] == "succeeded"
+            assert stopped.json()["title_pending"]
+            generator.release.set()
+            await asyncio.wait_for(
+                asyncio.gather(*tuple(manager._title_tasks.values())), timeout=2,
+            )
+            assert not (await client.get(f"/api/runs/{run['id']}")).json()["title_pending"]
+            titled = await client.get(f"/api/conversations/{conversation.conversation_id}")
+            assert titled.json()["title"] == "Generated after answering"
+    finally:
+        cleanup_release.set()
+        generator.release.set()
+        await manager.stop()
+        store.close()
+
+
+@pytest.mark.parametrize("mutation", ["rename", "same_title", "delete", "disable"])
+async def test_pending_title_preserves_owner_changes(tmp_path, mutation):
+    generator = _BlockedTitleGenerator()
+    app, store, owner, manager = await asyncio.to_thread(
+        _native_app, tmp_path, title_generator=generator,
+    )
+    conversation = await store.conversations.create(user_id=owner.user_id)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test",
+        ) as client:
+            response = await client.post(
+                f"/api/conversations/{conversation.conversation_id}/runs",
+                json={"content": "First prompt"},
+            )
+            run = response.json()
+            await asyncio.wait_for(generator.started.wait(), timeout=2)
+            if mutation in {"rename", "same_title"}:
+                updated = await store.conversations.update(
+                    user_id=owner.user_id,
+                    conversation_id=conversation.conversation_id,
+                    title="My chosen title" if mutation == "rename" else "First prompt",
+                )
+                assert updated is not None
+            elif mutation == "delete":
+                assert (await client.delete(
+                    f"/api/conversations/{conversation.conversation_id}",
+                )).status_code == 204
+            else:
+                with store._lock:
+                    store._conn.execute(
+                        "UPDATE app_users SET status = 'disabled' WHERE user_id = ?",
+                        (owner.user_id,),
+                    )
+                    store._conn.commit()
+            generator.release.set()
+            await asyncio.wait_for(
+                asyncio.gather(*tuple(manager._title_tasks.values())), timeout=2,
+            )
+            current = await store.conversations.get(
+                user_id=owner.user_id,
+                conversation_id=conversation.conversation_id,
+            )
+            if mutation == "delete":
+                assert current is None
+            else:
+                assert current is not None
+                assert current.title == ("My chosen title" if mutation == "rename" else "First prompt")
+            assert not manager.title_pending(run["id"])
+    finally:
+        await manager.stop()
+        store.close()
+
+
+async def test_shutdown_cancels_auxiliary_title_without_losing_answer(tmp_path):
+    generator = _BlockedTitleGenerator()
+    app, store, owner, manager = await asyncio.to_thread(
+        _native_app, tmp_path, title_generator=generator,
+    )
+    conversation = await store.conversations.create(user_id=owner.user_id)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test",
+        ) as client:
+            response = await client.post(
+                f"/api/conversations/{conversation.conversation_id}/runs",
+                json={"content": "Keep my answer"},
+            )
+            await asyncio.wait_for(generator.started.wait(), timeout=2)
+            await asyncio.wait_for(manager.stop(), timeout=2)
+            assert generator.cancelled
+            assert not manager._title_tasks
+            run = await store.conversations.get_run(
+                user_id=owner.user_id, run_id=response.json()["id"],
+            )
+            assert run is not None and run.status == "succeeded"
+            records = await store.conversations.list_messages(
+                user_id=owner.user_id, conversation_id=conversation.conversation_id,
+            )
+            assert records is not None and records[-1].content == "native answer"
+    finally:
+        await manager.stop()
+        store.close()
+
+
+async def test_rejected_duplicate_and_cancelled_first_run_do_not_generate_titles(tmp_path):
+    answering = asyncio.Event()
+
+    async def blocked_answer(*_args, event_context, **_kwargs):
+        assert event_context.emitter is not None
+        event_context.emitter.run_started()
+        answering.set()
+        await asyncio.Event().wait()
+        yield "unreachable"
+
+    generator = _BlockedTitleGenerator()
+    app, store, owner, manager = await asyncio.to_thread(
+        _native_app, tmp_path, stream_factory=blocked_answer, title_generator=generator,
+    )
+    conversation = await store.conversations.create(user_id=owner.user_id)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test",
+        ) as client:
+            path = f"/api/conversations/{conversation.conversation_id}/runs"
+            response = await client.post(path, json={"content": "First prompt"})
+            await asyncio.wait_for(answering.wait(), timeout=2)
+            duplicate = await client.post(path, json={"content": "Retry too soon"})
+            assert duplicate.status_code == 409
+            assert len(manager._title_tasks) == 1
+            assert (await client.post(response.json()["cancel_url"])).json()["status"] == "cancelled"
+            await asyncio.wait_for(
+                asyncio.gather(*tuple(manager._title_tasks.values())), timeout=2,
+            )
+            assert generator.calls == 0
+    finally:
+        await manager.stop()
+        store.close()
+
+
+async def test_shutdown_drains_title_database_write_before_store_close(tmp_path, monkeypatch):
+    app, store, owner, manager = await asyncio.to_thread(
+        _native_app, tmp_path, title_generator=_StaticTitleGenerator("Generated title"),
+    )
+    original_write = store.conversations._apply_generated_title_sync
+    writing = threading.Event()
+    release = threading.Event()
+
+    def blocked_write(*args):
+        writing.set()
+        assert release.wait(timeout=3)
+        return original_write(*args)
+
+    monkeypatch.setattr(store.conversations, "_apply_generated_title_sync", blocked_write)
+    conversation = await store.conversations.create(user_id=owner.user_id)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test",
+        ) as client:
+            await client.post(
+                f"/api/conversations/{conversation.conversation_id}/runs",
+                json={"content": "Save answer before shutdown"},
+            )
+            assert await asyncio.to_thread(writing.wait, 2)
+            stopping = asyncio.create_task(manager.stop())
+            await asyncio.sleep(0)
+            assert not stopping.done()
+            release.set()
+            await asyncio.wait_for(stopping, timeout=2)
+            current = await store.conversations.get(
+                user_id=owner.user_id, conversation_id=conversation.conversation_id,
+            )
+            assert current is not None and current.title == "Generated title"
+            assert not manager._title_tasks
+    finally:
+        release.set()
+        await manager.stop()
         store.close()

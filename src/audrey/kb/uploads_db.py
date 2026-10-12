@@ -1,29 +1,14 @@
-"""SQLite index over per-user upload metadata.
+"""Durable SQLite catalog for per-user uploads and their storage lifecycle.
 
-Qdrant remains authoritative for *file content* (text chunks, image
-embeddings). This module is a fast index over the per-file metadata so
-`GET /v1/files` and the quota gate don't have to scroll a whole user
-collection.
+SQLite owns file identity, ownership, metadata, quota accounting, and job state.
+Qdrant holds searchable content derived from the files and their sidecars.
+Missing search points never imply that a file or its catalog record was deleted.
 
-Source-of-truth contract:
-  - Qdrant has the file's content → sqlite has a row for it.
-  - Qdrant has nothing for a file_id → sqlite must not either, *unless
-    the row never claimed Qdrant content in the first place*. A video
-    waiting on the media worker is the case that carve-out exists for:
-    it holds bytes on disk and no points anywhere, on purpose.
-
-The startup `reconcile_with_qdrant` enforces (b) by deleting sqlite rows
-whose file_id has zero points in the user's Qdrant collections, and
-backfills (a) on first run by scrolling each `kb_user_*` collection.
-After reconciliation, normal request flow keeps both stores in step:
-
-  upload   → qdrant upsert succeeds → sqlite insert
-             (insert fails ⇒ delete the just-upserted points to avoid
-              a phantom file no one can see in their list)
-  delete   → sqlite delete first (so the file vanishes from list even
-             if Qdrant delete is slow), then qdrant delete-by-filter
-  list     → sqlite only
-  quota    → sqlite only
+Startup reconciliation backfills missing catalog rows from legacy Qdrant
+payloads, preserves existing rows, and reports files missing from the index.
+Explicit deletion uses durable tombstones and retryable Qdrant/disk cleanup;
+tombstones prevent reconciliation from resurrecting files awaiting cleanup.
+File lists and quota decisions read SQLite directly.
 
 Each `UploadsDB` instance owns one connection guarded by a lock because the
 async wrapper runs calls in worker threads. Atomic quota decisions also use
@@ -451,39 +436,9 @@ class UploadsDB:
         bytes_: int, kind: str, collection: str, chunks: int, uploaded_at: str,
         status: str,
     ) -> None:
-        # Upsert, not INSERT OR REPLACE. The difference is the whole reason
-        # this is not a one-liner.
-        #
-        # `INSERT OR REPLACE` deletes the conflicting row and inserts a new
-        # one, so every column NOT named here silently reverts to its schema
-        # default. Every one of `_UPLOADS_ADDED_COLUMNS` is absent from this
-        # statement, and `reconcile_with_qdrant` calls this for every user file
-        # on every boot — which meant a processed video lost its `summary` and
-        # its `duration_s` at the next restart of `audrey`, with no error
-        # and nothing in the log. Measured, not theorised: a row completed with
-        # a 1,257-character summary came back empty after one reconcile pass.
-        #
-        # The rule the ON CONFLICT clause encodes: **Qdrant is authoritative
-        # about content, never about job lifecycle.** A payload knows the
-        # filename, the size and the chunk count. It does not know how many
-        # attempts a job took, why it failed, or what its summary said — those
-        # exist only here, so reconcile must leave them alone.
-        #
-        # `status` is deliberately in the second group. It arrives as a default
-        # argument rather than as something read from Qdrant, so honouring it
-        # on conflict would let a boot flip a 'processing' or 'failed' row to
-        # 'ready' on the strength of a value the caller never supplied.
-        #
-        # `source_url` (Phase 41) is in the same group for the same reason, and
-        # the consequence is worth stating: a fetched video that reconciles at
-        # boot keeps knowing where it came from. Naming it here would clear it
-        # from the payload's silence, which is the `summary` bug again.
-        #
-        # So are `transcript_source` and `fetched_transcript` (Phase 41 step 4).
-        # A Qdrant payload cannot know whether a human wrote the captions or
-        # whisper guessed at them, and the failure would be the quiet kind: a
-        # provenance label that is correct until the next restart and blank
-        # afterwards, on rows nobody thinks to re-check.
+        # Normal upload handovers may refresh metadata, but preserve job and
+        # retention fields not supplied by the caller. Startup index recovery
+        # uses backfill_upload instead and cannot overwrite existing metadata.
         with self._lock:
             self._record_locked(
                 file_id, user, filename, mime, bytes_, kind, collection,
@@ -508,6 +463,34 @@ class UploadsDB:
             (file_id, user, filename, mime, bytes_, kind, collection,
              chunks, uploaded_at, status),
         )
+
+    async def backfill_upload(self, row: dict, *, user: str, collection: str) -> bool:
+        """Restore a missing legacy row without replacing catalog-owned state."""
+        return await asyncio.to_thread(self._backfill_sync, row, user, collection)
+
+    def _backfill_sync(self, row: dict, user: str, collection: str) -> bool:
+        with self._lock, self._transaction_locked():
+            inserted = self._conn.execute(
+                "INSERT INTO uploads "
+                "(file_id, user, filename, mime, bytes, kind, collection, "
+                " chunks, uploaded_at, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready') "
+                "ON CONFLICT(file_id) DO NOTHING",
+                (row["file_id"], user, row["filename"], row["mime"],
+                 row["bytes"], row["kind"], collection, row["chunks"],
+                 row["uploaded_at"]),
+            ).rowcount > 0
+            # Earlier reconciles copied a text point's kind onto media rows.
+            # Repair that label from the catalog's MIME, never from a stale
+            # index payload or an index record naming another owner.
+            self._conn.execute(
+                "UPDATE uploads SET kind = CASE "
+                "WHEN mime LIKE 'video/%' THEN 'video' ELSE 'audio' END "
+                "WHERE file_id = ? AND user = ? "
+                "AND (mime LIKE 'video/%' OR mime LIKE 'audio/%')",
+                (row["file_id"], user),
+            )
+            return inserted
 
     async def commit_reserved_upload(
         self,
@@ -1609,16 +1592,9 @@ class UploadsDB:
 
     def _user_total_sync(self, user: str) -> int:
         with self._lock:
-            # Rows whose source has been reclaimed contribute nothing, because
-            # the quota exists to bound bytes on disk and those bytes are gone.
-            #
-            # Note what is NOT done here: setting `bytes = 0` on reclamation
-            # would be simpler and would be undone at the next boot, because
-            # `reconcile_with_qdrant` refreshes `bytes` from the Qdrant payload
-            # — which still carries the original size and always will. Freed
-            # space that silently un-frees itself on restart is worse than no
-            # reclamation at all, so the flag lives in a column reconcile does
-            # not touch and `bytes` stays true to what was uploaded.
+            # Quota bounds bytes retained on disk. Reclaimed originals keep
+            # their historical upload size, while the separate retention flag
+            # excludes those bytes from usage and survives index recovery.
             cur = self._conn.execute(
                 "SELECT COALESCE(SUM(CASE WHEN source_freed_at = '' THEN bytes END), 0) "
                 "AS total FROM uploads WHERE user = ?",
@@ -1855,29 +1831,16 @@ class UploadsDB:
             cur = self._conn.execute("SELECT DISTINCT user FROM uploads")
             return [r["user"] for r in cur.fetchall()]
 
-    async def prunable_file_ids(self, user: str) -> set[str]:
-        """File ids that *claim* Qdrant content, and so may be pruned if absent.
+    async def indexed_file_ids(self, user: str) -> set[str]:
+        """Ready files that expect searchable content, for drift reporting only.
 
-        `reconcile_with_qdrant`'s ghost sweep asks "is this row's content
-        really in Qdrant?" — a question only worth asking of rows that
-        assert there is any. Two kinds of row assert nothing and must be
-        withheld from that sweep, or boot deletes them:
-
-          - `status != 'ready'` — a pending or processing video hasn't been
-            ingested yet, and a failed one never will be. Having no points
-            is the expected state, not a ghost.
-          - `chunks = 0` — a video the worker completed with no transcript
-            (silent footage). It is 'ready' in the sense that the pipeline
-            is done with it, but nothing was ever written to Qdrant.
-
-        The upload path can't produce a 'ready' row with 0 chunks: images
-        record 1 and empty text is rejected with `EmptyExtractionError`
-        before any row is written. So `chunks = 0` here means a completed
-        video specifically, and excluding it costs no real ghost coverage.
+        Unfinished jobs and completed files without extracted content have no
+        points by design. Missing points for the remaining files indicate an
+        index needing recovery; they never authorize deleting catalog rows.
         """
-        return await asyncio.to_thread(self._prunable_ids_sync, user)
+        return await asyncio.to_thread(self._indexed_ids_sync, user)
 
-    def _prunable_ids_sync(self, user: str) -> set[str]:
+    def _indexed_ids_sync(self, user: str) -> set[str]:
         with self._lock:
             cur = self._conn.execute(
                 "SELECT file_id FROM uploads "
@@ -2845,135 +2808,76 @@ class UploadsDB:
 
 
 async def reconcile_with_qdrant(db: UploadsDB, qdrant) -> dict[str, int]:
-    """Make sqlite agree with Qdrant.
+    """Backfill legacy files and report index drift without deleting the catalog.
 
-    Strategy:
-      1. For every user collection that exists in Qdrant, scroll it,
-         build the same `(file_id → row)` map as `qdrant.list_user_files`,
-         and INSERT OR REPLACE every row. Brings sqlite up to whatever
-         is actually in vector storage right now.
-      2. For every user already in sqlite, delete sqlite rows whose
-         file_id no longer appears in either of that user's Qdrant
-         collections. Catches files that were deleted in Qdrant out of
-         band (manual purge, migration, etc.). Only rows that assert
-         Qdrant content are eligible — `prunable_file_ids` says which.
+    Run at startup before serving traffic. Existing SQLite rows remain the
+    authority for ownership, metadata, quotas, and lifecycle state. Qdrant can
+    recover missing legacy rows, but absent or partial index content cannot
+    remove files. Durable deletion tombstones outrank recovery payloads.
 
-    Returns a small stats dict for the boot log.
-
-    PRECONDITION — call before serving traffic.
-
-    Step 2 reads `db.all_users()` and then reads the matching live ids
-    from Qdrant in two separate awaits. A fresh upload that lands
-    between those two reads would have its sqlite row recorded but its
-    Qdrant points not yet visible in the scroll, so step 2 would
-    incorrectly prune that user's just-uploaded sqlite row.
-
-    `main.py:lifespan` calls this during startup before uvicorn accepts
-    requests, so the race window is empty in production. If you ever
-    add a code path that calls this concurrently with the upload route,
-    add per-user locking around steps 1 and 2 first.
+    A successful pass reports files expected in the index but missing from it.
+    It does not re-ingest files or change their ready status: originals and
+    sidecars remain usable independently of search. Qdrant errors propagate
+    to the startup caller, which logs them and retains the SQLite catalog.
     """
-    from audrey.kb.user_store import (
-        USER_IMAGE_PREFIX,
-        USER_TEXT_PREFIX,
-        user_image_collection,
-        user_text_collection,
-    )
+    from audrey.kb.user_store import USER_IMAGE_PREFIX, USER_TEXT_PREFIX
 
-    # A tombstone outranks Qdrant. Without this set, a crash after the user
-    # requested deletion but before Qdrant acknowledged it would let step 1
-    # recreate the visible row from the very points still awaiting cleanup.
     deletion_keys = await db.file_deletion_keys()
-
-    # 1. Pull every kb_user_* collection from qdrant and backfill sqlite.
     all_collections = await qdrant.list_collections()
-    user_to_collections: dict[str, list[str]] = {}
+    user_to_collections: dict[str, set[str]] = {}
+    indexed_ids: dict[str, set[str]] = {}
+    backfilled_rows = 0
     for col in all_collections:
         if not (col.startswith(USER_TEXT_PREFIX) or col.startswith(USER_IMAGE_PREFIX)):
             continue
-        # We don't know the raw user id from the sanitized suffix, so we
-        # scroll and read it from each point's payload (which preserves
-        # the raw id). Group collections by raw user as we go.
+        # Payloads retain the raw owner; collection suffixes are sanitized.
         rows = await _scroll_user_rows(qdrant, col)
-        for raw_user, files in rows.items():
-            user_to_collections.setdefault(raw_user, [])
-            if col not in user_to_collections[raw_user]:
-                user_to_collections[raw_user].append(col)
-            for f in files:
-                if (raw_user, str(f["file_id"])) in deletion_keys:
+        for user, files in rows.items():
+            user_to_collections.setdefault(user, set()).add(col)
+            for row in files:
+                file_id = str(row["file_id"])
+                if (user, file_id) in deletion_keys:
                     continue
-                await db.record_upload(
-                    file_id=f["file_id"],
-                    user=raw_user,
-                    filename=f["filename"],
-                    mime=f["mime"],
-                    bytes_=f["bytes"],
-                    kind=f["kind"],
-                    collection=col,
-                    chunks=f["chunks"],
-                    uploaded_at=f["uploaded_at"],
-                )
+                indexed_ids.setdefault(user, set()).add(file_id)
+                backfilled_rows += int(await db.backfill_upload(
+                    row, user=user, collection=col,
+                ))
 
-    # 2. Drop sqlite rows for files that no longer exist anywhere in qdrant.
-    #    Scoped to rows that claim Qdrant content — see `prunable_file_ids`.
-    #    Without that scope every boot deletes the whole video queue, since
-    #    a pending video has no points by definition.
-    pruned = 0
+    missing_files = 0
+    missing_users = 0
     for user in await db.all_users():
-        text_col = user_text_collection(user)
-        image_col = user_image_collection(user)
-        live_ids: set[str] = set()
-        for col in (text_col, image_col):
-            if not await qdrant.collection_exists(col):
-                continue
-            for row in await qdrant.list_user_files(user=user, collection=col):
-                live_ids.add(row["file_id"])
-        sqlite_ids = await db.prunable_file_ids(user)
-        for fid in sqlite_ids - live_ids:
-            if await db.delete_upload(fid, user=user):
-                pruned += 1
+        expected = await db.indexed_file_ids(user)
+        missing = expected - indexed_ids.get(user, set())
+        missing_files += len(missing)
+        missing_users += bool(missing)
 
-    backfilled = sum(len(v) for v in user_to_collections.values())
+    if missing_files:
+        log.warning(
+            "uploads_db: search index missing %d files across %d users; "
+            "catalog records retained; restore or rebuild index content",
+            missing_files, missing_users,
+        )
+    backfilled = sum(len(collections) for collections in user_to_collections.values())
     log.info(
-        "uploads_db: reconcile complete (backfilled=%d collections, pruned=%d ghost rows)",
-        backfilled, pruned,
+        "uploads_db: reconcile complete (backfilled=%d collections, "
+        "restored=%d rows, missing_index=%d files)",
+        backfilled, backfilled_rows, missing_files,
     )
-    return {"backfilled_collections": backfilled, "pruned_rows": pruned}
+    return {
+        "backfilled_collections": backfilled,
+        "backfilled_rows": backfilled_rows,
+        "missing_index_files": missing_files,
+        "missing_index_users": missing_users,
+    }
 
 
 async def _scroll_user_rows(qdrant, collection: str) -> dict[str, list[dict]]:
-    """Scroll a single collection and group `list_user_files`-shaped rows by raw user.
+    """Recover legacy metadata from owner-bearing index payloads.
 
-    Reuses the same payload-shape contract as QdrantKB._list_user_files_sync,
-    but doesn't pre-filter by user — we don't know the user yet.
-
-    ## `kind` is derived, not copied, and that is a bug fix
-
-    A point's `kind` says what that POINT is, not what the FILE is. Every text
-    point carries `kind: "text"` (`qdrant.py`'s text-point builder sets it, and
-    the value is baked into the deterministic `point_id(source, kind, idx)`, so
-    it cannot be changed without invalidating every stored id). A video's
-    transcript, frame descriptions and summary are all ingested through that
-    same text path.
-
-    So copying it through said `kind = "text"` for a video, and because
-    `record_upload`'s ON CONFLICT updates `kind`, **every boot silently
-    rewrote a processed video's row to `kind='text'`**. Observed on the
-    deployed box 2026-08-05: a `ready` row with a `summary` and a
-    `completed_at` — fields only a video ever gets — sitting under
-    `kind='text'`.
-
-    Nothing crashed and no data was lost; `summary` and `completed_at` are in
-    the second ON CONFLICT group and survived. What broke is everything that
-    trusts `kind`: `list_my_files` told the model a video was a text file, and
-    `reclaimable_sources` filters on `kind = 'video'`.
-
-    **MIME plus `artifact` is the reliable signal.** Audio and video text
-    stages set an artifact while preserving the source MIME, so reconciliation
-    restores their file kind from MIME. Document summaries also carry an
-    artifact now, but their application/pdf MIME deliberately retains the
-    payload's text kind. Deriving this way repairs existing media rows on the
-    next boot without turning a summarized PDF into media.
+    A point's kind describes its embedding, not its original file. Media
+    artifacts therefore derive the recovered file kind from the source MIME;
+    a PDF summary remains a document. Existing catalog rows are preserved by
+    backfill_upload, which repairs old media labels from their stored MIME.
     """
     by_user_file: dict[tuple[str, str], dict] = {}
     for _point_id, payload in await qdrant.scroll_collection(collection):

@@ -296,9 +296,9 @@ function with multiple return paths or several exceptions to consider.
 In a normal request, Audrey acquires several resources that *must*
 be released, even when things go wrong:
 
-- **httpx clients with connection pools.** Every Ollama call, OWUI
-  auth probe, custom-tools dispatch, and Qdrant query goes through
-  one. If the underlying connection isn't returned to the pool after
+- **httpx clients with connection pools.** Every Ollama call,
+  custom-tools dispatch, and Qdrant query goes through one. If the
+  underlying connection isn't returned to the pool after
   an exception, the pool eventually exhausts and new requests stall.
 - **Fair-gate slots.** Audrey caps how many concurrent generations a
   single user can have running at once — without a cap, one user
@@ -540,46 +540,91 @@ instances use less memory and attribute access is slightly faster.
 Mostly cosmetic; included because the codebase has many small data
 holders.
 
-`@dataclass(frozen=True)` makes instances immutable. Used in places
-like `KeywordSignal` in `pipeline/classify.py`.
+`@dataclass(frozen=True)` makes instances immutable: assigning to a
+field after creation raises `FrozenInstanceError`. Used in places
+like `KeywordSignal` in `pipeline/classify.py`, and for Audrey's
+identity record, below.
 
 ### Why Audrey needs dataclasses (and type hints)
 
 Audrey shuffles small, structured records between layers constantly:
 
-- `AuthedUser` (email + role + owui_id) — produced by `auth.py`,
-  consumed by every protected route.
+- `Principal` (one authenticated Audrey account: user id, private
+  storage namespace, login provider, email, role, status) — produced
+  by the identity layer, consumed by every route that touches a
+  person's data.
 - `KBHit` (qdrant search result: source, text, score) — produced by
   `kb/qdrant.py`, consumed by tools and routes.
 - `ReactResult` — the per-iteration state of a ReAct loop.
 - `KeywordSignal` — `pipeline/classify.py`'s frozen rule registry.
 
 If those were untyped dicts, every call site would have to *remember*
-the keys and types. One typo (`me["emial"]` instead of `me["email"]`)
-is a `KeyError` at runtime — found only when that code path actually
-runs, which on a low-traffic route might be days after deploy. With
-a dataclass, the editor knows the field is `email`, autocompletes
-correctly, and a static type checker catches the typo before you save
-the file.
+the keys and types. One typo (`principal["usr_id"]` instead of
+`principal["user_id"]`) is a `KeyError` at runtime — found only when
+that code path actually runs, which on a low-traffic route might be
+days after deploy. With a dataclass, the editor knows the field is
+`user_id`, autocompletes correctly, and a static type checker catches
+the typo before you save the file.
+
+Here's the real thing, from
+[`identity/models.py:10`](../../src/audrey/identity/models.py#L10):
+
+```python
+@dataclass(frozen=True, slots=True)
+class Principal:
+    """One authenticated Audrey account, independent of its login provider.
+
+    ``user_id`` and ``storage_namespace`` are Audrey-owned, durable identifiers.
+    Email and display name are mutable profile attributes. Provider subject is
+    retained for audit and adapter decisions, but native resource ownership is
+    always keyed by ``user_id``.
+    """
+
+    user_id: str
+    storage_namespace: str
+    provider: str
+    provider_subject: str
+    email: str
+    display_name: str
+    role: str
+    status: str
+    auth_method: str
+    groups: frozenset[str] = frozenset()
+    token_id: str | None = None
+    scopes: frozenset[str] = frozenset()
+```
+
+Two choices in it are worth noticing. **It's frozen.** Once FastAPI has
+worked out who is calling, no code further along the request can
+change that answer by accident: `principal.role = "admin"` raises
+instead of quietly granting anything. **Its docstring separates two
+kinds of field.** `user_id` and `storage_namespace` are ids that
+Audrey issues and never changes; `email` and `display_name` are profile
+details that can change. Everything a person owns is keyed by the
+ids, so changing an email renames nothing.
 
 There's a second benefit specific to dataclasses: Free `__repr__`
-gives you readable log output. Logging an `AuthedUser` shows
-`AuthedUser(email='alice@example.com', role='admin', owui_id='abc123')`
-instead of `<auth.AuthedUser object at 0x7f4c...>`. That's the
-difference between "I can debug from logs" and "I have to add print
-statements and redeploy."
+gives you readable log output. Logging a `Principal` shows
+`Principal(user_id='usr_3f9c…', storage_namespace='ns_81ab…',
+provider='cloudflare_access', …, email='alice@example.com', …)`
+instead of `<audrey.identity.models.Principal object at 0x7f4c...>`.
+That's the difference between "I can debug from logs" and "I have to
+add print statements and redeploy."
 
-Concrete past pain: An early version of the auth wiring crashed
-with `AttributeError: 'AuthedUser' object has no attribute 'id'`
-because the field is `email`, not `id`. The fix was a one-line
-change, but the diagnostic was instant precisely because the
-dataclass refused to invent a missing attribute. An untyped-dict
-version would have returned `None` from `state.get("id")` and produced
-a much weirder downstream symptom.
+A dataclass also refuses to invent fields, and Audrey uses that on
+purpose. `AuthedUser`, the older identity shape that the `/v1` routes
+still receive, deliberately has no `id` field. An Audrey user id, a
+login provider's subject and an email are all "ids" in some sense,
+so code that reached for `me.id` would have to guess which one it
+meant. Without the field, the guess fails at once with an
+`AttributeError`, instead of an untyped dict's `me.get("id")`
+quietly returning `None` and producing a much weirder symptom
+further downstream.
 
 ### Where you'll see it in Audrey
 
 Dataclasses:
+- `Principal` in [`src/audrey/identity/models.py`](../../src/audrey/identity/models.py)
 - `AuthedUser` in [`src/audrey/auth.py`](../../src/audrey/auth.py)
 - `ReactResult` in [`src/audrey/pipeline/react.py`](../../src/audrey/pipeline/react.py)
 - `KBHit` in [`src/audrey/kb/qdrant.py`](../../src/audrey/kb/qdrant.py)

@@ -20,11 +20,15 @@ separated from username, Admin Panel, and Log out. The app shell owns its dialog
 - At widths up to 1,100 px, the top bar contains matching **Menu** and
   **New chat** icon buttons with the builtryte logo between them. Hide
   **Ask Audrey** and the desktop account controls.
-- Menu opens one left drawer with the user's name at the top left, **My Files**,
-  a collapsible **Projects** category, then **Chats**, search, active/archive
-  views, and history. **Admin Panel** (administrators only) and **Log out** stay
-  at the bottom while history scrolls. Account settings and the current-chat
-  action section are absent from this drawer.
+- Menu opens one left drawer headed **Username - My chats**, followed by a
+  search box with hint text, **Active/Archived**, and history. No separate search
+  label or swipe instructions are displayed; the search retains its accessible name.
+- The bottom group contains **My projects**, **My Files** (folder icon retained),
+  **Admin Panel** (administrators only), then **Log out**, with matching colors,
+  typography, and targets. My projects stays collapsible, with an adjacent plus
+  button to create a project and separators above/below its section. Expanded
+  projects scroll independently so the footer remains reachable. Account settings
+  and the current-chat action section are absent from this drawer.
 - Any compact chat-history row, including expanded Project chats, supports
   horizontal swipes: right archives (or restores in Archived); left reveals
   **Delete** and **Cancel**. Delete requires the explicit tap. Short/vertical
@@ -53,6 +57,9 @@ separated from username, Admin Panel, and Log out. The app shell owns its dialog
 - Profile opens with Close settings focused instead of its name input.
   Loading periods cycle one, two, three every 1.8 seconds; reduced motion shows
   three static periods. The accessible status label does not animate.
+  While Audrey checks the signed-in Cloudflare account, the portrait loader
+  shows **Processing Cloudflare Authentication** and **Please wait...** on
+  separate lines, including ordinary sign-in returns without a URL flag.
 
 Conversation creation, empty-draft cleanup, search, desktop rename,
 archive/restore, deletion, and active-run retention keep their existing behavior.

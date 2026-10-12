@@ -55,14 +55,15 @@ describe("App", () => {
     window.history.replaceState({}, "", "/");
   });
 
-  it("shows a centered Audrey Auto loader with a loading label", () => {
+  it("shows the Cloudflare account check beneath the centered Audrey Auto portrait", () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
 
     render(<App />);
 
-    const loader = screen.getByRole("status", { name: "Loading" });
+    const loader = screen.getByRole("status", { name: "Processing Cloudflare Authentication" });
     expect(loader).toHaveClass("audrey-loader-fullscreen");
-    expect(loader).toHaveTextContent("Loading");
+    expect(loader.querySelector("strong")).toHaveTextContent("Processing Cloudflare Authentication");
+    expect(loader.querySelector(".audrey-loader-copy > span")).toHaveTextContent("Please wait...");
     expect(loader.querySelector(".audrey-loading-orbit")).toBeInTheDocument();
     expect(loader.querySelector("img")).toHaveAttribute(
       "src",
@@ -281,12 +282,20 @@ describe("App", () => {
       fireEvent.click(toggle);
       const navigation = screen.getByRole("dialog", { name: "Conversations" });
       const actions = within(navigation);
-      expect(actions.getByText("Alice", { exact: true })).toHaveClass("drawer-user-name");
+      expect(actions.getByText("Alice - My chats", { exact: true })).toHaveClass("drawer-user-name");
+      expect(actions.queryByText("Search titles", { exact: true })).not.toBeInTheDocument();
+      expect(actions.queryByText(/Swipe right to/u)).not.toBeInTheDocument();
+      expect(actions.getByRole("searchbox", { name: "Search titles" }))
+        .toHaveAttribute("placeholder", "Search conversations");
+      expect(actions.getByRole("button", { name: "Active" })).toBeVisible();
+      expect(actions.getByRole("button", { name: "Archived" })).toBeVisible();
       expect(actions.queryByRole("button", { name: "Open account settings" })).not.toBeInTheDocument();
       const footer = within(actions.getByRole("group", { name: "Account actions" }));
       expect(footer.getByRole("link", { name: "Log out" })).toHaveAttribute("href", "/cdn-cgi/access/logout");
       expect(footer.queryByRole("button", { name: "Admin Panel" }) !== null).toBe(role === "admin");
-      fireEvent.click(actions.getByRole("button", { name: "My Files" }));
+      const filesButton = footer.getByRole("button", { name: "My Files" });
+      expect(filesButton.querySelector("svg")).toBeInTheDocument();
+      fireEvent.click(filesButton);
       expect(toggle).toHaveAttribute("aria-expanded", "false");
       const files = await screen.findByRole("dialog", { name: "Your files" });
       expect(topbar).not.toContainElement(files);
@@ -394,8 +403,8 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(screen.getByRole("status", { name: "Authenticating with Cloudflare" })).toHaveTextContent(
-      "Authenticating with Cloudflare",
+    expect(screen.getByRole("status", { name: "Processing Cloudflare Authentication" })).toHaveTextContent(
+      "Processing Cloudflare Authentication",
     );
     expect(screen.queryByRole("banner")).not.toBeInTheDocument();
 
@@ -454,7 +463,7 @@ describe("App", () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
     expect(identityReads).toBe(7);
-    expect(screen.getByRole("status", { name: "Authenticating with Cloudflare" })).toBeVisible();
+    expect(screen.getByRole("status", { name: "Processing Cloudflare Authentication" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Retry session" })).not.toBeInTheDocument();
 
     await act(async () => {
@@ -508,7 +517,7 @@ describe("App", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(55_000);
     });
-    expect(screen.getByRole("status", { name: "Loading" })).toBeVisible();
+    expect(screen.getByRole("status", { name: "Processing Cloudflare Authentication" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Retry session" })).not.toBeInTheDocument();
 
     await act(async () => {

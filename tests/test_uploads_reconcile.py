@@ -1,28 +1,19 @@
-"""Tests for `reconcile_with_qdrant`'s ghost-row sweep.
-
-The sweep enforces "Qdrant has nothing for this file_id → sqlite must not
-have a row either". That rule was written when every row in `uploads` was
-a file that had already been ingested, so "no points" could only mean the
-row was a ghost.
-
-Phase 32 broke that assumption by adding rows that are *supposed* to have
-no points: a video sits at `status='pending'` holding bytes on disk until
-the media worker gets to it. The sweep read those as ghosts and deleted
-them on every boot, which is invisible in the moment — the row is simply
-gone from `GET /v1/files` after a restart, with the mp4 still on disk and
-nothing left pointing at it.
-
-The tests below pin both halves: the sweep still removes real ghosts, and
-it no longer removes rows that never claimed Qdrant content.
-"""
+"""Startup recovery preserves the upload catalog when its search index is lost."""
 
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
+import httpx
 import pytest
+from fastapi import FastAPI, HTTPException
 
+from audrey.identity import Principal
+from audrey.kb.storage_lifecycle import StorageLifecycle
 from audrey.kb.uploads_db import UploadsDB, reconcile_with_qdrant
+from audrey.kb.user_store import sanitize_user
+from audrey.routes.app import files as native_files
 
 USER = "a@b.c"
 TEXT_COL = "kb_user_text_a_b_c"
@@ -30,13 +21,7 @@ IMAGE_COL = "kb_user_images_a_b_c"
 
 
 class _FakeQdrant:
-    """Only the four methods reconcile calls.
-
-    Points are held as `(collection, payload)` so the fake can answer both
-    `scroll_collection` (step 1, no user filter) and `list_user_files`
-    (step 2, filtered) from one source of truth — the way the real client
-    does, and the reason a row can't be live in one and dead in the other.
-    """
+    """Owner-bearing payloads returned by an otherwise empty search index."""
 
     def __init__(self, points: dict[str, list[dict]] | None = None):
         self._points = points or {}
@@ -74,8 +59,10 @@ def _point(
 
 
 @pytest.fixture
-def db(tmp_path: Path) -> UploadsDB:
-    return UploadsDB(tmp_path / "uploads.sqlite")
+def db(tmp_path: Path):
+    database = UploadsDB(tmp_path / "uploads.sqlite")
+    yield database
+    database.close()
 
 
 async def _add(db: UploadsDB, file_id: str, *, status: str = "ready",
@@ -92,52 +79,96 @@ async def _ids(db: UploadsDB, user: str = USER) -> set[str]:
     return {r["file_id"] for r in await db.list_user(user)}
 
 
-# ─── The sweep still does its job ──────────────────────────────────────
+# ─── Missing index content never deletes owned files ──────────────────
 
-class TestGhostsStillPruned:
-    async def test_a_ready_row_with_no_points_is_pruned(self, db: UploadsDB):
-        """The original contract. Points deleted out of band (manual purge,
-        migration) must not leave a row the user can see but not open."""
-        await _add(db, "ghost")
+class TestMissingIndexPreservesCatalog:
+    @pytest.mark.parametrize("collections", [{}, {TEXT_COL: []}])
+    @pytest.mark.parametrize("kind", ["text", "image", "audio", "video"])
+    async def test_ingested_files_survive_missing_or_empty_collections(
+        self, db: UploadsDB, collections: dict, kind: str, caplog,
+    ):
+        await _add(db, "retained", kind=kind)
+        before = await db.get_upload("retained")
+        usage = await db.quota_usage(USER)
 
-        stats = await reconcile_with_qdrant(db, _FakeQdrant({TEXT_COL: []}))
+        stats = await reconcile_with_qdrant(db, _FakeQdrant(collections))
 
-        assert stats["pruned_rows"] == 1
-        assert await _ids(db) == set()
+        assert await db.get_upload("retained") == before
+        assert await db.quota_usage(USER) == usage
+        assert await _ids(db) == {"retained"}
+        assert stats["missing_index_files"] == 1
+        assert stats["missing_index_users"] == 1
+        assert "catalog records retained" in caplog.text
 
-    async def test_a_ready_row_with_points_survives(self, db: UploadsDB):
+    async def test_partial_point_loss_preserves_both_files(self, db: UploadsDB):
+        await _add(db, "missing")
         await _add(db, "live")
+        rows = await db.list_user(USER)
 
         stats = await reconcile_with_qdrant(db, _FakeQdrant({TEXT_COL: [_point("live")]}))
 
-        assert stats["pruned_rows"] == 0
-        assert await _ids(db) == {"live"}
+        assert await db.list_user(USER) == rows
+        assert stats["missing_index_files"] == 1
+        assert stats["backfilled_rows"] == 0
 
-    async def test_pruning_is_scoped_to_the_owning_user(self, db: UploadsDB):
-        """Another user's live file must not keep this user's ghost alive,
-        and vice versa. The sweep reads per-user collections for a reason."""
-        await _add(db, "mine-ghost")
+    async def test_missing_index_counts_are_scoped_to_the_owner(self, db: UploadsDB):
+        await _add(db, "mine-missing")
         await _add(db, "theirs-live", user="other@b.c",
                    collection="kb_user_text_other_b_c")
 
-        await reconcile_with_qdrant(db, _FakeQdrant({
+        stats = await reconcile_with_qdrant(db, _FakeQdrant({
             TEXT_COL: [],
             "kb_user_text_other_b_c": [_point("theirs-live", user="other@b.c")],
         }))
 
-        assert await _ids(db) == set()
+        assert await _ids(db) == {"mine-missing"}
         assert await _ids(db, "other@b.c") == {"theirs-live"}
+        assert stats["missing_index_files"] == 1
+        assert stats["missing_index_users"] == 1
 
-    async def test_an_image_row_with_its_single_point_survives(self, db: UploadsDB):
-        """Images record `chunks=1`, so they stay inside the prunable set —
-        the carve-out must not accidentally exempt them."""
+    async def test_a_ready_file_with_points_needs_no_recovery(self, db: UploadsDB):
+        await _add(db, "live")
+
+        stats = await reconcile_with_qdrant(db, _FakeQdrant({TEXT_COL: [_point("live")]}))
+
+        assert stats["missing_index_files"] == 0
+        assert stats["missing_index_users"] == 0
+        assert await _ids(db) == {"live"}
+
+    async def test_an_image_with_its_point_needs_no_recovery(self, db: UploadsDB):
         await _add(db, "pic", kind="image", chunks=1, collection=IMAGE_COL)
 
-        await reconcile_with_qdrant(db, _FakeQdrant({
+        stats = await reconcile_with_qdrant(db, _FakeQdrant({
             IMAGE_COL: [_point("pic", kind="image")],
         }))
 
+        assert stats["missing_index_files"] == 0
         assert await _ids(db) == {"pic"}
+
+    async def test_unreachable_qdrant_keeps_existing_rows(self, db: UploadsDB):
+        class UnreachableQdrant(_FakeQdrant):
+            async def list_collections(self):
+                raise ConnectionError("Qdrant unavailable")
+
+        await _add(db, "retained")
+        before = await db.get_upload("retained")
+        with pytest.raises(ConnectionError, match="Qdrant unavailable"):
+            await reconcile_with_qdrant(db, UnreachableQdrant())
+
+        assert await db.get_upload("retained") == before
+
+    async def test_index_payload_cannot_transfer_ownership(self, db: UploadsDB):
+        await _add(db, "mine")
+        before = await db.get_upload("mine")
+
+        stats = await reconcile_with_qdrant(db, _FakeQdrant({
+            "kb_user_text_other_b_c": [_point("mine", user="other@b.c")],
+        }))
+
+        assert await db.get_upload("mine") == before
+        assert await _ids(db, "other@b.c") == set()
+        assert stats["backfilled_rows"] == 0
+        assert stats["missing_index_files"] == 1
 
 
 # ─── Rows that never claimed Qdrant content ────────────────────────────
@@ -152,7 +183,7 @@ class TestVideoRowsSurvive:
 
         stats = await reconcile_with_qdrant(db, _FakeQdrant({TEXT_COL: []}))
 
-        assert stats["pruned_rows"] == 0
+        assert stats["missing_index_files"] == 0
         assert await _ids(db) == {"vid"}
 
     async def test_a_completed_silent_video_survives(self, db: UploadsDB):
@@ -165,18 +196,16 @@ class TestVideoRowsSurvive:
 
         assert await _ids(db) == {"silent"}
 
-    async def test_a_completed_video_with_a_transcript_is_swept_normally(
+    async def test_a_completed_video_with_a_lost_transcript_remains_listed(
         self, db: UploadsDB,
     ):
-        """Once a video has chunks it makes the same claim a text file does,
-        and earns the same scrutiny. Exempting videos wholesale would have
-        been the lazy fix and would have leaked ghosts forever."""
+        """A missing transcript index cannot delete a video's catalog record."""
         await _add(db, "spoken", status="ready", chunks=7, kind="video")
 
         stats = await reconcile_with_qdrant(db, _FakeQdrant({TEXT_COL: []}))
 
-        assert stats["pruned_rows"] == 1
-        assert await _ids(db) == set()
+        assert stats["missing_index_files"] == 1
+        assert await _ids(db) == {"spoken"}
 
     async def test_a_pending_video_is_still_claimable_after_reconcile(
         self, db: UploadsDB,
@@ -193,9 +222,9 @@ class TestVideoRowsSurvive:
         assert job["file_id"] == "vid"
 
 
-# ─── prunable_file_ids directly ────────────────────────────────────────
+# ─── indexed_file_ids directly ────────────────────────────────────────
 
-class TestPrunableFileIds:
+class TestIndexedFileIds:
     async def test_it_selects_only_ready_rows_with_chunks(self, db: UploadsDB):
         await _add(db, "ready-with-chunks", status="ready", chunks=2)
         await _add(db, "ready-no-chunks", status="ready", chunks=0)
@@ -203,21 +232,20 @@ class TestPrunableFileIds:
         await _add(db, "processing", status="processing", chunks=0)
         await _add(db, "failed", status="failed", chunks=0)
 
-        assert await db.prunable_file_ids(USER) == {"ready-with-chunks"}
+        assert await db.indexed_file_ids(USER) == {"ready-with-chunks"}
 
     async def test_it_is_keyed_on_user(self, db: UploadsDB):
         await _add(db, "mine")
         await _add(db, "theirs", user="other@b.c")
 
-        assert await db.prunable_file_ids(USER) == {"mine"}
+        assert await db.indexed_file_ids(USER) == {"mine"}
 
 
 # ─── Backfill (step 1) is unaffected ───────────────────────────────────
 
 class TestBackfill:
     async def test_a_row_present_only_in_qdrant_is_restored(self, db: UploadsDB):
-        """Step 1 is the other half of the contract and shares no code with
-        the prune — this pins that the change didn't disturb it."""
+        """Legacy recovery restores metadata when the catalog itself is missing."""
         qdrant = _FakeQdrant({TEXT_COL: [_point("restored"), _point("restored")]})
 
         stats = await reconcile_with_qdrant(db, qdrant)
@@ -229,9 +257,7 @@ class TestBackfill:
     async def test_backfill_does_not_resurrect_a_deleted_pending_video(
         self, db: UploadsDB,
     ):
-        """A pending video has no points, so nothing in Qdrant can bring it
-        back. Its survival depends entirely on the prune, which is why the
-        prune is where the fix lives."""
+        """No index payload means no row can be recovered into an empty catalog."""
         qdrant = _FakeQdrant({TEXT_COL: []})
 
         await reconcile_with_qdrant(db, qdrant)
@@ -242,21 +268,7 @@ class TestBackfill:
 # ─── Backfill must not clobber what only sqlite knows (Phase 38) ───────
 
 class TestBackfillPreservesJobState:
-    """Step 1 refreshes every user file from its Qdrant payload on every boot.
-    It used to do that with `INSERT OR REPLACE`, which deletes the conflicting
-    row and re-inserts it — so every column the statement did not name reverted
-    to its schema default.
-
-    All seven of `_UPLOADS_ADDED_COLUMNS` were unnamed. The visible cost was
-    phase 37's summary: a video completed with a 1,257-character summary showed
-    it in `GET /v1/files` until `audrey` restarted, and then showed nothing,
-    with no error and no log line. `duration_s` went the same way.
-
-    The rule being pinned: **a Qdrant payload is authoritative about content,
-    never about job lifecycle.** It knows the filename, the size and the chunk
-    count. It does not know how many attempts a job took, why it failed, or
-    what its summary said.
-    """
+    """Index recovery cannot replace catalog metadata or job lifecycle state."""
 
     async def _completed_video(self, db: UploadsDB) -> None:
         await db.record_upload(
@@ -303,10 +315,7 @@ class TestBackfillPreservesJobState:
         assert (await db.get_upload("vid"))["duration_s"] == 565.0
 
     async def test_a_failed_row_is_not_flipped_to_ready(self, db: UploadsDB):
-        """`status` reaches `record_upload` as a default argument, not as
-        something read from Qdrant, so honouring it on conflict would let a
-        boot silently mark a failed video ready — chunkless, summaryless, and
-        indistinguishable from one that worked."""
+        """Legacy recovery's ready default cannot replace a failed job's state."""
         await db.record_upload(
             file_id="vid", user=USER, filename="broken.mp4", mime="video/mp4",
             bytes_=99, kind="video", collection="", chunks=0,
@@ -321,18 +330,16 @@ class TestBackfillPreservesJobState:
         assert row["status"] == "failed"
         assert row["failure_reason"] == "ffmpeg said no"
 
-    async def test_qdrant_still_wins_on_the_fields_it_owns(self, db: UploadsDB):
-        """The other half. Preserving job state must not turn the backfill
-        into a no-op — a chunk count that drifted from Qdrant is exactly what
-        reconcile exists to correct."""
+    async def test_stale_payload_cannot_replace_catalog_metadata(self, db: UploadsDB):
         await self._completed_video(db)
+        before = await db.get_upload("vid")
+        usage = await db.quota_usage(USER)
 
         qdrant = _FakeQdrant({TEXT_COL: [_point("vid"), _point("vid"), _point("vid")]})
         await reconcile_with_qdrant(db, qdrant)
 
-        row = await db.get_upload("vid")
-        assert row["chunks"] == 3
-        assert row["filename"] == "vid.txt"
+        assert await db.get_upload("vid") == before
+        assert await db.quota_usage(USER) == usage
 
 
 # ─── A video must not be demoted to a text file ────────────────────────
@@ -401,8 +408,7 @@ class TestVideoKindSurvivesReconcile:
         await reconcile_with_qdrant(db, _FakeQdrant(
             {TEXT_COL: [self._artifact_point("vid", "transcript")]}))
 
-        # No migration needed: the mechanism that broke it repairs it once it
-        # is computing the right answer.
+        # No migration needed: recovery repairs the label from stored MIME.
         assert (await db.get_upload("vid"))["kind"] == "video"
 
     async def test_one_artifact_point_among_many_is_enough(self, db: UploadsDB):
@@ -488,3 +494,51 @@ class TestVideoKindSurvivesReconcile:
         rows = await db.reclaimable_sources(
             completed_before="2099-01-01T00:00:00+00:00")
         assert [r["file_id"] for r in rows] == ["vid"]
+
+
+async def test_empty_index_keeps_native_file_access_owner_bound(
+    db: UploadsDB, tmp_path: Path,
+):
+    content = "This original remains readable after search index loss."
+    owner_dir = tmp_path / sanitize_user(USER)
+    owner_dir.mkdir()
+    (owner_dir / "document.txt").write_text(content)
+    await db.record_upload(
+        file_id="document", user=USER, filename="document.txt", mime="text/plain",
+        bytes_=len(content.encode()), kind="text", collection=TEXT_COL,
+        chunks=1, uploaded_at="2026-10-10T00:00:00+00:00",
+    )
+    await _add(db, "foreign", user="other@b.c")
+    await reconcile_with_qdrant(db, _FakeQdrant())
+
+    principal = Principal(
+        user_id="usr_owner", storage_namespace=USER, provider="cloudflare_access",
+        provider_subject="owner", email=USER, display_name="Owner", role="user",
+        status="active", auth_method="cloudflare_access",
+    )
+    app = FastAPI()
+    app.include_router(native_files.router, prefix="/api")
+    app.state.cfg = SimpleNamespace(raw={"kb": {"upload_root": str(tmp_path)}})
+    app.state.uploads_db = db
+    app.state.storage_lifecycle = StorageLifecycle(db)
+    app.dependency_overrides[native_files._files_access] = lambda: principal
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test",
+    ) as client:
+        listing = await client.get("/api/files")
+        assert listing.status_code == 200
+        assert [row["id"] for row in listing.json()["items"]] == ["document"]
+        download = await client.get("/api/files/document/download")
+        assert download.status_code == 200
+        assert download.text == content
+        text = await client.get("/api/files/document/text")
+        assert text.status_code == 200
+        assert text.json()["text"] == content
+        assert (await client.get("/api/files/foreign/download")).status_code == 404
+
+    request = SimpleNamespace(app=app)
+    attachments = await native_files.resolve_owned_attachments(request, principal, ["document"])
+    assert [item.file_id for item in attachments] == ["document"]
+    with pytest.raises(HTTPException) as denied:
+        await native_files.resolve_owned_attachments(request, principal, ["foreign"])
+    assert denied.value.status_code == 422

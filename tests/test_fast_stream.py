@@ -13,6 +13,7 @@ from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaError
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline import fast_path as fast_path_module
+from audrey.pipeline import memory as memory_module
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.fast_path import (
     FastStreamEventType,
@@ -88,6 +89,7 @@ class _ScriptedOllama:
         tools=None,
         timeout_s=None,
         think=None,
+        format=None,
     ):
         self.calls.append({
             "model": model,
@@ -96,6 +98,7 @@ class _ScriptedOllama:
             "tools": tools,
             "timeout_s": timeout_s,
             "think": think,
+            "format": format,
         })
         for item in self.outcomes[model]:
             if isinstance(item, BaseException):
@@ -639,6 +642,7 @@ def _route_app(cfg: _Cfg, ollama, archive: _RecordingArchive):
         inflight=UserInflightRegistry(max_inflight_per_user=2),
         gate=FairLocalGate(concurrency=1),
         tools=_NoTools(),
+        archive_http=object(),
         archive_client=archive,
     ))
 
@@ -1186,3 +1190,309 @@ async def test_nonstream_preserves_final_fast_truncation_without_tainting_deep(
     assert result["choices"][0]["finish_reason"] == expected_finish
     assert result["choices"][0]["message"]["content"] == "utility result"
     assert archive.calls[0]["partial"] is (expected_finish == "length")
+
+
+def _answer_from_frames(frames: list[str]) -> str:
+    return "".join(
+        json.loads(frame[6:])["choices"][0]["delta"].get("content", "")
+        for frame in frames
+        if frame.startswith("data: ") and frame.strip() != "data: [DONE]"
+    )
+
+
+def _context_tools() -> ToolRegistry:
+    return ToolRegistry(by_name={
+        name: ToolSpec(
+            name=name,
+            description=name,
+            parameters={"type": "object", "properties": {}},
+            server_url="http://unused",
+            path=f"/{name}",
+        )
+        for name in ("memory_search", "memory_store", "chat_history_search")
+    })
+
+
+def _recall_result(*, failed: bool = False) -> ToolResult:
+    return ToolResult(
+        name="memory_search", call_id=None,
+        content=(
+            "search timed out"
+            if failed
+            else json.dumps({"results": [{"key": "color", "value": "blue"}]})
+        ),
+        elapsed_s=0.01, is_error=failed,
+    )
+
+
+@pytest.mark.parametrize("kind", ["text", "image", "structured"])
+@pytest.mark.parametrize("native", [False, True])
+async def test_plain_fast_adds_owner_context_without_tool_guidance(
+    monkeypatch, kind, native,
+):
+    cfg = _Cfg(("a", 100, "local"))
+    cfg.model_registry["vl"] = cfg.model_registry["general"]
+    cfg.raw["agentic"] = {"memory": {"top_k": 2, "timeout_s": 0.75}}
+    if kind == "structured":
+        # Format alone must disable ReAct even with a capable model and tools.
+        cfg.raw["fast_path"]["tool_capable_models"] = ["a"]
+    ollama = _ScriptedOllama({
+        "a": [{"message": {"content": "context answer"}, "done": True}],
+    })
+    app = _route_app(cfg, ollama, _RecordingArchive())
+    app.state.tools = _context_tools()
+    content: Any = "What is my favorite color?"
+    if kind == "image":
+        content = [
+            {"type": "text", "text": content},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGVsbG8="}},
+        ]
+    routing_messages = [{"role": "user", "content": content}]
+    original_messages = [
+        {"role": "system", "content": "Original caller or skill instruction."},
+        *routing_messages,
+    ]
+    if native:
+        original_messages.insert(0, {
+            "role": "system", "name": "audrey_user_preferences",
+            "content": "User-local date and time: 2026-10-10T10:00:00-06:00",
+        })
+    original_copy = json.loads(json.dumps(original_messages))
+    schema = {"type": "object", "properties": {"answer": {"type": "string"}}}
+    payload = ChatCompletionRequest(
+        model="audrey_auto", messages=original_messages, stream=True,
+        user="someone-else@example.com",
+    )
+    recalls: list[dict[str, Any]] = []
+    decisions: list[list[dict[str, Any]]] = []
+
+    async def dispatch(http, registry, call, **kwargs):
+        assert http is app.state.archive_http
+        assert registry is app.state.tools
+        recalls.append({**call["function"]["arguments"], **kwargs})
+        return _recall_result()
+
+    async def classify(*args, **kwargs):
+        decisions.append(kwargs["messages"])
+        return "general", "test", 1.0
+
+    def complexity(messages, *, threshold):
+        decisions.append(messages)
+        return False, 6
+
+    monkeypatch.setattr(memory_module, "dispatch_one", dispatch)
+    monkeypatch.setattr(route_pipeline, "classify_with_registry", classify)
+    monkeypatch.setattr(route_pipeline, "is_complex", complexity)
+    frames = [frame async for frame in _stream_via_pipeline(
+        app, payload, original_messages, {},
+        user_id="owner@example.com", conversation_id="", user_turn_text="color",
+        routing_messages=routing_messages,
+        # A restricted skill can hide memory tools without disabling the
+        # server's owner recall. Structured output uses the full offered set.
+        model_tools=app.state.tools if kind == "structured" else ToolRegistry(),
+        response_format=schema if kind == "structured" else None,
+        event_context=(
+            RunEventContext(
+                run_id="run-context", conversation_id="conversation-context",
+                assistant_message_id="message-context", mode="auto", sink=lambda event: None,
+            ) if native else None
+        ),
+    )]
+
+    assert original_messages == original_copy
+    assert len(recalls) == 1
+    assert recalls[0]["user"] == "owner@example.com"
+    assert recalls[0]["query"] == "What is my favorite color?"
+    assert recalls[0]["top_k"] == 2
+    assert recalls[0]["timeout_s"] == 0.75
+    assert all(messages == routing_messages for messages in decisions)
+    sent = ollama.calls[0]["messages"]
+    assert sent[-len(original_messages):] == original_messages
+    assert sent[-1] is original_messages[-1]
+    assert sent[-1]["content"] is content
+    assert sum(
+        str(message.get("content", "")).startswith("Current server date and time:")
+        for message in sent
+    ) == 1
+    injected = "\n".join(message["content"] for message in sent[:-len(original_messages)])
+    assert "(color) blue" in injected
+    assert "memory_store" not in injected
+    assert "chat_history_search" not in injected
+    assert ollama.calls[0]["tools"] is None
+    assert ollama.calls[0]["format"] == (schema if kind == "structured" else None)
+    assert "context answer" in _answer_from_frames(frames)
+    assert frames[-1] == "data: [DONE]\n\n"
+
+
+@pytest.mark.parametrize("skip", ["disabled", "no_owner", "no_search_tool"])
+async def test_plain_fast_keeps_date_when_recall_is_unavailable(monkeypatch, skip):
+    cfg = _Cfg(("a", 100, "local"))
+    cfg.raw["agentic"] = {"memory": {"enabled": skip != "disabled"}}
+    ollama = _ScriptedOllama({
+        "a": [{"message": {"content": "answer without recall"}, "done": True}],
+    })
+    app = _route_app(cfg, ollama, _RecordingArchive())
+    app.state.tools = _context_tools() if skip != "no_search_tool" else ToolRegistry()
+
+    async def dispatch(*args, **kwargs):
+        pytest.fail("Recall must not dispatch when disabled, unidentified, or unavailable")
+
+    async def classify(*args, **kwargs):
+        return "general", "test", 1.0
+
+    monkeypatch.setattr(memory_module, "dispatch_one", dispatch)
+    monkeypatch.setattr(route_pipeline, "classify_with_registry", classify)
+    messages = [{"role": "user", "content": "hello"}]
+    frames = [frame async for frame in _stream_via_pipeline(
+        app, ChatCompletionRequest(model="audrey_fast", messages=messages, stream=True),
+        messages, {}, user_id="" if skip == "no_owner" else "owner@example.com",
+        conversation_id="", user_turn_text="hello",
+    )]
+
+    sent = ollama.calls[0]["messages"]
+    assert len(sent) == len(messages) + 1
+    assert sent[0]["content"].startswith("Current server date and time:")
+    assert "answer without recall" in _answer_from_frames(frames)
+
+
+async def test_plain_fast_ack_precedes_recall_and_failed_recall_still_answers(monkeypatch):
+    cfg = _Cfg(("a", 100, "local"))
+    cfg.raw["agentic"] = {"memory": {"timeout_s": 0.125}}
+    ollama = _ScriptedOllama({
+        "a": [{"message": {"content": "answer after recall failure"}, "done": True}],
+    })
+    app = _route_app(cfg, ollama, _RecordingArchive())
+    app.state.tools = _context_tools()
+    recall_started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def dispatch(*args, **kwargs):
+        assert kwargs["timeout_s"] == 0.125
+        recall_started.set()
+        await release.wait()
+        return _recall_result(failed=True)
+
+    async def classify(*args, **kwargs):
+        return "general", "test", 1.0
+
+    monkeypatch.setattr(memory_module, "dispatch_one", dispatch)
+    monkeypatch.setattr(route_pipeline, "classify_with_registry", classify)
+    messages = [{"role": "user", "content": "hello"}]
+    stream = _stream_via_pipeline(
+        app, ChatCompletionRequest(model="audrey_fast", messages=messages, stream=True),
+        messages, {}, user_id="owner@example.com", conversation_id="", user_turn_text="hello",
+    )
+    frames = [await anext(stream), await anext(stream)]
+    assert '"role": "assistant"' in frames[0]
+    assert "Thinking" in frames[1]
+    assert not recall_started.is_set()
+    pending = asyncio.create_task(anext(stream))
+    try:
+        await asyncio.wait_for(recall_started.wait(), timeout=1)
+        assert ollama.calls == []
+        release.set()
+        frames.append(await asyncio.wait_for(pending, timeout=1))
+        frames.extend([frame async for frame in stream])
+    finally:
+        release.set()
+        if not pending.done():
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+        await stream.aclose()
+
+    assert "answer after recall failure" in _answer_from_frames(frames)
+    assert len(ollama.calls[0]["messages"]) == len(messages) + 1
+    assert frames[-1] == "data: [DONE]\n\n"
+
+
+async def test_plain_fast_fallback_reuses_context_without_recalling_again(monkeypatch):
+    cfg = _Cfg(("a", 100, "local"), ("b", 50, "local"))
+    ollama = _ScriptedOllama({
+        "a": [OllamaError("first model unavailable")],
+        "b": [{"message": {"content": "fallback answer"}, "done": True}],
+    })
+    app = _route_app(cfg, ollama, _RecordingArchive())
+    app.state.tools = _context_tools()
+    recalls = []
+
+    async def dispatch(*args, **kwargs):
+        recalls.append(args)
+        return _recall_result()
+
+    async def classify(*args, **kwargs):
+        return "general", "test", 1.0
+
+    monkeypatch.setattr(memory_module, "dispatch_one", dispatch)
+    monkeypatch.setattr(route_pipeline, "classify_with_registry", classify)
+    messages = [{"role": "user", "content": "hello"}]
+    frames = [frame async for frame in _stream_via_pipeline(
+        app, ChatCompletionRequest(model="audrey_fast", messages=messages, stream=True),
+        messages, {}, user_id="owner@example.com", conversation_id="", user_turn_text="hello",
+    )]
+
+    assert len(recalls) == 1
+    assert [call["model"] for call in ollama.calls] == ["a", "b"]
+    assert ollama.calls[0]["messages"] is ollama.calls[1]["messages"]
+    assert len(ollama.calls[1]["messages"]) == len(messages) + 2
+    assert "fallback answer" in _answer_from_frames(frames)
+
+
+async def test_tool_graph_branch_does_not_prepare_stream_context_twice(monkeypatch):
+    cfg = _Cfg(("a", 100, "local"))
+    cfg.raw["fast_path"]["tool_capable_models"] = ["a"]
+    app = _route_app(cfg, _ScriptedOllama({}), _RecordingArchive())
+    app.state.tools = _context_tools()
+    graph_states = []
+
+    class Graph(_FixedGraph):
+        async def ainvoke(self, state):
+            graph_states.append(state)
+            return await super().ainvoke(state)
+
+    app.state.graph = Graph()
+
+    async def forbidden_context(**kwargs):
+        pytest.fail("Graph date/recall nodes own context on the tool-capable branch")
+
+    async def classify(*args, **kwargs):
+        return "general", "test", 1.0
+
+    monkeypatch.setattr(route_pipeline, "_prepare_stream_context", forbidden_context)
+    monkeypatch.setattr(route_pipeline, "classify_with_registry", classify)
+    messages = [{"role": "user", "content": "hello"}]
+    frames = [frame async for frame in _stream_via_pipeline(
+        app, ChatCompletionRequest(model="audrey_fast", messages=messages, stream=True),
+        messages, {}, user_id="owner@example.com", conversation_id="", user_turn_text="hello",
+    )]
+
+    assert len(graph_states) == 1
+    assert graph_states[0]["messages"] is messages
+    assert "utility result" in "".join(frames)
+
+
+async def test_deep_thinking_reuses_context_and_keeps_offered_tool_guidance(monkeypatch):
+    registry = _context_tools()
+    recalls = []
+
+    async def dispatch(*args, **kwargs):
+        recalls.append(args)
+        return _recall_result()
+
+    monkeypatch.setattr(memory_module, "dispatch_one", dispatch)
+    messages = [{"role": "user", "content": "hello"}]
+    sent, subtasks = await route_pipeline._phase_thinking(
+        ollama=None, tools=registry, http=object(), model_tools=registry,
+        user_id="owner@example.com", messages=messages,
+        memory_enabled=True, memory_top_k=3, memory_timeout_s=5,
+        planning_enabled=False, planning_min_tokens=40, planning_max_subtasks=3,
+        prompt_tokens=1, router_cfg={},
+    )
+
+    assert len(recalls) == 1
+    assert sent[0]["content"].startswith("Current server date and time:")
+    assert sent[-1] is messages[-1]
+    injected = "\n".join(message["content"] for message in sent[:-1])
+    assert "(color) blue" in injected
+    assert "memory_store" in injected
+    assert "chat_history_search" in injected
+    assert subtasks == []

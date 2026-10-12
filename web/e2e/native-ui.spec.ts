@@ -804,7 +804,7 @@ test("unifies compact navigation in a left drawer with a symmetric header", asyn
   });
   await page.goto("./");
 
-  for (const width of [1080, 760, 390, 320]) {
+  for (const width of [1100, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 740 });
     const menu = page.locator("#app-mobile-menu-toggle");
     const brand = page.locator(".brand-wordmark");
@@ -827,16 +827,49 @@ test("unifies compact navigation in a left drawer with a symmetric header", asyn
     await expectInViewport(page, drawer);
     const drawerBox = (await drawer.boundingBox())!;
     expect(drawerBox.x).toBe(0);
-    const actions = drawer.getByRole("group", { name: "Menu actions" });
-    await expectInViewport(page, drawer.getByText("Alice", { exact: true }));
-    await expectInViewport(page, actions.getByRole("button", { name: "My Files", exact: true }));
+    await expectInViewport(page, drawer.getByText("Alice - My chats", { exact: true }));
+    await expect(drawer.getByText("Search titles", { exact: true })).toHaveCount(0);
+    await expect(drawer.getByText(/Swipe right to/u)).toHaveCount(0);
+    await expect(drawer.getByRole("searchbox", { name: "Search titles" }))
+      .toHaveAttribute("placeholder", "Search conversations");
+    await expect(drawer.getByRole("button", { name: "Active", exact: true })).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "Archived", exact: true })).toBeVisible();
     await expect(drawer.getByRole("button", { name: "Open account settings" })).toHaveCount(0);
-    const footer = drawer.locator(".mobile-menu-footer");
-    await expectInViewport(page, footer.getByRole("button", { name: "Admin Panel" }));
-    await expectInViewport(page, footer.getByRole("link", { name: "Log out" }));
+    const footer = drawer.locator(".sidebar-menu-footer");
+    const projects = footer.getByRole("button", { name: "My projects", exact: true });
+    const addProject = footer.getByRole("button", { name: "New project" });
+    const files = footer.getByRole("button", { name: "My Files", exact: true });
+    const admin = footer.getByRole("button", { name: "Admin Panel" });
+    const logout = footer.getByRole("link", { name: "Log out" });
+    for (const action of [projects, addProject, files, admin, logout]) await expectInViewport(page, action);
+    await expect(files.locator("svg")).toBeVisible();
+    const projectBox = (await projects.boundingBox())!;
+    const addProjectBox = (await addProject.boundingBox())!;
+    expect(projectBox.x + projectBox.width).toBeLessThanOrEqual(addProjectBox.x + 1);
+    expect(addProjectBox.width).toBeLessThan(projectBox.width);
+    let previousBottom = 0;
+    await page.mouse.move(0, 0);
+    const styleOf = (control: Locator) => control.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { color: style.color, background: style.backgroundColor, font: style.fontSize, weight: style.fontWeight, radius: style.borderRadius };
+    });
+    const footerAppearance = await styleOf(files);
+    for (const action of [projects, files, admin, logout]) {
+      const box = (await action.boundingBox())!;
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.y).toBeGreaterThanOrEqual(previousBottom);
+      previousBottom = box.y + box.height;
+      expect(await styleOf(action)).toEqual(footerAppearance);
+    }
+    const projectSection = footer.getByRole("region", { name: "My projects" });
+    const borders = await projectSection.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [Number.parseFloat(style.borderTopWidth), Number.parseFloat(style.borderBottomWidth)];
+    });
+    expect(borders.every((border) => border > 0)).toBe(true);
     const footerBox = (await footer.boundingBox())!;
     expect(drawerBox.y + drawerBox.height - footerBox.y - footerBox.height).toBeLessThan(24);
-    await expect(drawer.getByRole("button", { name: "Projects", exact: true })).toHaveAttribute("aria-expanded", "false");
+    await expect(projects).toHaveAttribute("aria-expanded", "false");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     await page.keyboard.press("Escape");
     await expect(page.locator(".sidebar")).toBeHidden();
@@ -907,7 +940,13 @@ test("opens mobile history on demand and keeps chat and project navigation reach
   });
   await page.route("**/api/projects**", async (route) => {
     const url = new URL(route.request().url());
-    if (url.pathname === "/api/projects") return json(route, { items: [project], next_cursor: null, limits });
+    if (url.pathname === "/api/projects") return json(route, {
+      items: [project, ...Array.from({ length: 24 }, (_, index) => ({
+        ...project, id: `proj_mobile_older_${index + 1}`, name: `Earlier project ${index + 1}`,
+      }))],
+      next_cursor: null,
+      limits,
+    });
     if (url.pathname.endsWith("/conversations") || url.pathname.endsWith("/files")) {
       return json(route, { items: [], next_cursor: null, limits });
     }
@@ -926,13 +965,13 @@ test("opens mobile history on demand and keeps chat and project navigation reach
   await expect(drawer).toBeVisible();
   await expect(drawer).toHaveAttribute("aria-modal", "true");
   await expectInViewport(page, drawer);
-  await expect(drawer.getByRole("button", { name: "Projects", exact: true })).toHaveAttribute("aria-expanded", "false");
+  await expect(drawer.getByRole("button", { name: "My projects", exact: true })).toHaveAttribute("aria-expanded", "false");
   await expect(drawer.getByRole("button", { name: "Mobile project", exact: true })).toHaveCount(0);
   await expect(drawer.getByRole("searchbox")).toBeVisible();
-  await expect(drawer.getByRole("region", { name: "Projects" })).toBeVisible();
+  await expect(drawer.getByRole("region", { name: "My projects" })).toBeVisible();
   await drawer.getByRole("button", { name: /^Earlier chat 24/u }).scrollIntoViewIfNeeded();
   await expect(drawer.getByRole("button", { name: /^Earlier chat 24/u })).toBeInViewport();
-  await expectInViewport(page, drawer.getByText("Alice", { exact: true }));
+  await expectInViewport(page, drawer.getByText("Alice - My chats", { exact: true }));
   await expectInViewport(page, drawer.locator(".mobile-menu-footer").getByRole("link", { name: "Log out" }));
   await expect(drawer.getByRole("button", { name: "Admin Panel" })).toHaveCount(0);
   const search = drawer.getByRole("searchbox");
@@ -953,7 +992,15 @@ test("opens mobile history on demand and keeps chat and project navigation reach
   await expect(page.locator(".sidebar")).toBeHidden();
 
   await historyToggle.click();
-  await drawer.getByRole("button", { name: "Projects", exact: true }).click();
+  await drawer.getByRole("button", { name: "My projects", exact: true }).click();
+  const projectList = drawer.locator("#sidebar-projects");
+  await expect.poll(() => projectList.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await drawer.getByRole("button", { name: "Earlier project 24", exact: true }).scrollIntoViewIfNeeded();
+  await expectInViewport(page, drawer.getByRole("button", { name: "Earlier project 24", exact: true }));
+  await expectInViewport(page, drawer.getByText("Alice - My chats", { exact: true }));
+  await expectInViewport(page, drawer.locator(".mobile-menu-footer").getByRole("button", { name: "My Files", exact: true }));
+  await expectInViewport(page, drawer.locator(".mobile-menu-footer").getByRole("link", { name: "Log out" }));
+  await drawer.getByRole("button", { name: "Mobile project", exact: true }).scrollIntoViewIfNeeded();
   await drawer.getByRole("button", { name: "Mobile project", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Mobile project", exact: true })).toBeVisible();
   await expect(page.locator(".sidebar")).toBeHidden();
@@ -1132,6 +1179,67 @@ test("swipes any mobile chat to archive, restore, or confirm deletion without op
   await expect(projectControl).toHaveValue("");
 });
 
+test("keeps message options visually consistent and usable across compact and desktop widths", async ({ page }) => {
+  await mockAudreyApi(page, undefined, canonicalBrowserTurn());
+  await page.route("**/api/files**", (route) => json(route, browserFileListing([])));
+  await page.goto("./");
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
+
+  for (const width of [320, 390, 768, 1100, 1280]) {
+    await page.setViewportSize({ width, height: 740 });
+    await page.getByText("Canonical mode answer.").click();
+    await page.mouse.move(0, 0);
+    const rail = page.locator(".composer-control-rail");
+    const controls = rail.locator(".compact-model-picker, .composer-rail-control");
+    await expect(controls).toHaveCount(4);
+    const appearances = await controls.evaluateAll((elements) => elements.map((element) => {
+      const outer = getComputedStyle(element);
+      const value = getComputedStyle(element.querySelector("select, strong")!);
+      const label = getComputedStyle(element.querySelector(".composer-control-label")!);
+      return {
+        height: element.getBoundingClientRect().height,
+        background: outer.backgroundColor,
+        border: outer.borderColor,
+        radius: outer.borderRadius,
+        valueColor: value.color,
+        valueFont: value.fontSize,
+        valueWeight: value.fontWeight,
+        labelColor: label.color,
+        labelFont: label.fontSize,
+      };
+    }));
+    const reference = appearances[0];
+    for (const appearance of appearances) {
+      expect(appearance.height).toBeGreaterThanOrEqual(44);
+      expect(Math.abs(appearance.height - reference.height)).toBeLessThan(1);
+      expect({ ...appearance, height: 0 }).toEqual({ ...reference, height: 0 });
+    }
+    await page.keyboard.press("Tab");
+    for (let index = 0; index < 4; index += 1) {
+      await expectInViewport(page, controls.nth(index));
+      const focusable = index < 2 ? controls.nth(index).locator("select") : controls.nth(index);
+      await focusable.focus();
+      await expect(focusable).toBeFocused();
+      await expect(controls.nth(index)).not.toHaveCSS("box-shadow", "none");
+      if (index < 2) await expect(focusable).toHaveCSS("box-shadow", "none");
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+
+    await rail.locator(".attach-button").click();
+    await expectInViewport(page, page.getByRole("region", { name: "Choose attachments" }));
+    await rail.locator(".skill-button").click();
+    await expect(page.getByRole("region", { name: "Choose attachments" })).toHaveCount(0);
+    const skillPicker = page.getByRole("dialog", { name: "Choose how Audrey uses tools" });
+    await expectInViewport(page, skillPicker);
+    await skillPicker.getByRole("button", { name: /Video analysis/u }).click();
+    await expect(rail.locator(".skill-button")).toContainText("Video analysis");
+    await expectInViewport(page, rail.locator(".skill-button"));
+    await rail.locator(".skill-button").click();
+    await skillPicker.getByRole("button", { name: /Automatic/u }).click();
+    await expect(skillPicker).toHaveCount(0);
+  }
+});
+
 test("gives desktop chat actions and aligned composer pickers comfortable controls with one focus ring", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockAudreyApi(page, undefined, canonicalBrowserTurn());
@@ -1260,7 +1368,7 @@ test("keeps mobile files and a scrolling chat accessible through the streamlined
   await menu.click();
   const drawer = page.getByRole("dialog", { name: "Conversations" });
   await expect(drawer.getByRole("button", { name: "Open account settings" })).toHaveCount(0);
-  await expect(drawer.getByText("Alice", { exact: true })).toBeVisible();
+  await expect(drawer.getByText("Alice - My chats", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "My Files", exact: true }).click();
   const files = page.getByRole("dialog", { name: "Your files" });
   await expectInViewport(page, files);
@@ -1464,9 +1572,18 @@ test("hides the run summary when the saved presentation preference is off", asyn
   await expect(page.getByText("Working quietly")).toHaveCount(0);
 });
 
-test("summarizes a new conversation from its first prompt", async ({ page }) => {
+async function mockDeferredConversationTitle(page: Page) {
   let created = false;
+  let creates = 0;
+  let answered = false;
+  let titleReady = false;
+  let manuallyRenamed = false;
   let createBody: unknown = null;
+  let runReads = 0;
+  let startedTitleGate: Promise<void> | null = null;
+  let releaseStartedTitle: (() => void) | null = null;
+  const prompt = "Plan a weekend hiking trip with a packing list";
+  const summaryTitle = "Weekend Hiking Trip Planning";
   let conversation = {
     ...browserConversation(""),
     last_message_at: null as string | null,
@@ -1477,94 +1594,189 @@ test("summarizes a new conversation from its first prompt", async ({ page }) => 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname === "/api/me/preferences") {
-      await json(route, browserPreferences());
-      return;
-    }
-    if (url.pathname === "/api/me") {
-      await json(route, browserUser());
-      return;
-    }
+    if (url.pathname === "/api/me/preferences") return json(route, browserPreferences());
+    if (url.pathname === "/api/me") return json(route, browserUser());
+    if (url.pathname === "/api/models") return json(route, { items: browserModels() });
+    if (url.pathname === "/api/skills") return json(route, { enabled: true, status: "ready", items: browserSkills() });
+    if (url.pathname === "/api/projects") return json(route, { items: [], next_cursor: null });
     if (url.pathname === "/api/conversations" && request.method() === "GET") {
-      await json(route, { items: created ? [conversation] : [], next_cursor: null });
-      return;
+      return json(route, { items: created ? [conversation] : [], next_cursor: null });
     }
     if (url.pathname === "/api/conversations" && request.method() === "POST") {
+      creates += 1;
+      if (creates > 1) {
+        return json(route, { ...conversation, id: "con_title_next", title: "", last_message_at: null });
+      }
       createBody = request.postDataJSON();
       created = true;
-      await json(route, conversation);
-      return;
+      return json(route, conversation);
+    }
+    if (url.pathname === "/api/conversations/con_title_next/messages") {
+      return json(route, { items: [], next_cursor: null });
     }
     if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
-      await json(route, { items: [], next_cursor: null });
-      return;
+      return json(route, { items: answered ? [
+        {
+          id: "msg_title_user", run_id: "run_automatic_title", sequence: 1,
+          role: "user", status: "completed", content: prompt, attachments: [],
+          created_at: "2026-10-12T00:00:00Z", updated_at: "2026-10-12T00:00:00Z",
+        },
+        {
+          id: "msg_title", run_id: "run_automatic_title", sequence: 2,
+          role: "assistant", status: "completed", content: "Here is the hiking plan.",
+          attachments: [], created_at: "2026-10-12T00:00:01Z", updated_at: "2026-10-12T00:00:01Z",
+        },
+      ] : [], next_cursor: null });
     }
-    if (
-      url.pathname === `/api/conversations/${CONVERSATION_ID}`
-      && request.method() === "GET"
-    ) {
-      await json(route, conversation);
-      return;
+    if (url.pathname === "/api/runs/run_automatic_title" && request.method() === "GET") {
+      runReads += 1;
+      return json(route, {
+        id: "run_automatic_title", conversation_id: CONVERSATION_ID,
+        status: "succeeded", title_pending: !titleReady,
+      });
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}`) {
+      if (request.method() === "PATCH") {
+        manuallyRenamed = true;
+        conversation = { ...conversation, title: request.postDataJSON().title };
+      }
+      const snapshot = conversation;
+      if (request.method() === "GET" && answered && !titleReady && startedTitleGate) {
+        await startedTitleGate;
+      }
+      return json(route, snapshot);
     }
     if (url.pathname === "/api/agent") {
-      conversation = {
-        ...conversation,
-        title: "Weekend Hiking Trip Planning",
-        last_message_at: "2026-09-04T00:00:00Z",
-      };
-      await route.fulfill({
+      conversation = { ...conversation, title: prompt, last_message_at: "2026-10-12T00:00:00Z" };
+      answered = true;
+      return route.fulfill({
         status: 200,
         contentType: "text/event-stream",
         body: aguiStream([
-          {
-            type: "RUN_STARTED",
-            timestamp: 1,
-            threadId: CONVERSATION_ID,
-            runId: "run_automatic_title",
-          },
+          { type: "RUN_STARTED", timestamp: 1, threadId: CONVERSATION_ID, runId: "run_automatic_title" },
           { type: "TEXT_MESSAGE_START", timestamp: 2, messageId: "msg_title" },
-          {
-            type: "TEXT_MESSAGE_CONTENT",
-            timestamp: 3,
-            messageId: "msg_title",
-            delta: "Here is the hiking plan.",
-          },
+          { type: "TEXT_MESSAGE_CONTENT", timestamp: 3, messageId: "msg_title", delta: "Here is the hiking plan." },
           { type: "TEXT_MESSAGE_END", timestamp: 4, messageId: "msg_title" },
           {
-            type: "RUN_FINISHED",
-            timestamp: 5,
-            threadId: CONVERSATION_ID,
-            runId: "run_automatic_title",
-            outcome: { type: "success" },
+            type: "RUN_FINISHED", timestamp: 5, threadId: CONVERSATION_ID,
+            runId: "run_automatic_title", outcome: { type: "success" },
           },
         ]),
       });
-      return;
-    }
-    if (url.pathname === "/api/models") {
-      await json(route, { items: browserModels() });
-      return;
     }
     await route.abort("failed");
   });
+  return {
+    prompt, summaryTitle,
+    createBody: () => createBody,
+    runReads: () => runReads,
+    holdStartedTitle: () => {
+      startedTitleGate = new Promise<void>((resolve) => { releaseStartedTitle = resolve; });
+    },
+    releaseStartedTitle: () => releaseStartedTitle?.(),
+    finishTitle: () => {
+      titleReady = true;
+      if (!manuallyRenamed) conversation = { ...conversation, title: summaryTitle };
+    },
+  };
+}
 
+test("summarizes a new conversation from its first prompt after its answer appears", async ({ page }) => {
+  const title = await mockDeferredConversationTitle(page);
   await page.goto("./");
   await expect(page.getByRole("heading", { name: "New conversation" })).toBeVisible();
   await expect(page.locator(".composer-model-picker img")).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toBeVisible();
-  await expect(page.getByText("What shall we work through?")).toHaveCount(0);
-
-  const prompt = "Plan a weekend hiking trip with a packing list";
-  await page.getByRole("textbox", { name: "Ask Audrey" }).fill(prompt);
+  await page.getByRole("textbox", { name: "Ask Audrey" }).fill(title.prompt);
   await page.getByRole("textbox", { name: "Ask Audrey" }).press("Enter");
 
-  const summaryTitle = "Weekend Hiking Trip Planning";
-  await expect(page.getByRole("heading", { name: summaryTitle })).toBeVisible();
+  await expect(page.getByText("Here is the hiking plan.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: title.prompt })).toBeVisible();
+  await expect(page.getByRole("heading", { name: title.summaryTitle })).toHaveCount(0);
+  await expect.poll(title.runReads).toBeGreaterThan(0);
+  title.finishTitle();
+  await expect(page.getByRole("heading", { name: title.summaryTitle })).toBeVisible();
   await expect(
-    page.getByRole("navigation", { name: "Conversation history" }).getByText(summaryTitle),
+    page.getByRole("navigation", { name: "Conversation history" }).getByText(title.summaryTitle),
   ).toBeVisible();
-  expect(createBody).toEqual({ model_id: "auto" });
+  expect(title.createBody()).toEqual({ model_id: "auto" });
 });
+
+test("does not replace a finished generated title with a stale run-start read", async ({ page }) => {
+  const title = await mockDeferredConversationTitle(page);
+  title.holdStartedTitle();
+  await page.goto("./");
+  await page.getByRole("textbox", { name: "Ask Audrey" }).fill(title.prompt);
+  await page.getByRole("textbox", { name: "Ask Audrey" }).press("Enter");
+  await expect(page.getByText("Here is the hiking plan.")).toBeVisible();
+  await expect.poll(title.runReads).toBeGreaterThan(0);
+  title.finishTitle();
+  await expect(page.getByRole("heading", { name: title.summaryTitle })).toBeVisible();
+  const staleResponse = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === `/api/conversations/${CONVERSATION_ID}`);
+  title.releaseStartedTitle();
+  await staleResponse;
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  await expect(page.getByRole("heading", { name: title.summaryTitle })).toBeVisible();
+  await expect(page.getByRole("heading", { name: title.prompt })).toHaveCount(0);
+});
+
+test("recovers a pending first-turn title after a hard refresh without delaying the answer", async ({ page }) => {
+  const title = await mockDeferredConversationTitle(page);
+  await page.goto("./");
+  await page.getByRole("textbox", { name: "Ask Audrey" }).fill(title.prompt);
+  await page.getByRole("textbox", { name: "Ask Audrey" }).press("Enter");
+  await expect(page.getByText("Here is the hiking plan.")).toBeVisible();
+  const readsBeforeReload = title.runReads();
+  await page.reload();
+  await expect(page.getByText("Here is the hiking plan.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: title.prompt })).toBeVisible();
+  await expect.poll(title.runReads).toBeGreaterThan(readsBeforeReload);
+  title.finishTitle();
+  await expect(page.getByRole("heading", { name: title.summaryTitle })).toBeVisible();
+});
+
+test("preserves an in-progress manual rename while the generated title finishes", async ({ page }) => {
+  await page.clock.install();
+  const title = await mockDeferredConversationTitle(page);
+  await page.goto("./");
+  await page.getByRole("textbox", { name: "Ask Audrey" }).fill(title.prompt);
+  await page.getByRole("textbox", { name: "Ask Audrey" }).press("Enter");
+  await expect(page.getByText("Here is the hiking plan.")).toBeVisible();
+  await expect.poll(title.runReads).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Rename conversation" }).click();
+  const draft = page.getByRole("textbox", { name: "Conversation title" });
+  await draft.fill("My own hiking title");
+  const readsWhileEditing = title.runReads();
+  title.finishTitle();
+  await page.clock.fastForward(5000);
+  expect(title.runReads()).toBe(readsWhileEditing);
+  await expect(draft).toHaveValue("My own hiking title");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "My own hiking title" })).toBeVisible();
+  await expect.poll(title.runReads).toBeGreaterThan(readsWhileEditing);
+  await expect(page.getByRole("heading", { name: title.summaryTitle })).toHaveCount(0);
+});
+
+test("stops generated-title checks when navigating away and resumes when returning", async ({ page }) => {
+  await page.clock.install();
+  const title = await mockDeferredConversationTitle(page);
+  await page.goto("./");
+  await page.getByRole("textbox", { name: "Ask Audrey" }).fill(title.prompt);
+  await page.getByRole("textbox", { name: "Ask Audrey" }).press("Enter");
+  await expect(page.getByText("Here is the hiking plan.")).toBeVisible();
+  await expect.poll(title.runReads).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "New conversation", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "New conversation" })).toBeVisible();
+  const readsWhileAway = title.runReads();
+  await page.clock.fastForward(5000);
+  expect(title.runReads()).toBe(readsWhileAway);
+  title.finishTitle();
+  await page.getByRole("navigation", { name: "Conversation history" }).getByText(title.prompt, { exact: true }).click();
+  await expect(page.getByRole("heading", { name: title.summaryTitle })).toBeVisible();
+});
+
 
 test("keeps the composer docked and returns to the latest message", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });

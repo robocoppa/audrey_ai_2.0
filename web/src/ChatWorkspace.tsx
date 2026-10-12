@@ -216,7 +216,7 @@ export function ChatWorkspace({
         : document.activeElement;
       const focusInHistory = focused instanceof HTMLElement && navigationRef.current?.contains(focused);
       const focusInCompactControls = focused instanceof HTMLElement
-        && focused.closest(".topbar-mobile-menu, .topbar-mobile-new-chat, .conversation-drawer-header, .session-controls-drawer, .mobile-menu-footer, .projects-category-toggle");
+        && focused.closest(".topbar-mobile-menu, .topbar-mobile-new-chat, .conversation-drawer-header, .session-controls-drawer, .mobile-menu-footer, .sidebar-menu-footer, .projects-category-toggle");
       const focusInDesktopActions = focused instanceof HTMLElement
         && focused.closest(".session-controls:not(.session-controls-drawer)");
       setCompactNavigation(event.matches);
@@ -720,6 +720,133 @@ export function ChatWorkspace({
     }
   }
 
+  const projectNavigation = (
+    <section className="projects-sidebar" aria-labelledby="projects-sidebar-title">
+      <header>
+        <h2 id="projects-sidebar-title">
+          {compactNavigation ? (
+            <button
+              className="projects-category-toggle menu-navigation-action"
+              type="button"
+              aria-expanded={projectsExpanded}
+              aria-controls="sidebar-projects"
+              onClick={() => setProjectsExpanded((expanded) => !expanded)}
+            >
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 7h7l2 2h9v10H3V7Z" />
+                <path d="M3 7V4h7l2 3" />
+              </svg>
+              <span>My projects</span>
+              <span aria-hidden="true">{projectsExpanded ? "⌄" : "›"}</span>
+            </button>
+          ) : "Projects"}
+        </h2>
+        <button className="project-create-button" type="button" onClick={() => {
+          setNavigationOpen(false);
+          setNewProjectOpen(true);
+        }} aria-label="New project" title="Add project">
+          <span aria-hidden="true">＋</span>
+          {compactNavigation ? null : <span>New</span>}
+        </button>
+      </header>
+      <div id="sidebar-projects" hidden={compactNavigation && !projectsExpanded}>
+        {projectsLoading ? <p className="sidebar-status" role="status">Loading projects…</p> : null}
+        {!projectsLoading && projects.length === 0 ? (
+          <p className="sidebar-status">No projects yet.</p>
+        ) : null}
+        {projects.length ? (
+          <ul className="project-sidebar-list">
+            {projects.map((project) => {
+              const expanded = expandedProjectId === project.id;
+              const current = selectedProjectId === project.id;
+              return (
+                <li key={project.id} className={current ? "project-sidebar-row current" : "project-sidebar-row"}>
+                  <div className="project-sidebar-main">
+                    <button
+                      className="project-sidebar-link"
+                      type="button"
+                      onClick={() => openProject(project)}
+                      aria-current={current && selectedId === null ? "page" : undefined}
+                      title={project.name}
+                    >
+                      <span className="project-folder-icon" aria-hidden="true">◇</span>
+                      <span>{project.name}</span>
+                    </button>
+                    <button
+                      className="project-sidebar-toggle"
+                      type="button"
+                      onClick={() => {
+                        if (expanded) {
+                          setExpandedProjectId(null);
+                        } else {
+                          openProject(project);
+                        }
+                      }}
+                      aria-label={`${expanded ? "Collapse" : "Expand"} project ${project.name}`}
+                      aria-expanded={expanded}
+                    >
+                      <span aria-hidden="true">{expanded ? "⌄" : "›"}</span>
+                    </button>
+                  </div>
+                  {expanded ? (
+                    <nav className="project-conversation-list" aria-label={`${project.name} conversations`}>
+                      {projectConversationsLoading ? (
+                        <p className="sidebar-status" role="status">Loading conversations…</p>
+                      ) : null}
+                      {!projectConversationsLoading && projectHistoryConversations.length === 0 ? (
+                        <p className="sidebar-status">
+                          {searchQuery ? "No matching titles." : view === "archived" ? "No archived conversations." : "No conversations yet."}
+                        </p>
+                      ) : null}
+                      {projectHistoryConversations.map((conversation) => (
+                        <SwipeConversationRow
+                          key={`${conversation.id}-${compactNavigation && navigationOpen}`}
+                          title={conversation.title || "New conversation"}
+                          enabled={compactNavigation && navigationOpen}
+                          disabled={deletingId !== null || archivingId !== null}
+                          archiveLabel={conversation.archived_at ? "Restore" : "Archive"}
+                          onArchive={() => void archiveFromSidebar(conversation)}
+                          onDelete={() => void deleteFromSidebar(conversation.id)}
+                        >
+                          <button
+                            className={conversation.id === selectedId ? "project-conversation active" : "project-conversation"}
+                            type="button"
+                            onClick={() => openConversation(conversation)}
+                            aria-current={conversation.id === selectedId ? "page" : undefined}
+                            title={conversation.title || "New conversation"}
+                          >
+                            <span>{conversation.title || "New conversation"}</span>
+                            <small>{modelLabel(models, conversation)}</small>
+                          </button>
+                        </SwipeConversationRow>
+                      ))}
+                      {projectConversationsNextCursor ? (
+                        <button
+                          className="project-load-more"
+                          type="button"
+                          onClick={() => void loadMoreProjectConversations()}
+                          disabled={projectConversationsLoading}
+                        >
+                          {projectConversationsLoading ? "Loading…" : "Load older"}
+                        </button>
+                      ) : null}
+                    </nav>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+        {projectsNextCursor ? (
+          <button className="project-load-more" type="button" onClick={() => void loadMoreProjects()} disabled={projectsLoadingMore}>
+            {projectsLoadingMore ? "Loading…" : "Load more projects"}
+          </button>
+        ) : null}
+        {projectsError ? <p className="sidebar-error">{projectsError}</p> : null}
+      </div>
+    </section>
+  );
+
   return (
     <div className="workspace" data-navigation-open={navigationOpen}>
       {mobileMenuHost ? createPortal(
@@ -776,7 +903,7 @@ export function ChatWorkspace({
       >
         <div className="conversation-drawer-header">
           <strong className="drawer-user-name" title={user.display_name || user.email}>
-            {user.display_name.trim() || user.email.split("@", 1)[0]}
+            {user.display_name.trim() || user.email.split("@", 1)[0]} - My chats
           </strong>
           <button className="conversation-drawer-close" type="button" aria-label="Close conversation history" onClick={closeNavigation}>
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
@@ -800,137 +927,12 @@ export function ChatWorkspace({
             </button>
           </div>
 
-          <section className="projects-sidebar" aria-labelledby="projects-sidebar-title">
-            <header>
-              <h2 id="projects-sidebar-title">
-                {compactNavigation ? (
-                  <button
-                    className="projects-category-toggle"
-                    type="button"
-                    aria-expanded={projectsExpanded}
-                    aria-controls="sidebar-projects"
-                    onClick={() => setProjectsExpanded((expanded) => !expanded)}
-                  >
-                    <span>Projects</span>
-                    <span aria-hidden="true">{projectsExpanded ? "⌄" : "›"}</span>
-                  </button>
-                ) : "Projects"}
-              </h2>
-              <button type="button" onClick={() => {
-                setNavigationOpen(false);
-                setNewProjectOpen(true);
-              }} aria-label="New project">
-                <span aria-hidden="true">＋</span>
-                <span>New</span>
-              </button>
-            </header>
-            <div id="sidebar-projects" hidden={compactNavigation && !projectsExpanded}>
-              {projectsLoading ? <p className="sidebar-status" role="status">Loading projects…</p> : null}
-              {!projectsLoading && projects.length === 0 ? (
-                <p className="sidebar-status">No projects yet.</p>
-              ) : null}
-              {projects.length ? (
-                <ul className="project-sidebar-list">
-                  {projects.map((project) => {
-                    const expanded = expandedProjectId === project.id;
-                    const current = selectedProjectId === project.id;
-                    return (
-                      <li key={project.id} className={current ? "project-sidebar-row current" : "project-sidebar-row"}>
-                        <div className="project-sidebar-main">
-                          <button
-                            className="project-sidebar-link"
-                            type="button"
-                            onClick={() => openProject(project)}
-                            aria-current={current && selectedId === null ? "page" : undefined}
-                            title={project.name}
-                          >
-                            <span className="project-folder-icon" aria-hidden="true">◇</span>
-                            <span>{project.name}</span>
-                          </button>
-                          <button
-                            className="project-sidebar-toggle"
-                            type="button"
-                            onClick={() => {
-                              if (expanded) {
-                                setExpandedProjectId(null);
-                              } else {
-                                openProject(project);
-                              }
-                            }}
-                            aria-label={`${expanded ? "Collapse" : "Expand"} project ${project.name}`}
-                            aria-expanded={expanded}
-                          >
-                            <span aria-hidden="true">{expanded ? "⌄" : "›"}</span>
-                          </button>
-                        </div>
-                        {expanded ? (
-                          <nav className="project-conversation-list" aria-label={`${project.name} conversations`}>
-                            {projectConversationsLoading ? (
-                              <p className="sidebar-status" role="status">Loading conversations…</p>
-                            ) : null}
-                            {!projectConversationsLoading && projectHistoryConversations.length === 0 ? (
-                              <p className="sidebar-status">
-                                {searchQuery ? "No matching titles." : view === "archived" ? "No archived conversations." : "No conversations yet."}
-                              </p>
-                            ) : null}
-                            {projectHistoryConversations.map((conversation) => (
-                              <SwipeConversationRow
-                                key={`${conversation.id}-${compactNavigation && navigationOpen}`}
-                                title={conversation.title || "New conversation"}
-                                enabled={compactNavigation && navigationOpen}
-                                disabled={deletingId !== null || archivingId !== null}
-                                archiveLabel={conversation.archived_at ? "Restore" : "Archive"}
-                                onArchive={() => void archiveFromSidebar(conversation)}
-                                onDelete={() => void deleteFromSidebar(conversation.id)}
-                              >
-                                <button
-                                  className={conversation.id === selectedId ? "project-conversation active" : "project-conversation"}
-                                  type="button"
-                                  onClick={() => openConversation(conversation)}
-                                  aria-current={conversation.id === selectedId ? "page" : undefined}
-                                  title={conversation.title || "New conversation"}
-                                >
-                                  <span>{conversation.title || "New conversation"}</span>
-                                  <small>{modelLabel(models, conversation)}</small>
-                                </button>
-                              </SwipeConversationRow>
-                            ))}
-                            {projectConversationsNextCursor ? (
-                              <button
-                                className="project-load-more"
-                                type="button"
-                                onClick={() => void loadMoreProjectConversations()}
-                                disabled={projectConversationsLoading}
-                              >
-                                {projectConversationsLoading ? "Loading…" : "Load older"}
-                              </button>
-                            ) : null}
-                          </nav>
-                        ) : null}
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : null}
-              {projectsNextCursor ? (
-                <button className="project-load-more" type="button" onClick={() => void loadMoreProjects()} disabled={projectsLoadingMore}>
-                  {projectsLoadingMore ? "Loading…" : "Load more projects"}
-                </button>
-              ) : null}
-              {projectsError ? <p className="sidebar-error">{projectsError}</p> : null}
-            </div>
-          </section>
+          {!compactNavigation ? projectNavigation : null}
 
-          {compactNavigation ? (
-            <>
-              <h2 className="sidebar-chats-heading">Chats</h2>
-              <p className="conversation-swipe-hint">Swipe right to {view === "archived" ? "restore" : "archive"}, left to delete</p>
-            </>
-          ) : null}
           <label className="conversation-search">
-            <span>Search titles</span>
             <input
               type="search"
+              aria-label="Search titles"
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
               placeholder="Search conversations"
@@ -1038,7 +1040,12 @@ export function ChatWorkspace({
           ) : null}
           {error ? <p className="sidebar-error" role="alert">{error}</p> : null}
         </div>
-        {compactNavigation ? menuFooter : null}
+        {compactNavigation ? (
+          <div className="sidebar-menu-footer">
+            {projectNavigation}
+            {menuFooter}
+          </div>
+        ) : null}
       </aside>
 
       <section className="chat-column" aria-label="Audrey conversation" inert={compactNavigation && navigationOpen ? true : undefined}>
@@ -1074,6 +1081,7 @@ export function ChatWorkspace({
           >
             <ConversationThread
               conversation={opened}
+              isSelected={opened.id === selectedId}
               compactNavigation={compactNavigation}
               models={models}
               projects={projects}
@@ -1102,6 +1110,7 @@ export function ChatWorkspace({
 
 function ConversationThread({
   conversation,
+  isSelected,
   compactNavigation,
   models,
   projects,
@@ -1113,6 +1122,7 @@ function ConversationThread({
   onOpenProject,
 }: {
   conversation: Conversation;
+  isSelected: boolean;
   compactNavigation: boolean;
   models: AudreyModel[];
   projects: AudreyProject[];
@@ -1139,6 +1149,8 @@ function ConversationThread({
   const [recoveryError, setRecoveryError] = useState("");
   const [stoppingRecovered, setStoppingRecovered] = useState(false);
   const [threadRevision, setThreadRevision] = useState(0);
+  const [titleRunId, setTitleRunId] = useState<string | null>(null);
+  const titleRefreshVersionRef = useRef(0);
   const onConversationChangeRef = useRef(onConversationChange);
   useEffect(() => { onConversationChangeRef.current = onConversationChange; }, [onConversationChange]);
   const archived = conversation.archived_at !== null;
@@ -1163,7 +1175,12 @@ function ConversationThread({
             }
           } else {
             items = (await listMessages(conversation.id)).items;
+            if (active) setTitleRunId(run.id);
           }
+        } else if (active && latestAssistant?.run_id) {
+          // A reload can land after the answer was saved but before its
+          // auxiliary title finished. Showing history must not wait for it.
+          setTitleRunId(latestAssistant.run_id);
         }
         if (active) setThread({ status: "ready", messages: items });
       } catch (reason) {
@@ -1193,12 +1210,7 @@ function ConversationThread({
           setThreadRevision((revision) => revision + 1);
           setRecoveredRunId(null);
           setRunActive(false);
-          void getConversation(conversation.id).then((updated) => {
-            if (active) {
-              setTitleDraft(updated.title);
-              onConversationChangeRef.current(updated);
-            }
-          }).catch(() => {});
+          setTitleRunId(run.id);
         }
       } catch (reason) {
         if (active) setRecoveryError(messageOf(reason));
@@ -1216,6 +1228,58 @@ function ConversationThread({
       document.removeEventListener("visibilitychange", checkRun);
     };
   }, [conversation.id, recoveredRunId]);
+
+  useEffect(() => () => {
+    // Invalidate an older run-start title read when navigation or a manual
+    // edit changes which response may update this thread.
+    titleRefreshVersionRef.current += 1;
+  }, [conversation.id, isSelected, editingTitle, mutation]);
+
+  useEffect(() => {
+    if (!titleRunId || !isSelected || editingTitle || mutation !== null) return;
+    let active = true;
+    let checks = 0;
+    let timer: number | undefined;
+    const controller = new AbortController();
+    // Title generation has a short server budget. A failed or older server
+    // must never leave a perpetual poll attached to a finished conversation.
+    const deadline = window.setTimeout(() => {
+      active = false;
+      controller.abort();
+      window.clearTimeout(timer);
+      setTitleRunId(null);
+    }, 20_000);
+
+    async function checkTitle() {
+      try {
+        const run = await getRun(titleRunId!, controller.signal);
+        if (!active) return;
+        if (run.conversation_id !== conversation.id) throw new Error("Run belongs to another conversation.");
+        checks += 1;
+        if (run.title_pending) {
+          if (checks < 20) timer = window.setTimeout(() => void checkTitle(), 1000);
+          else setTitleRunId(null);
+          return;
+        }
+        const updated = await getConversation(conversation.id, controller.signal);
+        if (!active) return;
+        setTitleDraft(updated.title);
+        onConversationChangeRef.current(updated);
+        setTitleRunId(null);
+      } catch {
+        if (active) setTitleRunId(null);
+        // A later navigation or reload reconciles canonical state. Failure
+        // of an auxiliary title refresh does not turn the answer into an error.
+      }
+    }
+    void checkTitle();
+    return () => {
+      active = false;
+      controller.abort();
+      window.clearTimeout(timer);
+      window.clearTimeout(deadline);
+    };
+  }, [conversation.id, titleRunId, isSelected, editingTitle, mutation]);
 
   async function stopRecoveredRun() {
     if (!recoveredRunId || stoppingRecovered) return;
@@ -1255,10 +1319,13 @@ function ConversationThread({
   }
 
   async function refreshAutomaticTitle() {
+    if (!isSelected || editingTitle || mutation !== null) return;
+    const version = titleRefreshVersionRef.current;
     try {
       const updated = await getConversation(conversation.id);
+      if (version !== titleRefreshVersionRef.current) return;
       setTitleDraft(updated.title);
-      onConversationChange(updated);
+      onConversationChangeRef.current(updated);
     } catch {
       // Canonical state remains correct; a later list or refresh will reconcile it.
     }
@@ -1472,6 +1539,10 @@ function ConversationThread({
           onModelChange={changeModel}
           onRunActiveChange={setRunActive}
           onRunStarted={() => void refreshAutomaticTitle()}
+          onRunFinished={(runId) => {
+            titleRefreshVersionRef.current += 1;
+            setTitleRunId(runId);
+          }}
         />
       ) : null}
     </>
@@ -1493,6 +1564,7 @@ function AudreyThread({
   onModelChange,
   onRunActiveChange,
   onRunStarted,
+  onRunFinished,
 }: {
   conversationId: string;
   projectPicker: ReactNode;
@@ -1508,6 +1580,7 @@ function AudreyThread({
   onModelChange: (modelId: string) => Promise<void>;
   onRunActiveChange: (active: boolean) => void;
   onRunStarted: () => void;
+  onRunFinished: (runId: string) => void;
 }) {
   const [runError, setRunError] = useState("");
   const [skillId, setSkillId] = useState("");
@@ -1707,9 +1780,11 @@ function AudreyThread({
     }
   }
   const onRunStartedRef = useRef(onRunStarted);
+  const onRunFinishedRef = useRef(onRunFinished);
   useEffect(() => {
     onRunStartedRef.current = onRunStarted;
-  }, [onRunStarted]);
+    onRunFinishedRef.current = onRunFinished;
+  }, [onRunStarted, onRunFinished]);
   useEffect(() => {
     const subscriber: AgentSubscriber = {
       onRunInitialized: () => {
@@ -1815,7 +1890,8 @@ function AudreyThread({
           )),
         }));
       },
-      onRunFinishedEvent: () => {
+      onRunFinishedEvent: ({ event }) => {
+        onRunFinishedRef.current(event.runId);
         setActiveRunId(null);
         userRequestedCancelRef.current = false;
         onRunActiveChange(false);

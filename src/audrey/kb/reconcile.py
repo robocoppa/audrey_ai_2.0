@@ -13,10 +13,11 @@ collections, group by `payload.source`, check each unique source against
 summary dict suitable for logging or admin response.
 
 Excludes per-user collections (`kb_user_text_*` / `kb_user_images_*`) on
-purpose — the sqlite uploads index already reconciles those against qdrant
-at startup. Mixing the two paths would let this reconciler delete
-legitimately-uploaded files just because the host can't see the user's
-filename (which it can't — uploads live in qdrant only, no on-disk source).
+purpose — the SQLite upload catalog preserves ownership and lifecycle,
+while startup recovery backfills legacy rows and reports missing search points.
+Uploaded originals and sidecars live under the upload root, outside the shared
+dataset folders scanned here. A filename in an upload payload is not a path
+in those folders, so this global sweep must never decide an upload is deleted.
 
 Lifecycle wrapper `KBReconciler` mirrors `KBWatcher`'s shape: `start()`
 spawns a long-lived asyncio task, `stop()` cancels it. The task sleeps
@@ -199,7 +200,7 @@ async def reconcile_once(
     """Run one full reconcile pass over both global collections.
 
     Returns a structured summary. Per-user collections are NOT touched —
-    they're managed by the sqlite uploads index + startup reconcile.
+    they're managed by the SQLite upload catalog + startup recovery.
 
     `quiet_httpx` suppresses httpx's per-request INFO lines for this
     sweep's own qdrant traffic (never for concurrent requests). Defaults

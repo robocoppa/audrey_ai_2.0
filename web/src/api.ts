@@ -819,9 +819,13 @@ export async function removeProjectFile(
   );
 }
 
-export function getConversation(conversationId: string): Promise<Conversation> {
+export function getConversation(
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<Conversation> {
   return apiJson<Conversation>(
     `/api/conversations/${encodeURIComponent(conversationId)}`,
+    { signal },
   );
 }
 
@@ -849,14 +853,15 @@ export interface AudreyRun {
   id: string;
   conversation_id: string;
   status: "running" | "succeeded" | "cancelled" | "failed";
+  title_pending?: boolean;
   skill_id: string;
   skill_version: number;
   skill_digest: string;
   skill_reason: string;
 }
 
-export function getRun(runId: string): Promise<AudreyRun> {
-  return apiJson<AudreyRun>(`/api/runs/${encodeURIComponent(runId)}`);
+export function getRun(runId: string, signal?: AbortSignal): Promise<AudreyRun> {
+  return apiJson<AudreyRun>(`/api/runs/${encodeURIComponent(runId)}`, { signal });
 }
 
 export function cancelRun(runId: string): Promise<AudreyRun> {
