@@ -25,7 +25,9 @@ separated from username, Admin Panel, and Log out. The app shell owns its dialog
   label or swipe instructions are displayed; the search retains its accessible name.
 - The bottom group contains **My projects**, **My Files** (folder icon retained),
   **Admin Panel** (administrators only), then **Log out**, with matching colors,
-  typography, and targets. My projects stays collapsible, with an adjacent plus
+  typography, and targets. Projects uses a stacked-layers icon, also shared
+  by individual project rows on desktop and mobile. My projects stays collapsible,
+  with an adjacent plus
   button to create a project and separators above/below its section. Expanded
   projects scroll independently so the footer remains reachable. Account settings
   and the current-chat action section are absent from this drawer.

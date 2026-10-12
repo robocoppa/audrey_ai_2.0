@@ -8,6 +8,10 @@ test("centers Audrey Auto with a glowing orbit and loading label", async ({ page
   const sessionGate = new Promise<void>((resolve) => {
     releaseSession = resolve;
   });
+  let releaseIdentity: () => void = () => undefined;
+  const identityGate = new Promise<void>((resolve) => {
+    releaseIdentity = resolve;
+  });
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/me/preferences") {
@@ -16,7 +20,7 @@ test("centers Audrey Auto with a glowing orbit and loading label", async ({ page
       return;
     }
     if (url.pathname === "/api/me") {
-      await sessionGate;
+      await identityGate;
       await json(route, browserUser());
       return;
     }
@@ -44,6 +48,12 @@ test("centers Audrey Auto with a glowing orbit and loading label", async ({ page
   });
 
   await page.goto("./", { waitUntil: "domcontentloaded" });
+
+  const accountCheck = page.getByRole("status", { name: "Processing Cloudflare Authentication" });
+  await expect(accountCheck).toBeVisible();
+  await expect(accountCheck.locator("strong")).toHaveText("Processing Cloudflare Authentication");
+  await expect(accountCheck.locator(".audrey-loader-copy > span")).toHaveText("Please wait...");
+  releaseIdentity();
 
   const loader = page.getByRole("status", { name: "Loading" });
   const portrait = loader.locator("img");
@@ -134,8 +144,8 @@ test("holds through multiple transient Access bootstrap rejections", async ({ pa
 
   await page.goto("./?__cf_access_message=logged_out&kept=yes#chat");
 
-  const handoff = page.getByRole("status", { name: "Authenticating with Cloudflare" });
-  await expect(handoff).toHaveText("Authenticating with Cloudflare");
+  const handoff = page.getByRole("status", { name: "Processing Cloudflare Authentication" });
+  await expect(handoff).toHaveText("Processing Cloudflare Authentication");
   await expect(page.locator(".topbar")).toHaveCount(0);
   await expect(page.getByText("A quieter place to think.")).toHaveCount(0);
 

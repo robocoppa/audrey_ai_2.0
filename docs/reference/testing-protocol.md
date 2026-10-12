@@ -86,8 +86,9 @@ folder (`refused.json`, the scratch hubs) and are read there.
 |---|---|---|---|
 | ai-sec | `scripts/eval/eval-model.sh`, `scripts/eval/eval-arms.sh` | laptop, under `nohup` | yes |
 | ai-sec | `tests/smoke/smoke-run.sh` | laptop, detached | yes |
-| ai-sec | `scripts/b6_drill.py`, `scripts/b8_drill.py`, and each drill after them | laptop, ten to twenty-five minutes | yes, by `scripts/notify.py` |
-| ai-sec | `scripts/box/b8_drill.sh`, shipped to `/boot/config/aisec/` | Tower, as root, about twenty minutes | yes, through fleet-watchdog's `.env` |
+| ai-sec | `scripts/b6_drill.py`, `scripts/b8_drill.py`, and each long drill after them | laptop, ten to twenty-five minutes | yes, by `scripts/notify.py` |
+| ai-sec | `scripts/b9_drill.py`, which signs and sends B9's updates | laptop, under a minute | no: it prints what it signed |
+| ai-sec | `scripts/box/b8_drill.sh` and `b9_drill.sh`, shipped to `/boot/config/aisec/` | Tower, as root, six to twenty minutes | yes, through fleet-watchdog's `.env` |
 | Audrey | `evals/eval-onbox.sh` | Tower, a detached container | yes |
 | Audrey | `scripts/probes/probe-onbox.sh` | Tower | detached, yes; with `FOREGROUND=1`, only with `NOTIFY=1` |
 | Audrey | `evals/eval_research.py`, `evals/run_all_evals.sh` | laptop, in the background | not yet: the results are in `evals/results/` |

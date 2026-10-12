@@ -89,6 +89,29 @@ const MODEL_PORTRAITS: Readonly<Record<string, string>> = {
 };
 
 
+function ProjectIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      width="17"
+      height="17"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="m12 3 10 5-10 5L2 8Z" />
+      <path d="m2 12 10 5 10-5" />
+      <path d="m2 16 10 5 10-5" />
+    </svg>
+  );
+}
+
+
 type ThreadState =
   | { status: "idle" }
   | { status: "loading" }
@@ -732,10 +755,7 @@ export function ChatWorkspace({
               aria-controls="sidebar-projects"
               onClick={() => setProjectsExpanded((expanded) => !expanded)}
             >
-              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M3 7h7l2 2h9v10H3V7Z" />
-                <path d="M3 7V4h7l2 3" />
-              </svg>
+              <ProjectIcon />
               <span>My projects</span>
               <span aria-hidden="true">{projectsExpanded ? "⌄" : "›"}</span>
             </button>
@@ -769,7 +789,7 @@ export function ChatWorkspace({
                       aria-current={current && selectedId === null ? "page" : undefined}
                       title={project.name}
                     >
-                      <span className="project-folder-icon" aria-hidden="true">◇</span>
+                      <ProjectIcon className="project-icon" />
                       <span>{project.name}</span>
                     </button>
                     <button

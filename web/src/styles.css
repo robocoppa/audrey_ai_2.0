@@ -4876,17 +4876,11 @@ a:focus-visible {
   font-size: 0.78rem;
 }
 
-.project-folder-icon {
-  display: grid;
+.project-icon {
   width: 1.1rem;
   height: 1.1rem;
   flex: none;
-  place-items: center;
-  border: 1px solid rgb(99 181 255 / 28%);
-  border-radius: 0.28rem;
   color: var(--accent);
-  font-size: 0.68rem;
-  transform: rotate(45deg);
 }
 
 .project-sidebar-toggle {
