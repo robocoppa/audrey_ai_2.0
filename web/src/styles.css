@@ -864,9 +864,9 @@ a:focus-visible {
 .composer-model-picker img:hover {
   border-color: rgb(99 181 255 / 72%);
   box-shadow:
-    0 0 0.22rem rgb(99 181 255 / 74%),
-    0 0 0.75rem rgb(99 181 255 / 48%),
-    0 0 1.5rem rgb(52 153 250 / 30%);
+    0 0 0.3rem rgb(99 181 255 / 68%),
+    0 0 1rem rgb(99 181 255 / 42%),
+    0 0 2rem rgb(52 153 250 / 26%);
 }
 
 .model-description {
@@ -1978,8 +1978,8 @@ a:focus-visible {
   stroke-dasharray: 100 100;
   stroke-dashoffset: 100;
   filter:
-    drop-shadow(0 0 0.35rem rgb(99 181 255 / 72%))
-    drop-shadow(0 0 0.8rem rgb(52 153 250 / 42%));
+    drop-shadow(0 0 0.5rem rgb(99 181 255 / 64%))
+    drop-shadow(0 0 1.1rem rgb(52 153 250 / 36%));
   animation: audrey-loading-rim-sweep var(--audrey-rim-cycle, 4s) linear infinite;
 }
 
@@ -1989,22 +1989,23 @@ a:focus-visible {
   inset: 0;
   border-radius: 50%;
   pointer-events: none;
-  filter: drop-shadow(0 0 0.5rem rgb(52 153 250 / 32%));
+  filter: drop-shadow(0 0 0.7rem rgb(52 153 250 / 28%));
   animation: audrey-loading-orbit var(--audrey-rim-pass, 2s) linear infinite;
 }
 
 .audrey-loading-orbit::after {
   position: absolute;
-  top: -0.25rem;
+  top: -0.4rem;
   left: 50%;
-  width: 0.5rem;
-  height: 0.5rem;
+  width: 0.8rem;
+  height: 0.8rem;
   transform: translateX(-50%);
   border-radius: 50%;
   background: #b9ddff;
   box-shadow:
-    0 0 0.55rem rgb(185 221 255 / 90%),
-    0 0 1.3rem rgb(52 153 250 / 76%);
+    0 0 0.7rem rgb(185 221 255 / 84%),
+    0 0 1.8rem rgb(52 153 250 / 62%),
+    0 0 2.4rem rgb(52 153 250 / 30%);
   content: "";
 }
 

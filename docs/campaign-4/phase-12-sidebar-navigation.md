@@ -74,7 +74,7 @@ beside the wordmark.
   This is a decorative waiting animation, not measured authentication progress.
   The light sits directly on the photo's edge: the photo obscures the inner
   half of the small moving orb, and the backlight hugs the rim and radiates
-  outward without a gap. Reduced motion shows a static rim. Hovering over the
+  outward without a gap, with a larger orb and a wider, softer fade. Reduced motion shows a static rim. Hovering over the
   main-page portrait adds the same close backlight without brightening the photo.
 
 Conversation creation, empty-draft cleanup, search, desktop rename,
