@@ -2890,7 +2890,7 @@ const ComposerPickerContext = createContext<{
   setActivePicker: (picker: ComposerPickerName | null) => void;
 }>({ activePicker: null, setActivePicker: () => {} });
 
-// All message options share one overlay above the form. Portaling prevents a
+// Message options float above their own controls. Portaling prevents a
 // long menu from resizing the dock or being clipped by the scrolling thread.
 function ComposerPickerPanel({
   className,
@@ -2912,22 +2912,27 @@ function ComposerPickerPanel({
     const trigger = triggerRef.current;
     const panel = panelRef.current;
     const composer = trigger?.closest<HTMLElement>(".composer");
-    if (!composer || !panel) return;
+    if (!trigger || !composer || !panel) return;
     const viewport = composer.closest<HTMLElement>(".thread-viewport");
     const visualViewport = window.visualViewport;
     const place = () => {
       const box = composer.getBoundingClientRect();
+      const control = trigger.getBoundingClientRect();
+      const thread = viewport?.getBoundingClientRect();
       const viewLeft = visualViewport?.offsetLeft ?? 0;
       const viewTop = visualViewport?.offsetTop ?? 0;
       const viewWidth = visualViewport?.width ?? window.innerWidth;
       const viewHeight = visualViewport?.height ?? window.innerHeight;
-      const topLimit = Math.max(viewTop + 8, (viewport?.getBoundingClientRect().top ?? 0) + 8);
-      const bottom = Math.min(box.top - 8, viewTop + viewHeight - 8);
-      const width = Math.min(576, box.width, viewWidth - 16);
-      const left = Math.max(viewLeft + 8, Math.min(
-        box.left + (box.width - width) / 2,
-        viewLeft + viewWidth - width - 8,
-      ));
+      const topLimit = Math.max(viewTop + 8, (thread?.top ?? viewTop) + 8);
+      const bottom = Math.min(control.top - 8, viewTop + viewHeight - 8);
+      const leftLimit = Math.max(viewLeft + 8, (thread?.left ?? viewLeft) + 8);
+      const rightLimit = Math.min(viewLeft + viewWidth - 8, (thread?.right ?? viewLeft + viewWidth) - 8);
+      const width = Math.max(0, Math.min(576, box.width, rightLimit - leftLimit));
+      const alignedLeft = activePicker === "model" || activePicker === "other-models"
+        ? control.left
+        : activePicker === "skills" ? control.right - width
+        : control.left + (control.width - width) / 2;
+      const left = Math.max(leftLimit, Math.min(alignedLeft, rightLimit - width));
       panel.style.left = `${left}px`;
       panel.style.bottom = `${window.innerHeight - bottom}px`;
       panel.style.width = `${width}px`;
@@ -2937,6 +2942,7 @@ function ComposerPickerPanel({
     place();
     const observer = new ResizeObserver(place);
     observer.observe(composer);
+    observer.observe(trigger);
     if (composer.parentElement) observer.observe(composer.parentElement);
     if (viewport) observer.observe(viewport);
     window.addEventListener("resize", place);

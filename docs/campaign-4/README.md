@@ -37,8 +37,9 @@ they are not ongoing task lists.
   and Project metadata; explicit choices win and unclear targets abstain.
   Remaining browser acceptance is pending.
 - **Composer/provenance followup:** built, awaiting browser acceptance. All four
-  composer pickers use matching dark overlays above the message field without
-  shifting the composer or portrait, on desktop and mobile. Sources, Models,
+  composer pickers use matching dark overlays directly above their controls,
+  overlapping the message field without shifting the composer or portrait.
+  Model aligns left, Tools right, Files/Project centered, with viewport clamping. Sources, Models,
   and Tool calls stay
   beside each completed answer immediately, even with progress display off.
   Kimi K3 is included in the tool capability gate used by native panel workers.

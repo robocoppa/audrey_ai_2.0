@@ -2796,12 +2796,30 @@ for (const viewport of [
       });
       const baseline = await composerGeometry();
       let panelWidth: number | undefined;
-      const assertPanelGeometry = async (panel: Locator) => {
+      const assertPanelGeometry = async (
+        panel: Locator,
+        trigger: Locator,
+        alignment: "left" | "center" | "right",
+      ) => {
         await expectInViewport(page, panel);
         const box = (await panel.boundingBox())!;
-        expect(box.y + box.height).toBeLessThanOrEqual(baseline.input.y);
-        expect(Math.abs(box.x + box.width / 2 - (baseline.form.x + baseline.form.width / 2)))
-          .toBeLessThan(2);
+        const triggerBox = (await trigger.boundingBox())!;
+        const thread = await trigger.evaluate((button) => {
+          const box = button.closest(".thread-viewport")!.getBoundingClientRect();
+          return { left: box.left, right: box.right, top: box.top };
+        });
+        const leftLimit = Math.max(8, thread.left + 8);
+        const rightLimit = Math.min(viewport.width - 8, thread.right - 8);
+        const anchoredLeft = alignment === "left" ? triggerBox.x
+          : alignment === "right" ? triggerBox.x + triggerBox.width - box.width
+            : triggerBox.x + (triggerBox.width - box.width) / 2;
+        const expectedLeft = Math.max(leftLimit, Math.min(anchoredLeft, rightLimit - box.width));
+        const expectedBottom = Math.min(triggerBox.y - 8, viewport.height - 8);
+        expect(Math.abs(box.y + box.height - expectedBottom)).toBeLessThan(2);
+        expect(Math.abs(box.x - expectedLeft)).toBeLessThan(2);
+        expect(box.x).toBeGreaterThanOrEqual(leftLimit - 1);
+        expect(box.x + box.width).toBeLessThanOrEqual(rightLimit + 1);
+        expect(box.y).toBeGreaterThanOrEqual(thread.top + 7);
         expect(box.width).toBeLessThanOrEqual(baseline.form.width);
         panelWidth ??= box.width;
         expect(Math.abs(box.width - panelWidth)).toBeLessThan(2);
@@ -2816,7 +2834,7 @@ for (const viewport of [
 
       const modelButton = page.getByRole("button", { name: "Audrey model", exact: true });
       const projectButton = page.getByRole("button", { name: "Move conversation to project", exact: true });
-      const attachButton = page.getByRole("button", { name: "Add files" });
+      const attachButton = page.getByRole("button", { name: /^(?:Add files|Close file picker)$/u });
       const toolsButton = page.getByRole("button", { name: "Tools and skills: Automatic" });
       const modelPanel = page.getByRole("dialog", { name: "Choose an Audrey model" });
       const projectPanel = page.getByRole("dialog", { name: "Choose a project" });
@@ -2824,25 +2842,25 @@ for (const viewport of [
       const toolsPanel = page.getByRole("dialog", { name: "Choose how Audrey uses tools" });
 
       await modelButton.click();
-      await assertPanelGeometry(modelPanel);
+      await assertPanelGeometry(modelPanel, modelButton, "left");
       await expect(modelPanel.getByRole("button", { name: "Fast", exact: true })).toBeFocused();
       await page.keyboard.press("Escape");
       await expect(modelPanel).toHaveCount(0);
       await expect(modelButton).toBeFocused();
 
       await projectButton.click();
-      await assertPanelGeometry(projectPanel);
+      await assertPanelGeometry(projectPanel, projectButton, "center");
       await expect(projectPanel.getByRole("button", { name: "No project", exact: true })).toHaveAttribute("aria-pressed", "true");
       await attachButton.click();
       await expect(projectPanel).toHaveCount(0);
-      await assertPanelGeometry(attachmentPanel);
+      await assertPanelGeometry(attachmentPanel, attachButton, "center");
       await expect.poll(() => attachmentPanel.evaluate(
         (panel) => panel.scrollHeight > panel.clientHeight,
       )).toBe(true);
 
       await toolsButton.click();
       await expect(attachmentPanel).toHaveCount(0);
-      await assertPanelGeometry(toolsPanel);
+      await assertPanelGeometry(toolsPanel, toolsButton, "right");
       await expect(toolsPanel.getByRole("button", { name: /Automatic/u })).toBeFocused();
       await page.keyboard.press("Escape");
       await expect(toolsPanel).toHaveCount(0);
@@ -2855,7 +2873,7 @@ for (const viewport of [
       await modelButton.click();
       await toolsButton.click();
       await expect(modelPanel).toHaveCount(0);
-      await page.getByRole("textbox", { name: "Ask Audrey" }).click();
+      await page.mouse.click(2, 2);
       await expect(toolsPanel).toHaveCount(0);
 
       await attachButton.click();

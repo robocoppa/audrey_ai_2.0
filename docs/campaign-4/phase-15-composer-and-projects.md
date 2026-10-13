@@ -9,10 +9,12 @@ The centered dock has a 56 rem desktop maximum: message field plus Send/Stop abo
 
 Add files explains uploading a new file or choosing Ready files from My Files. Tools & skills uses server names/descriptions and explains Automatic; it selects a skill that may narrow tools rather than pretending to be an individual-tool permission editor.
 
-Model, Project, Files, and Tools & skills open in the same dark panel above
-the message field. The panel floats over the conversation; opening it keeps
-the composer and empty-chat portrait in place. Its width and scrollable height
-fit the visible viewport, including narrow screens and keyboard changes.
+Model, Project, Files, and Tools & skills use matching dark panels directly
+above their controls, overlapping the message field. Model aligns left with
+its control; Tools aligns right; Files and Project center over their controls.
+Panels clamp to the chat and visible screen edges. Opening them keeps the
+composer and empty-chat portrait in place. Width and scrollable height fit
+narrow screens and keyboard changes.
 Only one picker opens at a time. Outside click, keyboard focus leaving the
 picker, Escape, and the close button dismiss it. Escape, Close, and choosing a
 model, project, or skill restore focus without scrolling the chat. Files stays
