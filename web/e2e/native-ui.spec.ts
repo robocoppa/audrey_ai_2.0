@@ -53,6 +53,43 @@ test("centers Audrey Auto with a glowing orbit and loading label", async ({ page
   await expect(accountCheck).toBeVisible();
   await expect(accountCheck.locator("strong")).toHaveText("Processing Cloudflare Authentication");
   await expect(accountCheck.locator(".audrey-loader-copy > span")).toHaveText("Please wait...");
+  const assertRimCycle = async (status: Locator, cycleMs: number) => {
+    const rim = status.locator(".audrey-loading-rim-fill");
+    await expect(status.locator(".audrey-loading-rim")).toBeVisible();
+    await expect(rim).toHaveAttribute("pathLength", "100");
+    expect(await rim.evaluate((circle) => getComputedStyle(circle).strokeDasharray
+      .split(/[,\s]+/u).filter(Boolean).map((value) => Number.parseFloat(value))))
+      .toEqual([100, 100]);
+    const motion = await status.evaluate((root, duration) => {
+      const circle = root.querySelector(".audrey-loading-rim-fill")!;
+      const leader = root.querySelector(".audrey-loading-orbit")!;
+      const sweep = circle.getAnimations()[0];
+      const orbit = leader.getAnimations()[0];
+      if (!sweep || !orbit) throw new Error("The rim and its leader must animate together.");
+      sweep.pause();
+      orbit.pause();
+      const offsets = [0, 0.25, 0.5, 0.75, 0.99999].map((fraction) => {
+        sweep.currentTime = fraction * duration;
+        return Number.parseFloat(getComputedStyle(circle).strokeDashoffset);
+      });
+      const clockwiseAngles = [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875].map((fraction) => {
+        orbit.currentTime = fraction * duration;
+        const matrix = new DOMMatrix(getComputedStyle(leader).transform);
+        const angle = Math.atan2(matrix.b, matrix.a) * 180 / Math.PI;
+        return (Math.round(angle) + 360) % 360;
+      });
+      return { sweepDuration: sweep.effect!.getComputedTiming().duration,
+        leaderDuration: orbit.effect!.getComputedTiming().duration, offsets, clockwiseAngles };
+    }, cycleMs);
+    expect(motion.sweepDuration).toBe(cycleMs);
+    expect(motion.leaderDuration).toBe(cycleMs / 2);
+    for (const [index, expected] of [100, 50, 0, -50, -100].entries()) {
+      expect(motion.offsets[index]).toBeCloseTo(expected, 1);
+    }
+    expect(motion.clockwiseAngles).toEqual([0, 90, 180, 270, 0, 90, 180, 270]);
+  };
+  await assertRimCycle(accountCheck, 120000);
+  const authenticationRim = await accountCheck.locator(".audrey-loading-rim-fill").elementHandle();
   releaseIdentity();
 
   const loader = page.getByRole("status", { name: "Loading" });
@@ -60,6 +97,11 @@ test("centers Audrey Auto with a glowing orbit and loading label", async ({ page
   const orbit = loader.locator(".audrey-loading-orbit");
   await expect(loader).toBeVisible();
   await expect(loader).toHaveText("Loading...");
+  await expect.poll(() => authenticationRim!.evaluate((circle) => circle.isConnected)).toBe(false);
+  await expect.poll(() => loader.locator(".audrey-loading-rim-fill").evaluate((circle) => (
+    Number.parseFloat(getComputedStyle(circle).strokeDashoffset)
+  ))).toBeGreaterThan(50);
+  await assertRimCycle(loader, 4000);
   const dotCounts = await loader.locator(".audrey-loading-dots").evaluate((dots) => {
     const animations = dots.getAnimations({ subtree: true });
     for (const animation of animations) animation.pause();
@@ -94,6 +136,13 @@ test("centers Audrey Auto with a glowing orbit and loading label", async ({ page
   expect(Math.abs((portraitBox?.y ?? 0) + (portraitBox?.height ?? 0) / 2 - (viewport?.height ?? 0) / 2))
     .toBeLessThan(2);
 
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(loader.locator(".audrey-loading-rim-fill")).toHaveCSS("stroke-dashoffset", "0px");
+  await expect(loader.locator(".audrey-loading-rim-fill")).toHaveCSS("animation-name", "none");
+  await expect(orbit).toHaveCSS("animation-name", "none");
+  await expect.poll(() => orbit.evaluate((element) => getComputedStyle(element, "::after").display))
+    .toBe("none");
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   releaseSession();
   await expect(page.getByRole("link", { name: "Audrey home" })).toBeVisible();
 });
@@ -455,6 +504,14 @@ test("restores a saved conversation on hard refresh without showing a landing pa
       await json(route, { items: browserModels() });
       return;
     }
+    if (url.pathname === "/api/projects") {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/skills") {
+      await json(route, { enabled: true, status: "ready", items: browserSkills() });
+      return;
+    }
     await route.abort("failed");
   });
 
@@ -466,13 +523,13 @@ test("restores a saved conversation on hard refresh without showing a landing pa
   await expect.poll(() => conversationListReads).toBe(2);
   const opening = page.getByRole("status", { name: "Opening conversation" });
   await expect(opening).toBeAttached();
-  await expect(opening.locator("img, .audrey-loading-orbit")).toHaveCount(0);
+  await expect(opening.locator("img, .audrey-loading-orbit, .audrey-loading-rim")).toHaveCount(0);
   await expect(page.getByText("What shall we work through?")).toHaveCount(0);
 
   releaseReloadList();
   const loading = page.getByRole("status", { name: "Loading conversation" });
   await expect(loading).toBeAttached();
-  await expect(loading.locator("img, .audrey-loading-orbit")).toHaveCount(0);
+  await expect(loading.locator("img, .audrey-loading-orbit, .audrey-loading-rim")).toHaveCount(0);
 
   releaseReloadMessages();
   await expect(page.getByRole("heading", { name: "Hard refresh history" })).toBeVisible();
@@ -712,10 +769,13 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect.poll(
     () => portrait.evaluate((element) => Number.parseFloat(getComputedStyle(element).opacity)),
   ).toBe(0.8);
+  const restingShadow = await portrait.evaluate((element) => getComputedStyle(element).boxShadow);
   await portrait.hover();
   await expect.poll(
     () => portrait.evaluate((element) => Number.parseFloat(getComputedStyle(element).opacity)),
-  ).toBe(1);
+  ).toBe(0.8);
+  await expect.poll(() => portrait.evaluate((element) => getComputedStyle(element).boxShadow))
+    .not.toBe(restingShadow);
   await expect(page.locator(".composer-model-picker")).toHaveCSS("isolation", "isolate");
   await expect(page.locator(".composer-control-rail")).toBeVisible();
   await expect(page.locator(".compact-model-picker")).toContainText("Model");

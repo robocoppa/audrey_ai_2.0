@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 12, 2026.** English user input only. Passed work stays closed.
+**Updated October 13, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -20,7 +20,9 @@ they are not ongoing task lists.
   composer controls are larger; Model focus highlights only the outer control.
   Async history actions preserve a chat selected while the request is pending.
   Latest polish: Cloudflare bootstrap shows **Processing Cloudflare Authentication**
-  / **Please wait...**; Projects uses a shared layers icon; the desktop divider
+  / **Please wait...**. Its portrait rim fills/erases in 60-second passes;
+  ordinary loading uses two-second passes. Main portrait hover adds a rim glow
+  without brightening the photo. Projects uses a shared layers icon; the desktop divider
   follows the sidebar edge with balanced logo spacing and **AUDREY** in spaced
   capitals, with a larger initial A and a softer slate color.
   These UI changes rebuild `audrey-ui`; laptop verification passed, latest Tower

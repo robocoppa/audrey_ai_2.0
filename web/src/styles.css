@@ -860,11 +860,15 @@ a:focus-visible {
   box-shadow:
     0 0 0 0.32rem rgb(70 118 242 / 10%),
     0 0.75rem 2.1rem rgb(52 153 250 / 24%);
-  transition: opacity 160ms ease;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 
 .composer-model-picker img:hover {
-  opacity: 1;
+  border-color: rgb(99 181 255 / 72%);
+  box-shadow:
+    0 0 0 0.32rem rgb(70 118 242 / 18%),
+    0 0 1.5rem rgb(99 181 255 / 48%),
+    0 0.75rem 2.1rem rgb(52 153 250 / 34%);
 }
 
 .model-description {
@@ -1940,9 +1944,6 @@ a:focus-visible {
   inset: -0.55rem;
   border: 1px solid rgb(99 181 255 / 18%);
   border-radius: inherit;
-  box-shadow:
-    0 0 2.5rem rgb(52 153 250 / 18%),
-    inset 0 0 1.6rem rgb(52 153 250 / 8%);
   content: "";
 }
 
@@ -1959,30 +1960,61 @@ a:focus-visible {
   box-shadow: 0 1.2rem 3.5rem rgb(0 0 0 / 48%);
 }
 
+.audrey-loading-rim {
+  position: absolute;
+  z-index: 2;
+  top: -0.55rem;
+  left: -0.55rem;
+  width: calc(100% + 1.1rem);
+  height: calc(100% + 1.1rem);
+  overflow: visible;
+  pointer-events: none;
+  transform: rotate(-90deg);
+}
+
+.audrey-loading-rim-fill {
+  fill: none;
+  stroke: #78c6ff;
+  stroke-width: 1.2;
+  stroke-linecap: butt;
+  stroke-dasharray: 100 100;
+  stroke-dashoffset: 100;
+  filter:
+    drop-shadow(0 0 0.35rem rgb(99 181 255 / 72%))
+    drop-shadow(0 0 0.8rem rgb(52 153 250 / 42%));
+  animation: audrey-loading-rim-sweep var(--audrey-rim-cycle, 4s) linear infinite;
+}
+
 .audrey-loading-orbit {
   position: absolute;
   z-index: 2;
   inset: -0.55rem;
-  border: 1px solid rgb(99 181 255 / 16%);
   border-radius: 50%;
+  pointer-events: none;
   filter: drop-shadow(0 0 0.5rem rgb(52 153 250 / 32%));
-  animation: audrey-loading-orbit 2.4s linear infinite;
+  animation: audrey-loading-orbit var(--audrey-rim-pass, 2s) linear infinite;
 }
 
 .audrey-loading-orbit::after {
   position: absolute;
-  top: -0.24rem;
+  top: -0.25rem;
   left: 50%;
-  width: 0.7rem;
-  height: 0.7rem;
+  width: 0.5rem;
+  height: 0.5rem;
   transform: translateX(-50%);
   border-radius: 50%;
   background: #b9ddff;
   box-shadow:
     0 0 0.55rem rgb(185 221 255 / 90%),
-    0 0 1.3rem rgb(52 153 250 / 76%),
-    0 0 2.4rem rgb(70 118 242 / 42%);
+    0 0 1.3rem rgb(52 153 250 / 76%);
   content: "";
+}
+
+/* Two clockwise passes: draw the rim, then erase it from the same start. */
+@keyframes audrey-loading-rim-sweep {
+  0% { stroke-dashoffset: 100; }
+  50% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -100; }
 }
 
 @keyframes audrey-loading-orbit {
@@ -1992,9 +2024,18 @@ a:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .audrey-loading-rim-fill,
   .audrey-loading-orbit,
   .recovered-run-orb {
     animation: none;
+  }
+
+  .audrey-loading-rim-fill {
+    stroke-dashoffset: 0;
+  }
+
+  .audrey-loading-orbit::after {
+    display: none;
   }
 }
 

@@ -68,6 +68,12 @@ beside the wordmark.
   While Audrey checks the signed-in Cloudflare account, the portrait loader
   shows **Processing Cloudflare Authentication** and **Please wait...** on
   separate lines, including ordinary sign-in returns without a URL flag.
+  The portrait rim fills clockwise over 60 seconds, then its moving light
+  erases the rim over another 60 seconds and repeats. Ordinary loading uses
+  two seconds per pass and starts a fresh cycle after authentication.
+  This is a decorative waiting animation, not measured authentication progress.
+  Reduced motion shows a static rim. Hovering over the main-page portrait
+  adds a rim glow while keeping the photo's brightness unchanged.
 
 Conversation creation, empty-draft cleanup, search, desktop rename,
 archive/restore, deletion, and active-run retention keep their existing behavior.

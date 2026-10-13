@@ -182,14 +182,16 @@ export function App() {
     if (showAccessHandoff) {
       return (
         <AudreyLoader
+          key="access"
           fullscreen
+          rimPassSeconds={60}
           label="Processing Cloudflare Authentication"
           message="Processing Cloudflare Authentication"
           detail="Please wait..."
         />
       );
     }
-    return <AudreyLoader fullscreen />;
+    return <AudreyLoader key="loading" fullscreen />;
   }
 
   if (session.status === "restricted") {
