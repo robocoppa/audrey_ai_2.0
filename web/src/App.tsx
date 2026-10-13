@@ -236,8 +236,8 @@ export function App() {
             <img src={builtryteWordmark} alt="" />
           </span>
           <span className="brand-product">
-            <span>Ask </span>
-            <span>Audrey</span>
+            <span><span className="brand-initial">A</span>sk </span>
+            <span><span className="brand-initial">A</span>udrey</span>
           </span>
         </a>
         <div className="topbar-mobile-new-chat" ref={setMobileNewChatHost} />

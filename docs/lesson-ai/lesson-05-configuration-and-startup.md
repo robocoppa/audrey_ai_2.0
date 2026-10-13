@@ -107,14 +107,14 @@ caller. The comments in
 when its port was published.
 
 **The media worker can reach Audrey and nothing else.** It joins only
-[`media-net`](../../compose.yaml#L356), which is declared `internal: true`. The
+[`media-net`](../../compose.yaml#L361), which is declared `internal: true`. The
 worker parses video, audio and scanned PDFs that someone uploaded, the riskiest
 input Audrey handles, so a compromised worker should have nowhere to go. It
 must not reach Ollama either: its model work (describing video frames) has to
 go through Audrey, where fair scheduling applies.
 
 **The media fetcher can reach the internet, because downloading is its whole
-job.** It joins only [`fetch-net`](../../compose.yaml#L363), an ordinary network
+job.** It joins only [`fetch-net`](../../compose.yaml#L368), an ordinary network
 with a route out.
 
 > **Concept spotlight — Docker networks, and why a missing name is not a
@@ -199,7 +199,7 @@ partial, Audrey retries in the background (§2.5).
 
 Now open [`src/audrey/main.py`](../../src/audrey/main.py). When uvicorn imports
 `audrey.main:app`, Python executes the module top to bottom and creates the
-FastAPI [`app`](../../src/audrey/main.py#L479) object near the end of the file.
+FastAPI [`app`](../../src/audrey/main.py#L477) object near the end of the file.
 Importing the module does not mean Audrey is ready yet. The app exists, but
 the expensive shared objects are built later, by `lifespan`.
 
@@ -452,7 +452,7 @@ retry their queues until each item is done: file deletions, archive
 deliveries, account purges. `NativeRunManager` holds every live run.
 
 Ordering matters at startup too. The uploads reconcile,
-[`reconcile_with_qdrant`](../../src/audrey/main.py#L206), must finish before
+[`reconcile_with_qdrant`](../../src/audrey/main.py#L204), must finish before
 uvicorn accepts traffic, because it isn't safe alongside uploads that are in
 progress. It restores missing legacy catalog rows, preserves existing
 ownership and lifecycle metadata, and reports missing search content. Empty
@@ -460,7 +460,7 @@ or partially lost search collections never delete upload records. The
 lifespan runs this before `yield`, so that ordering is structural.
 
 At shutdown, the `finally` block at
-[`main.py:398`](../../src/audrey/main.py#L398) stops things in a deliberate
+[`main.py:396`](../../src/audrey/main.py#L396) stops things in a deliberate
 order:
 
 ```python
@@ -578,7 +578,7 @@ returned, because it captured that object.
 Audrey's graph does the same thing with `tool_registry`. So when tools are
 rediscovered, the existing registry object has to be refreshed in place. Here
 is the admin route that does it,
-[`rediscover_tools`](../../src/audrey/main.py#L557):
+[`rediscover_tools`](../../src/audrey/main.py#L568):
 
 ```python
 fresh = await discover_all(tool_servers)
@@ -611,7 +611,7 @@ and the live registry stays as it was.
 
 The same in-place refresh runs without anyone asking, too. If the first
 discovery at startup comes back empty, or with some tools unavailable,
-[`_retry_tool_discovery`](../../src/audrey/main.py#L421) retries in the
+[`_retry_tool_discovery`](../../src/audrey/main.py#L419) retries in the
 background for about two minutes, mutating the same registry when it succeeds.
 After that window, the admin route is the way to retry.
 

@@ -19,7 +19,12 @@ they are not ongoing task lists.
   deliberate downward pull followed by release. Desktop Archive/Delete and
   composer controls are larger; Model focus highlights only the outer control.
   Async history actions preserve a chat selected while the request is pending.
-  These UI changes rebuild `audrey-ui`.
+  Latest polish: Cloudflare bootstrap shows **Processing Cloudflare Authentication**
+  / **Please wait...**; Projects uses a shared layers icon; the desktop divider
+  follows the sidebar edge with balanced logo spacing and **ASK** above **AUDREY**,
+  using larger initial A's, spaced capitals, and a softer slate color.
+  These UI changes rebuild `audrey-ui`; laptop verification passed, latest Tower
+  deployment and browser acceptance are unconfirmed.
 - **Course review:** the platform and system-map reviews are recorded in
   the local, gitignored [AUDIT](../lesson-ai/AUDIT.md). The current checkout
   requires rebuilding `audrey`, `custom-tools`, and `audrey-ui` after pull;
@@ -44,8 +49,9 @@ they are not ongoing task lists.
   the Grafana model dashboard remain accepted. 17B reasoning controls are built;
   their live API acceptance and benefit to the existing Hermes adapter remain
   unverified, with no further bot integration work queued.
-- **Deferred by the user:** Tailscale repair and 17D Responses tool contracts /
-  catalog expansion. Keep the working Hermes adapter and settings.
+- **Deferred by the user:** password login, Tailscale repair, and 17D Responses
+  tool contracts / catalog expansion. Keep current Cloudflare sign-in and the
+  working Hermes adapter and settings.
 
 ## Phases
 
@@ -72,19 +78,24 @@ they are not ongoing task lists.
 
 ## Remaining work
 
-1. Accept the compact/mobile layout on a phone and a narrow laptop window:
+1. Confirm Tower deployment and close pending targeted acceptance for the
+   current course-reviewed work. The local, gitignored [AUDIT](../lesson-ai/AUDIT.md)
+   holds its review record; the [operations guide](../reference/box-operations.md#10-memory-backups-and-isolated-restore-verification)
+   holds the backup check. Reuse passed checks instead of restarting the suites.
+2. Accept the latest branding and compact/mobile layout: **Ask** above **Audrey**,
+   balanced desktop divider, Cloudflare loading message, distinct Projects icon,
    left menu/footer, chat swipes, New chat, Project beside Model, empty-screen fit,
    profile keyboard behavior, normal scrolling, and deliberate pull-to-refresh.
-   No upload or scripted live eval is required.
-2. Accept the below-composer menus and immediate per-answer tool summaries in
+   No upload or scripted live eval is required for these UI checks.
+3. Accept the below-composer menus and immediate per-answer tool summaries in
    the browser, reusing the existing Ready video. Recorded video reads are passed;
    the remaining defect was their display, not missing tool execution.
-3. Close remaining 3D.6 browser acceptance. Activation is already approved and
+4. Close remaining 3D.6 browser acceptance. Activation is already approved and
    recorded in config. No additional campaign work is required without a new
    user request.
 
 Domain cleanup and operational evidence/traffic followups are closed by user
-confirmation. Tailscale, 17D, and further Hermes changes stay deferred. 17C is
+confirmation. Password login, Tailscale, 17D, and further Hermes changes stay deferred. 17C is
 only a future diagnostic note for an actual reported failure.
 
 ## Standing decisions

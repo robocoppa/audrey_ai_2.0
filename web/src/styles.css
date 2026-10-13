@@ -2200,12 +2200,18 @@ a:focus-visible {
   /* Match the centered wordmark's clearance to the sidebar boundary. */
   padding-left: calc((17rem - 10.5rem) / 2);
   border-left: 1px solid var(--border);
-  color: var(--text-soft);
+  color: var(--muted);
   font-size: 1.05rem;
   font-weight: 600;
   line-height: 1.2;
-  letter-spacing: 0.015em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   white-space: nowrap;
+}
+
+.brand-initial {
+  font-size: 1.2em;
+  line-height: 1;
 }
 
 .session-badge {

@@ -120,8 +120,9 @@ the cycle that writes the first inserted lesson, so the course never has a gap.
 1. **System map:** rewrite L0, L4 and L5; client examples in L1–L3. Replaces
    the L18 cycle. The platform audit of these files (filed 2026-10-09) is
    recorded in the local, gitignored course AUDIT.
-2. **Tool policy:** L9, plus the sidecar lesson's §2.1, §2.3, §2.4 and §2.7.
-3. **Search:** L11, plus L12 §2.9–2.10.
+2. **Tool policy:** L9, plus the sidecar lesson's §2.1, §2.3, §2.4 and §2.7
+   (to confirm: the refresh table also marks its §1.2 and §2.6).
+3. **Search:** L11, plus L12 §2.9–2.10 (to confirm: §2.11 is stale too).
 4. **New 13, the application database,** with the 13–17 renumber.
 5. **New 14, identity and access,** with the L15 (was 13) recap.
 6. **Light refreshes:** L6, L7, L8, L10 and L16 (was 14).
@@ -484,12 +485,14 @@ writer only; lesson prose must not cite phase numbers.
   **Background:** C4 phases 01, 17A.
 - **Updates:** L19's footer (the wrap-up moves here).
 
-## Cycle 1 — the system map (outline approved 2026-10-10; written, awaiting review)
+## Cycle 1 — the system map (outline approved 2026-10-10; committed 2026-10-12; awaiting review)
 
 Rewrites L0 and L4, refreshes L5, swaps the client examples in L1–L3, and
 updates the course README. Audit records live in the gitignored AUDIT.
 The lessons describe current source behavior; L4 includes background first-turn
 titles, shared stream context, backup recovery, and catalog-preserving startup.
+The cites those source changes moved were re-anchored afterwards (2026-10-12),
+and the staleness they caused in later lessons is in the refresh table.
 
 **As written** (beyond the outline): L4's graph section now shows the
 `research` node; §2.4 shows that the streaming driver also runs the graph for a
@@ -643,11 +646,11 @@ references. Items marked † are stale *snippets or values* found by the
 | L9 | † §2.7 snippet and prose still show `_USER_SCOPED_TOOLS`; user binding is now declared per tool in `TOOL_DECLARATIONS`. † Truncation default is 6000, not 2000, and the result now says what was cut. Compaction counted in tool messages with failures evicted first; per-worker search budget. ‡ §2.8 `_truncate` snippet: the marker now gives shown and total characters and says a retry will not help, and `_truncate_payload` (drops whole list items so JSON stays valid) is tried first. ‡ §2.9 dispatch goes through `_dispatch_observed` after the search budget stubs excess calls | Cycle 2 |
 | L10 | Client tool calls and results through passthrough; Responses function tools | Cycle 6; with L32 |
 | L11 | Hybrid retrieval, private-read isolation, resident embedder. ‡ §2.2 ingest snippet lacks the thread offload and sparse vectors; ‡ §2.5 `kb_query` snippet predates caller resolution, file and artifact scope, deleted-file exclusion and the hybrid branch, which is on by default, so §2.6's raw-score merge is the hybrid-off path | Cycle 3 |
-| L12 | † §2.9 upload steps: storage is now reserved atomically and committed after ingest; statuses, tombstones, durable deletion; the upload page is retired | Cycle 3 |
-| L13 (→15) | §2.1 identity through Open WebUI; §2.3–2.6 archive capture and stitching | With L14 (§2.1); with L23 (§2.3–2.6) |
+| L12 | † §2.9 upload steps: storage is now reserved atomically and committed after ingest; statuses, tombstones, durable deletion; the upload page is retired. §2.10 the startup reconcile no longer prunes: it backfills missing legacy rows, reports missing index content and never deletes catalog rows, so §2.11's "the next boot's `reconcile_with_qdrant` cleans up the orphan points" is stale too | Cycle 3 (§2.11 to confirm) |
+| L13 (→15) | §2.1 identity through Open WebUI; §2.3–2.6 archive capture and stitching. §2.6 the streaming bypass: plain fast streams now recall too, through `_prepare_stream_context`, which `_phase_thinking` also calls | With L14 (§2.1); with L23 (§2.3–2.6) |
 | L14 (→16) | Queue grants have explicit owners; cancellation releases slots. ‡ §2.2 step 5: a waiter cancelled after its grant re-releases the slot | Cycle 6 |
 | L15 (→17) | † §2.3 shows retired `_delta_frame`/`_stop_frame` (now `OpenAIStreamAdapter._frame`); §2.5–2.7 deep stream and cancellation run through `StreamStageRunner` and `OpenAIStreamSession`; typed passthrough outcomes; reasoning controls; a Responses route. ‡ §2.5 error handler and §2.7 cancellation snippets show `pipeline_outcome` and `synth_task.cancel()`: the deep stream now records outcomes on `runner.terminal`, drains owned tasks with `runner.cancel_and_drain()`, and archives through `runner.finalize` | Cycle 7 |
-| L16 (→18) | `list_my_files`, `get_file_text`; † `_USER_SCOPED_TOOLS` prose; capability supervisor; archive outboxes; `kb_search` scope. ‡ §2.4 teaches Brave only, with a 429 becoming 503 and other errors escaping as 500: `web_search` now alternates Brave and SearXNG with cross-fallback, returns 503 only when both fail, and normalizes non-429 errors. ‡ §2.6 the user filter is now the shared `_user_filter` helper | Cycle 2 (§2.1, §2.3, §2.4, §2.6, §2.7); with L23 (§2.8); with L28 (`kb_search` scope) |
+| L16 (→18) | `list_my_files`, `get_file_text`; † `_USER_SCOPED_TOOLS` prose; capability supervisor; archive outboxes; `kb_search` scope. ‡ §2.4 teaches Brave only, with a 429 becoming 503 and other errors escaping as 500: `web_search` now alternates Brave and SearXNG with cross-fallback, returns 503 only when both fail, and normalizes non-429 errors. ‡ §2.6 the user filter is now the shared `_user_filter` helper, and the memory collection now has scheduled snapshots and restore verification (`memory_backup.py`). §1.2 the file list lacks `capabilities.py`, `searxng.py` and `memory_backup.py` | Cycle 2 (§2.1, §2.3, §2.4, §2.6, §2.7; §1.2 to confirm); with L23 (§2.8); with L28 (`kb_search` scope) |
 | L17 (→19) | Footer ends the course | With L20 (points onward); the wrap-up moves to L33 |
 
 ## Out of scope

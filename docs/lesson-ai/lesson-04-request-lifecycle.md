@@ -672,7 +672,7 @@ run by id. Stop is `POST /api/runs/{run_id}/cancel`; `GET /api/runs/{run_id}`
 reports its status. If the connection drops, the run carries on.
 
 **10. The run enters the shared streaming driver.** The task runs
-[`_stream_via_selected_model`](../../src/audrey/routes/app/runs.py#L336):
+[`_stream_via_selected_model`](../../src/audrey/routes/app/runs.py#L337):
 
 ```python
 async def _stream_via_selected_model(
@@ -737,7 +737,7 @@ user interface (`STEP_STARTED` for a stage, `TEXT_MESSAGE_CONTENT` for answer
 text, `RUN_FINISHED` at the end), and those reach your browser.
 
 **13. The run finishes and is saved.** When the run's final event arrives,
-[`_persist_terminal`](../../src/audrey/routes/app/runs.py#L638) records the
+[`_persist_terminal`](../../src/audrey/routes/app/runs.py#L704) records the
 outcome:
 
 ```python
@@ -825,12 +825,18 @@ can be rebuilt on demand: the admin route
 [`rebuild_canonical_chat_projection`](../../src/audrey/routes/admin.py#L407)
 re-delivers every finished native turn from the application database. Saved
 memories are the exception to "Qdrant is search": they're stored as Qdrant
-points rather than rows in the application database. The sidecar now saves
-private snapshots at startup and daily, retaining seven completed bundles
-outside Qdrant's storage. Each includes a checked online copy of the archive
-database, which carries account-purge receipts. The
-[memory backup guide](../reference/box-operations.md#10-memory-backups-and-isolated-restore-verification) covers verification and
-recovery; an isolated restore check never overwrites the live collection.
+points rather than rows in the application database, so nothing can rebuild
+them. What protects them is a backup. The sidecar snapshots the memory
+collection when it starts and then once a day, and keeps a configured number
+of the newest snapshots
+([`memory_backup_retain`](../../tools-server/settings.py#L92)) in a private
+folder outside Qdrant's storage. Each snapshot is bundled with a copy of the
+chat archive's database, because that's where the sidecar records which
+accounts have been purged (deleted along with their data), and a restore must
+not bring a purged person's memories back. The
+[memory backup guide](../reference/box-operations.md#10-memory-backups-and-isolated-restore-verification)
+covers checking a backup and recovering from one; the built-in check restores
+into a throwaway collection and never touches the live one.
 
 Finally, the lookup table, for when something goes wrong or you want to
 understand something properly:
@@ -897,30 +903,31 @@ sides enforce it: `latestActionFetch` trims the request in the browser, and
 `AgUiRunRequest`'s docstring records that the server ignores submitted history
 even when a different client sends it.
 
-**4. The Qdrant volume is wiped and Qdrant restarts empty. What is lost for
-good, what can come back, and what surprises you at Audrey's next restart?**
+**4. The Qdrant volume is wiped and Qdrant restarts empty. What is lost, what
+can come back, and what does Audrey's next restart do about it?**
 
-Saved memories can be recovered from a completed memory snapshot. Changes
-made after that backup need to be remembered again. Recovery must preserve
-current account-purge cutoffs and reapply them before serving memory reads;
-an older snapshot can also bring back an individually deleted memory, so
-those deletions need review. If Qdrant and its separately stored backups are
-both lost, there is no other authoritative copy of the memories.
+Saved memories are the one real loss, and the backup limits it. Restoring the
+newest memory snapshot brings back everything as it was when the snapshot was
+taken; anything saved or corrected since has to be told to Audrey again. A
+restore is a careful manual job. The purge records have to be reapplied before
+memories are served, so purged accounts stay gone, and a memory someone
+deleted after the snapshot comes back and has to be found and deleted again.
+If Qdrant and the backup folder are both lost, the memories are gone for good.
 
 Everything else in Qdrant is a projection. The knowledge-base and upload
-collections can be rebuilt from retained source files or sidecars,
-chat-history search from the archive's SQLite rows, and the archive's copy
-of native conversations from the application database. Conversations,
-accounts and preferences aren't in Qdrant at all.
+collections can be rebuilt from the source folders and from each upload's
+original or the text extracted from it, chat-history search from the
+archive's SQLite rows, and the archive's copy of native conversations from the
+application database. Conversations, accounts and preferences aren't in Qdrant
+at all.
 
-At Audrey's next restart, startup recovery preserves upload catalog rows,
-ownership, statuses and quota accounting. It reports missing search content
-instead of treating it as deletion
-([`reconcile_with_qdrant`](../../src/audrey/kb/uploads_db.py#L2810)). Files
-remain listed and their available originals and sidecars remain readable.
-Search needs restoration or reindexing; preserving the catalog doesn't
-automatically rebuild missing vectors, and reclaimed originals can't be
-re-created from nothing.
+At the next restart, the uploads database stays the authority. The startup
+check, [`reconcile_with_qdrant`](../../src/audrey/kb/uploads_db.py#L2810),
+reports files whose search content is missing instead of treating them as
+deleted. Every file keeps its owner, its status and its place in the owner's
+quota, still shows in the owner's list, and can still be opened. What the
+restart doesn't do is rebuild the missing vectors: until the files are indexed
+again, a search over them finds nothing.
 
 **5. Audrey's container has just been recreated by a deploy, and the next
 browser request fails. A minute later everything works. What's the likely
