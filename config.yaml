@@ -770,8 +770,8 @@ agentic:
     # the loop. kb_search/memory are local and never capped.
     max_web_searches: 3
     # Deep-panel workers run ReAct with a tighter budget than fast path:
-    # N workers × M rounds multiplies, and each local worker holds the GPU
-    # gate for the whole loop (see pipeline/deep_panel.py).
+    # N workers × M rounds multiplies. Each local model call holds the GPU
+    # gate; tool dispatch releases it (see pipeline/deep_panel.py).
     deep_worker:
       # ⚠ compress_keep_last COUNTS TOOL MESSAGES, NOT ROUNDS. One round can
       # dispatch several tools at once, so rounds are the wrong unit and

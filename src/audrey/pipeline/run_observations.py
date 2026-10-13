@@ -30,6 +30,11 @@ _SAFE_ERROR_CODE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 # intentionally an allow-list: a newly added tool cannot accidentally expose a
 # secret-bearing argument before its UI projection has been reviewed.
 _VISIBLE_ARGUMENTS: dict[str, frozenset[str]] = {
+    "calculate": frozenset({"operation", "from_unit", "to_unit"}),
+    "analyze_table": frozenset({"filename", "action", "sheet", "limit", "offset"}),
+    "inspect_pdf_page": frozenset({"filename", "page"}),
+    "inspect_video_frame": frozenset({"filename", "timestamp_s"}),
+    "open_chat_history": frozenset({"conversation_id", "offset"}),
     "web_search": frozenset({"query", "count"}),
     "web_fetch": frozenset({"url", "max_chars"}),
     "kb_search": frozenset({"query", "top_k", "file_ids"}),
@@ -83,6 +88,16 @@ class RunEventToolObserver:
         )
         if result.is_error:
             return
+        if result.name in {"inspect_pdf_page", "inspect_video_frame"}:
+            # Visual tools generate in a separate service request, outside
+            # this run's context observer. Preserve their real model identity.
+            try:
+                body = json.loads(result.content)
+            except (json.JSONDecodeError, ValueError):
+                body = {}
+            model = body.get("model") if isinstance(body, dict) else None
+            if isinstance(model, str) and model.strip() and len(model) <= 200:
+                self._emitter.model_used(model.strip())
         for source in source_rows:
             self._source_observed(source, fallback_type=result.name)
 

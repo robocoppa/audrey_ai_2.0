@@ -16,6 +16,11 @@ matching declaration in Audrey's central capability policy.
 - `POST /chat_history_search` — user-scoped semantic chat-history search
 - `POST /list_my_files` — list the authenticated user's Audrey uploads
 - `POST /get_file_text` — read one bounded page of a user's file artifact
+- `POST /calculate` — decimal arithmetic, unit conversion, linear/quadratic equations
+- `POST /analyze_table` — read-only owned CSV/XLSX rows, totals, groups and duplicates
+- `POST /inspect_pdf_page` — visual observations from one owned PDF page
+- `POST /open_chat_history` — paged owned saved conversations, respecting deletion cutoffs
+- `POST /inspect_video_frame` — visual observations from a retained video at a timestamp
 
 Internal archive routes are excluded from OpenAPI so models cannot call them:
 
@@ -54,6 +59,8 @@ limits are in [Box operations](../docs/reference/box-operations.md#10-memory-bac
 
 ## Adding new tools later
 
-Add the tagged route to `app.py`, declare its identity and dependencies in
-`src/audrey/tools/discovery.py`, extend the catalogue/discovery tests, then call
-`POST /v1/tools/rediscover` on the orchestrator. See `../docs/future-tools.md`.
+Add a tagged route or include its router in `app.py`, declare its identity
+and dependencies in `src/audrey/tools/discovery.py`, and extend focused checks.
+Rebuild the owning services and rediscover tools. The
+[main plan](../docs/campaign-4/README.md) owns remaining work;
+[Phase 19](../docs/campaign-4/phase-19-evidence-tools.md) defines the evidence tools.

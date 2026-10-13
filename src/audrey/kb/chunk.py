@@ -53,6 +53,11 @@ def load_text(path: Path) -> str | None:
     try:
         if suffix in TEXT_SUFFIXES:
             return path.read_text(encoding="utf-8", errors="replace")
+        if suffix == ".xlsx":
+            from audrey.kb.table_analysis import extract_table_text
+            return extract_table_text(
+                path, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
         if suffix == ".pdf":
             return _load_pdf(path)
         if suffix == ".docx":

@@ -91,6 +91,14 @@ def _declare(
 TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
     declaration.name: declaration
     for declaration in (
+        _declare("calculate", dependencies=()),
+        _declare("analyze_table", user_scope=ToolUserScope.ARGUMENT, dependencies=("audrey_files",)),
+        _declare("inspect_pdf_page", user_scope=ToolUserScope.ARGUMENT, dependencies=("audrey_files",)),
+        _declare("inspect_video_frame", user_scope=ToolUserScope.ARGUMENT, dependencies=("audrey_files",)),
+        _declare(
+            "open_chat_history", user_scope=ToolUserScope.ARGUMENT,
+            dependencies=("audrey_history", "chat_archive_source"), purge_gated=True,
+        ),
         _declare("web_search", dependencies=("web_search",)),
         _declare("web_fetch", dependencies=("web_fetch",)),
         _declare(

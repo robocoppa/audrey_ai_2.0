@@ -25,7 +25,8 @@ from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, ToolSpec
 
 ROOT = Path(__file__).resolve().parent.parent
 KNOWN_TOOLS = frozenset(TOOL_DECLARATIONS)
-DOCUMENT_TOOLS = {"list_my_files", "get_file_text", "kb_search", "kb_image_search"}
+DOCUMENT_TOOLS = {"list_my_files", "get_file_text", "kb_search", "kb_image_search",
+                  "calculate", "analyze_table", "inspect_pdf_page"}
 
 
 def _registry(*, auto_select=True, enabled=True):

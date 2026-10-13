@@ -37,6 +37,7 @@ import logging
 import re
 import time
 from collections.abc import AsyncIterator, Iterable
+from contextlib import nullcontext
 from typing import Any
 
 from audrey.config import Config
@@ -366,9 +367,9 @@ async def _run_one_worker(
     """Execute one worker. Always returns a WorkerDraft — never raises.
 
     If `tool_capable` is True and `tools` has entries, runs a ReAct loop;
-    otherwise a single `ollama.chat`. In both cases the GPU gate is held for
-    the full duration so local workers strictly serialize, even across
-    ReAct rounds (VRAM fits one local model at a time).
+    otherwise a single `ollama.chat`. ReAct acquires the GPU only for model
+    calls; dispatch can run a visual tool through the same gate without
+    deadlocking. A plain model call holds it for that generation.
     """
     start = time.monotonic()
     use_tools = bool(tool_capable and tools is not None and tools.by_name)
@@ -379,12 +380,11 @@ async def _run_one_worker(
         # serialises every other local worker behind it. Inside the `try`
         # because this function promises never to raise — see below.
         think = await think_for(ollama, cfg, role="deep_worker", model=model)
-        async with gate.acquire(model, location=location, user_id=user_id):
+        async with (nullcontext() if use_tools else
+                    gate.acquire(model, location=location, user_id=user_id)):
             if use_tools:
-                # Deep panel holds the gate for the *whole* worker (this
-                # `async with`), so pass `gate=None` to keep ReAct from
-                # double-acquiring. Fast path does the opposite — it passes
-                # a real gate so tool-dispatch windows release the GPU.
+                # A visual tool needs the GPU too. ReAct releases it between
+                # model calls, keeping tool dispatch outside the held gate.
                 react: ReactResult = await run_react(
                     ollama, health, tools,  # type: ignore[arg-type]
                     model=model,
@@ -398,7 +398,7 @@ async def _run_one_worker(
                     compress_keep_last=react_compress_keep_last,
                     max_web_searches=react_max_web_searches,
                     user_id=user_id,
-                    gate=None,
+                    gate=gate,
                     location=location,
                     cfg=cfg,
                     think=think,
@@ -2080,25 +2080,24 @@ async def run_research_pipeline_streaming(
             {"role": "user", "content": _factcheck_user_block(user_text, findings, critique)},
         ]
         try:
-            async with gate.acquire(factchecker, location=registry.location_of(factchecker), user_id=user_id):
-                fc: ReactResult = await run_react(
-                    ollama, health, tools,  # type: ignore[arg-type]
-                    model=factchecker,
-                    messages=fc_msgs,
-                    options=options,
-                    timeout_s=timeout_s,
-                    max_rounds=fc_budget["max_rounds"],
-                    compress_after_round=fc_budget["compress_after"],
-                    max_tool_result_chars=fc_budget["max_tool_chars"],
-                    tool_dispatch_timeout_s=float(fc_budget["dispatch_timeout_s"]),
-                    compress_keep_last=fc_budget["compress_keep_last"],
-                    max_web_searches=fc_budget["max_web_searches"],
-                    user_id=user_id,
-                    gate=None,  # gate held for the whole stage (as deep panel does)
-                    location=registry.location_of(factchecker),
-                    cfg=cfg,
-                    tool_observer=tool_observer,
-                )
+            fc: ReactResult = await run_react(
+                ollama, health, tools,  # type: ignore[arg-type]
+                model=factchecker,
+                messages=fc_msgs,
+                options=options,
+                timeout_s=timeout_s,
+                max_rounds=fc_budget["max_rounds"],
+                compress_after_round=fc_budget["compress_after"],
+                max_tool_result_chars=fc_budget["max_tool_chars"],
+                tool_dispatch_timeout_s=float(fc_budget["dispatch_timeout_s"]),
+                compress_keep_last=fc_budget["compress_keep_last"],
+                max_web_searches=fc_budget["max_web_searches"],
+                user_id=user_id,
+                gate=gate,  # release the GPU during evidence-tool dispatch
+                location=registry.location_of(factchecker),
+                cfg=cfg,
+                tool_observer=tool_observer,
+            )
             corrections = (fc.content or "").strip()
             # Structure the fact-check against the claim ledger.
             # When a ledger exists, convert the prose notes into per-claim

@@ -86,9 +86,9 @@ folder (`refused.json`, the scratch hubs) and are read there.
 |---|---|---|---|
 | ai-sec | `scripts/eval/eval-model.sh`, `scripts/eval/eval-arms.sh` | laptop, under `nohup` | yes |
 | ai-sec | `tests/smoke/smoke-run.sh` | laptop, detached | yes |
-| ai-sec | `scripts/b6_drill.py`, `scripts/b8_drill.py`, and each long drill after them | laptop, ten to twenty-five minutes | yes, by `scripts/notify.py` |
-| ai-sec | `scripts/b9_drill.py`, which signs and sends B9's updates, and the `check` of `scripts/b10_drill.py` and `scripts/b10_retention.py`, which read B10's restore and its collectors' purge | laptop, under a minute | no: each prints its result |
-| ai-sec | `scripts/box/b8_drill.sh`, `b9_drill.sh`, `b10_drill.sh` and `b10_retention.sh`, shipped to `/boot/config/aisec/` | Tower, as root, three to twenty minutes | yes, through fleet-watchdog's `.env` |
+| ai-sec | `scripts/b6_drill.py`, `scripts/b8_drill.py`, and each long drill after them | laptop, ten to forty-five minutes | yes, by `scripts/notify.py` |
+| ai-sec | `scripts/b9_drill.py`, which signs and sends B9's updates, and the `check` of `scripts/b10_drill.py`, `scripts/b10_retention.py` and `scripts/b10_rotation.py`, which judge B10's runs again | laptop, a minute or two | no: each prints its result |
+| ai-sec | `scripts/box/b8_drill.sh`, `b9_drill.sh`, `b10_drill.sh`, `b10_retention.sh` and `b10_rotation.sh prepare`, shipped to `/boot/config/aisec/` | Tower, as root, three to twenty minutes | yes, through fleet-watchdog's `.env`; `b10_rotation.sh`'s other modes are steps the laptop runs over ssh, and do not |
 | Audrey | `evals/eval-onbox.sh` | Tower, a detached container | yes |
 | Audrey | `scripts/probes/probe-onbox.sh` | Tower | detached, yes; with `FOREGROUND=1`, only with `NOTIFY=1` |
 | Audrey | `evals/eval_research.py`, `evals/run_all_evals.sh` | laptop, in the background | not yet: the results are in `evals/results/` |

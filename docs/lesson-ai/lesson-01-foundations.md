@@ -1,14 +1,13 @@
 # Lesson 1 — Foundations I: Python language features
 
-**Estimated time:** 60-90 minutes if you read carefully and try the
-examples. You can split it across sessions — sections are
-self-contained.
+**Estimated time:** 60-90 minutes if you read carefully. You can split
+it across sessions — sections are self-contained.
 
 **Goal:** before we touch the Audrey codebase proper, you should know
 what each major *language feature* the project relies on actually is,
 what problem it solves for Audrey specifically, and recognize its
-shape when you see it. This is **not** a Python tutorial — you already
-know the language basics. It's a tour of the modern-Python features
+shape when you see it. This is **not** a Python tutorial — it is written for those that already
+know the language basics and is a tour of the modern-Python features
 this project leans on heavily.
 
 This is split out from a former combined foundations lesson into two
@@ -141,46 +140,11 @@ Two new keywords:
   blocking function from an `async def` blocks the whole event loop —
   every other task stalls until it returns.
 
-### Tiny working example
+### A small example
 
-The code below uses async features, so it has to live in a `.py` file
-and be run with `python3` against that file. The top-level
-`asyncio.run(main())` line is what kicks the whole thing off.
+Three slow tasks, run together:
 
-**Step 1.** Open your terminal.
-
-- **Linux:** any terminal app, running its default shell (usually
-  bash). The shell brand doesn't matter for these examples.
-- **macOS:** open the **Terminal** app (Applications → Utilities →
-  Terminal). Default shell is zsh; that's fine.
-- **Windows:** the Linux/macOS commands below use Unix shell syntax
-  (heredocs, `/tmp/...` paths, `$PATH`). The clean way to use them on
-  Windows is **WSL2** (Windows Subsystem for Linux). If you don't
-  already have it: Open PowerShell *as administrator* and run
-  `wsl --install`, reboot when prompted, then launch the **Ubuntu**
-  app from your Start menu. From inside Ubuntu/WSL you have a real
-  Linux environment with bash — every command in this lesson works
-  unchanged. (Windows-native PowerShell or `cmd` would need different
-  commands for file creation; not worth fighting.)
-
-The rest of this lesson assumes you're at a bash/zsh prompt with
-`python3` available. Verify:
-
-```
-$ python3 --version
-Python 3.12.3
-```
-
-If that command says "command not found" or shows a version below
-3.7, install Python 3 first (Audrey targets 3.12). On WSL Ubuntu:
-`sudo apt update && sudo apt install python3 python3-pip`.
-
-**Step 2.** Create a file at `/tmp/async_demo.py` with the example
-code. The easiest copy-pasteable way is a heredoc — paste this entire
-block into your terminal and press Enter:
-
-```bash
-cat > /tmp/async_demo.py <<'EOF'
+```python
 import asyncio
 
 async def slow_task(name: str, seconds: float) -> str:
@@ -199,23 +163,14 @@ async def main():
     print(results)
 
 asyncio.run(main())
-EOF
 ```
 
-(`cat > file <<'EOF' … EOF` is a shell shortcut for "take everything
-between the EOFs as input and write it to `file`." Using the file
-manager + a text editor would work the same way; the heredoc is just
-faster.)
+The last line, `asyncio.run(main())`, starts the event loop and runs
+`main` on it until it finishes. Inside `main`, `asyncio.gather` starts
+all three tasks and waits until every one of them has returned. The
+program prints:
 
-**Step 3.** Run the file:
-
-```
-$ python3 /tmp/async_demo.py
-```
-
-You should see:
-
-```
+```text
 A: starting
 B: starting
 C: starting
@@ -224,10 +179,6 @@ B: done
 C: done
 ['A', 'B', 'C']
 ```
-
-If you see an error mentioning `SyntaxError: 'await' outside async
-function`, you're running an old Python (pre-3.7). Check
-`python3 --version` again.
 
 All three tasks started immediately. Because each
 `await asyncio.sleep(...)` yields control back to the event loop, the
@@ -300,24 +251,20 @@ be released, even when things go wrong:
   custom-tools dispatch, and Qdrant query goes through one. If the
   underlying connection isn't returned to the pool after
   an exception, the pool eventually exhausts and new requests stall.
-- **Fair-gate slots.** Audrey caps how many concurrent generations a
-  single user can have running at once — without a cap, one user
-  could fire 50 requests and starve everyone else off the GPU. The
-  cap is enforced by handing out a fixed number of "slots" per user;
-  a request has to claim a slot before it can start generating, and
-  give the slot back when it finishes. The bookkeeping lives in
-  [`pipeline/fair_gate.py`](../../src/audrey/pipeline/fair_gate.py).
-
-  The thing that makes this fragile: A request might fail
-  *partway through* — the model call could time out, the network
-  could drop, the user could disconnect, an unexpected exception
-  could fire. If the failure path skips the "give the slot back"
-  step, that slot is leaked: The bookkeeping still thinks it's in
-  use, even though nothing is actually using it. Leak enough slots
-  for one user and they hit their cap permanently — every subsequent
-  request from them queues forever waiting for a slot that will
-  never come back. The user-visible symptom is "Audrey hangs forever
-  for me," with no error message, hours after the leak happened.
+- **Slots.** Audrey hands out two kinds. Each person may have only a
+  few requests running at once
+  ([`routes/inflight.py`](../../src/audrey/routes/inflight.py)), and
+  local generations take turns on the GPU
+  ([`pipeline/fair_gate.py`](../../src/audrey/pipeline/fair_gate.py)).
+  A request claims a slot before it starts and has to give it back
+  when it ends, however it ends: The model call can time out, the
+  network can drop, the person can close the tab, or an exception can
+  fire. A failure path that skipped the give-back would *leak* the
+  slot. The bookkeeping would count it as in use forever, and once all
+  of a person's slots had leaked, each new request of theirs would
+  wait for a slot that never comes back, with no error to explain it.
+  Audrey takes every slot with `async with`, so the give-back runs on
+  every exit.
 - **Phase tickers.** Streaming responses spin up a background task
   that emits "thinking…" progress dots; that task has to be cancelled
   when generation finishes, even if generation finished by raising.

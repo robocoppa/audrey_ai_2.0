@@ -9,6 +9,11 @@ they are not ongoing task lists.
 
 ## Current work
 
+- **19 — deeper evidence tools:** built October 13; laptop checks pass, browser acceptance pending.
+  [Phase 19](phase-19-evidence-tools.md) defines calculator/conversions, CSV/XLSX
+  analysis, PDF-page inspection, previous-conversation reading and video-frame
+  inspection. Existing chat disclosures show their activity.
+
 - **12 — compact/mobile navigation:** unified left drawer built; browser
   acceptance pending. Header: Menu, builtryte logo, New chat. Drawer: Username -
   My chats, search, Active/Archived, and history. The uniform bottom group holds
@@ -80,8 +85,13 @@ they are not ongoing task lists.
 | 16 | [Document tooling boundary](phase-16-native-document-tools.md) | Retired; Hermes uses its existing stack |
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
+| 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Built; browser acceptance pending |
 
 ## Remaining work
+
+Accept Phase 19's five tools with normal browser questions and real owned
+evidence. Rebuild `audrey` and `custom-tools`; no UI/media-worker rebuild is
+needed for this feature. Prior UI acceptance stays queued below.
 
 1. Confirm Tower deployment and close pending targeted acceptance for the
    current course-reviewed work. The local, gitignored [AUDIT](../lesson-ai/AUDIT.md)

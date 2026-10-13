@@ -211,3 +211,16 @@ def test_url_less_file_evidence_is_bounded_deduplicated_and_body_free():
     assert sources[0].url == ""
     assert sources[0].source_type == "kb_search"
     assert "private transcript body" not in json.dumps(dump_run_event(sources[0]))
+
+
+def test_visual_tools_report_actual_model_without_publishing_description():
+    observer, events = _observer()
+    call = observer.started({
+        "function": {"name": "inspect_pdf_page", "arguments": {"filename": "report.pdf", "page": 2}},
+    })
+    observer.finished(call, _result("inspect_pdf_page", json.dumps({
+        "model": "vision-model", "description": "private chart observation",
+    })))
+    models = [event for event in events if event.type == "model.used"]
+    assert len(models) == 1 and models[0].model == "vision-model"
+    assert "private chart observation" not in json.dumps([dump_run_event(event) for event in events])

@@ -1,8 +1,7 @@
 # Lesson 2 — Foundations II: the orchestration stack
 
-**Estimated time:** 45-60 minutes if you read carefully and try the
-examples. You can split it across sessions — sections are
-self-contained.
+**Estimated time:** 45-60 minutes if you read carefully. You can split
+it across sessions — sections are self-contained.
 
 **Goal:** know what the three libraries that *shape* Audrey's HTTP
 surface and pipeline structure each do, what problem they solve, and
@@ -38,8 +37,8 @@ async def health() -> dict:
     return {"status": "ok"}
 ```
 
-That's it. Run that file with `uvicorn` (an ASGI server) and `GET
-/health` returns `{"status": "ok"}`.
+That's it. Served by `uvicorn` (an ASGI server), the app answers
+`GET /health` with `{"status": "ok"}`.
 
 ### Why Audrey needs FastAPI
 

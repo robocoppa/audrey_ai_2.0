@@ -1,6 +1,6 @@
 # Introduction — what is Audrey, and what is this course?
 
-**Audrey** is a self-hosted AI application that runs on a single home server.
+**Audrey** is a self-hosted AI application that runs on a single server.
 People reach it in two ways. In a **browser**, they sign in, chat, attach files,
 and keep related conversations together in Projects. **Bots and scripts** call
 its OpenAI-compatible API with a personal access token, the same way they would
@@ -43,7 +43,7 @@ more than one person, and trustworthy with their data:
   sits alongside, kept current by a watcher.
 - **Side effects are durable.** Work that must happen after a turn, such as
   archiving it for later search or finishing a deletion, is written down first
-  and retried until it's done, even across a restart.
+  and retried until it's done, even across a system restart.
 - **Operations are visible.** One readiness report says what's up and what's
   degraded, and Prometheus and Grafana record latency, throughput, fairness,
   model usage and tool calls.
@@ -54,7 +54,7 @@ considered done until it had been deployed and checked against the live server.
 The build history and design notes are indexed in the [docs README](../README.md).
 They aren't a tutorial path, but they record what was built when, and why each
 decision went the way it did. Most of the code was written with an AI
-pair-programmer (Claude Code) on a laptop, while every git operation and deploy
+pair-programmer (Claude Code and Codex) on a laptop, while every git operation and deploy
 step was run by hand on the server. That workflow shaped the codebase's tone:
 comments, names and docstrings are written for the *next* reader, because the
 next reader was usually an assistant opening the file with no memory of why it
@@ -65,12 +65,10 @@ runs on the laptop without any live service.
 ## How the course is organized
 
 The course walks the codebase from the language features and libraries it's
-built on, through the request pipeline, to the application around it. It's
-written for whoever maintains Audrey, so they can fix and extend it without
-help, and it's published openly because the patterns may help anyone building a
+built on, through the request pipeline, to the application around it. It's published openly because the patterns may help anyone building a
 multi-model application on a home server.
 
-It comes in five parts and a closing lesson:
+The lessons are grouped in five parts:
 
 1. **Foundations and the system map.** The Python features and libraries Audrey
    relies on, then the platform as a whole: the containers, the life of a
@@ -87,12 +85,5 @@ It comes in five parts and a closing lesson:
    files.
 5. **Shaping a turn, and the second API.** Skills, Projects, and the Responses
    API.
-
-The closing lesson is about operating Audrey: degraded states, readiness, and
-what the models are costing.
-
-Lessons are written and published one at a time; the
-[course README](README.md) lists the ones available so far, and each lesson
-ends by pointing at the next.
 
 Start with [Lesson 1 — Foundations I: Python language features](lesson-01-foundations.md).

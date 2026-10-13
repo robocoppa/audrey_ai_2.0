@@ -367,8 +367,8 @@ def test_division_by_zero():
         1 / 0
 ```
 
-Run with `pytest tests/`. Output tells you what passed, what failed,
-and shows the offending line for failures.
+Given `tests/`, pytest finds and runs both functions, then reports what
+passed and what failed, showing the offending line for each failure.
 
 ### Why Audrey needs pytest
 
@@ -464,11 +464,8 @@ means any `async def test_*` is auto-detected — you don't need
 
 ### Where you'll see it in Audrey
 
-- [`tests/`](../../tests/) — the full hermetic test suite (no live
-  Ollama, Qdrant or custom-tools required). Run with
-  `.venv/bin/pytest tests/ -q`.
-- The test suite itself is what later lessons use to demonstrate
-  testing patterns.
+- [`tests/`](../../tests/) — the full hermetic test suite: no live
+  Ollama, Qdrant or custom-tools required.
 
 
 

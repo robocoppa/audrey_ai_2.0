@@ -14,6 +14,7 @@ CASES = ROOT / "evals" / "cases" / "eval_prompts_grounded_documents.json"
 FIXTURES = ROOT / "evals" / "fixtures" / "grounded-document-analysis"
 KNOWN_TOOLS = frozenset(TOOL_DECLARATIONS)
 DOCUMENT_TOOLS = frozenset({
+    "calculate", "analyze_table", "inspect_pdf_page",
     "list_my_files",
     "get_file_text",
     "kb_search",

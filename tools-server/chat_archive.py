@@ -577,6 +577,22 @@ class ChatArchiveStore:
             await cursor.close()
         return str(row[0]) if row and row[0] else ""
 
+    async def conversation_read_cutoff(self, *, user: str, conversation_id: str) -> str:
+        """Durable visibility cutoff for opening a saved conversation."""
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore source is unavailable")
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                "SELECT MAX(cutoff_at) FROM ("
+                "SELECT cutoff_at FROM archive_user_purges WHERE user = ? "
+                "UNION ALL SELECT cutoff_at FROM archive_conversation_deletions "
+                "WHERE user = ? AND conversation_id = ?)",
+                (user, user, conversation_id),
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+        return str(row[0]) if row and row[0] else ""
+
     async def archive_turn(
         self,
         *,

@@ -44,6 +44,7 @@ ALLOWED_TEXT_MIMES: frozenset[str] = frozenset({
     "text/markdown",
     "text/x-markdown",
     "text/csv",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "text/html",
     "text/x-rst",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
@@ -85,6 +86,7 @@ SUFFIX_MIMES: dict[str, str] = {
     ".txt": "text/plain", ".log": "text/plain",
     ".md": "text/markdown", ".rst": "text/x-rst",
     ".csv": "text/csv",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".html": "text/html", ".htm": "text/html",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
@@ -142,7 +144,17 @@ def extract_uploaded_text(path: Path) -> str:
 def sniff_mime(path: Path) -> str:
     """Return the sniffed mime type. Falls back to extension-derived guess if libmagic chokes on the file."""
     try:
-        return magic.from_file(str(path), mime=True) or ""
+        mime = magic.from_file(str(path), mime=True) or ""
+        if path.suffix.lower() == ".xlsx" and mime in {"application/zip", "application/octet-stream"}:
+            # Only an actual spreadsheet package receives the Excel MIME.
+            import zipfile
+            try:
+                with zipfile.ZipFile(path) as archive:
+                    if "[Content_Types].xml" in archive.namelist() and "xl/workbook.xml" in archive.namelist():
+                        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            except (OSError, zipfile.BadZipFile):
+                pass
+        return mime
     except Exception as e:  # noqa: BLE001
         log.warning("kb.extract: libmagic sniff failed for %s: %s — falling back to suffix", path, e)
         return _guess_from_suffix(path)

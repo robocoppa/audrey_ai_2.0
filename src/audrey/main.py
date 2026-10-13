@@ -43,12 +43,14 @@ from audrey.readiness import ReadinessCollector
 from audrey.routes.admin import router as admin_router
 from audrey.routes.app import router as application_router
 from audrey.routes.app.runs import NativeRunManager
+from audrey.routes.evidence_tools import router as evidence_tools_router
 from audrey.routes.files import router as files_router
 from audrey.routes.inflight import UserInflightRegistry
 from audrey.routes.kb import router as kb_router
 from audrey.routes.media import router as media_router
 from audrey.routes.openai import VIRTUAL_MODELS
 from audrey.routes.openai import router as openai_router
+from audrey.routes.tool_history import router as tool_history_router
 from audrey.routes.user_data import router as user_data_router
 from audrey.skills import SkillRegistry
 from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, discover_all
@@ -497,6 +499,8 @@ app = FastAPI(
 app.include_router(openai_router)
 app.include_router(application_router)
 app.include_router(kb_router)
+app.include_router(evidence_tools_router)
+app.include_router(tool_history_router)
 app.include_router(files_router)
 app.include_router(media_router)
 app.include_router(user_data_router)

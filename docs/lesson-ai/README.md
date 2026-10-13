@@ -54,11 +54,12 @@ WebUI, as the client.
 
 ## Prerequisites
 
-- The Audrey repo (you're in it).
-- Python 3.12 + `uv sync --extra dev` (so you can run `pytest`).
-- Comfort with reading code and running shell commands. Comfort with
-  modern Python (async, type hints, decorators) is *not* assumed —
-  the foundations lessons cover those.
+- The Audrey repo (you're in it), so you can open the files each lesson
+  cites. Nothing needs installing or running: the lessons explain the
+  code, and never ask you to run it.
+- Comfort with reading code. Comfort with modern Python (async, type
+  hints, decorators) is *not* assumed — the foundations lessons cover
+  those.
 
 ## Out of scope
 

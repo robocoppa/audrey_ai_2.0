@@ -698,6 +698,9 @@ Hard rules for the writer:
 - No numbered forward references; say "the next lesson".
 - Capitalize after a colon that introduces a clause.
 - No test walkthroughs: explain production code.
+- No labs (2026-10-13): never ask the reader to open a terminal, install
+  anything, create files or run code. Show code and what it prints, and explain
+  why.
 - Teach the principle, not the war story. The phase docs are full of
   incidents; the lesson explains why the code is shaped the way it is.
 - Define every new concept on first use (see the learner profile in `AGENTS.md`).

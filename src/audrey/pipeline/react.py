@@ -404,13 +404,13 @@ def _observed_evidence(results: list[ToolResult]) -> list[dict[str, str]]:
     observed = list(_retrieved_sources(results))
     seen_files: set[str] = set()
     for result in results:
-        if result.is_error or result.name not in {*_FILE_SEARCH_TOOLS, _FILE_READ_TOOL}:
+        if result.is_error or result.name not in {*_FILE_SEARCH_TOOLS, _FILE_READ_TOOL, "analyze_table", "inspect_pdf_page", "inspect_video_frame"}:
             continue
         try:
             body = json.loads(result.content)
         except (json.JSONDecodeError, TypeError, ValueError):
             continue
-        if result.name == _FILE_READ_TOOL:
+        if result.name in {_FILE_READ_TOOL, "analyze_table", "inspect_pdf_page", "inspect_video_frame"}:
             rows = [body] if isinstance(body, dict) else []
         else:
             values = body.get("results") if isinstance(body, dict) else None
@@ -422,11 +422,21 @@ def _observed_evidence(results: list[ToolResult]) -> list[dict[str, str]]:
             artifact = str(row.get("artifact") or "").strip().lower()[:100]
             if not filename:
                 continue
-            identity = f"file:{filename.casefold()}:{artifact}"
+            position = (
+                f":page:{row['page']}" if row.get("page") is not None
+                else f":time:{row['timestamp_s']}" if row.get("timestamp_s") is not None
+                else f":sheet:{row['sheet']}" if row.get("sheet") else ""
+            )
+            identity = f"file:{row.get('file_id') or filename.casefold()}:{artifact}{position}"
             if identity in seen_files:
                 continue
             seen_files.add(identity)
-            label = artifact.replace("_", " ").capitalize()
+            label = (
+                f"Page {row['page']}" if row.get("page") is not None
+                else f"Frame at {row['timestamp_s']}s" if row.get("timestamp_s") is not None
+                else f"Sheet {row['sheet']}" if row.get("sheet")
+                else artifact.replace("_", " ").capitalize()
+            )
             observed.append({
                 "title": f"{filename} · {label}" if label else filename,
                 "url": "",

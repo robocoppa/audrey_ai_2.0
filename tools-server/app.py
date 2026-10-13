@@ -51,9 +51,11 @@ from brave import (
     BraveUpstreamError,
     SearchResult,
 )
+from calculator import router as calculator_router
 from capabilities import CapabilityRegistry, CapabilitySupervisor
 from chat_archive import ChatArchiveMaintainer, ChatArchiveStore, ChatExportMessage
 from db import EmbedError, MemoryEntry, MemoryStore
+from evidence_tools import router as evidence_tools_router
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.openapi.utils import get_openapi
 from fetch import FetchError, fetch_readable
@@ -198,6 +200,8 @@ def _dynamic_openapi() -> dict[str, Any]:
     return schema
 
 
+app.include_router(calculator_router)
+app.include_router(evidence_tools_router)
 app.openapi = _dynamic_openapi
 
 

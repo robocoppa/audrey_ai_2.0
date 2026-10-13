@@ -28,7 +28,7 @@ from typing import Any
 import httpx
 
 from audrey.metrics import tool_call_seconds, tool_calls_total
-from audrey.tools.discovery import ToolRegistry, ToolUserScope
+from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, ToolUserScope
 from audrey.user_data_visibility import remote_personal_reads_blocked
 
 log = logging.getLogger(__name__)
@@ -249,7 +249,11 @@ async def dispatch_one(
     url = f"{spec.server_url}{spec.path}"
     start = time.monotonic()
     try:
-        r = await client.post(url, json=args, timeout=timeout_s)
+        dispatch_timeout = (
+            150.0 if name in {"inspect_pdf_page", "inspect_video_frame"}
+            and name in TOOL_DECLARATIONS else timeout_s
+        )
+        r = await client.post(url, json=args, timeout=dispatch_timeout)
     except httpx.TimeoutException as e:
         elapsed = round(time.monotonic() - start, 2)
         log.warning("dispatch: %s timeout in %.2fs: %s", name, elapsed, e)

@@ -30,6 +30,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxml2 \
         libxslt1.1 \
         libmagic1 \
+        poppler-utils \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # uv for fast, reproducible installs. Pinned to digest (Phase 31); the tag

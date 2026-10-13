@@ -4,6 +4,9 @@ name: Grounded document analysis
 description: Read, compare, and explain the user's uploaded documents with explicit evidence coverage.
 version: 1
 allowed_tools:
+  - calculate
+  - analyze_table
+  - inspect_pdf_page
   - list_my_files
   - get_file_text
   - kb_search
@@ -25,3 +28,5 @@ For comparisons, present each file's position or facts separately before synthes
 Check the returned coverage information before characterizing a whole document. Continue reading when the task requires complete coverage and the remaining content is reachable. If the available rounds or context do not permit a complete read, state which file and portion were covered and which portion remains unread.
 
 Use image evidence only when the user's question depends on visual material. If text and image evidence conflict, report the conflict instead of silently choosing one.
+
+Use analyze_table for CSV or Excel rows, filters, and totals. Inspect a PDF page when diagrams, charts, or layout matter. Use calculate to verify arithmetic. Report returned sheet, row, and page coverage.

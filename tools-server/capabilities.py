@@ -28,6 +28,7 @@ _RUNTIME_DEFAULTS: dict[str, bool] = {
     "web_fetch": True,
     "audrey_kb": True,
     "audrey_files": True,
+    "audrey_history": True,
     "image_embedding": True,
     # Stateful capabilities become available only after their own startup
     # checks succeed.
