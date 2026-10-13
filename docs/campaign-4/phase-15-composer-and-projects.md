@@ -1,7 +1,7 @@
 # Campaign 4 Phase 15 — composer and Projects
 
 **Status:** Composer and Projects accepted, including direct project upload.
-Menus below the composer are built; browser acceptance is pending.
+Shared overlay menus are built; browser acceptance is pending.
 
 ## Composer
 
@@ -9,11 +9,17 @@ The centered dock has a 56 rem desktop maximum: message field plus Send/Stop abo
 
 Add files explains uploading a new file or choosing Ready files from My Files. Tools & skills uses server names/descriptions and explains Automatic; it selects a skill that may narrow tools rather than pretending to be an individual-tool permission editor.
 
-File and skill pickers open below their controls, are mutually exclusive, and
-close on outside click/Escape with focus restoration. Their contents scroll
-within a bounded panel. While a picker is open, the empty-chat portrait collapses.
-Mobile history uses the Phase 12 drawer and remains accessible; conversation
-actions stay available. Closing a picker restores the portrait.
+Model, Project, Files, and Tools & skills open in the same dark panel above
+the message field. The panel floats over the conversation; opening it keeps
+the composer and empty-chat portrait in place. Its width and scrollable height
+fit the visible viewport, including narrow screens and keyboard changes.
+Only one picker opens at a time. Outside click, keyboard focus leaving the
+picker, Escape, and the close button dismiss it. Escape, Close, and choosing a
+model, project, or skill restore focus without scrolling the chat. Files stays
+open for multiple selections. Model choices retain descriptions and the
+role-filtered Other models list. Project keeps No project and owned projects.
+Arrow keys navigate model, project, and skill choices. Open panels suspend
+pull-to-refresh. Mobile history uses the Phase 12 drawer.
 
 The empty draft stays centered; the composer pins to the bottom after the first
 message. Existing attachment limits/progress, model availability, Stop, and retry

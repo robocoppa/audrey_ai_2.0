@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 const PULL_THRESHOLD = 120;
 const PRIMARY_SCROLL_AREA = ".conversation-thread-slot:not([hidden]) .thread-viewport, .chat-column > .project-home";
 const INTERACTIVE_AREA = 'button, a, input, select, textarea, [contenteditable]:not([contenteditable="false"]), .composer, [role="dialog"], [role="menu"], .saved-run-details, .run-activity';
-const OPEN_OVERLAY = '[aria-modal="true"], [role="dialog"]:not([aria-hidden="true"]):not([hidden]), .conversation-drawer-backdrop';
+const OPEN_OVERLAY = '[aria-modal="true"], [role="dialog"]:not([aria-hidden="true"]):not([hidden]), .conversation-drawer-backdrop, .composer-picker';
 const BUSY_OR_OPEN_PICKER = ".attachment-status, .attachment-picker, .skill-picker, .direct-model-menu, .saved-sources[open], .saved-models[open], .saved-tools[open]";
 
 function reloadPage() {

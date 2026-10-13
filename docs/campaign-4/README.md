@@ -21,8 +21,8 @@ they are not ongoing task lists.
   Async history actions preserve a chat selected while the request is pending.
   Latest polish: Cloudflare bootstrap shows **Processing Cloudflare Authentication**
   / **Please wait...**; Projects uses a shared layers icon; the desktop divider
-  follows the sidebar edge with balanced logo spacing and **ASK** above **AUDREY**,
-  using larger initial A's, spaced capitals, and a softer slate color.
+  follows the sidebar edge with balanced logo spacing and **AUDREY** in spaced
+  capitals, with a larger initial A and a softer slate color.
   These UI changes rebuild `audrey-ui`; laptop verification passed, latest Tower
   deployment and browser acceptance are unconfirmed.
 - **Course review:** the platform and system-map reviews are recorded in
@@ -36,9 +36,10 @@ they are not ongoing task lists.
   matching Tower's enabled setting. Deterministic rules use ready owned attachment
   and Project metadata; explicit choices win and unclear targets abstain.
   Remaining browser acceptance is pending.
-- **Composer/provenance followup:** built, awaiting browser acceptance. Files and
-  Tools & skills open below the composer; Files and Tools match the Model/Project
-  control styling on mobile and desktop. Sources, Models, and Tool calls stay
+- **Composer/provenance followup:** built, awaiting browser acceptance. All four
+  composer pickers use matching dark overlays above the message field without
+  shifting the composer or portrait, on desktop and mobile. Sources, Models,
+  and Tool calls stay
   beside each completed answer immediately, even with progress display off.
   Kimi K3 is included in the tool capability gate used by native panel workers.
 - **18A — admin controls and project presentation:** accepted October 7.
@@ -71,7 +72,7 @@ they are not ongoing task lists.
 | 12 | [Navigation](phase-12-sidebar-navigation.md) | Desktop/mobile followup built; browser acceptance pending |
 | 13 | [Responses extensions](phase-13-responses-multimodal-input.md) | Complete |
 | 14 | [Bots and tokens](phase-14-bot-accounts-and-token-lifetimes.md) | Complete |
-| 15 | [Composer and Projects](phase-15-composer-and-projects.md) | Complete; menus below composer await acceptance |
+| 15 | [Composer and Projects](phase-15-composer-and-projects.md) | Complete; shared overlay menus await acceptance |
 | 16 | [Document tooling boundary](phase-16-native-document-tools.md) | Retired; Hermes uses its existing stack |
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
@@ -82,12 +83,12 @@ they are not ongoing task lists.
    current course-reviewed work. The local, gitignored [AUDIT](../lesson-ai/AUDIT.md)
    holds its review record; the [operations guide](../reference/box-operations.md#10-memory-backups-and-isolated-restore-verification)
    holds the backup check. Reuse passed checks instead of restarting the suites.
-2. Accept the latest branding and compact/mobile layout: **Ask** above **Audrey**,
+2. Accept the latest branding and compact/mobile layout: stylistic **AUDREY** label,
    balanced desktop divider, Cloudflare loading message, distinct Projects icon,
    left menu/footer, chat swipes, New chat, Project beside Model, empty-screen fit,
    profile keyboard behavior, normal scrolling, and deliberate pull-to-refresh.
    No upload or scripted live eval is required for these UI checks.
-3. Accept the below-composer menus and immediate per-answer tool summaries in
+3. Accept the shared composer overlays and immediate per-answer tool summaries in
    the browser, reusing the existing Ready video. Recorded video reads are passed;
    the remaining defect was their display, not missing tool execution.
 4. Close remaining 3D.6 browser acceptance. Activation is already approved and

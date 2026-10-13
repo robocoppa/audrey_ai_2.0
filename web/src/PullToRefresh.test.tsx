@@ -222,6 +222,23 @@ describe("deliberate mobile pull to refresh", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
+  it("suspends refresh while a composer picker is portaled outside the chat", () => {
+    const { content, refresh } = workspace();
+    const panel = document.createElement("section");
+    panel.className = "composer-picker attachment-picker";
+    panel.setAttribute("role", "region");
+    document.body.append(panel);
+    try {
+      gesture(content, 180).release();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(refresh).not.toHaveBeenCalled();
+    } finally {
+      panel.remove();
+    }
+    gesture(content, 180).release();
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
   it("supports the project page only when it starts at the top", () => {
     const refresh = vi.fn();
     render(

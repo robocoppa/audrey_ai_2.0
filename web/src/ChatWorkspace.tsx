@@ -18,10 +18,12 @@ import {
   createContext,
   isValidElement,
   type ReactNode,
+  type RefObject,
   type SetStateAction,
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1497,23 +1499,13 @@ function ConversationThread({
     </header>
   );
   const projectPicker = (
-    <label className="composer-rail-control composer-project-picker">
-      <span className="composer-control-label">Project</span>
-      <select
-        value={conversation.project_id ?? ""}
-        onChange={(event) => void moveToProject(event.target.value || null)}
-        disabled={runActive || mutation !== null}
-        aria-label="Move conversation to project"
-      >
-        <option value="">No project</option>
-        {conversation.project_id && !conversationProject ? (
-          <option value={conversation.project_id}>Current project</option>
-        ) : null}
-        {projects.map((project) => (
-          <option key={project.id} value={project.id}>{project.name}</option>
-        ))}
-      </select>
-    </label>
+    <ComposerProjectPicker
+      projects={projects}
+      projectId={conversation.project_id ?? null}
+      projectName={conversationProject?.name}
+      disabled={runActive || mutation !== null}
+      onChange={moveToProject}
+    />
   );
 
   return (
@@ -1645,8 +1637,9 @@ function AudreyThread({
     attachments: AudreyFile[];
   } | null>(null);
   const dispatchedRetryRef = useRef<object | null>(null);
-  const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
-  const [skillPickerOpen, setSkillPickerOpen] = useState(false);
+  const [activePicker, setActivePicker] = useState<ComposerPickerName | null>(null);
+  const attachmentPickerOpen = activePicker === "files";
+  const skillPickerOpen = activePicker === "skills";
   const [attachmentFiles, setAttachmentFiles] = useState<AudreyFile[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentError, setAttachmentError] = useState("");
@@ -1660,11 +1653,8 @@ function AudreyThread({
   const [pendingAttachment, setPendingAttachment] = useState<AudreyFile | null>(null);
   const [uploadIssue, setUploadIssue] = useState("");
   const uploadInputRef = useRef<HTMLInputElement>(null);
-  const attachmentPickerRef = useRef<HTMLElement>(null);
   const attachButtonRef = useRef<HTMLButtonElement>(null);
-  const skillPickerRef = useRef<HTMLElement>(null);
   const skillButtonRef = useRef<HTMLButtonElement>(null);
-  const firstSkillOptionRef = useRef<HTMLButtonElement>(null);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const userRequestedCancelRef = useRef(false);
@@ -1721,37 +1711,6 @@ function AudreyThread({
     for (const [id, answer] of activityLedger.answers) tools.set(id, answer.tools);
     return tools;
   }, [initialMessages, activityLedger.answers]);
-  useEffect(() => {
-    if (!attachmentPickerOpen && !skillPickerOpen) return;
-    if (skillPickerOpen) firstSkillOptionRef.current?.focus();
-    const closeOnOutsideClick = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (
-        attachmentPickerRef.current?.contains(target)
-        || attachButtonRef.current?.contains(target)
-        || skillPickerRef.current?.contains(target)
-        || skillButtonRef.current?.contains(target)
-      ) return;
-      setAttachmentPickerOpen(false);
-      setSkillPickerOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      const focusTarget = attachmentPickerOpen
-        ? attachButtonRef.current
-        : skillButtonRef.current;
-      setAttachmentPickerOpen(false);
-      setSkillPickerOpen(false);
-      focusTarget?.focus();
-    };
-    document.addEventListener("pointerdown", closeOnOutsideClick);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsideClick);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [attachmentPickerOpen, skillPickerOpen]);
   const history = useMemo<ThreadHistoryAdapter>(
     () => ({
       load: () => Promise.resolve(
@@ -1781,8 +1740,7 @@ function AudreyThread({
   );
   async function changeModel(nextModelId: string) {
     if (attachmentBusy || retrying) return;
-    setAttachmentPickerOpen(false);
-    setSkillPickerOpen(false);
+    setActivePicker(null);
     await onModelChange(nextModelId);
     const nextModel = modelDetails(models, nextModelId);
     const nextSkillMode = skillModeForModel(nextModel);
@@ -1795,7 +1753,7 @@ function AudreyThread({
     }
     if (!nextModel.capabilities.includes("files")) {
       void runtime.thread.composer.clearAttachments();
-      setAttachmentPickerOpen(false);
+      setActivePicker(null);
       setSelectedAttachments([]);
     }
   }
@@ -1822,7 +1780,7 @@ function AudreyThread({
         }, null);
       },
       onRunStartedEvent: () => {
-        setAttachmentPickerOpen(false);
+        setActivePicker(null);
         onRunStartedRef.current();
       },
       onStepStartedEvent: ({ event }) => {
@@ -2077,11 +2035,10 @@ function AudreyThread({
 
   async function toggleAttachmentPicker() {
     if (attachmentPickerOpen) {
-      setAttachmentPickerOpen(false);
+      setActivePicker(null);
       return;
     }
-    setSkillPickerOpen(false);
-    setAttachmentPickerOpen(true);
+    setActivePicker("files");
     setAttachmentSearch("");
     setAttachmentKind("all");
     setAttachmentsLoading(true);
@@ -2102,11 +2059,10 @@ function AudreyThread({
 
   function toggleSkillPicker() {
     if (skillPickerOpen) {
-      setSkillPickerOpen(false);
+      setActivePicker(null);
       return;
     }
-    setAttachmentPickerOpen(false);
-    setSkillPickerOpen(true);
+    setActivePicker("skills");
   }
 
   function toggleAttachment(file: AudreyFile) {
@@ -2175,7 +2131,7 @@ function AudreyThread({
       } else {
         setPendingAttachment(row);
       }
-      setAttachmentPickerOpen(false);
+      setActivePicker(null);
     } catch (reason) {
       setUploadIssue(stored
         ? file.name + " was uploaded to Files, but could not be attached: " + messageOf(reason)
@@ -2228,6 +2184,7 @@ function AudreyThread({
   }, [pendingId, pendingStatus, runtime]);
 
   return (
+    <ComposerPickerContext.Provider value={{ activePicker, setActivePicker }}>
     <SavedSourcesContext.Provider value={savedSources}>
       <SavedModelsContext.Provider value={savedModels}>
       <SavedToolsContext.Provider value={savedTools}>
@@ -2245,7 +2202,6 @@ function AudreyThread({
           </ThreadPrimitive.If>
           <ThreadPrimitive.ViewportFooter
             className="composer-dock"
-            data-picker-open={attachmentPickerOpen || skillPickerOpen}
           >
             <ScrollToLatest />
             {readOnly ? (
@@ -2409,10 +2365,11 @@ function AudreyThread({
                   </div>
                 </ComposerPrimitive.Root>
                 {attachmentPickerOpen ? (
-                  <section
-                    ref={attachmentPickerRef}
+                  <ComposerPickerPanel
                     className="attachment-picker"
-                    aria-label="Choose attachments"
+                    label="Choose attachments"
+                    role="region"
+                    triggerRef={attachButtonRef}
                   >
                     <header>
                       <div>
@@ -2428,8 +2385,8 @@ function AudreyThread({
                         className="attachment-picker-close"
                         aria-label="Hide attachment picker"
                         onClick={() => {
-                          setAttachmentPickerOpen(false);
-                          attachButtonRef.current?.focus();
+                          setActivePicker(null);
+                          attachButtonRef.current?.focus({ preventScroll: true });
                         }}
                       >
                         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -2530,14 +2487,13 @@ function AudreyThread({
                         })}
                       </ul>
                     ) : null}
-                  </section>
+                  </ComposerPickerPanel>
                 ) : null}
                 {skillPickerOpen ? (
-                  <section
-                    ref={skillPickerRef}
+                  <ComposerPickerPanel
                     className="skill-picker"
-                    role="dialog"
-                    aria-label="Choose how Audrey uses tools"
+                    label="Choose how Audrey uses tools"
+                    triggerRef={skillButtonRef}
                   >
                     <header>
                       <div>
@@ -2551,8 +2507,8 @@ function AudreyThread({
                         className="attachment-picker-close"
                         aria-label="Hide tools and skills picker"
                         onClick={() => {
-                          setSkillPickerOpen(false);
-                          skillButtonRef.current?.focus();
+                          setActivePicker(null);
+                          skillButtonRef.current?.focus({ preventScroll: true });
                         }}
                       >
                         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -2562,13 +2518,12 @@ function AudreyThread({
                     </header>
                     <div className="skill-options" role="group" aria-label="Tools and skills choices">
                       <button
-                        ref={firstSkillOptionRef}
                         type="button"
                         aria-pressed={!skillId}
                         onClick={() => {
                           setSkillId("");
-                          setSkillPickerOpen(false);
-                          skillButtonRef.current?.focus();
+                          setActivePicker(null);
+                          skillButtonRef.current?.focus({ preventScroll: true });
                         }}
                       >
                         <strong>Automatic</strong>
@@ -2582,8 +2537,8 @@ function AudreyThread({
                           disabled={skill.availability !== "available"}
                           onClick={() => {
                             setSkillId(skill.id);
-                            setSkillPickerOpen(false);
-                            skillButtonRef.current?.focus();
+                            setActivePicker(null);
+                            skillButtonRef.current?.focus({ preventScroll: true });
                           }}
                         >
                           <strong>
@@ -2593,7 +2548,7 @@ function AudreyThread({
                         </button>
                       ))}
                     </div>
-                  </section>
+                  </ComposerPickerPanel>
                 ) : null}
               </>
             )}
@@ -2604,6 +2559,7 @@ function AudreyThread({
       </SavedToolsContext.Provider>
       </SavedModelsContext.Provider>
     </SavedSourcesContext.Provider>
+    </ComposerPickerContext.Provider>
   );
 }
 
@@ -2927,6 +2883,226 @@ function skillModeForModel(model: AudreyModel): "auto" | "fast" | "deep" | null 
   return "auto";
 }
 
+type ComposerPickerName = "files" | "skills" | "model" | "other-models" | "project";
+
+const ComposerPickerContext = createContext<{
+  activePicker: ComposerPickerName | null;
+  setActivePicker: (picker: ComposerPickerName | null) => void;
+}>({ activePicker: null, setActivePicker: () => {} });
+
+// All message options share one overlay above the form. Portaling prevents a
+// long menu from resizing the dock or being clipped by the scrolling thread.
+function ComposerPickerPanel({
+  className,
+  label,
+  role = "dialog",
+  triggerRef,
+  children,
+}: {
+  className: string;
+  label: string;
+  role?: "dialog" | "region" | "menu";
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  children: ReactNode;
+}) {
+  const { activePicker, setActivePicker } = useContext(ComposerPickerContext);
+  const panelRef = useRef<HTMLElement>(null);
+
+  useLayoutEffect(() => {
+    const trigger = triggerRef.current;
+    const panel = panelRef.current;
+    const composer = trigger?.closest<HTMLElement>(".composer");
+    if (!composer || !panel) return;
+    const viewport = composer.closest<HTMLElement>(".thread-viewport");
+    const visualViewport = window.visualViewport;
+    const place = () => {
+      const box = composer.getBoundingClientRect();
+      const viewLeft = visualViewport?.offsetLeft ?? 0;
+      const viewTop = visualViewport?.offsetTop ?? 0;
+      const viewWidth = visualViewport?.width ?? window.innerWidth;
+      const viewHeight = visualViewport?.height ?? window.innerHeight;
+      const topLimit = Math.max(viewTop + 8, (viewport?.getBoundingClientRect().top ?? 0) + 8);
+      const bottom = Math.min(box.top - 8, viewTop + viewHeight - 8);
+      const width = Math.min(576, box.width, viewWidth - 16);
+      const left = Math.max(viewLeft + 8, Math.min(
+        box.left + (box.width - width) / 2,
+        viewLeft + viewWidth - width - 8,
+      ));
+      panel.style.left = `${left}px`;
+      panel.style.bottom = `${window.innerHeight - bottom}px`;
+      panel.style.width = `${width}px`;
+      panel.style.maxHeight = `${Math.max(0, Math.min(352, bottom - topLimit))}px`;
+      panel.style.visibility = "visible";
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(composer);
+    if (composer.parentElement) observer.observe(composer.parentElement);
+    if (viewport) observer.observe(viewport);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    visualViewport?.addEventListener("resize", place);
+    visualViewport?.addEventListener("scroll", place);
+    const firstChoice = panel.querySelector<HTMLButtonElement>(
+      '.composer-choice-options button[aria-pressed="true"]:not(:disabled), .composer-choice-options button[aria-checked="true"]:not(:disabled), .skill-options button[aria-pressed="true"]:not(:disabled)',
+    ) ?? panel.querySelector<HTMLButtonElement>(
+      '.composer-choice-options button:not(:disabled), .skill-options button:not(:disabled)',
+    ) ?? panel.querySelector<HTMLButtonElement>('button:not(:disabled)');
+    firstChoice?.focus({ preventScroll: true });
+    if (firstChoice) {
+      const choiceBox = firstChoice.getBoundingClientRect();
+      const panelBox = panel.getBoundingClientRect();
+      if (choiceBox.bottom > panelBox.bottom) panel.scrollTop += choiceBox.bottom - panelBox.bottom + 12;
+    }
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+      visualViewport?.removeEventListener("resize", place);
+      visualViewport?.removeEventListener("scroll", place);
+    };
+  }, [activePicker, triggerRef]);
+
+  useEffect(() => {
+    const outside = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      setActivePicker(null);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setActivePicker(null);
+      triggerRef.current?.focus({ preventScroll: true });
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("focusin", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("focusin", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [setActivePicker, triggerRef]);
+
+  return createPortal(
+    <section
+      ref={panelRef}
+      className={`composer-picker ${className}`}
+      role={role}
+      aria-label={label}
+      onKeyDown={(event) => {
+        if (!(event.target instanceof HTMLButtonElement)) return;
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        const choices = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>(
+          '.composer-choice-options button:not(:disabled), .skill-options button:not(:disabled)',
+        ));
+        if (!choices.length) return;
+        event.preventDefault();
+        const current = choices.indexOf(event.target);
+        const index = event.key === "Home" ? 0 : event.key === "End" ? choices.length - 1
+          : current < 0 ? (event.key === "ArrowUp" ? choices.length - 1 : 0)
+          : (current + (event.key === "ArrowUp" ? -1 : 1) + choices.length) % choices.length;
+        choices[index].focus({ preventScroll: true });
+        choices[index].scrollIntoView({ block: "nearest" });
+      }}
+    >{children}</section>,
+    document.body,
+  );
+}
+
+function ComposerPickerClose({
+  label,
+  triggerRef,
+}: {
+  label: string;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+}) {
+  const { setActivePicker } = useContext(ComposerPickerContext);
+  return (
+    <button
+      type="button"
+      className="attachment-picker-close"
+      aria-label={label}
+      onClick={() => {
+        setActivePicker(null);
+        triggerRef.current?.focus({ preventScroll: true });
+      }}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m6.5 9 5.5 5.5L17.5 9" />
+      </svg>
+    </button>
+  );
+}
+
+function ComposerProjectPicker({
+  projects,
+  projectId,
+  projectName,
+  disabled,
+  onChange,
+}: {
+  projects: AudreyProject[];
+  projectId: string | null;
+  projectName?: string;
+  disabled: boolean;
+  onChange: (id: string | null) => Promise<void>;
+}) {
+  const { activePicker, setActivePicker } = useContext(ComposerPickerContext);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const open = activePicker === "project" && !disabled;
+  const choices = [
+    { id: "", name: "No project" },
+    ...(projectId && !projects.some(({ id }) => id === projectId)
+      ? [{ id: projectId, name: projectName ?? "Current project" }] : []),
+    ...projects,
+  ];
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="composer-rail-control composer-project-picker"
+        aria-label="Move conversation to project"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        data-value={projectId ?? ""}
+        disabled={disabled}
+        onClick={() => setActivePicker(open ? null : "project")}
+      >
+        <span className="composer-control-label">Project</span>
+        <strong>{projectName ?? (projectId ? "Current project" : "No project")}</strong>
+      </button>
+      {open ? (
+        <ComposerPickerPanel className="project-picker" label="Choose a project" triggerRef={triggerRef}>
+          <header>
+            <div><strong>Choose a project</strong><span>Group this chat with a project's files and instructions.</span></div>
+            <ComposerPickerClose label="Hide project picker" triggerRef={triggerRef} />
+          </header>
+          <div className="composer-choice-options">
+            {choices.map((project) => (
+              <button
+                key={project.id}
+                type="button"
+                aria-label={project.name}
+                aria-pressed={(projectId ?? "") === project.id}
+                onClick={() => {
+                  setActivePicker(null);
+                  triggerRef.current?.focus({ preventScroll: true });
+                  void onChange(project.id || null);
+                }}
+              ><strong>{project.name}</strong></button>
+            ))}
+          </div>
+        </ComposerPickerPanel>
+      ) : null}
+    </>
+  );
+}
+
 function ComposerModelPicker({
   compact = false,
   models,
@@ -2943,127 +3119,82 @@ function ComposerModelPicker({
   onChange: (modelId: string) => Promise<void>;
 }) {
   const selected = modelDetails(models, modelId);
-  const [directMenuOpen, setDirectMenuOpen] = useState(false);
-  const anchorRef = useRef<HTMLDivElement>(null);
-  const selectRef = useRef<HTMLSelectElement>(null);
-  const firstDirectRef = useRef<HTMLButtonElement>(null);
+  const { activePicker, setActivePicker } = useContext(ComposerPickerContext);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const workflowModels = models.filter(({ kind }) => kind === "workflow");
-  const directModels = canBrowseDirectModels
-    ? models.filter(({ kind }) => kind === "direct")
-    : [];
-  const directMenuVisible = directMenuOpen && !disabled && directModels.length > 0;
-
-  useEffect(() => {
-    if (!directMenuVisible) return;
-    firstDirectRef.current?.focus();
-    const closeOnOutsideClick = (event: PointerEvent) => {
-      if (!anchorRef.current?.contains(event.target as Node)) {
-        setDirectMenuOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.stopPropagation();
-      setDirectMenuOpen(false);
-      selectRef.current?.focus();
-    };
-    document.addEventListener("pointerdown", closeOnOutsideClick);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsideClick);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [directMenuVisible]);
-
-  const select = (
-    <select
-      ref={selectRef}
-      aria-label="Audrey model"
-      aria-expanded={directMenuVisible}
-      title={`${selected.label}: ${selected.description}`}
-      value={modelId}
-      disabled={disabled}
-      onChange={(event) => {
-        if (event.target.value === "__other_models__") {
-          setDirectMenuOpen(true);
-          return;
-        }
-        setDirectMenuOpen(false);
-        void onChange(event.target.value);
-      }}
-    >
-      <optgroup label="Audrey">
-        {workflowModels.map((item) => (
-          <option key={item.id} value={item.id}>{item.label}</option>
-        ))}
-      </optgroup>
-      {selected.kind === "direct" && canBrowseDirectModels ? (
-        <optgroup label="Selected direct model">
-          <option value={selected.id}>{selected.id.slice("direct/".length)}</option>
-        </optgroup>
-      ) : null}
-      {directModels.length > 0 ? (
-        <option value="__other_models__">Other models...</option>
-      ) : null}
-    </select>
-  );
-
-  const control = (
-    <div className="model-picker-menu-anchor" ref={anchorRef}>
-      <label className={compact ? "compact-model-picker" : "model-picker-control"}>
-        {compact ? <span className="composer-control-label">Model</span> : null}
-        {select}
-      </label>
-      {directMenuVisible ? (
-        <div className="direct-model-menu" role="menu" aria-label="Other models">
-          <header>
-            <strong>Other models</strong>
-            <button
-              className="direct-model-menu-close"
-              type="button"
-              aria-label="Close other models"
-              onClick={() => {
-                setDirectMenuOpen(false);
-                selectRef.current?.focus();
-              }}
-            >
-              ×
-            </button>
-          </header>
-          <div className="direct-model-options">
-            {directModels.map((item, index) => (
-              <button
-                key={item.id}
-                ref={index === 0 ? firstDirectRef : undefined}
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setDirectMenuOpen(false);
-                  void onChange(item.id);
-                }}
-              >
-                {item.id.slice("direct/".length)}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-  if (compact) {
+  const directModels = canBrowseDirectModels ? models.filter(({ kind }) => kind === "direct") : [];
+  const open = !disabled && ["model", "other-models"].includes(activePicker ?? "");
+  const direct = activePicker === "other-models";
+  if (!compact) {
     return (
-      <div className="compact-model-picker-shell">
-        {control}
+      <div className="composer-model-picker">
+        <img src={selected.portrait} alt="" aria-hidden="true" />
+        <span className="model-description" aria-live="polite">{selected.description}</span>
       </div>
     );
   }
+  const choose = (id: string) => {
+    setActivePicker(null);
+    triggerRef.current?.focus({ preventScroll: true });
+    void onChange(id);
+  };
   return (
-    <div className="composer-model-picker">
-      <img src={selected.portrait} alt="" aria-hidden="true" />
-      <span className="model-description" aria-live="polite">
-        {selected.description}
-      </span>
-    </div>
+    <>
+      <button
+        ref={triggerRef}
+        className="composer-rail-control compact-model-picker"
+        type="button"
+        aria-label="Audrey model"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        data-value={modelId}
+        title={`${selected.label}: ${selected.description}`}
+        disabled={disabled}
+        onClick={() => setActivePicker(open ? null : "model")}
+      >
+        <span className="composer-control-label">Model</span>
+        <strong>{selected.kind === "direct" ? selected.id.slice("direct/".length) : selected.label}</strong>
+      </button>
+      {open ? (
+        <ComposerPickerPanel
+          className={direct ? "direct-model-menu" : "model-picker"}
+          label={direct ? "Other models" : "Choose an Audrey model"}
+          role={direct ? "menu" : "dialog"}
+          triggerRef={triggerRef}
+        >
+          <header>
+            <div>
+              <strong>{direct ? "Other models" : "Choose an Audrey model"}</strong>
+              <span>{direct ? "Use an available model directly." : "Choose how Audrey approaches your question."}</span>
+            </div>
+            <ComposerPickerClose label={direct ? "Close other models" : "Hide model picker"} triggerRef={triggerRef} />
+          </header>
+          <div className="composer-choice-options">
+            {(direct ? directModels : workflowModels).map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role={direct ? "menuitemradio" : undefined}
+                aria-label={direct ? item.id.slice("direct/".length) : item.label}
+                aria-pressed={direct ? undefined : item.id === modelId}
+                aria-checked={direct ? item.id === modelId : undefined}
+                onClick={() => choose(item.id)}
+              >
+                <strong>{direct ? item.id.slice("direct/".length) : item.label}</strong>
+                {!direct ? <span>{item.description}</span> : null}
+              </button>
+            ))}
+          </div>
+          {direct || directModels.length > 0 ? (
+            <button
+              type="button"
+              className="composer-picker-browse"
+              onClick={() => setActivePicker(direct ? "model" : "other-models")}
+            >{direct ? "Back to Audrey models" : "Other models..."}</button>
+          ) : null}
+        </ComposerPickerPanel>
+      ) : null}
+    </>
   );
 }
 

@@ -406,9 +406,11 @@ test("hides direct models from basic users even if the catalog contains one", as
 
   await page.goto("./");
 
-  await expect(page.getByRole("option", { name: "Qwen 3.8" })).toHaveCount(0);
-  await expect(page.getByRole("option", { name: "Other models..." })).toHaveCount(0);
-  await expect(page.locator('optgroup[label="Other models — direct"]')).toHaveCount(0);
+  await page.getByRole("button", { name: "Audrey model", exact: true }).click();
+  const picker = page.getByRole("dialog", { name: "Choose an Audrey model" });
+  await expect(picker).toBeVisible();
+  await expect(picker.getByRole("button", { name: "Qwen 3.8", exact: true })).toHaveCount(0);
+  await expect(picker.getByRole("button", { name: "Other models...", exact: true })).toHaveCount(0);
 });
 
 test("restores a saved conversation on hard refresh without showing a landing page", async ({ page }) => {
@@ -633,7 +635,7 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect((accountBox?.x ?? 0) - ((filesBox?.x ?? 0) + (filesBox?.width ?? 0))).toBeGreaterThan(15);
   await expect(page.getByRole("group", { name: "File actions" }))
     .toHaveCSS("border-right-style", "solid");
-  await expect(page.locator(".brand-product")).toHaveText("Ask Audrey");
+  await expect(page.locator(".brand-product")).toHaveText("Audrey");
   const brandProductBox = await page.locator(".brand-product").boundingBox();
   const productTextBox = await page.locator(".brand-product").evaluate((element) => {
     const range = document.createRange();
@@ -648,22 +650,12 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(Math.abs(logoClearance - productClearance)).toBeLessThan(2);
   expect(Math.abs((brandProductBox?.x ?? 0) - ((sidebarBox?.x ?? 0) + (sidebarBox?.width ?? 0))))
     .toBeLessThan(2);
-  const askLineBox = await page.locator(".brand-product > span").first().boundingBox();
-  const audreyLineBox = await page.locator(".brand-product > span").last().boundingBox();
-  expect(askLineBox).not.toBeNull();
-  expect(audreyLineBox).not.toBeNull();
-  expect((askLineBox?.y ?? 0) + (askLineBox?.height ?? 0))
-    .toBeLessThanOrEqual((audreyLineBox?.y ?? 0) + 1);
-  expect(Math.abs((askLineBox?.x ?? 0) - (audreyLineBox?.x ?? 0))).toBeLessThan(1);
   await expect.poll(
     () => page.locator(".brand-product").evaluate(
       (element) => Number.parseFloat(getComputedStyle(element).fontSize),
     ),
   ).toBeGreaterThanOrEqual(16);
-  await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("fast");
-  await expect(page.getByRole("option", { name: "Video" })).toHaveCount(1);
-  await expect(page.locator('optgroup[label="Other models — direct"]')).toHaveCount(0);
-  await expect(page.getByRole("option", { name: "Other models..." })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Audrey model", exact: true })).toHaveAttribute("data-value", "fast");
   await expect(page.getByLabel("Signed in user")).toContainText("Alice");
   await expect(page.getByRole("link", { name: "Log out" })).toHaveAttribute(
     "href",
@@ -671,25 +663,29 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   );
   const portrait = page.locator(".composer-model-picker img");
   await expect(portrait).toBeVisible();
-  const modelPicker = page.getByRole("combobox", { name: "Audrey model" });
-  await expect(modelPicker.locator('optgroup[label="Other models — direct"]')).toHaveCount(0);
-  await expect(modelPicker).toHaveValue("fast");
-  await modelPicker.selectOption("__other_models__");
-  await expect(modelPicker).toHaveValue("fast");
+  const modelPicker = page.getByRole("button", { name: "Audrey model", exact: true });
+  await expect(modelPicker).toHaveAttribute("data-value", "fast");
+  await modelPicker.click();
+  const modelPanel = page.getByRole("dialog", { name: "Choose an Audrey model" });
+  await expect(modelPanel.getByRole("button", { name: "Video", exact: true })).toBeVisible();
+  await expect(modelPanel.getByRole("button", { name: "Fast", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await modelPanel.getByRole("button", { name: "Other models...", exact: true }).click();
+  await expect(modelPicker).toHaveAttribute("data-value", "fast");
   const directMenu = page.getByRole("menu", { name: "Other models" });
   await expect(directMenu).toBeVisible();
-  const firstDirectModel = directMenu.getByRole("menuitem", { name: "qwen3.8:latest", exact: true });
+  const firstDirectModel = directMenu.getByRole("menuitemradio", { name: "qwen3.8:latest", exact: true });
   await expect(firstDirectModel).toHaveText("qwen3.8:latest");
+  await expect(firstDirectModel).toHaveAttribute("aria-checked", "false");
   await expect(directMenu).not.toContainText("Direct local Qwen");
   await expect(firstDirectModel).toBeFocused();
   await firstDirectModel.press("Escape");
   await expect(directMenu).toHaveCount(0);
-  await modelPicker.selectOption("research");
+  await chooseAudreyModel(page, "Research");
   await expect(portrait).toHaveAttribute("src", /audrey8/u);
-  await modelPicker.selectOption("video");
+  await chooseAudreyModel(page, "Video");
   await expect(portrait).toHaveAttribute("src", /audrey9/u);
   await expect.poll(() => portrait.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
-  await modelPicker.selectOption("fast");
+  await chooseAudreyModel(page, "Fast");
   await expect(portrait).toHaveAttribute("src", /audrey3/u);
   await expect.poll(() => portrait.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await expect(page.getByText("Quick, direct answers for everyday questions and tasks.")).toBeVisible();
@@ -697,7 +693,7 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(page.getByRole("heading", { name: "Ask Audrey", exact: true })).toHaveCount(0);
   await expect(page.getByText("The server will load this conversation's canonical history.")).toHaveCount(0);
   const portraitBox = await portrait.boundingBox();
-  const pickerBox = await page.getByRole("combobox", { name: "Audrey model" }).boundingBox();
+  const pickerBox = await page.getByRole("button", { name: "Audrey model", exact: true }).boundingBox();
   const composerBox = await page.locator(".composer").boundingBox();
   const emptyDockBox = await page.locator(".composer-dock").boundingBox();
   const threadViewportBox = await page.locator(".thread-viewport").boundingBox();
@@ -712,6 +708,7 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(pickerBox?.y ?? 0)
     .toBeGreaterThan((portraitBox?.y ?? 0) + (portraitBox?.height ?? 0));
   expect(composerBox?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(896);
+  await page.mouse.move(0, 0);
   await expect.poll(
     () => portrait.evaluate((element) => Number.parseFloat(getComputedStyle(element).opacity)),
   ).toBe(0.8);
@@ -745,7 +742,7 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
     () => page.locator(".model-description").evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
   ).toBeGreaterThanOrEqual(14);
   await expect.poll(
-    () => page.getByRole("combobox", { name: "Audrey model" }).evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+    () => page.getByRole("button", { name: "Audrey model", exact: true }).evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
   ).toBeGreaterThanOrEqual(14);
   await expect(page.getByRole("button", { name: "Send message" }).locator("svg")).toBeVisible();
 
@@ -1138,12 +1135,12 @@ test("swipes any mobile chat to archive, restore, or confirm deletion without op
 
   await page.goto("./");
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
-  const projectControl = page.getByRole("combobox", { name: "Move conversation to project" });
+  const projectControl = page.getByRole("button", { name: "Move conversation to project", exact: true });
   await expectInViewport(page, projectControl);
-  await projectControl.selectOption(project.id);
-  await expect(projectControl).toHaveValue(project.id);
-  await projectControl.selectOption("");
-  await expect(projectControl).toHaveValue("");
+  await chooseConversationProject(page, project.name);
+  await expect(projectControl).toHaveAttribute("data-value", project.id);
+  await chooseConversationProject(page, "No project");
+  await expect(projectControl).toHaveAttribute("data-value", "");
 
   const menu = page.locator("#app-mobile-menu-toggle");
   const drawer = page.getByRole("dialog", { name: "Conversations" });
@@ -1207,7 +1204,7 @@ test("swipes any mobile chat to archive, restore, or confirm deletion without op
   await touch.detach();
   await page.keyboard.press("Escape");
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
-  await expect(projectControl).toHaveValue("");
+  await expect(projectControl).toHaveAttribute("data-value", "");
 });
 
 test("keeps message options visually consistent and usable across compact and desktop widths", async ({ page }) => {
@@ -1225,7 +1222,7 @@ test("keeps message options visually consistent and usable across compact and de
     await expect(controls).toHaveCount(4);
     const appearances = await controls.evaluateAll((elements) => elements.map((element) => {
       const outer = getComputedStyle(element);
-      const value = getComputedStyle(element.querySelector("select, strong")!);
+      const value = getComputedStyle(element.querySelector("strong")!);
       const label = getComputedStyle(element.querySelector(".composer-control-label")!);
       return {
         height: element.getBoundingClientRect().height,
@@ -1248,15 +1245,23 @@ test("keeps message options visually consistent and usable across compact and de
     await page.keyboard.press("Tab");
     for (let index = 0; index < 4; index += 1) {
       await expectInViewport(page, controls.nth(index));
-      const focusable = index < 2 ? controls.nth(index).locator("select") : controls.nth(index);
-      await focusable.focus();
-      await expect(focusable).toBeFocused();
-      await expect(controls.nth(index)).not.toHaveCSS("box-shadow", "none");
-      if (index < 2) await expect(focusable).toHaveCSS("box-shadow", "none");
+      const control = controls.nth(index);
+      await control.focus();
+      await expect(control).toBeFocused();
+      await expect(control).not.toHaveCSS("box-shadow", "none");
+      await expect(control.locator("strong")).toHaveCSS("box-shadow", "none");
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
 
+    await page.getByRole("button", { name: "Audrey model", exact: true }).click();
+    const modelPanel = page.getByRole("dialog", { name: "Choose an Audrey model" });
+    await expectInViewport(page, modelPanel);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Audrey model", exact: true })).toBeFocused();
+    await page.getByRole("button", { name: "Move conversation to project", exact: true }).click();
+    await expectInViewport(page, page.getByRole("dialog", { name: "Choose a project" }));
     await rail.locator(".attach-button").click();
+    await expect(page.getByRole("dialog", { name: "Choose a project" })).toHaveCount(0);
     await expectInViewport(page, page.getByRole("region", { name: "Choose attachments" }));
     await rail.locator(".skill-button").click();
     await expect(page.getByRole("region", { name: "Choose attachments" })).toHaveCount(0);
@@ -1293,17 +1298,16 @@ test("gives desktop chat actions and aligned composer pickers comfortable contro
   expect(Math.abs(modelBox.y - projectBox.y)).toBeLessThan(1);
   expect(Math.abs(modelBox.height - projectBox.height)).toBeLessThan(1);
   for (const control of [model, project]) {
-    expect(await control.locator("select").evaluate((select) => Number.parseFloat(getComputedStyle(select).fontSize)))
+    expect(await control.locator("strong").evaluate((value) => Number.parseFloat(getComputedStyle(value).fontSize)))
       .toBeGreaterThanOrEqual(15);
     expect(await control.locator(".composer-control-label").evaluate((label) => Number.parseFloat(getComputedStyle(label).fontSize)))
       .toBeGreaterThanOrEqual(10);
   }
   await page.keyboard.press("Tab");
   for (const control of [model, project]) {
-    const select = control.locator("select");
-    await select.focus();
-    await expect(select).toBeFocused();
-    await expect(select).toHaveCSS("box-shadow", "none");
+    await control.focus();
+    await expect(control).toBeFocused();
+    await expect(control.locator("strong")).toHaveCSS("box-shadow", "none");
     await expect(control).not.toHaveCSS("box-shadow", "none");
   }
 });
@@ -1900,13 +1904,13 @@ test("keeps history and an active run alive while switching conversations", asyn
   await composer.press("Enter");
   await expect(page.getByText("Planning", { exact: true })).toBeVisible();
   await expect(page.getByText("Preparing the background answer")).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Move conversation to project" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Move conversation to project", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Archive", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Delete conversation", exact: true })).toBeDisabled();
 
   await page.getByRole("button", { name: /^Second conversation/u }).click();
   await expect(page.getByRole("heading", { name: "Second conversation" })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Move conversation to project" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Move conversation to project", exact: true })).toBeEnabled();
   await expect(page.getByText("Canonical mode answer.")).toBeHidden();
   expect(await page.evaluate(() =>
     Boolean((window as Window & { __navigationRunAborted?: boolean }).__navigationRunAborted),
@@ -1921,7 +1925,7 @@ test("keeps history and an active run alive while switching conversations", asyn
     (window as Window & { __finishNavigationRun?: () => void }).__finishNavigationRun?.();
   });
   await expect(page.getByText("Background response survived navigation.")).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Move conversation to project" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Move conversation to project", exact: true })).toBeEnabled();
   await expect(page.locator(".run-activity")).toHaveCount(0);
 
   await page.getByRole("button", { name: /^Second conversation/u }).click();
@@ -2124,6 +2128,14 @@ test("keeps canonical messages when changing model", async ({ page }) => {
       await json(route, { items: browserModels() });
       return;
     }
+    if (url.pathname === "/api/projects") {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/skills") {
+      await json(route, { enabled: true, status: "ready", items: browserSkills() });
+      return;
+    }
     await route.abort("failed");
   });
 
@@ -2136,21 +2148,30 @@ test("keeps canonical messages when changing model", async ({ page }) => {
 
   await expect(page.locator(".composer-model-picker")).toHaveCount(0);
   await expect(page.locator(".composer .compact-model-picker")).toBeVisible();
-  await expect.poll(() => page.locator(".compact-model-picker select").evaluate(
-    (select) => select.getBoundingClientRect().width,
+  await expect.poll(() => page.locator(".compact-model-picker").evaluate(
+    (button) => button.getBoundingClientRect().width,
   )).toBeGreaterThan(150);
-  await page.getByRole("combobox", { name: "Audrey model" }).selectOption("deep");
-  await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("deep");
+  await chooseAudreyModel(page, "Deep");
+  await expect(page.getByRole("button", { name: "Audrey model", exact: true })).toHaveAttribute("data-value", "deep");
   await expect(page.getByText("A reasoning panel for complex problems and careful analysis.")).toHaveCount(0);
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
-  await page.getByRole("combobox", { name: "Audrey model" }).selectOption("__other_models__");
+  await page.getByRole("button", { name: "Audrey model", exact: true }).click();
+  await page.getByRole("dialog", { name: "Choose an Audrey model" })
+    .getByRole("button", { name: "Other models...", exact: true }).click();
   const directMenu = page.getByRole("menu", { name: "Other models" });
   await expect(directMenu).toBeVisible();
-  await directMenu.getByRole("menuitem", { name: "qwen3.8:latest", exact: true }).click();
-  await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue(
-    "direct/qwen3.8:latest",
+  await directMenu.getByRole("menuitemradio", { name: "qwen3.8:latest", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Audrey model", exact: true })).toHaveAttribute(
+    "data-value", "direct/qwen3.8:latest",
   );
   await expect(page.getByRole("button", { name: "Add files" })).toBeDisabled();
+  await page.getByRole("button", { name: "Audrey model", exact: true }).click();
+  await page.getByRole("dialog", { name: "Choose an Audrey model" })
+    .getByRole("button", { name: "Other models...", exact: true }).click();
+  await expect(directMenu.getByRole("menuitemradio", { name: "qwen3.8:latest", exact: true }))
+    .toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Audrey model", exact: true })).toBeFocused();
   await page.getByRole("textbox", { name: "Ask Audrey" }).fill("Use direct Qwen");
   await page.getByRole("textbox", { name: "Ask Audrey" }).press("Enter");
   await expect.poll(() => agentModels).toEqual(["fast", "direct/qwen3.8:latest"]);
@@ -2754,7 +2775,7 @@ for (const viewport of [
   { name: "short mobile", width: 320, height: 640 },
 ]) {
   for (const populated of [false, true]) {
-    test(`opens composer pickers below controls in ${viewport.name} ${populated ? "history" : "empty chat"}`, async ({ page }) => {
+    test(`overlays composer pickers without shifting ${viewport.name} ${populated ? "history" : "empty chat"}`, async ({ page }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await mockAudreyApi(page, undefined, populated ? scrollingBrowserHistory() : []);
       await page.route("**/api/files**", (route) => json(route, browserFileListing(
@@ -2763,60 +2784,85 @@ for (const viewport of [
       await page.goto("./");
       const jump = page.getByRole("button", { name: "Scroll to latest message" });
       await expect(jump).toBeHidden();
-      if (!populated) {
-        await expect(page.locator(".composer-model-picker img")).toBeVisible();
-        if (viewport.name !== "desktop") {
-          await expect.poll(() => page.locator(".conversation-thread-slot:not([hidden]) .thread-viewport").evaluate((viewport) => {
-            const main = document.querySelector(".native-main")!.getBoundingClientRect();
-            const thread = viewport.getBoundingClientRect();
-            const dock = viewport.querySelector(".composer-dock")!.getBoundingClientRect();
-            return {
-              fillsMain: Math.abs(thread.top - main.top) < 1 && Math.abs(thread.bottom - main.bottom) < 1,
-              centered: Math.abs((dock.top + dock.bottom) / 2 - (thread.top + thread.bottom) / 2) < 2,
-            };
-          })).toEqual({ fillsMain: true, centered: true });
-        }
-      }
+      if (!populated) await expect(page.locator(".composer-model-picker img")).toBeVisible();
 
-      const assertPanelGeometry = async (selector: string) => {
-        await expect.poll(() => page.locator(selector).evaluate((panel) => {
-          const dock = panel.closest(".composer-dock")!;
-          const rail = dock.querySelector(".composer-control-rail")!.getBoundingClientRect();
-          const input = dock.querySelector(".composer-input-row")!.getBoundingClientRect();
-          const viewport = panel.closest(".thread-viewport")!.getBoundingClientRect();
-          const box = panel.getBoundingClientRect();
-          return {
-            belowControls: box.top >= rail.bottom,
-            inputVisible: input.top >= viewport.top - 1,
-            panelVisible: box.bottom <= viewport.bottom + 1 && box.height >= 64,
-            withinWidth: box.left >= viewport.left && box.right <= viewport.right,
-          };
-        })).toEqual({
-          belowControls: true, inputVisible: true, panelVisible: true, withinWidth: true,
-        });
+      const composerGeometry = () => page.locator(".composer").evaluate((composer) => {
+        const dock = composer.closest(".composer-dock")!.getBoundingClientRect();
+        const form = composer.getBoundingClientRect();
+        const input = composer.querySelector(".composer-input-row")!.getBoundingClientRect();
+        return { dock: { x: dock.x, y: dock.y, width: dock.width, height: dock.height },
+          form: { x: form.x, y: form.y, width: form.width, height: form.height },
+          input: { x: input.x, y: input.y, width: input.width, height: input.height } };
+      });
+      const baseline = await composerGeometry();
+      let panelWidth: number | undefined;
+      const assertPanelGeometry = async (panel: Locator) => {
+        await expectInViewport(page, panel);
+        const box = (await panel.boundingBox())!;
+        expect(box.y + box.height).toBeLessThanOrEqual(baseline.input.y);
+        expect(Math.abs(box.x + box.width / 2 - (baseline.form.x + baseline.form.width / 2)))
+          .toBeLessThan(2);
+        expect(box.width).toBeLessThanOrEqual(baseline.form.width);
+        panelWidth ??= box.width;
+        expect(Math.abs(box.width - panelWidth)).toBeLessThan(2);
+        expect(box.height).toBeGreaterThanOrEqual(64);
+        await expect.poll(composerGeometry).toEqual(baseline);
+        await expect(page.locator(".composer-picker")).toHaveCount(1);
+        if (!populated) {
+          await expect(page.locator(".composer-model-picker img")).toBeVisible();
+          await expect(jump).toBeHidden();
+        }
       };
 
-      await page.getByRole("button", { name: "Add files" }).click();
-      await expect(page.getByRole("region", { name: "Choose attachments" })).toBeVisible();
-      await assertPanelGeometry(".attachment-picker");
-      if (!populated) await expect(jump).toBeHidden();
-      await expect.poll(() => page.locator(".attachment-picker").evaluate(
+      const modelButton = page.getByRole("button", { name: "Audrey model", exact: true });
+      const projectButton = page.getByRole("button", { name: "Move conversation to project", exact: true });
+      const attachButton = page.getByRole("button", { name: "Add files" });
+      const toolsButton = page.getByRole("button", { name: "Tools and skills: Automatic" });
+      const modelPanel = page.getByRole("dialog", { name: "Choose an Audrey model" });
+      const projectPanel = page.getByRole("dialog", { name: "Choose a project" });
+      const attachmentPanel = page.getByRole("region", { name: "Choose attachments" });
+      const toolsPanel = page.getByRole("dialog", { name: "Choose how Audrey uses tools" });
+
+      await modelButton.click();
+      await assertPanelGeometry(modelPanel);
+      await expect(modelPanel.getByRole("button", { name: "Fast", exact: true })).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(modelPanel).toHaveCount(0);
+      await expect(modelButton).toBeFocused();
+
+      await projectButton.click();
+      await assertPanelGeometry(projectPanel);
+      await expect(projectPanel.getByRole("button", { name: "No project", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await attachButton.click();
+      await expect(projectPanel).toHaveCount(0);
+      await assertPanelGeometry(attachmentPanel);
+      await expect.poll(() => attachmentPanel.evaluate(
         (panel) => panel.scrollHeight > panel.clientHeight,
       )).toBe(true);
-      await page.getByRole("region", { name: "Choose attachments" })
-        .getByRole("button", { name: /report-19\.txt/u }).click();
+
+      await toolsButton.click();
+      await expect(attachmentPanel).toHaveCount(0);
+      await assertPanelGeometry(toolsPanel);
+      await expect(toolsPanel.getByRole("button", { name: /Automatic/u })).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(toolsPanel).toHaveCount(0);
+      await expect(toolsButton).toBeFocused();
+
+      await projectButton.click();
+      await page.keyboard.press("Escape");
+      await expect(projectPanel).toHaveCount(0);
+      await expect(projectButton).toBeFocused();
+      await modelButton.click();
+      await toolsButton.click();
+      await expect(modelPanel).toHaveCount(0);
+      await page.getByRole("textbox", { name: "Ask Audrey" }).click();
+      await expect(toolsPanel).toHaveCount(0);
+
+      await attachButton.click();
+      await attachmentPanel.getByRole("button", { name: /report-19\.txt/u }).click();
       await expect(page.getByRole("button", { name: "Remove attachment report-19.txt" })).toBeVisible();
       await page.keyboard.press("Escape");
-      await expect(page.getByRole("button", { name: "Add files" })).toBeFocused();
-
-      await page.getByRole("button", { name: "Tools and skills: Automatic" }).click();
-      await expect(page.getByRole("dialog", { name: "Choose how Audrey uses tools" })).toBeVisible();
-      await assertPanelGeometry(".skill-picker");
-      if (!populated) await expect(jump).toBeHidden();
-      await expect(page.getByRole("dialog", { name: "Choose how Audrey uses tools" })
-        .getByRole("button", { name: /Automatic/u })).toBeFocused();
-      await page.keyboard.press("Escape");
-      await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeFocused();
+      await expect(attachButton).toBeFocused();
       await expect(page.locator(".sidebar"))[viewport.name === "desktop" ? "toBeVisible" : "toBeHidden"]();
     });
   }
@@ -4247,11 +4293,10 @@ test("creates and manages a personal project without losing conversations or fil
   await expect(page.getByRole("region", { name: "Project conversations" }).getByText("New conversation")).toHaveCount(2);
 
   const ordinaryHistory = page.getByRole("navigation", { name: "Conversation history" });
-  await ordinaryHistory.getByRole("button", { name: /Ordinary conversation/u }).click();
-  const projectSelect = page.getByRole("combobox", { name: "Move conversation to project" });
-  await projectSelect.selectOption({ label: "Renamed launch" });
+  await ordinaryHistory.getByRole("button", { name: /^Ordinary conversation/u }).click();
+  await chooseConversationProject(page, "Renamed launch");
   await expect(page.getByRole("navigation", { name: "Project breadcrumb" })).toContainText("Renamed launch");
-  await projectSelect.selectOption({ label: "No project" });
+  await chooseConversationProject(page, "No project");
   await expect(page.getByRole("navigation", { name: "Project breadcrumb" })).toHaveCount(0);
 
   const projectSidebar = page.getByRole("region", { name: "Projects" });
@@ -4394,6 +4439,18 @@ async function mockAudreyApi(
     }
     await route.abort("failed");
   });
+}
+
+async function chooseAudreyModel(page: Page, label: string) {
+  await page.getByRole("button", { name: "Audrey model", exact: true }).click();
+  await page.getByRole("dialog", { name: "Choose an Audrey model" })
+    .getByRole("button", { name: label, exact: true }).click();
+}
+
+async function chooseConversationProject(page: Page, name: string) {
+  await page.getByRole("button", { name: "Move conversation to project", exact: true }).click();
+  await page.getByRole("dialog", { name: "Choose a project" })
+    .getByRole("button", { name, exact: true }).click();
 }
 
 async function expectInViewport(page: Page, locator: Locator) {

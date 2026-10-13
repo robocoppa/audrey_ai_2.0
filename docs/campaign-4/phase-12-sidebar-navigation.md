@@ -17,15 +17,15 @@ separated from username, Admin Panel, and Log out. The app shell owns its dialog
 
 The desktop wordmark is centered over the sidebar. Its divider follows that
 sidebar boundary, with equal space between the visible logo and divider,
-and between the divider and **Ask Audrey**. The product label stacks **ASK**
-above **AUDREY**, with larger initial A's, spaced capitals, and a muted slate
-color. The stack is centered vertically beside the wordmark.
+and between the divider and **AUDREY**. The product label uses spaced
+capitals, a larger initial A, and a muted slate color, centered vertically
+beside the wordmark.
 
 ## Compact and mobile layout
 
 - At widths up to 1,100 px, the top bar contains matching **Menu** and
   **New chat** icon buttons with the builtryte logo between them. Hide
-  **Ask Audrey** and the desktop account controls.
+  **AUDREY** and the desktop account controls.
 - Menu opens one left drawer headed **Username - My chats**, followed by a
   search box with hint text, **Active/Archived**, and history. No separate search
   label or swipe instructions are displayed; the search retains its accessible name.
