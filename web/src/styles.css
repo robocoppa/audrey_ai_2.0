@@ -1668,7 +1668,7 @@ a:focus-visible {
   cursor: not-allowed;
 }
 
-.composer:focus-within {
+.composer:has(.composer-input:focus) {
   border-color: var(--border-strong);
   background: var(--surface-raised);
   box-shadow: 0 1.2rem 4rem rgb(0 0 0 / 30%), var(--focus-glow);
