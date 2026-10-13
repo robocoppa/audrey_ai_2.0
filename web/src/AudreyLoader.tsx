@@ -41,7 +41,9 @@ export function AudreyLoader({
                 />
               </svg>
               <span className="audrey-loading-orbit" />
-              <img src={autoPortrait} alt="" />
+              <div className="audrey-loading-photo">
+                <img src={autoPortrait} alt="" />
+              </div>
             </div>
             {!message ? (
               <span className="audrey-loading-label" aria-hidden="true">

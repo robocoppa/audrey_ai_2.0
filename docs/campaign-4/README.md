@@ -21,8 +21,9 @@ they are not ongoing task lists.
   Async history actions preserve a chat selected while the request is pending.
   Latest polish: Cloudflare bootstrap shows **Processing Cloudflare Authentication**
   / **Please wait...**. Its portrait rim fills/erases in 60-second passes;
-  ordinary loading uses two-second passes. Main portrait hover adds a rim glow
-  without brightening the photo. Projects uses a shared layers icon; the desktop divider
+  ordinary loading uses two-second passes. The small orb is partly hidden
+  by the photo, with backlight against its edge. Main portrait hover adds that
+  close glow without brightening the photo. Projects uses a shared layers icon; the desktop divider
   follows the sidebar edge with balanced logo spacing and **AUDREY** in spaced
   capitals, with a larger initial A and a softer slate color.
   These UI changes rebuild `audrey-ui`; laptop verification passed, latest Tower

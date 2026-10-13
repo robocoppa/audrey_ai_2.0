@@ -72,8 +72,10 @@ beside the wordmark.
   erases the rim over another 60 seconds and repeats. Ordinary loading uses
   two seconds per pass and starts a fresh cycle after authentication.
   This is a decorative waiting animation, not measured authentication progress.
-  Reduced motion shows a static rim. Hovering over the main-page portrait
-  adds a rim glow while keeping the photo's brightness unchanged.
+  The light sits directly on the photo's edge: the photo obscures the inner
+  half of the small moving orb, and the backlight hugs the rim and radiates
+  outward without a gap. Reduced motion shows a static rim. Hovering over the
+  main-page portrait adds the same close backlight without brightening the photo.
 
 Conversation creation, empty-draft cleanup, search, desktop rename,
 archive/restore, deletion, and active-run retention keep their existing behavior.
