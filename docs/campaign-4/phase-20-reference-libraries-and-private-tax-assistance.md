@@ -1,6 +1,6 @@
 # Phase 20 — reference libraries and private tax assistance
 
-Requested October 14, 2026. 20A is built; Tower collection acceptance is pending.
+Requested October 14, 2026. 20A is deployed and accepted; broad collection is pending.
 English content and requests only. Federal coverage can begin independently;
 state jurisdiction and priority tax years await the user's answer.
 
@@ -177,10 +177,11 @@ from arithmetic; record supported strengths in the existing model report.
 `scripts/reference/collect-irs-onbox.sh` as its Tower runner. Laptop checks cover
 catalog parsing, durable revisions/resume, HTTP and storage bounds, and runner
 reporting/cancellation. A live bounded laptop check retained five official PDFs
-without failures. This establishes collector behavior, not complete archive
-coverage or tax assistance. Named retrieval and private processing remain unbuilt.
+without failures. The user's bounded Tower check also passed October 14.
+20A is accepted. Broad archive coverage and tax assistance remain incomplete;
+named retrieval and private processing are the following slices.
 
-### Deploy and check 20A on Tower
+### Run IRS collection on Tower
 
 In `/mnt/user/appdata/audrey_ai_2.0`, pull the user's committed changes, then
 build the image used by the disposable collector:
@@ -193,19 +194,10 @@ No running service needs a restart for 20A. The collector uses an isolated
 container, public HTTPS and writable archive/report mounts; no GPU, API token,
 uploaded file, Ollama or Qdrant is needed.
 
-Run the bounded check in the same Tower directory:
-
-```bash
-NOTIFY=0 bash scripts/reference/collect-irs-onbox.sh --catalogs current --max-pages 1 --max-downloads 5
-```
-
-Success is exit 0, `run.downloaded: 5` on a fresh archive, `failures: []`, and
-`status: partial`. This deliberately reads one catalog page and attempts five
-PDF downloads; partial is expected. If repeated, verified PDFs are reused and
-the next pending documents are downloaded. Originals reside under
+Originals reside under
 `/mnt/user/knowledge/reference-libraries/tax/us/federal/irs/originals/`.
 
-After that check succeeds, launch broad collection in the same directory:
+Launch broad collection in the same Tower directory:
 
 ```bash
 nohup bash scripts/reference/collect-irs-onbox.sh > testing-out/last-irs-archive.log 2>&1 &

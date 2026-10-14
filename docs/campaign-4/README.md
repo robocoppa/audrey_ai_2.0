@@ -10,7 +10,8 @@ they are not ongoing task lists.
 ## Current work
 
 - **20 — reference libraries and private tax assistance:** 20A's public IRS
-  archive collector is built; Tower acceptance/collection is pending.
+  archive collector is deployed and accepted October 14; broad collection
+  has not yet been confirmed.
   [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds the
   collector commands and the remaining named local retrieval, private processing
   and verified tax Project workflow. Laptop verification and a five-PDF live
@@ -94,11 +95,11 @@ they are not ongoing task lists.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A built; Tower collection pending; next build 20B |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A accepted; broad collection pending; next build 20B |
 
 ## Remaining work
 
-1. Accept/run Phase 20A's IRS archive collection on Tower, then build 20B's
+1. Run Phase 20A's broad IRS archive collection on Tower, then build 20B's
    named retrieval, enforced private processing, the tax workflow and targeted
    tax evaluation. Public collection proceeds independently of private inputs.
 2. Confirm Tower deployment and close pending targeted acceptance for the
