@@ -1,6 +1,6 @@
 # Phase 20 — reference libraries and private tax assistance
 
-Requested October 14, 2026. 20A is deployed and accepted; broad collection is pending.
+Requested October 14, 2026. 20A is deployed and accepted; broad collection needs resume.
 English content and requests only. Federal coverage can begin independently;
 state jurisdiction and priority tax years await the user's answer.
 
@@ -178,8 +178,11 @@ from arithmetic; record supported strengths in the existing model report.
 catalog parsing, durable revisions/resume, HTTP and storage bounds, and runner
 reporting/cancellation. A live bounded laptop check retained five official PDFs
 without failures. The user's bounded Tower check also passed October 14.
-20A is accepted. Broad archive coverage and tax assistance remain incomplete;
-named retrieval and private processing are the following slices.
+20A is accepted. The first broad run retained 23,567 PDFs (all eligible current
+products); 3,140 remain, including one corrupted official historical source.
+The collector followup raises the file limit and continues after individual
+oversized files while preserving total-byte and disk stops. Build the updated
+image and resume; named retrieval and private processing are the following slices.
 
 ### Run IRS collection on Tower
 
@@ -212,9 +215,11 @@ remain in `testing-out/reference-archives/` on Tower. Read the downloaded
 Telegram report on the laptop.
 
 Rerun the same command to resume; no previously retained revision is removed.
-The defaults allow 10 GiB of newly downloaded PDF data per run, 128 MiB per PDF
-and reserve 1 GiB of free disk. A safety limit or download failure is reported
-explicitly. Use the collector's `--help` to adjust limits for a later batch.
+The defaults allow 10 GiB of newly downloaded PDF data per run, 256 MiB per PDF
+and reserve 1 GiB of free disk. A file exceeding the individual size limit is
+reported as a coverage gap and collection continues. The run stops at the total
+byte budget or disk reserve. Use the collector's `--help` to adjust limits for
+a later batch. Corrupted sources remain flagged rather than weakening validation.
 `--refresh` checks verified PDFs conditionally for changed content; changed
 catalog revision/posted dates also trigger checks automatically. PDF size/time
 or metadata/download failures never turn into claims of complete coverage.

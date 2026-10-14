@@ -18,7 +18,7 @@ import time
 from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import httpx
@@ -40,7 +40,13 @@ class CollectionError(Exception):
 
 
 class CapacityError(CollectionError):
-    """Storage or the configured byte budget cannot hold another document."""
+    """An explicit per-file limit or a run-wide capacity limit was reached."""
+
+    def __init__(
+        self, message: str, *, reason: Literal["file_size", "download_budget", "free_space"],
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 class PublicIRSClient:
@@ -131,8 +137,19 @@ class PublicIRSClient:
 
     def pdf(
         self, url: str, destination: Path, *, headers: dict[str, str],
-        max_bytes: int, min_free_bytes: int,
+        max_bytes: int, min_free_bytes: int, remaining_bytes: int | None = None,
     ) -> dict[str, Any]:
+        # max_bytes is the per-file cap. Keep the remaining run budget separate so
+        # a single large document cannot incorrectly halt unrelated downloads.
+        budget_is_tighter = remaining_bytes is not None and remaining_bytes <= max_bytes
+        byte_limit = min(max_bytes, remaining_bytes) if remaining_bytes is not None else max_bytes
+        capacity_reason: Literal["file_size", "download_budget"] = (
+            "download_budget" if budget_is_tighter else "file_size"
+        )
+        capacity_message = (
+            "PDF exceeds the remaining download-byte budget" if budget_is_tighter else
+            f"PDF exceeds the per-file size limit ({max_bytes} bytes)"
+        )
         with self.response(url, headers=headers) as response:
             metadata = {
                 "final_url": str(response.url), "etag": response.headers.get("etag", ""),
@@ -141,19 +158,31 @@ class PublicIRSClient:
             if response.status_code == 304:
                 return {**metadata, "not_modified": True, "bytes": 0}
             length = response.headers.get("content-length", "")
-            if length.isdigit() and int(length) > max_bytes:
-                raise CapacityError("PDF exceeds the file or remaining download-byte limit")
+            if length.isdigit():
+                declared_bytes = int(length)
+                if declared_bytes > max_bytes:
+                    # The whole size is known before reading any bytes. Skip an
+                    # individually oversized PDF even when the run budget is smaller.
+                    raise CapacityError(
+                        f"PDF exceeds the per-file size limit ({max_bytes} bytes)",
+                        reason="file_size",
+                    )
+                if declared_bytes > byte_limit:
+                    raise CapacityError(capacity_message, reason=capacity_reason)
             start = time.monotonic()
             size = 0
             with destination.open("wb") as output:
                 for block in response.iter_bytes(chunk_size=64 * 1024):
                     size += len(block)
-                    if size > max_bytes:
-                        raise CapacityError("PDF exceeds the file or remaining download-byte limit")
+                    if size > byte_limit:
+                        raise CapacityError(capacity_message, reason=capacity_reason)
                     if time.monotonic() - start > 120:
                         raise CollectionError("PDF response exceeded the time limit")
                     if shutil.disk_usage(destination.parent).free < min_free_bytes + len(block):
-                        raise CapacityError("Available disk space reached the configured reserve")
+                        raise CapacityError(
+                            "Available disk space reached the configured reserve",
+                            reason="free_space",
+                        )
                     output.write(block)
             with destination.open("rb") as source:
                 if source.read(5) != b"%PDF-":
@@ -206,7 +235,10 @@ def collect(args: argparse.Namespace, store: ArchiveStore, client: PublicIRSClie
                 body, final_url = client.catalog(url)
                 page = parse_catalog_page(body.decode("utf-8"), final_url, catalog)
                 if shutil.disk_usage(store.root).free < args.min_free_bytes + 2 * len(body):
-                    raise CapacityError("Catalog storage reached the configured free-space reserve")
+                    raise CapacityError(
+                        "Catalog storage reached the configured free-space reserve",
+                        reason="free_space",
+                    )
                 store.record_catalog_page(
                     catalog, final_url, body, page.entries,
                     next_urls=page.next_urls, total_rows=page.total_rows,
@@ -283,7 +315,8 @@ def collect(args: argparse.Namespace, store: ArchiveStore, client: PublicIRSClie
             try:
                 metadata = client.pdf(
                     url, temporary, headers=headers,
-                    max_bytes=min(args.max_file_bytes, args.max_new_bytes - run["new_bytes"]),
+                    max_bytes=args.max_file_bytes,
+                    remaining_bytes=args.max_new_bytes - run["new_bytes"],
                     min_free_bytes=args.min_free_bytes,
                 )
                 if metadata["not_modified"]:
@@ -293,7 +326,10 @@ def collect(args: argparse.Namespace, store: ArchiveStore, client: PublicIRSClie
                     run["unchanged"] += 1
                 else:
                     if shutil.disk_usage(store.root).free < args.min_free_bytes + metadata["bytes"]:
-                        raise CapacityError("Archiving the verified PDF would cross the free-space reserve")
+                        raise CapacityError(
+                            "Archiving the verified PDF would cross the free-space reserve",
+                            reason="free_space",
+                        )
                     store.record_download(
                         url, temporary, metadata["final_url"],
                         etag=metadata["etag"], last_modified=metadata["last_modified"],
@@ -305,10 +341,16 @@ def collect(args: argparse.Namespace, store: ArchiveStore, client: PublicIRSClie
             except (CollectionError, CatalogParseError, httpx.HTTPError, OSError, ValueError) as error:
                 safe_error = str(error) if not isinstance(error, httpx.HTTPError) else type(error).__name__
                 store.record_failure(url, safe_error)
-                failures.append({"url": url, "error": safe_error})
-                _emit("pdf_failed", url=url, error=safe_error)
+                failure = {"url": url, "error": safe_error}
                 if isinstance(error, CapacityError):
-                    limits.append("file size, byte budget or free-space limit")
+                    failure["capacity_reason"] = error.reason
+                failures.append(failure)
+                _emit("pdf_failed", **failure)
+                if isinstance(error, CapacityError) and error.reason != "file_size":
+                    limits.append(
+                        "download-byte budget" if error.reason == "download_budget" else
+                        "free-space reserve"
+                    )
                     break
             finally:
                 temporary.unlink(missing_ok=True)
@@ -348,7 +390,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--max-downloads", type=_positive_int, help="PDF attempts this run (resume later)")
     result.add_argument("--max-new-bytes", type=_positive_int, default=10 * GIB)
     result.add_argument("--min-free-bytes", type=_positive_int, default=GIB)
-    result.add_argument("--max-file-bytes", type=_positive_int, default=128 * MIB)
+    result.add_argument("--max-file-bytes", type=_positive_int, default=256 * MIB)
     result.add_argument("--delay", type=float, default=1.0, help="Minimum seconds between IRS requests")
     result.add_argument("--refresh", action="store_true", help="Conditionally check verified PDFs for updates")
     result.add_argument("--discover-only", action="store_true")

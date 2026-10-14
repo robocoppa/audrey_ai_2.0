@@ -630,3 +630,173 @@ def test_copy_peak_guard_does_not_commit_original_or_leave_staging(
         assert store.latest_revision(PDF_URL) is None
         assert list((tmp_path / ".staging").iterdir()) == []
         assert not list((tmp_path / "originals").rglob("*.pdf"))
+
+
+@pytest.mark.parametrize("declared_size", [True, False])
+def test_individual_oversize_is_recorded_and_later_pdf_is_archived(
+    clients, tmp_path, declared_size,
+):
+    later_url = "https://www.irs.gov/pub/irs-pdf/p17.pdf"
+    pdf_requests = []
+
+    def handler(request):
+        url = str(request.url)
+        if url == CATALOG_URLS["current"]:
+            return httpx.Response(200, content=_catalog([
+                ("Form 1040", "Income Tax Return", "f1040.pdf"),
+                ("Publication 17", "Your Federal Income Tax", "p17.pdf"),
+            ]))
+        pdf_requests.append(url)
+        if url == PDF_URL:
+            if declared_size:
+                return httpx.Response(200, content=PDF_V1, headers={"content-length": "5000"})
+            return httpx.Response(200, stream=_Chunks([b"%PDF-1.4\n", b"x" * 1000, b"%%EOF"]))
+        assert url == later_url
+        return httpx.Response(200, content=PDF_V1)
+
+    with ArchiveStore(tmp_path) as store:
+        report = collect(_args(tmp_path, "--max-file-bytes", "100"), store, clients(handler))
+        assert pdf_requests == [PDF_URL, later_url]
+        assert report["status"] == "findings"
+        assert report["archive_complete_for_selected_catalogs"] is False
+        assert report["run"]["attempted"] == 2
+        assert report["run"]["downloaded"] == 1
+        assert report["run"]["new_bytes"] == len(PDF_V1)
+        assert report["inventory"]["failed"] == 1
+        assert report["inventory"]["pending"] == 0
+        assert report["remaining_known_documents"] == 1
+        assert report["limits"] == []
+        assert report["failures"][0]["capacity_reason"] == "file_size"
+        assert "per-file size limit" in report["failures"][0]["error"]
+        assert store.latest_revision(PDF_URL) is None
+        later = store.latest_revision(later_url)
+        assert (tmp_path / later["relative_path"]).read_bytes() == PDF_V1
+        assert list((tmp_path / ".staging").iterdir()) == []
+
+
+@pytest.mark.parametrize("declared_size", [True, False])
+def test_remaining_global_budget_stops_before_later_pdf(
+    clients, tmp_path, declared_size,
+):
+    pdf_requests = []
+
+    def handler(request):
+        url = str(request.url)
+        if url == CATALOG_URLS["current"]:
+            return httpx.Response(200, content=_catalog([
+                ("Form 1040", "Income Tax Return", "f1040.pdf"),
+                ("Publication 17", "Your Federal Income Tax", "p17.pdf"),
+            ]))
+        pdf_requests.append(url)
+        if declared_size:
+            return httpx.Response(200, content=PDF_V1)
+        return httpx.Response(200, stream=_Chunks([PDF_V1]))
+
+    with ArchiveStore(tmp_path) as store:
+        report = collect(_args(
+            tmp_path, "--max-file-bytes", "100", "--max-new-bytes", "10",
+        ), store, clients(handler))
+        assert pdf_requests == [PDF_URL]
+        assert report["status"] == "findings"
+        assert report["archive_complete_for_selected_catalogs"] is False
+        assert report["run"]["attempted"] == 1
+        assert report["run"]["downloaded"] == 0
+        assert report["run"]["new_bytes"] == 0
+        assert report["inventory"]["failed"] == 1
+        assert report["inventory"]["pending"] == 1
+        assert report["remaining_known_documents"] == 2
+        assert report["limits"] == ["download-byte budget"]
+        assert report["failures"][0]["capacity_reason"] == "download_budget"
+        assert "remaining download-byte budget" in report["failures"][0]["error"]
+        assert store.latest_revision(PDF_URL) is None
+        assert list((tmp_path / ".staging").iterdir()) == []
+
+
+@pytest.mark.parametrize("failure_stage", ["download", "archive"])
+def test_disk_reserve_failure_stops_before_later_pdf(
+    clients, tmp_path, monkeypatch, failure_stage,
+):
+    pdf_requests = []
+    requested_pdf = False
+    streamed_pdf = False
+
+    def available_space(path):
+        nonlocal streamed_pdf
+        if failure_stage == "download" and requested_pdf:
+            return SimpleNamespace(free=1)
+        if str(path).endswith(".staging"):
+            streamed_pdf = True
+        elif failure_stage == "archive" and streamed_pdf:
+            return SimpleNamespace(free=1)
+        return SimpleNamespace(free=1000000)
+
+    def handler(request):
+        nonlocal requested_pdf
+        url = str(request.url)
+        if url == CATALOG_URLS["current"]:
+            return httpx.Response(200, content=_catalog([
+                ("Form 1040", "Income Tax Return", "f1040.pdf"),
+                ("Publication 17", "Your Federal Income Tax", "p17.pdf"),
+            ]))
+        pdf_requests.append(url)
+        requested_pdf = True
+        return httpx.Response(200, content=PDF_V1)
+
+    monkeypatch.setattr(irs_collect.shutil, "disk_usage", available_space)
+    with ArchiveStore(tmp_path) as store:
+        report = collect(_args(tmp_path), store, clients(handler))
+        assert pdf_requests == [PDF_URL]
+        assert report["status"] == "findings"
+        assert report["archive_complete_for_selected_catalogs"] is False
+        assert report["run"]["attempted"] == 1
+        assert report["run"]["downloaded"] == 0
+        assert report["run"]["new_bytes"] == 0
+        assert report["inventory"]["failed"] == 1
+        assert report["inventory"]["pending"] == 1
+        assert report["remaining_known_documents"] == 2
+        assert report["limits"] == ["free-space reserve"]
+        assert report["failures"][0]["capacity_reason"] == "free_space"
+        assert store.latest_revision(PDF_URL) is None
+        assert list((tmp_path / ".staging").iterdir()) == []
+
+
+def test_larger_pdf_default_preserves_global_budget_and_disk_reserve(tmp_path):
+    args = irs_collect.parser().parse_args(["--root", str(tmp_path)])
+    assert args.max_file_bytes == 256 * irs_collect.MIB
+    assert args.max_new_bytes == 10 * irs_collect.GIB
+    assert args.min_free_bytes == irs_collect.GIB
+
+
+def test_declared_oversize_does_not_halt_a_smaller_remaining_run_budget(clients, tmp_path):
+    later_url = "https://www.irs.gov/pub/irs-pdf/p17.pdf"
+    pdf_requests = []
+
+    def handler(request):
+        url = str(request.url)
+        if url == CATALOG_URLS["current"]:
+            return httpx.Response(200, content=_catalog([
+                ("Form 1040", "Income Tax Return", "f1040.pdf"),
+                ("Publication 17", "Your Federal Income Tax", "p17.pdf"),
+            ]))
+        pdf_requests.append(url)
+        if url == PDF_URL:
+            return httpx.Response(200, content=PDF_V1, headers={"content-length": "5000"})
+        assert url == later_url
+        return httpx.Response(200, content=PDF_V1)
+
+    with ArchiveStore(tmp_path) as store:
+        report = collect(_args(
+            tmp_path, "--max-file-bytes", "100", "--max-new-bytes", "50",
+        ), store, clients(handler))
+        assert pdf_requests == [PDF_URL, later_url]
+        assert report["status"] == "findings"
+        assert report["archive_complete_for_selected_catalogs"] is False
+        assert report["run"]["attempted"] == 2
+        assert report["run"]["downloaded"] == 1
+        assert report["run"]["new_bytes"] == len(PDF_V1)
+        assert report["remaining_known_documents"] == 1
+        assert report["limits"] == []
+        assert report["failures"][0]["capacity_reason"] == "file_size"
+        assert store.latest_revision(PDF_URL) is None
+        assert store.latest_revision(later_url) is not None
+        assert list((tmp_path / ".staging").iterdir()) == []
