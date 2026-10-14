@@ -56,5 +56,5 @@ CSV/XLSX, a PDF with a diagram, an existing saved chat, and a retained video.
 A calculator request needs no upload. The user confirms visible tool calls and
 answers before live acceptance is marked passed.
 
-Status: all five tools built; focused hermetic checks, real local rendering,
-scoped lint and locked dependencies pass. Tower/browser acceptance pending.
+Status: complete. The user deployed the tools and accepted all five in the
+browser October 13, following focused laptop verification.

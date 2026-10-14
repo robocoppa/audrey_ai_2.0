@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 13, 2026.** English user input only. Passed work stays closed.
+**Updated October 14, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -9,7 +9,15 @@ they are not ongoing task lists.
 
 ## Current work
 
-- **19 — deeper evidence tools:** built October 13; laptop checks pass, browser acceptance pending.
+- **20 — reference libraries and private tax assistance:** 20A's public IRS
+  archive collector is built; Tower acceptance/collection is pending.
+  [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds the
+  collector commands and the remaining named local retrieval, private processing
+  and verified tax Project workflow. Laptop verification and a five-PDF live
+  collection passed. Next build: 20B. State jurisdiction and priority years remain
+  unspecified; fine-tuning requires later evidence.
+
+- **19 — deeper evidence tools:** complete; user accepted all five tools October 13.
   [Phase 19](phase-19-evidence-tools.md) defines calculator/conversions, CSV/XLSX
   analysis, PDF-page inspection, previous-conversation reading and video-frame
   inspection. Existing chat disclosures show their activity.
@@ -85,29 +93,28 @@ they are not ongoing task lists.
 | 16 | [Document tooling boundary](phase-16-native-document-tools.md) | Retired; Hermes uses its existing stack |
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
-| 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Built; browser acceptance pending |
+| 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A built; Tower collection pending; next build 20B |
 
 ## Remaining work
 
-Accept Phase 19's five tools with normal browser questions and real owned
-evidence. Rebuild `audrey` and `custom-tools`; no UI/media-worker rebuild is
-needed for this feature. Prior UI acceptance stays queued below.
-
-1. Confirm Tower deployment and close pending targeted acceptance for the
+1. Accept/run Phase 20A's IRS archive collection on Tower, then build 20B's
+   named retrieval, enforced private processing, the tax workflow and targeted
+   tax evaluation. Public collection proceeds independently of private inputs.
+2. Confirm Tower deployment and close pending targeted acceptance for the
    current course-reviewed work. The local, gitignored [AUDIT](../lesson-ai/AUDIT.md)
    holds its review record; the [operations guide](../reference/box-operations.md#10-memory-backups-and-isolated-restore-verification)
    holds the backup check. Reuse passed checks instead of restarting the suites.
-2. Accept the latest branding and compact/mobile layout: stylistic **AUDREY** label,
+3. Accept the latest branding and compact/mobile layout: stylistic **AUDREY** label,
    balanced desktop divider, Cloudflare loading message, distinct Projects icon,
    left menu/footer, chat swipes, New chat, Project beside Model, empty-screen fit,
    profile keyboard behavior, normal scrolling, and deliberate pull-to-refresh.
    No upload or scripted live eval is required for these UI checks.
-3. Accept the shared composer overlays and immediate per-answer tool summaries in
+4. Accept the shared composer overlays and immediate per-answer tool summaries in
    the browser, reusing the existing Ready video. Recorded video reads are passed;
    the remaining defect was their display, not missing tool execution.
-4. Close remaining 3D.6 browser acceptance. Activation is already approved and
-   recorded in config. No additional campaign work is required without a new
-   user request.
+5. Close remaining 3D.6 browser acceptance. Activation is already approved and
+   recorded in config. Passed work remains closed.
 
 Domain cleanup and operational evidence/traffic followups are closed by user
 confirmation. Password login, Tailscale, 17D, and further Hermes changes stay deferred. 17C is
