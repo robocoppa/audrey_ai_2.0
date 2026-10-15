@@ -16,6 +16,7 @@ from audrey.references.library import (
     ReferenceReadError,
     ReferenceUnavailable,
 )
+from audrey.references.releases import ReleaseError
 
 router = APIRouter(prefix="/v1/references", tags=["references"])
 _read_slots = asyncio.Semaphore(2)
@@ -35,6 +36,14 @@ class CatalogRequest(LibraryRequest):
     catalog: Literal["current", "prior", "bulletins"] | None = "current"
     offset: int = Field(default=0, ge=0, le=100000)
     limit: int = Field(default=5, ge=1, le=20)
+    tax_year: int | None = Field(default=None, ge=1800, le=2200)
+
+
+class SearchRequest(LibraryRequest):
+    query: str = Field(min_length=1, max_length=1000)
+    catalog: Literal["current", "prior", "bulletins"] | None = "current"
+    product_number: str | None = Field(default=None, min_length=1, max_length=100)
+    top_k: int = Field(default=3, ge=1, le=5)
     tax_year: int | None = Field(default=None, ge=1800, le=2200)
 
 
@@ -102,7 +111,18 @@ def _bounded_read(result: dict) -> dict:
 
 @router.get("/libraries")
 async def libraries(request: Request, _: object = Depends(require_principal)) -> dict:
-    return await asyncio.to_thread(_registry(request).list_libraries)
+    result = await asyncio.to_thread(_registry(request).list_libraries)
+    releases = getattr(request.app.state, "reference_releases", None)
+    if releases is not None:
+        for item in result["items"]:
+            try:
+                release = await asyncio.to_thread(releases.published, item["id"], "current")
+                if release is not None:
+                    item.update(search_status="published", release_id=release["id"],
+                                search_coverage=release["coverage"])
+            except ReleaseError:
+                item["search_status"] = "unavailable"
+    return result
 
 
 @router.post("/catalog")
@@ -132,5 +152,39 @@ async def read(
                 revision_sha256=body.revision_sha256,
             )
         return _bounded_read(result)
+    except (ReferenceNotFound, ReferenceUnavailable, ReferenceQueryError, ReferenceReadError) as exc:
+        raise _http_error(exc) from exc
+
+
+def _bounded_search(result: dict) -> dict:
+    result = {**result, "results": [dict(item) for item in result["results"]]}
+    original_count = len(result["results"])
+    while _size(result) > _RESULT_CHARS and len(result["results"]) > 1:
+        result["results"].pop()
+    result["returned"] = len(result["results"])
+    result["result_limit_applied"] = result["returned"] < original_count
+    if _size(result) > _RESULT_CHARS and result["results"]:
+        item = result["results"][0]
+        text = item["text"]
+        # Metadata is bounded independently; retain a useful, exact character span.
+        while _size(result) > _RESULT_CHARS and len(text) > 100:
+            text = text[:max(100, len(text) - 100)]
+            item.update(text=text, char_end=item["offset"] + len(text), passage_truncated=True)
+    if _size(result) > _RESULT_CHARS:
+        raise ReferenceReadError("Reference search metadata exceeds the bounded result size.")
+    return result
+
+
+@router.post("/search")
+async def search(
+    body: SearchRequest, request: Request, _: None = Depends(require_service),
+) -> dict:
+    service = getattr(request.app.state, "reference_search", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="Public reference search is not initialized.")
+    try:
+        return _bounded_search(await service.search(**body.model_dump()))
+    except ReleaseError as exc:
+        raise HTTPException(status_code=503, detail="Public reference index state is unavailable.") from exc
     except (ReferenceNotFound, ReferenceUnavailable, ReferenceQueryError, ReferenceReadError) as exc:
         raise _http_error(exc) from exc

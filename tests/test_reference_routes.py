@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -176,3 +176,70 @@ def test_public_page_sources_preserve_page_citations_and_exclude_catalog_only():
     assert _observable_arguments("read_reference", {
         "document_id": _ID, "page": 2, "path": "/private/path",
     }) == {"document_id": _ID, "page": 2, "path": "[redacted]"}
+
+
+async def test_search_requires_service_auth_and_refuses_model_scope_overrides(client, app):
+    app.state.reference_search = SimpleNamespace(search=AsyncMock())
+    for headers in ({}, {"Authorization": "Bearer browser-user"}):
+        response = await client.post("/v1/references/search", json={"query": "filing"}, headers=headers)
+        assert response.status_code == 401
+    for key in ("collection", "release_id", "root", "user", "asof_year"):
+        response = await client.post("/v1/references/search", headers=_HEADERS,
+                                     json={"query": "filing", key: "untrusted"})
+        assert response.status_code == 422
+    app.state.reference_search.search.assert_not_awaited()
+
+
+async def test_search_preserves_valid_bounded_json_and_exact_character_spans(client, app):
+    result = {
+        "release_id": "public-release", "coverage": {"subset": True, "eligible_total": 2407},
+        "returned": 5, "results": [{
+            "document_id": _ID, "revision_sha256": "b" * 64,
+            "source_url": "https://www.irs.gov/pub/irs-pdf/p17.pdf", "product_number": "Publication 17",
+            "page": page, "offset": 40, "text": "Evidence text " * 80,
+            "char_end": 40 + len("Evidence text " * 80), "passage_truncated": False,
+        } for page in range(1, 6)],
+    }
+    app.state.reference_search = SimpleNamespace(search=AsyncMock(return_value=result))
+    response = await client.post("/v1/references/search", headers=_HEADERS,
+                                 json={"query": "filing requirements", "tax_year": 2025})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(json.dumps(body, ensure_ascii=False)) <= references._RESULT_CHARS
+    assert body["coverage"] == result["coverage"]
+    assert body["returned"] == len(body["results"]) > 0
+    assert body["result_limit_applied"]
+    for item in body["results"]:
+        assert item["char_end"] == item["offset"] + len(item["text"])
+        assert result["results"][0]["text"].startswith(item["text"])
+    assert app.state.reference_search.search.await_args.kwargs["tax_year"] == 2025
+
+
+async def test_search_without_release_state_returns_unavailable(client, app):
+    response = await client.post("/v1/references/search", headers=_HEADERS, json={"query": "filing"})
+    assert response.status_code == 503
+    app.state.reference_search = SimpleNamespace(search=AsyncMock(side_effect=ReferenceUnavailable("Not published")))
+    response = await client.post("/v1/references/search", headers=_HEADERS, json={"query": "filing"})
+    assert response.status_code == 503
+
+
+def test_search_snippets_add_page_sources_without_exposing_query_or_passage_in_events():
+    from audrey.pipeline.react import _observed_evidence
+    from audrey.pipeline.run_observations import _observable_arguments
+    from audrey.tools.dispatch import ToolResult
+
+    result = ToolResult(name="reference_search", call_id=None, elapsed_s=0, is_error=False,
+                        content=json.dumps({"results": [
+                            {"source_url": "https://www.irs.gov/pub/irs-pdf/p17.pdf", "page": 9,
+                             "product_number": "Publication 17", "text": "Quoted public evidence"},
+                            {"source_url": "https://www.irs.gov/pub/irs-pdf/p17.pdf", "page": 9,
+                             "text": "Duplicate page"},
+                            {"source_url": "https://www.irs.gov/pub/irs-pdf/p17.pdf", "page": 10,
+                             "text": ""},
+                        ]}))
+    sources = _observed_evidence([result])
+    assert sources == [{"title": "Publication 17 · Page 9",
+                        "url": "https://www.irs.gov/pub/irs-pdf/p17.pdf#page=9", "tool": "reference_search"}]
+    assert _observable_arguments("reference_search", {"query": "personal filing situation", "tax_year": 2025}) == {
+        "query": "[redacted]", "tax_year": 2025,
+    }

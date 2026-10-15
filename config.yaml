@@ -1748,6 +1748,11 @@ title_generation:
 # Edition dates do not establish applicability to a particular tax year.
 reference_libraries:
   enabled: true
+  index_root: "/data/reference-libraries"
+  # Initial retrieval gates; tax-case quality calibration follows in 20E.
+  search:
+    min_dense_score: 0.55
+    min_term_overlap: 0.5
   asof_year: 2026
   history_years: 5
   libraries:

@@ -41,6 +41,8 @@ from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.graph import build_graph
 from audrey.readiness import ReadinessCollector
 from audrey.references.library import ReferenceLibraryRegistry
+from audrey.references.releases import ReleaseError, ReleaseStore
+from audrey.references.search import ReferenceSearchService
 from audrey.routes.admin import router as admin_router
 from audrey.routes.app import router as application_router
 from audrey.routes.app.runs import NativeRunManager
@@ -286,9 +288,20 @@ async def lifespan(app: FastAPI):
     app.state.image_embedder = image_embedder
     app.state.kb_watcher = watcher
     app.state.kb_reconciler = reconciler
-    app.state.reference_libraries = ReferenceLibraryRegistry(
-        cfg.raw.get("reference_libraries", {}),
-    )
+    reference_cfg = cfg.raw.get("reference_libraries", {})
+    app.state.reference_libraries = ReferenceLibraryRegistry(reference_cfg)
+    app.state.reference_releases = None
+    app.state.reference_search = None
+    if app.state.reference_libraries.enabled:
+        try:
+            releases = ReleaseStore(Path(reference_cfg.get("index_root", "/data/reference-libraries")))
+            app.state.reference_search = ReferenceSearchService(
+                app.state.reference_libraries, releases, qdrant, text_embedder,
+                config=reference_cfg.get("search", {}),
+            )
+            app.state.reference_releases = releases
+        except (OSError, ReleaseError):
+            log.warning("Public reference search state unavailable; catalog/page reader remain available")
 
     # Durable chat-archive outbox. Response handlers commit only the small
     # local source row; this lifecycle-owned worker performs the remote

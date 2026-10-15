@@ -32,6 +32,7 @@ _SAFE_ERROR_CODE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _VISIBLE_ARGUMENTS: dict[str, frozenset[str]] = {
     "calculate": frozenset({"operation", "from_unit", "to_unit"}),
     "reference_lookup": frozenset({"library_id", "product_number", "catalog", "offset", "tax_year"}),
+    "reference_search": frozenset({"library_id", "catalog", "product_number", "tax_year", "top_k"}),
     "read_reference": frozenset({"library_id", "document_id", "catalog", "page", "offset"}),
     "analyze_table": frozenset({"filename", "action", "sheet", "limit", "offset"}),
     "inspect_pdf_page": frozenset({"filename", "page"}),

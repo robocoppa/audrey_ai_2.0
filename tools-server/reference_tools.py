@@ -46,7 +46,7 @@ class ReferenceReadRequest(ReferenceRequest):
     )
     document_id: str = Field(
         pattern=r"^[0-9a-f]{64}$",
-        description="Full 64-character document ID returned by reference_lookup; never a filename, path, URL or abbreviated ID.",
+        description="Full 64-character document ID returned by reference_lookup or reference_search; never a filename, path, URL or abbreviated ID.",
     )
     page: int = Field(default=1, ge=1, le=10000, description="PDF page number, starting at 1.")
     offset: int = Field(
@@ -60,8 +60,28 @@ class ReferenceReadRequest(ReferenceRequest):
     )
 
 
-def _require_reference_service(request: Request) -> None:
-    unavailable = request.app.state.capabilities.unavailable(["audrey_references"])
+class ReferenceSearchRequest(ReferenceRequest):
+    query: str = Field(
+        min_length=1, max_length=1000,
+        description="Question or terms to retrieve in the selected public reference library.",
+    )
+    catalog: Literal["current", "prior", "bulletins"] | None = Field(
+        default="current",
+        description="Current catalog by default. Explicit prior/bulletins searches use only the server-controlled recent-history window.",
+    )
+    top_k: int = Field(default=3, ge=1, le=5, description="Maximum matching passages.")
+    product_number: str | None = Field(
+        default=None, min_length=1, max_length=100,
+        description="Optional exact official product number to narrow retrieval.",
+    )
+    tax_year: int | None = Field(
+        default=None, ge=1800, le=2200,
+        description="Optional return-year filter, limited to the server's recent-year window. Only documents with a verified source-stated return year match; unknown-year documents are excluded. Revision dates do not establish applicability.",
+    )
+
+
+def _require_reference_service(request: Request, *extra: str) -> None:
+    unavailable = request.app.state.capabilities.unavailable(["audrey_references", *extra])
     if unavailable:
         raise HTTPException(status_code=503, detail={
             "error": "capability_unavailable", "components": unavailable,
@@ -127,3 +147,21 @@ async def reference_lookup(body: ReferenceLookupRequest, request: Request) -> di
 async def read_reference(body: ReferenceReadRequest, request: Request) -> dict:
     _require_reference_service(request)
     return await _proxy(request, "/v1/references/read", body.model_dump())
+
+
+@router.post("/reference_search", operation_id="reference_search", description=(
+    "Retrieve relevant passages from the published local English IRS reference "
+    "library using dense and keyword retrieval under the same selected scope. "
+    "Current catalog is the default; explicit prior/bulletins scope permits only "
+    "the server-controlled recent historical window. Search never falls back to "
+    "global knowledge, private uploads or another library, and the model cannot "
+    "choose a collection, release or history window. Returned source snippets "
+    "are limited retrieval results, not exhaustive legal research or proof of "
+    "eligibility. Tax-year applicability remains unknown until verified from "
+    "the source; revision dates are not tax years. Read cited pages and the "
+    "returned revision with read_reference before relying on exact wording. "
+    "An unavailable library/index/embedding service returns an explicit failure."
+))
+async def reference_search(body: ReferenceSearchRequest, request: Request) -> dict:
+    _require_reference_service(request, "qdrant", "text_embedding")
+    return await _proxy(request, "/v1/references/search", body.model_dump())

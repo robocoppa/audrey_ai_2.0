@@ -342,6 +342,34 @@ class ReferenceLibraryRegistry:
             "historical_edition_window": [self.first_history_year, self.asof_year],
         }
 
+    def iter_index_documents(self, library_id: str, *, catalog: str = "current"):
+        """Page through the permitted manifest; asset paths remain internal.
+
+        No database transaction stays open while the caller embeds a document.
+        The same archived-edition guard used by exact reads applies here.
+        """
+        library = self._library(library_id)
+        after = ""
+        while True:
+            sql, params = self._select(catalog=catalog)
+            sql += " AND d.source_url>? ORDER BY d.source_url LIMIT 64"
+            with self._connection(library) as connection:
+                rows = connection.execute(sql, [*params, after]).fetchall()
+            if not rows:
+                return
+            for row in rows:
+                after = row["source_url"]
+                try:
+                    self._check_archived_scope(row, catalog)
+                except ReferenceNotFound:
+                    continue
+                metadata = self._metadata(library, row)
+                metadata["_asset"] = {
+                    "root": str(library.root), "relative_path": row["relative_path"],
+                    "bytes": row["bytes"], "sha256": row["sha256"],
+                }
+                yield metadata
+
     def _lookup(
         self, library: _Library, identifier: str, revision_sha256: str | None = None,
         catalog: str | None = None,
@@ -361,6 +389,10 @@ class ReferenceLibraryRegistry:
             row = connection.execute(sql, params).fetchone()
         if row is None:
             raise ReferenceNotFound("Reference document not found")
+        self._check_archived_scope(row, catalog)
+        return row
+
+    def _check_archived_scope(self, row: sqlite3.Row, catalog: str | None) -> None:
         scope = "current" if catalog is None else catalog
         if scope != "current" and row["sha256"]:
             try:
@@ -375,7 +407,6 @@ class ReferenceLibraryRegistry:
                 archived_year = None
             if archived_year is None or not self.first_history_year <= archived_year <= self.asof_year:
                 raise ReferenceNotFound("Reference document not found")
-        return row
 
     def lookup(
         self, library_id: str, document_id: str, *, catalog: str | None = None,

@@ -12,12 +12,14 @@ they are not ongoing task lists.
 - **20 — reference libraries and private tax assistance:** public collection
   is sufficient to proceed: logs confirm 26,706 downloaded/verified PDFs; the
   only known source failure is the corrupt 1976 Form 940. No further broad run.
-  **20B.1 built:** named IRS catalog, exact lookup and bounded page reading.
+  **20B.1 accepted October 14:** named IRS catalog, exact lookup and bounded page reading.
   Models see current official editions by default; explicit historical access
   is limited to the most recent five years (2022–2026). Older originals remain
   outside the accessible library. Tax-year applicability is verified separately
-  from catalog/revision dates. Deploy `audrey` and `custom-tools`; browser
-  acceptance pending. Next: 20B.2's scoped hybrid index/search.
+  from catalog/revision dates. Deployed tools, page citations and historical
+  refusal are user-accepted. **20B.2 built:** local scoped hybrid content search,
+  resumable bounded indexing, verified publication and page citations. Tower
+  deployment, initial current-catalog indexing and browser acceptance are next.
   [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds
   the contract and remaining privacy/tax workflow. State jurisdictions remain
   unspecified; fine-tuning requires evidence.
@@ -99,14 +101,15 @@ they are not ongoing task lists.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A sufficient; 20B.1 catalog/read built; next 20B.2 scoped search |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A/20B.1 accepted; 20B.2 built, indexing/browser acceptance pending |
 
 ## Remaining work
 
-1. Accept 20B.1's current/recent reference lookup and page reading, then build
-   20B.2's hybrid search using the same access scope. Follow with enforced private
-   processing, the tax workflow and targeted tax evaluation. The broad offline
-   archive is sufficient; further bulk collection is not a prerequisite.
+1. Deploy 20B.2 and publish the current-catalog search index, then accept one
+   cited document-content search in the browser. The phase document has the
+   exact rebuild/index steps. Follow with 20C enforced private processing,
+   20D's tax workflow and targeted 20E evaluation. The owned archive is sufficient;
+   another broad collection is unnecessary.
 2. Confirm Tower deployment and close pending targeted acceptance for the
    current course-reviewed work. The local, gitignored [AUDIT](../lesson-ai/AUDIT.md)
    holds its review record; the [operations guide](../reference/box-operations.md#10-memory-backups-and-isolated-restore-verification)

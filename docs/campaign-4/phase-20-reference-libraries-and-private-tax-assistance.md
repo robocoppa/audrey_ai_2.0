@@ -1,6 +1,7 @@
 # Phase 20 — reference libraries and private tax assistance
 
-Requested October 14, 2026. The archive is sufficient; 20B.1 catalog/read is built.
+Requested October 14, 2026. The archive is sufficient; 20B.1 is deployed and
+accepted. 20B.2 is built; Tower indexing and browser acceptance are pending.
 English content and requests only. Federal coverage can begin independently;
 state jurisdiction and priority tax years await the user's answer.
 
@@ -143,7 +144,7 @@ Publish a release only after its coverage and extraction checks pass; preserve
 the previous usable release during updates. Tax retrieval thresholds are measured
 on tax cases rather than assumed from other topic datasets.
 
-#### 20B.1 — catalog and page reader (built)
+#### 20B.1 — catalog and page reader (accepted October 14)
 
 `reference_libraries` in repository configuration registers the owned IRS root.
 `reference_lookup` performs exact product-number/title catalog lookup;
@@ -157,7 +158,8 @@ history window. Current is the default for lookup and reading; explicit
 old checksums, removed entries and ambiguous historical edition years are refused.
 Failed updates cannot silently serve an old retained body as fresh. Edition-year
 filters never assert applicability to a tax year; unverified tax-year filtering
-returns an explicit error until 20B.2 establishes that metadata.
+returns an explicit error. Verified return-year filtering is provided by
+20B.2 content search; catalog metadata remains separate.
 
 The read-only SQLite inventory is authoritative even when final report export
 fails. Reads do not load the full archive, use private files or contact a model.
@@ -166,10 +168,45 @@ and elapsed-time bounds. Page and character pagination preserve precise coverage
 blank/scanned pages need a future OCR/inspection path. Actual page reads produce
 official-source citations in the existing Sources disclosure.
 
-20B.2 adds published releases and hybrid text search over current editions,
-keeping the same scope on keyword/vector search and exact reads. Recent history
-is separately selected; defaults never mix decades of revisions. Apply verified
-tax-year metadata when selecting an edition for a return.
+#### 20B.2 — published content search (built October 14)
+
+`reference_search` searches PDF text using local Nomic embeddings and the existing
+Qdrant keyword/vector fusion. It selects one published library/catalog release;
+both retrievers receive the same document, release, status and optional year
+filters. It never falls back to another subject or a private upload collection.
+The default build covers current English catalog entries only. Optional recent
+history needs its own explicitly selected build and search.
+
+Public derivative state lives at
+`/mnt/user/appdata/runtime/reference-libraries/` (`index.sqlite` and job reports),
+with one dedicated Qdrant collection per library. The job mounts only the public
+archive read-only, repository configuration and that public index state. It
+uses the existing local embedding model; it does not call an answering model,
+download more PDFs or receive private uploads or API credentials.
+
+Each bounded extraction verifies the retained PDF checksum and keeps exact PDF
+page/character spans. A document checkpoint commits after its vector writes
+complete. Interrupted runs resume verified checkpoints; incomplete remote
+checkpoints are rebuilt. Unchanged published releases are reused after remote
+verification. Staging points include their release identity, so a failed build
+cannot overwrite the previous release's vectors. Publication atomically switches
+only after every selected original is accounted for and exact remote chunk counts
+match. Extraction failures block publication; blank/scanned text layers are
+counted explicitly as `no_text`, without claiming OCR coverage.
+
+Results identify release, selected catalog, coverage/subset status, document
+revision, PDF page and exact excerpt. Candidates are checked against the immutable
+release and current permitted catalog before being returned. Missing vectors or
+unavailable services produce explicit errors. Only nonempty returned passages
+produce page citations in Sources; a snippet is not full-document review.
+
+Return-year filtering is conservative: an unambiguous first-page statement such
+as "For use in preparing 2025 Returns" establishes that document's stated return
+year, with its quote/page/checksum retained. Other documents stay unknown and are
+excluded from year-filtered search. Revision dates and isolated years do not
+establish applicability. This metadata does not decide taxpayer eligibility.
+The initial retrieval thresholds still require tax-case calibration in 20E.
+Private tax processing and the assistance workflow remain 20C/20D work.
 
 ### 20C — private processing
 
@@ -217,26 +254,61 @@ the corrupt 1976 Form 940, which is outside model access. No download rerun is
 required. The library uses durable SQLite commits and originals directly;
 final export/report files are not prerequisites.
 
-### Deploy and accept 20B.1
+### 20B.2 deployment and acceptance
 
-After the user's commit/push, on Tower in `/mnt/user/appdata/audrey_ai_2.0`:
+After committing/pushing on the laptop, run on **Tower**:
 
 ```bash
+cd /mnt/user/appdata/audrey_ai_2.0
 git pull
-docker compose up -d --build custom-tools audrey
+docker compose up -d --build --force-recreate --wait custom-tools audrey
 ```
 
-No UI or media-worker rebuild, private upload, indexing run or collector rerun is
-needed. The backend already mounts `/mnt/user/knowledge` at `/datasets:ro`.
+Only the backend and tools sidecar rebuild for this slice. The command waits for both
+services to become healthy before the index starts. No UI/media-worker rebuild,
+private file upload, new archive collection or personal token is needed.
 
-In a new browser conversation, use Auto/Automatic and ask Audrey to locate the
-current Publication 17 in the owned IRS library, read PDF page 1 and identify its
-stated tax year with a source link. Expect `reference_lookup` and `read_reference`
-in Tools plus a page-specific official URL in Sources. A missing text layer is
-disclosed. In that same chat ask for the archived 1976 Form 940: the library
-must refuse access, with no old document text. A revision date is not presented
-as a verified applicable tax year. This proves the catalog/read surface; hybrid
-content search and private tax processing remain future slices.
+In the same **Tower** checkout, start the initial current-catalog index:
+
+```bash
+nohup bash scripts/reference/index-irs-onbox.sh > testing-out/last-reference-index.log 2>&1 &
+```
+
+This is a long first build over the retained current catalog, not all historical
+PDFs. Its duration depends on PDF size and local embedding throughput; it is not
+expected to finish as a short smoke check. It survives disconnects and sends the
+usual Telegram start/finish messages and stamped JSON report. It uses local
+embedding calls, which can share Ollama resources with chat. Progress is in
+`testing-out/last-reference-index.log`; the last `document_indexed` event shows
+completed/selected documents. The report and detailed log also reside in
+`testing-out/reference-indexes/`. Read the Telegram download on the laptop.
+
+Success: exit 0, `status: published`, `coverage.subset: false`,
+`coverage.complete_for_selected_documents: true`, zero failed/pending documents,
+and a nonzero chunk count. `no_text_documents` discloses originals without
+extractable text. A failed build leaves the previous publication untouched;
+rerun the same command to resume after resolving the reported cause. An unchanged
+verified publication returns `unchanged: true` without re-embedding.
+
+After publication, open **https://ai.builtryte.xyz** in the browser. Start a new
+chat with Tools set to **Automatic**, with no upload required, and ask:
+
+> Using only the owned IRS library, find the explanation of how gross income,
+> filing status and age affect whether someone must file a return. Search document
+> contents, cite the matching PDF pages and state the source document's tax year.
+
+Pass: Tools shows `reference_search`; Sources opens official IRS PDFs at the
+matching pages; the answer uses retrieved text and distinguishes a source-stated
+return year from revision/download dates. `read_reference` can open more of the
+cited page when needed. This is one answer-generation check; it does not establish
+tax advice quality or private-processing guarantees. Do not repeat the accepted
+20B.1 checks. If it fails, keep the run/conversation and report for diagnosis.
+
+Operator options remain bounded: `--product-number "Publication 17"` or
+`--max-documents 5` intentionally publishes a disclosed subset, not full coverage.
+Use these only for a requested diagnosis. `--catalog prior` or `bulletins` builds
+a separate permitted recent scope; `--rebuild` forces a fresh replacement for
+unchanged sources. None widens the configured history window.
 
 ### Collector operator reference
 

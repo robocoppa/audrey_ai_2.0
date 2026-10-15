@@ -30,7 +30,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
@@ -106,6 +106,15 @@ class SearchScope:
     # reads must hide these ids before the old points are physically gone.
     excluded_file_ids: list[str] | None = None
 
+    # Dedicated public reference reads pin both library and published release;
+    # the same conjunction must reach dense and lexical retrieval.
+    reference_library_id: str | None = None
+    reference_release_id: str | None = None
+    reference_catalog: Literal["current", "prior", "bulletins"] | None = None
+    reference_document_ids: list[str] | None = None
+    reference_tax_year: int | None = None
+    reference_status: str | None = None
+
     def __post_init__(self) -> None:
         if self.file_ids is not None and not self.file_ids:
             raise ValueError(
@@ -113,12 +122,28 @@ class SearchScope:
                 "it is a bug. A lookup that resolved no files must not search."
             )
 
+        if self.reference_document_ids is not None and not self.reference_document_ids:
+            raise ValueError(
+                "SearchScope(reference_document_ids=[]) is not a scope that matches "
+                "nothing. A lookup that resolved no reference documents must not search."
+            )
+        if self.reference_catalog is not None and self.reference_catalog not in (
+            "current", "prior", "bulletins",
+        ):
+            raise ValueError("Reference catalog must be current, prior or bulletins.")
+
     def is_empty(self) -> bool:
         return (
             self.file_ids is None
             and self.artifact is None
             and self.user is None
             and self.excluded_file_ids is None
+            and self.reference_library_id is None
+            and self.reference_release_id is None
+            and self.reference_catalog is None
+            and self.reference_document_ids is None
+            and self.reference_tax_year is None
+            and self.reference_status is None
         )
 
 
@@ -144,6 +169,19 @@ def _as_filter(scope: SearchScope | None) -> qmodels.Filter | None:
         must_not.append(qmodels.FieldCondition(
             key="file_id",
             match=qmodels.MatchAny(any=list(scope.excluded_file_ids)),
+        ))
+    for key, value in (
+        ("library_id", scope.reference_library_id),
+        ("release_id", scope.reference_release_id),
+        ("catalog", scope.reference_catalog),
+        ("applicable_tax_years", scope.reference_tax_year),
+        ("status", scope.reference_status),
+    ):
+        if value is not None:
+            must.append(qmodels.FieldCondition(key=key, match=qmodels.MatchValue(value=value)))
+    if scope.reference_document_ids is not None:
+        must.append(qmodels.FieldCondition(
+            key="document_id", match=qmodels.MatchAny(any=list(scope.reference_document_ids)),
         ))
     return qmodels.Filter(must=must, must_not=must_not)
 
@@ -337,6 +375,16 @@ class QdrantKB:
             points_selector=qmodels.FilterSelector(filter=flt),
             wait=True,
         )
+
+    async def count_text(self, *, collection: str, scope: SearchScope | None = None) -> int:
+        """Count exactly the selected points before publishing a reference release."""
+        result = await asyncio.to_thread(
+            self._client.count,
+            collection_name=collection,
+            count_filter=_as_filter(scope),
+            exact=True,
+        )
+        return int(result.count)
 
     async def search_text(
         self, vector: list[float], *, top_k: int = 5, collection: str | None = None,

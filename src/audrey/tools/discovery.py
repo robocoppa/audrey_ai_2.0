@@ -94,6 +94,9 @@ TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
         _declare("calculate", dependencies=()),
         _declare("reference_lookup", dependencies=("audrey_references",)),
         _declare("read_reference", dependencies=("audrey_references",)),
+        _declare(
+            "reference_search", dependencies=("audrey_references", "qdrant", "text_embedding"),
+        ),
         _declare("analyze_table", user_scope=ToolUserScope.ARGUMENT, dependencies=("audrey_files",)),
         _declare("inspect_pdf_page", user_scope=ToolUserScope.ARGUMENT, dependencies=("audrey_files",)),
         _declare("inspect_video_frame", user_scope=ToolUserScope.ARGUMENT, dependencies=("audrey_files",)),

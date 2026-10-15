@@ -356,11 +356,30 @@ def _retrieved_sources(results: list[ToolResult]) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     seen: set[str] = set()
     for r in results:
-        if r.is_error or (r.name not in _RETRIEVAL_TOOLS and r.name not in {_FETCH_TOOL, "read_reference"}):
+        if r.is_error or (r.name not in _RETRIEVAL_TOOLS and r.name not in {_FETCH_TOOL, "read_reference", "reference_search"}):
             continue
         try:
             body = json.loads(r.content)
         except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if r.name == "reference_search":
+            if not isinstance(body, dict) or not isinstance(body.get("results"), list):
+                continue
+            for item in body["results"]:
+                if not isinstance(item, dict) or not item.get("text"):
+                    continue
+                url = str(item.get("source_url") or "").strip()
+                page = item.get("page")
+                if (not url.startswith("https://www.irs.gov/") or isinstance(page, bool)
+                        or not isinstance(page, int) or page < 1):
+                    continue
+                url = f"{url}#page={page}"
+                if url not in seen:
+                    seen.add(url)
+                    title = str(item.get("product_number") or item.get("title") or "IRS reference")
+                    out.append({"title": f"{title} · Page {page}", "url": url, "tool": r.name})
+                    if len(out) >= _MAX_RETRIEVED:
+                        return out
             continue
         if r.name == "read_reference":
             # Catalog metadata alone is not evidence that PDF contents reached
