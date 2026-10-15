@@ -356,11 +356,30 @@ def _retrieved_sources(results: list[ToolResult]) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     seen: set[str] = set()
     for r in results:
-        if r.is_error or (r.name not in _RETRIEVAL_TOOLS and r.name != _FETCH_TOOL):
+        if r.is_error or (r.name not in _RETRIEVAL_TOOLS and r.name not in {_FETCH_TOOL, "read_reference"}):
             continue
         try:
             body = json.loads(r.content)
         except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if r.name == "read_reference":
+            # Catalog metadata alone is not evidence that PDF contents reached
+            # the model. Only a successful nonempty page read becomes a source.
+            if not isinstance(body, dict) or not body.get("text"):
+                continue
+            url = str(body.get("source_url") or "").strip()
+            if not url.startswith("https://www.irs.gov/"):
+                continue
+            page = body.get("page")
+            if isinstance(page, bool) or not isinstance(page, int) or page < 1:
+                continue
+            url = f"{url}#page={page}"
+            if url not in seen:
+                seen.add(url)
+                title = str(body.get("product_number") or body.get("title") or "IRS reference")
+                out.append({"title": f"{title} · Page {page}", "url": url, "tool": r.name})
+                if len(out) >= _MAX_RETRIEVED:
+                    return out
             continue
         if r.name == _FETCH_TOOL:
             # One page, `{url, text}`. No title, so the catalogue renders it

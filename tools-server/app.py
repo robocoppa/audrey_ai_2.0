@@ -3,6 +3,8 @@
 Endpoints, OpenAPI auto-discovered by the Audrey orchestrator:
   POST /web_search             — Brave Search API
   POST /web_fetch              — open one URL, return its readable text (SSRF-guarded)
+  POST /reference_lookup       — browse retained public reference catalog entries
+  POST /read_reference         — read a cited page of a retained public reference
   POST /kb_search              — text query proxied to Audrey /v1/kb/query
   POST /kb_image_search        — image query proxied to Audrey /v1/kb/query/image
   POST /memory_store           — save (key, value, user:<id>-tagged) to Qdrant
@@ -61,6 +63,7 @@ from fastapi.openapi.utils import get_openapi
 from fetch import FetchError, fetch_readable
 from memory_backup import MemoryBackup, MemoryBackupScheduler
 from pydantic import BaseModel, Field
+from reference_tools import router as reference_tools_router
 from searxng import SearxngClient, SearxngError
 from settings import settings
 
@@ -202,6 +205,7 @@ def _dynamic_openapi() -> dict[str, Any]:
 
 app.include_router(calculator_router)
 app.include_router(evidence_tools_router)
+app.include_router(reference_tools_router)
 app.openapi = _dynamic_openapi
 
 

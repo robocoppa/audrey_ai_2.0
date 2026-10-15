@@ -29,6 +29,7 @@ _RUNTIME_DEFAULTS: dict[str, bool] = {
     "audrey_kb": True,
     "audrey_files": True,
     "audrey_history": True,
+    "audrey_references": True,
     "image_embedding": True,
     # Stateful capabilities become available only after their own startup
     # checks succeed.

@@ -180,22 +180,27 @@ search**. Three pieces:
 
 ### What's an embedding?
 
-A neural network that turns a piece of text (or an image) into a
-fixed-length array of floats. The geometry of these vectors encodes
-semantic meaning: Similar concepts produce vectors near each other in
-space; unrelated concepts produce vectors far apart.
+An **embedding** is a list of numbers (a **vector**) that stands for
+what a piece of text or an image means. An embedding model reads the
+input and produces the list, always the same length. You don't need to
+know how the model works inside.
 
-Concretely:
+Think of each list as an address on a map of meanings. The model has
+learned to give text about the same thing nearby addresses. "My car
+won't start" lands close to "engine trouble", though they share no
+words, and far from "a bread recipe". The map just has far more
+directions than a street map: hundreds of numbers per address instead
+of two.
 
-- `nomic-embed-text` produces 768-dimensional float vectors from
-  text. Run via Ollama.
-- `clip-ViT-B-32` (CLIP) produces 512-dimensional vectors from
-  images **or** from text — both end up in the same vector space, so
-  you can search images using a text query.
+That turns searching by meaning into measuring distance. Audrey
+converts the question the same way, then finds the stored lists closest
+to it. Closeness is scored with **cosine similarity**, which runs from
+near 1 for very similar meanings down to around 0 for unrelated ones.
 
-You don't need to understand how the network works. Treat it as: text
-in → vector out. Two vectors are "close" if their cosine similarity
-is near 1; "far" if near 0 or negative.
+- `nomic-embed-text` (run by Ollama) turns text into 768 numbers.
+- `clip-ViT-B-32` (CLIP) turns images into 512 numbers, and can put
+  text on the same map: A query like "a black dog" lands near photos
+  of black dogs, which is how a written question finds a picture.
 
 ### What's Qdrant?
 

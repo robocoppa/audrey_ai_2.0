@@ -1,6 +1,6 @@
 # Phase 20 — reference libraries and private tax assistance
 
-Requested October 14, 2026. 20A is deployed and accepted; broad collection needs resume.
+Requested October 14, 2026. The archive is sufficient; 20B.1 catalog/read is built.
 English content and requests only. Federal coverage can begin independently;
 state jurisdiction and priority tax years await the user's answer.
 
@@ -24,9 +24,13 @@ its first application; existing topic datasets and ordinary chat stay intact.
 - Fine-tuning is deferred until measured extraction or workflow failures justify
   it. Updated rules belong in the versioned library. Private records never
   become model-training data.
-- Archive broadly. Download current English forms, schedules, instructions and
-  publications across all tax subjects, then their available prior revisions.
-  Do not limit collection to forms presumed relevant to one taxpayer.
+- Keep archive ownership separate from model access. The broad English archive
+  is sufficient and older originals remain offline. The accessible library uses
+  current official editions by default. Historical access requires an explicit
+  request and is limited to the most recent five years (2022–2026 initially).
+  An active current publication can have an older revision date; catalog edition
+  age and tax-year applicability are separate facts. Do not index decades of
+  historical material into the model library.
 - Include official guidance as well as forms: Internal Revenue Bulletins,
   notices, revenue rulings/procedures, corrections and dated IRS guidance.
   Add official federal statutes and Treasury regulations through separate
@@ -139,6 +143,34 @@ Publish a release only after its coverage and extraction checks pass; preserve
 the previous usable release during updates. Tax retrieval thresholds are measured
 on tax cases rather than assumed from other topic datasets.
 
+#### 20B.1 — catalog and page reader (built)
+
+`reference_libraries` in repository configuration registers the owned IRS root.
+`reference_lookup` performs exact product-number/title catalog lookup;
+`read_reference` reads one PDF text page using its full document ID and optional
+current revision checksum. The existing Automatic tool selection exposes both.
+Catalog lookup is not document-content search; vector indexing follows in 20B.2.
+
+Both operations enforce active catalog membership and the same server-owned
+history window. Current is the default for lookup and reading; explicit
+`catalog=prior` or `bulletins` permits recent editions only. Direct old IDs,
+old checksums, removed entries and ambiguous historical edition years are refused.
+Failed updates cannot silently serve an old retained body as fresh. Edition-year
+filters never assert applicability to a tax year; unverified tax-year filtering
+returns an explicit error until 20B.2 establishes that metadata.
+
+The read-only SQLite inventory is authoritative even when final report export
+fails. Reads do not load the full archive, use private files or contact a model.
+PDF text extraction runs separately with checksum, file/page/text, memory, CPU
+and elapsed-time bounds. Page and character pagination preserve precise coverage;
+blank/scanned pages need a future OCR/inspection path. Actual page reads produce
+official-source citations in the existing Sources disclosure.
+
+20B.2 adds published releases and hybrid text search over current editions,
+keeping the same scope on keyword/vector search and exact reads. Recent history
+is separately selected; defaults never mix decades of revisions. Apply verified
+tax-year metadata when selecting an edition for a return.
+
 ### 20C — private processing
 
 One enforceable policy covers routing, planning, workers, synthesis, fallbacks,
@@ -178,16 +210,38 @@ from arithmetic; record supported strengths in the existing model report.
 catalog parsing, durable revisions/resume, HTTP and storage bounds, and runner
 reporting/cancellation. A live bounded laptop check retained five official PDFs
 without failures. The user's bounded Tower check also passed October 14.
-20A is accepted. The first broad run retained 23,567 PDFs (all eligible current
-products); 3,140 remain, including one corrupted official historical source.
-The collector followup raises the file limit and continues after individual
-oversized files while preserving total-byte and disk stops. Build the updated
-image and resume; named retrieval and private processing are the following slices.
+20A is accepted and collection is sufficient. The resumed log confirms 26,706
+PDFs downloaded or verified. The process was killed after the final recorded
+download; its final report has no inventory. The only known source failure is
+the corrupt 1976 Form 940, which is outside model access. No download rerun is
+required. The library uses durable SQLite commits and originals directly;
+final export/report files are not prerequisites.
 
-### Run IRS collection on Tower
+### Deploy and accept 20B.1
 
-In `/mnt/user/appdata/audrey_ai_2.0`, pull the user's committed changes, then
-build the image used by the disposable collector:
+After the user's commit/push, on Tower in `/mnt/user/appdata/audrey_ai_2.0`:
+
+```bash
+git pull
+docker compose up -d --build custom-tools audrey
+```
+
+No UI or media-worker rebuild, private upload, indexing run or collector rerun is
+needed. The backend already mounts `/mnt/user/knowledge` at `/datasets:ro`.
+
+In a new browser conversation, use Auto/Automatic and ask Audrey to locate the
+current Publication 17 in the owned IRS library, read PDF page 1 and identify its
+stated tax year with a source link. Expect `reference_lookup` and `read_reference`
+in Tools plus a page-specific official URL in Sources. A missing text layer is
+disclosed. In that same chat ask for the archived 1976 Form 940: the library
+must refuse access, with no old document text. A revision date is not presented
+as a verified applicable tax year. This proves the catalog/read surface; hybrid
+content search and private tax processing remain future slices.
+
+### Collector operator reference
+
+Collection is sufficient; do not rerun it for 20B.1. For future source
+updates, in `/mnt/user/appdata/audrey_ai_2.0`, build its disposable image:
 
 ```bash
 docker compose build audrey
@@ -200,14 +254,14 @@ uploaded file, Ollama or Qdrant is needed.
 Originals reside under
 `/mnt/user/knowledge/reference-libraries/tax/us/federal/irs/originals/`.
 
-Launch broad collection in the same Tower directory:
+Future current-catalog updates use the same runner:
 
 ```bash
-nohup bash scripts/reference/collect-irs-onbox.sh > testing-out/last-irs-archive.log 2>&1 &
+nohup bash scripts/reference/collect-irs-onbox.sh --catalogs current > testing-out/last-irs-archive.log 2>&1 &
 ```
 
-This can take several hours. It enumerates current products, prior revisions
-and bulletins, then downloads current products first. It survives a disconnect.
+This updates current official editions without repeating historical collection.
+It survives a disconnect.
 The existing fleet-watchdog settings send a start ping, completion/interruption
 ping and stamped JSON report to Telegram. Notification failures warn without
 changing the collection result; no personal data is included. Reports/logs also

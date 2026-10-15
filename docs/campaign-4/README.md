@@ -9,15 +9,18 @@ they are not ongoing task lists.
 
 ## Current work
 
-- **20 — reference libraries and private tax assistance:** 20A's public IRS
-  archive collector is deployed and accepted October 14. The first broad run
-  retained all eligible current documents and most historical PDFs. Resume the
-  remainder after deploying the collector size-limit followup.
-  [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds the
-  collector commands and the remaining named local retrieval, private processing
-  and verified tax Project workflow. Laptop verification and a five-PDF live
-  collection passed. Next build: 20B. State jurisdiction and priority years remain
-  unspecified; fine-tuning requires later evidence.
+- **20 — reference libraries and private tax assistance:** public collection
+  is sufficient to proceed: logs confirm 26,706 downloaded/verified PDFs; the
+  only known source failure is the corrupt 1976 Form 940. No further broad run.
+  **20B.1 built:** named IRS catalog, exact lookup and bounded page reading.
+  Models see current official editions by default; explicit historical access
+  is limited to the most recent five years (2022–2026). Older originals remain
+  outside the accessible library. Tax-year applicability is verified separately
+  from catalog/revision dates. Deploy `audrey` and `custom-tools`; browser
+  acceptance pending. Next: 20B.2's scoped hybrid index/search.
+  [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds
+  the contract and remaining privacy/tax workflow. State jurisdictions remain
+  unspecified; fine-tuning requires evidence.
 
 - **19 — deeper evidence tools:** complete; user accepted all five tools October 13.
   [Phase 19](phase-19-evidence-tools.md) defines calculator/conversions, CSV/XLSX
@@ -96,14 +99,14 @@ they are not ongoing task lists.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A accepted; broad collection needs resume; next build 20B |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A sufficient; 20B.1 catalog/read built; next 20B.2 scoped search |
 
 ## Remaining work
 
-1. Resume Phase 20A's broad archive after building the collector followup;
-   verified originals are reused. Build 20B's named retrieval, followed by
-   enforced private processing, the tax workflow and targeted tax evaluation.
-   Public collection proceeds independently of private inputs.
+1. Accept 20B.1's current/recent reference lookup and page reading, then build
+   20B.2's hybrid search using the same access scope. Follow with enforced private
+   processing, the tax workflow and targeted tax evaluation. The broad offline
+   archive is sufficient; further bulk collection is not a prerequisite.
 2. Confirm Tower deployment and close pending targeted acceptance for the
    current course-reviewed work. The local, gitignored [AUDIT](../lesson-ai/AUDIT.md)
    holds its review record; the [operations guide](../reference/box-operations.md#10-memory-backups-and-isolated-restore-verification)

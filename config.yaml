@@ -1742,3 +1742,16 @@ title_generation:
   max_prompt_chars: 6000
   max_tokens: 32
   no_thinking: true
+
+# Public originals stay outside the general KB watcher. Models see current IRS
+# catalog entries by default; explicit history is confined to five recent years.
+# Edition dates do not establish applicability to a particular tax year.
+reference_libraries:
+  enabled: true
+  asof_year: 2026
+  history_years: 5
+  libraries:
+    - id: irs-federal
+      name: IRS Federal
+      description: "Owned English IRS reference PDFs; current official editions by default, recent history only on explicit request. Tax-year applicability requires source verification."
+      root: "/datasets/reference-libraries/tax/us/federal/irs"

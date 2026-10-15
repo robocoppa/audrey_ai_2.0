@@ -40,6 +40,7 @@ from audrey.pipeline.chat_archive import ChatArchiveClient, ChatArchiveQueue
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.graph import build_graph
 from audrey.readiness import ReadinessCollector
+from audrey.references.library import ReferenceLibraryRegistry
 from audrey.routes.admin import router as admin_router
 from audrey.routes.app import router as application_router
 from audrey.routes.app.runs import NativeRunManager
@@ -50,6 +51,7 @@ from audrey.routes.kb import router as kb_router
 from audrey.routes.media import router as media_router
 from audrey.routes.openai import VIRTUAL_MODELS
 from audrey.routes.openai import router as openai_router
+from audrey.routes.references import router as references_router
 from audrey.routes.tool_history import router as tool_history_router
 from audrey.routes.user_data import router as user_data_router
 from audrey.skills import SkillRegistry
@@ -284,6 +286,9 @@ async def lifespan(app: FastAPI):
     app.state.image_embedder = image_embedder
     app.state.kb_watcher = watcher
     app.state.kb_reconciler = reconciler
+    app.state.reference_libraries = ReferenceLibraryRegistry(
+        cfg.raw.get("reference_libraries", {}),
+    )
 
     # Durable chat-archive outbox. Response handlers commit only the small
     # local source row; this lifecycle-owned worker performs the remote
@@ -499,6 +504,7 @@ app = FastAPI(
 app.include_router(openai_router)
 app.include_router(application_router)
 app.include_router(kb_router)
+app.include_router(references_router)
 app.include_router(evidence_tools_router)
 app.include_router(tool_history_router)
 app.include_router(files_router)
