@@ -1,13 +1,18 @@
 # Campaign 4 Phase 06 — System One router assessment
 
-**Status:** Earlier comparisons are complete; retain `qwen3.5:4b`. The user's
-October 15 Nimble v3 comparison is complete: retain Qwen. EmbeddingGemma 2's
-first launches stopped at settings validation; the corrected probe is ready to
-run. No production model or index changes are part of the tests.
+**Status:** Retain `qwen3.5:4b` for routing; those comparisons are closed.
+The deeper embedding comparison is prepared for Tower: EmbeddingGemma 2 and
+Qwen3 Embedding 0.6B/4B/8B against both Nomic baselines. The user approved
+adopting an improvement and reindexing the existing text stores before growth.
+The IRS index has never run; its first build waits for this decision.
 
 ## Decision
 
-Measured `tev1:0.8b`, `tev1:latest`, `nimble:latest`, `clef:latest`, and `clef-flash:latest` did not clear the complete Audrey routing gate. Clef matched incumbent quality on production-reached cases but failed cold latency and residency. Clef Flash failed cold-start reliability. Tev/Nimble comparisons did not establish a replacement that met the full gate.
+Measured `tev1:0.8b`, `tev1:latest`, `nimble:latest`, `nimble-v3:latest`,
+`clef:latest`, and `clef-flash:latest` did not clear the complete Audrey routing
+gate. Clef matched incumbent quality on production-reached cases but failed cold
+latency and residency. Clef Flash failed cold-start reliability. Tev/Nimble
+comparisons did not establish a replacement that met the full gate.
 
 Model measurements and publishable comparisons belong in [the model report](../../evals/MODEL-FACTS.md), not duplicate phase logs.
 
@@ -22,39 +27,38 @@ Strong keywords, cheap short-prompt routing, explicit tool-name handling, image 
 English-only evaluation applies. Skill-selection research is separate under
 Phase 03; native automatic selection uses the approved deterministic rules.
 
+## Deeper embedding comparison
 
-## October 15 candidate comparison
+The initial Gemma screening is complete; measurements are in the model report.
+The follow-up uses the existing `probe-onbox.sh` and Telegram reporting flow,
+with no new runner or production indexing during evaluation.
 
-Use the existing direct-model probe runner. These are measured comparisons,
-not acceptance of a replacement or an automatic configuration change. Published
-specifications and eventual measured results belong in the standalone model
-report linked above.
+- Four frozen, official English IRS publications contribute 336 page-preserving
+  passages and 80 queries: 60 answerable and 20 unsupported. Source PDFs have
+  recorded URLs/digests; labels identify reviewed quotes and pages. Publications
+  501/502 calibrate thresholds; 527/969 test them without retuning. Entire source
+  families stay in one split. These are source-reading cases, not tax advice.
+- Invented memory and chat-history records contribute 48 queries; the existing
+  general/document/code/reference fixture contributes 28 reused regression cases.
+  No private uploads, saved memories or real conversations are read or reported.
+- Every candidate gets its documented query/document format and native vector
+  width. Both raw Nomic and prefixed Nomic remain baselines; repeated questions
+  add timing/stability evidence, not independent quality examples.
+- Measure dense/hybrid ranking, positive support and wrong/unsupported admission
+  under current thresholds and thresholds fitted only on calibration. The strict
+  diagnostic target is at least 90% positive support, zero unsupported admissions;
+  report infeasible calibration honestly. Review per-query outcomes before choosing.
+- Measure three verified unload/cold loads per arm, warm median/p95, residency,
+  production-sized reference batches and two 64-passage batches at approximately
+  1,000 tokens each. Frozen stress inputs avoid runtime tokenizer downloads.
+  No concurrent answering worker or end-to-end answer quality is measured here.
 
-- **Nimble v3:** rerun the 36 tracked English router cases against the real
-  configured incumbent for three rounds. Report the actual model-reached
-  subset separately from deterministic-rule cases, full failures, confidence
-  behavior, cold/warm latency and observed residency. Require Ollama 0.40.4+
-  before model calls. The current Qwen also generates conversation titles;
-  decision-only Nimble cannot replace that role, so capacity decisions must
-  account for both models if Qwen remains necessary. This is a reused feasibility
-  fixture, not an independent general classifier benchmark.
-- **EmbeddingGemma 2:** compare its documented task prefixes against both raw
-  Nomic (ordinary deployed text retrieval) and prefixed Nomic (reference search).
-  Use the same 32 synthetic documents, 24 positive English queries and four
-  separately reported no-answer diagnostics. Measure dense and keyword-fused
-  rankings, query latency, corpus embedding throughput, vector validity and
-  residency. Each arm embeds its own corpus in memory; no Qdrant collections or
-  stored documents are changed. Existing cosine cutoffs are not transferred to
-  the candidate. This screens text retrieval only; it does not validate image,
-  audio or personal-memory retrieval.
+The full run has six arms and 2,070 embedding requests within a checked 4,096
+request cap. All required models must be installed before the first unload or
+embedding request. Candidates run sequentially, are unloaded afterward, and raw
+Nomic runs last. Do not run another GPU-heavy job alongside it.
 
-Both reports retain the installed model digests and fixture checksums. Model
-load/unload operations affect only tested tags. Run when the IRS indexer and
-other GPU work are idle, and run the two comparisons sequentially. The smaller
-EmbeddingGemma text-only variant is a follow-up if the pulled default proves too
-slow or memory-heavy; it is not another required run before reading the results.
-
-### Tower commands
+### Tower handoff
 
 After committing/pushing on the laptop, on **Tower**:
 
@@ -64,34 +68,63 @@ git pull
 ```
 
 No service, UI or eval-image rebuild/restart is required. The existing runner
-copies both probe scripts and their fixtures into the running backend. Both
-models are already pulled; Nomic and the current router must also be installed.
-No upload, personal token, collector run or new production index is needed.
-
-The router comparison is completed; do not rerun it. Two saved comparisons
-support retaining the incumbent; measurements are in the model report.
-
-The embedding launches requested ten and five rounds. Both stopped at the old
-three-round limit before any model call. The probe now accepts 1–10 rounds,
-with a maximum of 1,024 embedding requests checked before model operations.
-The default fixture uses 855 requests at ten rounds or 435 at five.
-
-After pulling this harness fix, run only the embedding comparison in the same
-Tower checkout:
+copies the probe, helper and frozen fixtures into the running backend.
+Gemma and Nomic are already installed. Pull the three requested Qwen models
+if not already present; stop if a pull fails:
 
 ```bash
-scripts/probes/probe-onbox.sh embedding_retrieval_probe.py COPY=embedding_retrieval_cases.json CANDIDATE=embeddinggemma-2:latest ROUNDS=10
+docker exec ollama ollama pull qwen3-embedding:0.6b
+docker exec ollama ollama pull qwen3-embedding:4b
+docker exec ollama ollama pull qwen3-embedding:8b
 ```
 
-It self-detaches and uses the same Telegram workflow; allow a few minutes
-depending on loading and host conditions. The candidate runs before both
-Nomic arms, leaving the incumbent embedder warm. Read the downloaded Telegram
-files from `~/Downloads/Telegram Desktop/` on the laptop; the logs also remain
-in Tower's `testing-out/probes/` directory. No separate transfer or rerun is
-needed when the attachments arrive.
+Then run once in that same **Tower** checkout:
 
-For both comparisons, successful execution means a completed measurement with
-all expected model/arm results. Inspect accuracy/ranking metrics and failures
-alongside latency and memory before choosing a model. A completed run is not
-proof that the candidate won. A setup error stops before comparison; resolve
-that error before continuing.
+```bash
+scripts/probes/probe-onbox.sh embedding_document_probe.py \
+  COPY=embedding_retrieval_probe.py,embedding_real_documents.json,embedding_personal_cases.json,embedding_retrieval_cases.json \
+  CANDIDATES=embeddinggemma-2:latest,qwen3-embedding:0.6b,qwen3-embedding:4b,qwen3-embedding:8b \
+  ROUNDS=2 BATCH_SIZE=16
+```
+
+Allow roughly 10–30 minutes depending on loading and the larger models' batch
+cost. It self-detaches, survives SSH disconnection and sends the usual Telegram
+result/log attachment. No upload, personal token, IRS indexing or extra PDF
+download is required. Read the attachment from the laptop's Telegram Downloads.
+
+`measurement_status: completed` and all six arms comparable prove execution.
+Exit 0 also means a candidate cleared the predeclared diagnostic gates; exit 1
+can instead mean completed measurements with quality findings. Read both the
+measurement status and per-model recommendation, rather than treating a Telegram
+verdict as a model winner. Setup errors exit 2 before model work. No store or
+configuration switches automatically.
+
+## Adoption and reindexing
+
+Compare supported retrieval, wrong/unsupported hits and the unchanged regression
+first, then latency, cold failures, batch costs and GPU use. A document winner
+does not automatically win memory/history. Keep Nomic in a workload where a
+candidate regresses. Fit thresholds on calibration only; do not tune on holdout
+or infer year/ownership policy from a cosine score. Runtime coexistence and a
+targeted browser/tool check remain part of migration verification.
+
+If the results establish an improvement, the user's conditional adoption request
+authorizes implementing the switch and a recoverable reindex:
+
+1. Add consistent document/query formatting and explicit model/digest/dimension
+   identity across ingest, query and rebuild. References currently special-case
+   Nomic prefixes; ordinary KB, memory and history currently embed raw text.
+   Qwen's native dimensions differ from the current fixed 768; update schemas
+   deliberately. Matching dimensions never make two models' vectors compatible.
+2. Inventory and snapshot global/user text collections, memories and durable
+   history/upload SQLite state. Keep existing originals, IDs, owner metadata,
+   sparse vectors, timestamps and deletion/purge boundaries.
+3. Re-embed retained text into separate staging collections; verify counts,
+   payload hashes and retrieval before cutover. Pause writers during the final
+   switch and change backend/sidecar configuration together where applicable.
+   BM25 migration and missing-index reconciliation do not rebuild dense vectors.
+4. Verify existing file, memory and history search using the selected model;
+   retain recovery snapshots through acceptance. Image collections remain CLIP.
+5. Build the IRS current-catalog index for the first time with the selected
+   model, then resume Phase 20B.2 acceptance. Do not build a Nomic IRS index first
+   or re-download the owned archive.

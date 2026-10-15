@@ -22,6 +22,9 @@ conclusion. It is a small practical study, not a general leaderboard.
 - **Qwen 3.5 4B was the best fit for lightweight request classification on the
   tested hardware.** Clef classified well but required much more memory and
   loading time; the smallest Tev model frequently escalated simple requests.
+- **EmbeddingGemma 2 improved short-passage retrieval and warm query speed**
+  against two Nomic baselines. The small synthetic test does not validate
+  real-document accuracy or thresholds for rejecting unsupported results.
 - **Evidence for current Kimi K3 and GLM 5.3 answer quality remains limited.**
   Successful function calls do not establish good writing or reasoning, and
   older Kimi/GLM results cannot be transferred to their successors.
@@ -34,8 +37,9 @@ conclusion. It is a small practical study, not a general leaderboard.
 Local tests used a host with **two RTX 3090 Ti GPUs, 24 GB each**. Runtime memory
 needs exceeding the combined 48 GB require slower main memory or cause failure.
 Even models that fit can compete with other loaded models. Hosted-model timings
-also include network and provider conditions. September–October decision tests
-used **Ollama 0.35.0–0.35.1**, software that serves models locally and through hosted tags.
+also include network and provider conditions. Earlier September–October decision
+tests used **Ollama 0.35.0–0.35.1**; the October 15 router and retrieval
+comparisons used **0.40.4**. Ollama serves models locally and through hosted tags.
 Exact tested tags are retained because `latest` can change over time.
 Immutable weight identifiers were not consistently recorded, which limits
 exact reproduction of older runs.
@@ -536,34 +540,74 @@ across collections or queries.
 Another query found its passage through a ten-word paraphrase at **0.796**,
 while a six-word verbatim phrase returned no result. The correct passage scored
 **0.460**, only slightly above an unrelated passage's **0.431**. Combining
-literal-word search with meaning-based search was proposed in response; no
-comparative retrieval benchmark was retained. The small score gap does not
-establish a reliable cutoff across queries.
+literal-word search with meaning-based search was proposed in response. Those
+older observations did not retain a comparative benchmark; the October 15
+comparison below supplies one. The small score gap does not establish a
+reliable cutoff across queries.
 
-### EmbeddingGemma 2: candidate, not yet measured locally
+### EmbeddingGemma 2: stronger retrieval in a small test
 
-[Ollama's current default](https://ollama.com/library/embeddinggemma-2) is a
-roughly 1.3 GB, 740M parameter multimodal package producing 768-dimensional
-vectors. Smaller variants are available. [Google's model card](https://ai.google.dev/gemma/docs/embeddinggemma/model_card_2?hl=en)
-specifies separate query and document instructions for retrieval; comparisons
-must format each model's inputs appropriately.
+The October 15 comparison used **32 synthetic English passages, 24 answerable
+questions and four separate no-answer diagnostics**, repeated ten times.
+These are 28 unique questions, not 280 independent examples. All rankings
+were identical across repetitions; all **855 embedding requests** succeeded.
 
-No local retrieval or timing result is available yet: the first two launches
-stopped at the probe's three-round settings cap before making an embedding call.
-That setup failure says nothing about either model. The cap now allows up to
-ten rounds, with an explicit total-request budget. The initial English
-comparison uses the same synthetic passages and relevance labels for three
-arms: raw Nomic, Nomic with retrieval prefixes, and EmbeddingGemma with its
-documented task prefixes. It measures rankings and query/batch costs, with
-meaning-based search reported separately from combined keyword retrieval.
-This separates a model improvement from the effect of fixing input formatting.
+Three formats separated model quality from input formatting: raw Nomic,
+Nomic with `search_document:` / `search_query:` prefixes, and Gemma with
+`title: none | text:` / `task: search result | query:` prefixes. Actual titles
+were omitted for every arm. Meaning-based search used exact cosine ranking;
+hybrid search combined it with keyword ranking through reciprocal rank fusion.
+No stored vector index or rejection threshold was involved.
 
-A small synthetic text test does not establish performance on a large document
-collection, personal memories or image/audio search. Matching vector dimensions
-does not make different models' vectors compatible: adopting a new model needs
-fresh corpus embeddings and separately validated score thresholds. If the
-default package is too slow or memory-heavy, compare a smaller variant on the
-same cases before drawing a family-wide conclusion.
+| Measurement | EmbeddingGemma 2 | Nomic prefixed | Nomic raw |
+|---|---:|---:|---:|
+| Correct first result, meaning-based | **24/24** | 21/24 | 21/24 |
+| Correct first result, hybrid | **24/24** | 23/24 | 23/24 |
+| Correct result within first three | 24/24 | 24/24 | 24/24 |
+| Warm query median / p95 | **9.3 / 11.7 ms** | 31.3 / 33.6 ms | 31.5 / 34.2 ms |
+| Observed cold query | 3.95 s | 6.71 s | 2.19 s |
+| GPU memory while resident | 503 MB | 336 MB | 336 MB |
+| Corpus embedding throughput | 69.7 passages/s | 6.5 passages/s* | 100.3 passages/s |
+
+Both Nomic formats misplaced three meaning-based results: starter readiness
+versus oven instructions, the adopted Q2 policy versus an earlier Q1 policy,
+and a trial **without docking** versus one **with docking**. Hybrid search
+corrected the first two. Gemma ranked all three correctly, although its
+docking distinction had only a **0.0012 cosine margin**. Both models got all
+six code-retrieval questions right. Prefixes gave Nomic no ranking-accuracy improvement
+on these cases.
+
+Gemma's warm queries were about **3.4× faster**, with about **168 MB more GPU
+memory**. This does not establish faster ingestion. *Prefixed Nomic's first
+eight-passage batch took 4.76 seconds and dominated its aggregate; later batches
+were much faster.* Only four batches were measured per arm. Cold samples
+include loading after unload, without clearing filesystem caches; concurrent
+large-model workloads were not tested.
+
+**Unsupported results still need explicit handling.** For an absent 2023
+edition, Gemma's nearest hit was the wrong 2025 edition at **0.8364** cosine.
+Some correct positive hits scored lower, down to **0.7892**. These diagnostics
+measured nearest matches, not rejection accuracy. Existing Nomic cutoffs cannot
+be copied to Gemma; source-year filters and reading the actual evidence remain
+necessary.
+
+The tested Gemma package was **1.3 GB, Q8_0**, parent tag `740m-q8_0`, digest
+`f4981a15b998`; Nomic was **274 MB, F16**, digest `0a109f422b47`.
+All actual outputs were finite, approximately unit-length **768-dimensional
+vectors**. Gemma's installed metadata instead listed 512 dimensions and a
+271M parameter count; use the measured API output when planning an index. No long
+context, image, audio or personal-memory retrieval was evaluated.
+[Ollama's package page](https://ollama.com/library/embeddinggemma-2) and
+[Google's model card](https://ai.google.dev/gemma/docs/embeddinggemma/model_card_2?hl=en)
+describe the model family and retrieval formatting.
+
+**Recommendation:** validate Gemma on held-out real documents and calibrate
+rejection rules before replacing an existing embedder. Its query speed gives
+no reason to seek a smaller variant for latency yet. Adoption requires fresh
+embeddings in separate indexes: equal dimensions do not make vectors from
+different models compatible. The complete comparison, including model digests,
+fixture checksum and per-question rankings, is in the
+[saved results](results/2026-10-15-083742-embedding-retrieval-results.json).
 
 ## How to use these results
 
@@ -585,8 +629,8 @@ Keep these limits visible:
 
 ## Sources and traceability
 
-This revision analyzes the user's October 15 router runs; no additional model
-calls were made during report writing. EmbeddingGemma 2 remains unmeasured.
+This revision analyzes the October 15 router and embedding comparisons; no
+additional model calls were made during report writing.
 Findings come from saved
 answers, machine-readable test results, runtime diagnostics, and attributed
 client observations. Older test evidence without full controlled settings is
@@ -613,8 +657,9 @@ the report can be read without opening them.
   and [results](results/2026-09-28-grounded-documents-reader-fix-results.json).
   Draft-overlap analysis used eight August 17 saved runs with a constant lineup;
   current-version protocol observations came from an external client assessment.
-- **Media/retrieval:** dated August runtime receipts, September synthetic
-  summary probe, and October operator-supplied capability/API diagnostics.
+- **Media/retrieval:** [October 15 embedding comparison](results/2026-10-15-083742-embedding-retrieval-results.json),
+  dated August runtime receipts, September synthetic summary probe, and
+  October operator-supplied capability/API diagnostics.
   Some historical receipts lack retained raw output; these carry less evidence
   than the saved result files.
 

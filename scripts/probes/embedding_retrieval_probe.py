@@ -235,7 +235,9 @@ def cosine(left: list[float], right: list[float]) -> float:
     return min(1.0, max(-1.0, score))
 
 
-def lexical_rank(documents: list[Document], query: str) -> list[KBHit]:
+def lexical_rank(
+    documents: list[Document], query: str, *, limit: int = RETRIEVAL_POOL,
+) -> list[KBHit]:
     """Existing BM25 token/TF helpers plus Qdrant's corpus-dependent IDF.
 
     This emulates ranking only; it is not a Qdrant endpoint or a score-floor
@@ -254,11 +256,18 @@ def lexical_rank(documents: list[Document], query: str) -> list[KBHit]:
         ) for term in terms)
         if score > 0:
             hits.append(KBHit(score, doc.id, "text", 0, doc.text, {}))
-    return sorted(hits, key=lambda hit: (-hit.score, hit.source))[:RETRIEVAL_POOL]
+    return sorted(hits, key=lambda hit: (-hit.score, hit.source))[:limit]
 
 
 class Ollama:
-    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None,
+        *, max_embed_calls: int = MAX_EMBED_CALLS,
+    ):
+        if (isinstance(max_embed_calls, bool) or not isinstance(max_embed_calls, int)
+                or not 1 <= max_embed_calls <= 4096):
+            raise ProbeError("embedding call budget must be an integer between 1 and 4096")
+        self.max_embed_calls = max_embed_calls
         self.client = httpx.AsyncClient(
             base_url=settings.base_url.rstrip("/"), timeout=settings.timeout,
             transport=transport, follow_redirects=False, trust_env=False,
@@ -281,7 +290,7 @@ class Ollama:
 
     async def embed(self, arm: Arm, texts: list[str]) -> tuple[list[list[float]], dict]:
         self.embed_calls += 1
-        if self.embed_calls > MAX_EMBED_CALLS:
+        if self.embed_calls > self.max_embed_calls:
             raise ProbeError("bounded embedding call budget exhausted")
         started = time.monotonic()
         body = await self.request("POST", "/api/embed", {

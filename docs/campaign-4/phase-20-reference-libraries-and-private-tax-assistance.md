@@ -1,7 +1,9 @@
 # Phase 20 — reference libraries and private tax assistance
 
 Requested October 14, 2026. The archive is sufficient; 20B.1 is deployed and
-accepted. 20B.2 is built; Tower indexing and browser acceptance are pending.
+accepted. 20B.2 is built; the user confirms the IRS index has never run.
+Its first build waits for the deeper embedding comparison in Phase 06;
+Tower indexing and browser acceptance remain pending.
 English content and requests only. Federal coverage can begin independently;
 state jurisdiction and priority tax years await the user's answer.
 
@@ -255,6 +257,12 @@ required. The library uses durable SQLite commits and originals directly;
 final export/report files are not prerequisites.
 
 ### 20B.2 deployment and acceptance
+
+**Hold the first index build:** the user confirmed October 15 that indexing has
+never run. Complete Phase 06's embedding comparison and any selected-model
+formatting/schema changes first, then refresh this handoff for the chosen model.
+The commands below describe the existing Nomic implementation and are not the
+next action while that decision is pending.
 
 After committing/pushing on the laptop, run on **Tower**:
 

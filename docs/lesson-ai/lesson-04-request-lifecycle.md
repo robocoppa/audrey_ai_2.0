@@ -913,21 +913,8 @@ quota, still shows in the owner's list, and can still be opened. What the
 restart doesn't do is rebuild the missing vectors: until the files are indexed
 again, a search over them finds nothing.
 
-**5. Audrey's container has just been recreated by a deploy, and the next
-browser request fails. A minute later everything works. What's the likely
-story, and why doesn't it last longer?**
 
-During the recreate, `audrey` is briefly down and then comes back, possibly
-with a new IP address. Requests that arrive while it's starting fail: nginx
-can't reach it, or Audrey isn't ready yet, because its startup work (Lesson 5)
-runs before it accepts requests. It doesn't last because nginx looks Audrey's
-address up through Docker's DNS on every request, caching the answer for only
-ten seconds (`resolver 127.0.0.11 valid=10s` and the variable in
-`proxy_pass`). If nginx had resolved `audrey` once at its own startup, it would
-keep sending traffic to the old address until someone restarted `audrey-ui`
-too.
-
-**6. Ollama fails in the middle of a native answer. Where does the failure
+**5. Ollama fails in the middle of a native answer. Where does the failure
 surface, and what does the person see?**
 
 The response's status line went out long ago (`200 OK`, at the start of the

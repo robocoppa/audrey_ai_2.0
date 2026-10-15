@@ -344,3 +344,28 @@ def test_large_fixture_budget_is_reported_before_metadata_or_model_requests():
             transport=httpx.MockTransport(fake.handle),
         ))
     assert fake.calls == []
+
+
+@pytest.mark.parametrize("budget", [0, 4097, True, 2.5])
+def test_invalid_per_client_budget_refused_before_client_or_network(budget):
+    with pytest.raises(probe.ProbeError, match="call budget"):
+        probe.Ollama(probe.Settings(), max_embed_calls=budget)
+
+
+def test_explicit_probe_budget_stops_before_extra_request():
+    fake = FakeOllama()
+
+    async def run():
+        client = probe.Ollama(
+            probe.Settings(), httpx.MockTransport(fake.handle), max_embed_calls=1,
+        )
+        try:
+            arm = probe.Settings().selected_arms()[0]
+            await client.embed(arm, [fake.documents[0].text])
+            with pytest.raises(probe.ProbeError, match="call budget exhausted"):
+                await client.embed(arm, ["must never be sent"])
+        finally:
+            await client.client.aclose()
+
+    asyncio.run(run())
+    assert sum(path == "/api/embed" for _, path, _ in fake.calls) == 1

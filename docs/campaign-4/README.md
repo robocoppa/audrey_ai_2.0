@@ -19,19 +19,20 @@ they are not ongoing task lists.
   from catalog/revision dates. Deployed tools, page citations and historical
   refusal are user-accepted. **20B.2 built:** local scoped hybrid content search,
   resumable bounded indexing, verified publication and page citations. Tower
-  deployment, initial current-catalog indexing and browser acceptance are next.
+  deployment and browser acceptance remain pending. The user confirms no IRS
+  index has run; hold its first build until the embedding decision below.
   [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds
   the contract and remaining privacy/tax workflow. State jurisdictions remain
   unspecified; fine-tuning requires evidence.
 
-- **Requested model comparison (October 15):** benchmark `nimble-v3:latest`
-  against the current router and `embeddinggemma-2:latest` against raw/prefixed
-  Nomic. Nimble's comparison is complete: retain Qwen. The embedding probe's
-  three-round cap blocked the user's launches; it now accepts 1–10 rounds within
-  a checked request budget. Only embedding measurement remains pending. Keep
-  production models and indexes unchanged.
-  Commands and assessment scope are in [Phase 06](phase-06-system-one-routing.md);
-  specifications/results belong in the standalone model report.
+- **Embedding comparison — current priority:** the deeper public-document test
+  is prepared for Tower. Compare Gemma 2 and Qwen3 Embedding 0.6B/4B/8B against
+  raw/prefixed Nomic, with source-disjoint threshold validation, memory/history
+  fixtures, regression checks and realistic runtime batches. The user approved
+  adopting an improvement and reindexing existing text stores before growth.
+  IRS indexing has never run and waits for this choice. [Phase 06](phase-06-system-one-routing.md)
+  holds the single run handoff and migration order. Router assessment remains
+  closed: retain Qwen 3.5 4B. Measurements belong in the standalone model report.
 
 - **19 — deeper evidence tools:** complete; user accepted all five tools October 13.
   [Phase 19](phase-19-evidence-tools.md) defines calculator/conversions, CSV/XLSX
@@ -96,7 +97,7 @@ they are not ongoing task lists.
 | 03 | [Skills](phase-03-skills.md) | Explicit skills complete; native automatic selection built, acceptance pending |
 | 04 | [File downloads](phase-04-file-downloads.md) | Complete |
 | 05 | [Responses foundation](phase-05-responses-api.md) | Complete |
-| 06 | [Router candidates](phase-06-system-one-routing.md) | Nimble v3 assessed; retain qwen3.5:4b; embedding comparison pending |
+| 06 | [Router candidates](phase-06-system-one-routing.md) | Router closed; deeper Gemma/Qwen embedding comparison prepared; conditional reindex approved |
 | 07 | [Scanned PDFs](phase-07-scanned-pdf-ocr.md) | Complete |
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
@@ -114,7 +115,9 @@ they are not ongoing task lists.
 
 ## Remaining work
 
-1. Deploy 20B.2 and publish the current-catalog search index, then accept one
+1. Complete the deeper embedding comparison in Phase 06. If a candidate is an
+   improvement, implement its formatting/identity and reindex existing text stores
+   before building the first IRS index. Then deploy 20B.2 and accept one
    cited document-content search in the browser. The phase document has the
    exact rebuild/index steps. Follow with 20C enforced private processing,
    20D's tax workflow and targeted 20E evaluation. The owned archive is sufficient;

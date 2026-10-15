@@ -1,0 +1,1261 @@
+{
+  "schema": 2,
+  "language": "en",
+  "public": true,
+  "synthetic": true,
+  "description": "Invented saved-memory and conversation records; no client data. Uses actual key/value/tag and User/Assistant shapes.",
+  "sources": [
+    {
+      "id": "memory-calibration",
+      "split": "calibration",
+      "title": "Invented memory records (calibration)",
+      "sha256": "3542971a6ff7e108f57ea04eba883c33a0fd82109da2354560d59c901a5b129b",
+      "pages": 1,
+      "license": "CC0 synthetic benchmark text"
+    },
+    {
+      "id": "memory-holdout",
+      "split": "holdout",
+      "title": "Invented memory records (holdout)",
+      "sha256": "ad46d7dcaeae3f23d9c3eff90f38ee0ee9bc1197e02db62fd96162221d6cf692",
+      "pages": 1,
+      "license": "CC0 synthetic benchmark text"
+    },
+    {
+      "id": "history-calibration",
+      "split": "calibration",
+      "title": "Invented history records (calibration)",
+      "sha256": "c8b1781a06659553d1bae69a8adbcadb9b13258d15927a5fcfb4685423301b62",
+      "pages": 1,
+      "license": "CC0 synthetic benchmark text"
+    },
+    {
+      "id": "history-holdout",
+      "split": "holdout",
+      "title": "Invented history records (holdout)",
+      "sha256": "302e67422d9d02fb7352c3e2b47743538b2ccec6a9fa45e39a877a08c5ca6af8",
+      "pages": 1,
+      "license": "CC0 synthetic benchmark text"
+    }
+  ],
+  "documents": [
+    {
+      "id": "memory-calibration-coffee",
+      "text": "Coffee preference: after 3 PM use decaf, but morning coffee may contain caffeine. [tags: drinks,preferences]",
+      "source_id": "memory-calibration",
+      "page": 1,
+      "offset": 0,
+      "split": "calibration",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-calibration-garden",
+      "text": "Container garden: water the balcony pots every other morning. The raised beds use a separate rain sensor. [tags: garden,watering]",
+      "source_id": "memory-calibration",
+      "page": 1,
+      "offset": 1000,
+      "split": "calibration",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-calibration-bench",
+      "text": "Workshop bench: the finished work surface should be 940 millimeters high. [tags: workshop,dimensions]",
+      "source_id": "memory-calibration",
+      "page": 1,
+      "offset": 2000,
+      "split": "calibration",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-calibration-reports",
+      "text": "Field report style: put dates in day-month-year order and spell the month out. Avoid numeric-only dates. [tags: writing,format]",
+      "source_id": "memory-calibration",
+      "page": 1,
+      "offset": 3000,
+      "split": "calibration",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-calibration-sensor",
+      "text": "Greenhouse sensor: sample temperature every ten minutes; upload the daily aggregate at midnight. [tags: greenhouse,telemetry]",
+      "source_id": "memory-calibration",
+      "page": 1,
+      "offset": 4000,
+      "split": "calibration",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-calibration-contact",
+      "text": "Workshop deliveries: the gate code is not stored. Bring parcels to the north loading door. [tags: workshop,deliveries]",
+      "source_id": "memory-calibration",
+      "page": 1,
+      "offset": 5000,
+      "split": "calibration",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-calibration-tea",
+      "text": "Tea preference: jasmine tea should steep for two minutes, with no sweetener. [tags: drinks,preferences]",
+      "source_id": "memory-calibration",
+      "page": 1,
+      "offset": 6000,
+      "split": "calibration",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-calibration-camp",
+      "text": "Camping stove fuel: use canister fuel on summer trips; the winter stove uses white gas. [tags: camping,equipment]",
+      "source_id": "memory-calibration",
+      "page": 1,
+      "offset": 7000,
+      "split": "calibration",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-calibration-coffee-decoy",
+      "text": "Coffee equipment: the espresso grinder is on shelf three. The travel grinder goes in the blue case. [tags: drinks,equipment]",
+      "source_id": "memory-calibration",
+      "page": 1,
+      "offset": 8000,
+      "split": "calibration",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-calibration-bench-decoy",
+      "text": "Workshop shelving: the upper storage shelf is 1940 millimeters above the floor. [tags: workshop,dimensions]",
+      "source_id": "memory-calibration",
+      "page": 1,
+      "offset": 9000,
+      "split": "calibration",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-calibration-sensor-decoy",
+      "text": "Garden rain gauge: record rainfall hourly, then transmit the weekly total on Sunday. [tags: garden,telemetry]",
+      "source_id": "memory-calibration",
+      "page": 1,
+      "offset": 10000,
+      "split": "calibration",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-calibration-camp-decoy",
+      "text": "Camping tent: the summer tent has green poles; the winter tent has orange poles. [tags: camping,equipment]",
+      "source_id": "memory-calibration",
+      "page": 1,
+      "offset": 11000,
+      "split": "calibration",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-holdout-aquarium",
+      "text": "Aquarium care: replace one quarter of the tank water every Saturday; never replace it all at once. [tags: aquarium,maintenance]",
+      "source_id": "memory-holdout",
+      "page": 1,
+      "offset": 0,
+      "split": "holdout",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-holdout-kiln",
+      "text": "Pottery kiln: hold the final firing temperature for twelve minutes before cooling. [tags: pottery,kiln]",
+      "source_id": "memory-holdout",
+      "page": 1,
+      "offset": 1000,
+      "split": "holdout",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-holdout-bike",
+      "text": "Commuter bicycle: the rear rack limit is eighteen kilograms; the front basket limit is four kilograms. [tags: cycling,capacity]",
+      "source_id": "memory-holdout",
+      "page": 1,
+      "offset": 2000,
+      "split": "holdout",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-holdout-books",
+      "text": "Book club schedule: meet on the second Tuesday each month at 7 PM, except August when there is no meeting. [tags: books,schedule]",
+      "source_id": "memory-holdout",
+      "page": 1,
+      "offset": 3000,
+      "split": "holdout",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-holdout-sewing",
+      "text": "Sewing pattern: leave a fifteen-millimeter seam allowance on the linen jacket, not the usual ten. [tags: sewing,dimensions]",
+      "source_id": "memory-holdout",
+      "page": 1,
+      "offset": 4000,
+      "split": "holdout",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-holdout-radio",
+      "text": "Radio battery rotation: pack the charged battery in the red pouch and the depleted one in the gray pouch. [tags: radio,batteries]",
+      "source_id": "memory-holdout",
+      "page": 1,
+      "offset": 5000,
+      "split": "holdout",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-holdout-printer",
+      "text": "Label printer: use matte labels for freezer containers; glossy labels are reserved for dry shelves. [tags: labels,storage]",
+      "source_id": "memory-holdout",
+      "page": 1,
+      "offset": 6000,
+      "split": "holdout",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-holdout-orchard",
+      "text": "Orchard reminder: prune the pear trees in late winter, while the cherry trees wait until after harvest. [tags: orchard,maintenance]",
+      "source_id": "memory-holdout",
+      "page": 1,
+      "offset": 7000,
+      "split": "holdout",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-holdout-aquarium-decoy",
+      "text": "Aquarium lighting: the lamp stays on for eight hours daily. The filter runs continuously. [tags: aquarium,equipment]",
+      "source_id": "memory-holdout",
+      "page": 1,
+      "offset": 8000,
+      "split": "holdout",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-holdout-bike-decoy",
+      "text": "Touring bicycle: its rear rack limit is twenty-five kilograms. This is not the commuter bike. [tags: cycling,capacity]",
+      "source_id": "memory-holdout",
+      "page": 1,
+      "offset": 9000,
+      "split": "holdout",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-holdout-books-decoy",
+      "text": "Writing circle: meet on the first Thursday at 6 PM. The writing circle also meets during August. [tags: writing,schedule]",
+      "source_id": "memory-holdout",
+      "page": 1,
+      "offset": 10000,
+      "split": "holdout",
+      "workload": "memory"
+    },
+    {
+      "id": "memory-holdout-printer-decoy",
+      "text": "Packing labels: glossy labels go on cartons stored indoors; plain paper tags go on outgoing parcels. [tags: labels,shipping]",
+      "source_id": "memory-holdout",
+      "page": 1,
+      "offset": 11000,
+      "split": "holdout",
+      "workload": "memory"
+    },
+    {
+      "id": "history-calibration-backup",
+      "text": "User: What did we decide about the nightly backup?\nAssistant: The chosen plan copies changed files at 02:30, verifies their checksums, and retains fourteen daily versions. No cloud copy was selected.",
+      "source_id": "history-calibration",
+      "page": 1,
+      "offset": 0,
+      "split": "calibration",
+      "workload": "history"
+    },
+    {
+      "id": "history-calibration-upload",
+      "text": "User: Why does the upload return 413?\nAssistant: The reverse proxy caps requests at 8 megabytes. Raising that proxy setting resolved the upload; the application limit was already larger.",
+      "source_id": "history-calibration",
+      "page": 1,
+      "offset": 1000,
+      "split": "calibration",
+      "workload": "history"
+    },
+    {
+      "id": "history-calibration-sqlite",
+      "text": "User: Which migration fixed the missing invoice index?\nAssistant: Migration 027 creates invoice_customer_created_idx on customer_id and created_at. It does not change the invoice number constraint.",
+      "source_id": "history-calibration",
+      "page": 1,
+      "offset": 2000,
+      "split": "calibration",
+      "workload": "history"
+    },
+    {
+      "id": "history-calibration-release",
+      "text": "User: Which release did we keep after the chart regression?\nAssistant: We retained version 2.6.4 because 2.7.0 broke axis labels. Version 2.7.1 remains untested.",
+      "source_id": "history-calibration",
+      "page": 1,
+      "offset": 3000,
+      "split": "calibration",
+      "workload": "history"
+    },
+    {
+      "id": "history-calibration-lens",
+      "text": "User: What camera test removed the focus hunting?\nAssistant: Switching from continuous autofocus to a fixed focus distance stopped the hunting in the tabletop demonstration.",
+      "source_id": "history-calibration",
+      "page": 1,
+      "offset": 4000,
+      "split": "calibration",
+      "workload": "history"
+    },
+    {
+      "id": "history-calibration-meeting",
+      "text": "User: What did the planning meeting agree on?\nAssistant: Build the importer before the dashboard. The exporter is deferred until the importer handles duplicate rows correctly.",
+      "source_id": "history-calibration",
+      "page": 1,
+      "offset": 5000,
+      "split": "calibration",
+      "workload": "history"
+    },
+    {
+      "id": "history-calibration-audio",
+      "text": "User: Why did the recording have a buzzing noise?\nAssistant: The unbalanced cable passed next to the power supply. Moving it away removed the buzz; replacing the microphone did not.",
+      "source_id": "history-calibration",
+      "page": 1,
+      "offset": 6000,
+      "split": "calibration",
+      "workload": "history"
+    },
+    {
+      "id": "history-calibration-cache",
+      "text": "User: What cache expiry did we select for the map tiles?\nAssistant: Use six hours for map tiles and five minutes for the weather overlay. Those are separate caches.",
+      "source_id": "history-calibration",
+      "page": 1,
+      "offset": 7000,
+      "split": "calibration",
+      "workload": "history"
+    },
+    {
+      "id": "history-calibration-backup-decoy",
+      "text": "User: What is the weekly backup policy?\nAssistant: The weekly archive retains eight snapshots and runs on Sunday afternoon. It is separate from the nightly file job.",
+      "source_id": "history-calibration",
+      "page": 1,
+      "offset": 8000,
+      "split": "calibration",
+      "workload": "history"
+    },
+    {
+      "id": "history-calibration-release-decoy",
+      "text": "User: Is the parser release stable?\nAssistant: Parser version 2.7.0 is approved. That decision does not apply to the chart package.",
+      "source_id": "history-calibration",
+      "page": 1,
+      "offset": 9000,
+      "split": "calibration",
+      "workload": "history"
+    },
+    {
+      "id": "history-calibration-upload-decoy",
+      "text": "User: Why was the image request rejected?\nAssistant: The image decoder rejected the color profile. The reverse proxy size limit was not involved.",
+      "source_id": "history-calibration",
+      "page": 1,
+      "offset": 10000,
+      "split": "calibration",
+      "workload": "history"
+    },
+    {
+      "id": "history-calibration-cache-decoy",
+      "text": "User: How long should login sessions last?\nAssistant: The chosen session duration is twelve hours. Tile-cache expiry is unrelated.",
+      "source_id": "history-calibration",
+      "page": 1,
+      "offset": 11000,
+      "split": "calibration",
+      "workload": "history"
+    },
+    {
+      "id": "history-holdout-thread",
+      "text": "User: Why did the sewing machine keep breaking thread?\nAssistant: A burr on the needle plate was catching the upper thread. Smoothing that edge fixed it; loosening the tension alone did not.",
+      "source_id": "history-holdout",
+      "page": 1,
+      "offset": 0,
+      "split": "holdout",
+      "workload": "history"
+    },
+    {
+      "id": "history-holdout-solar",
+      "text": "User: Which panel angle did the cabin trial choose?\nAssistant: The trial selected a thirty-five-degree tilt for the winter array and fifteen degrees for summer.",
+      "source_id": "history-holdout",
+      "page": 1,
+      "offset": 1000,
+      "split": "holdout",
+      "workload": "history"
+    },
+    {
+      "id": "history-holdout-lease",
+      "text": "User: What did we decide about the queue lease?\nAssistant: Use a ninety-second lease, renewed every twenty seconds. A failed renewal stops the worker before another task is accepted.",
+      "source_id": "history-holdout",
+      "page": 1,
+      "offset": 2000,
+      "split": "holdout",
+      "workload": "history"
+    },
+    {
+      "id": "history-holdout-dns",
+      "text": "User: What solved the intermittent name lookup?\nAssistant: The secondary resolver was unreachable. Removing that resolver stopped the intermittent failures without changing the primary.",
+      "source_id": "history-holdout",
+      "page": 1,
+      "offset": 3000,
+      "split": "holdout",
+      "workload": "history"
+    },
+    {
+      "id": "history-holdout-bread",
+      "text": "User: What loaf trial gave a thinner crust?\nAssistant: The covered bake lasted twenty minutes, followed by fifteen uncovered. Leaving the lid on longer made the crust thicker.",
+      "source_id": "history-holdout",
+      "page": 1,
+      "offset": 4000,
+      "split": "holdout",
+      "workload": "history"
+    },
+    {
+      "id": "history-holdout-import",
+      "text": "User: How do we identify duplicates in the inventory import?\nAssistant: Use the pair of warehouse code and item SKU. Matching only the display name incorrectly merges distinct stock.",
+      "source_id": "history-holdout",
+      "page": 1,
+      "offset": 5000,
+      "split": "holdout",
+      "workload": "history"
+    },
+    {
+      "id": "history-holdout-chair",
+      "text": "User: What material did we choose for the outdoor chair?\nAssistant: Use stainless fasteners and oiled cedar. Painted pine was rejected after the weathering trial.",
+      "source_id": "history-holdout",
+      "page": 1,
+      "offset": 6000,
+      "split": "holdout",
+      "workload": "history"
+    },
+    {
+      "id": "history-holdout-tests",
+      "text": "User: Which test case exposed the date bug?\nAssistant: The failing example crosses midnight at the end of February in a leap year. Ordinary month boundaries passed.",
+      "source_id": "history-holdout",
+      "page": 1,
+      "offset": 7000,
+      "split": "holdout",
+      "workload": "history"
+    },
+    {
+      "id": "history-holdout-lease-decoy",
+      "text": "User: What is the reservation timeout?\nAssistant: User reservations expire after twenty minutes and do not renew. This is unrelated to worker queue leases.",
+      "source_id": "history-holdout",
+      "page": 1,
+      "offset": 8000,
+      "split": "holdout",
+      "workload": "history"
+    },
+    {
+      "id": "history-holdout-dns-decoy",
+      "text": "User: How was the certificate warning fixed?\nAssistant: Installing the missing intermediate certificate resolved the warning. DNS settings were unchanged.",
+      "source_id": "history-holdout",
+      "page": 1,
+      "offset": 9000,
+      "split": "holdout",
+      "workload": "history"
+    },
+    {
+      "id": "history-holdout-bread-decoy",
+      "text": "User: What timing did the flatbread use?\nAssistant: Bake uncovered for six minutes. This is a different recipe from the covered loaf trial.",
+      "source_id": "history-holdout",
+      "page": 1,
+      "offset": 10000,
+      "split": "holdout",
+      "workload": "history"
+    },
+    {
+      "id": "history-holdout-solar-decoy",
+      "text": "User: What orientation did the greenhouse roof use?\nAssistant: The greenhouse roof has a twenty-five-degree slope. The cabin solar-array trial used a separate mount.",
+      "source_id": "history-holdout",
+      "page": 1,
+      "offset": 11000,
+      "split": "holdout",
+      "workload": "history"
+    }
+  ],
+  "queries": [
+    {
+      "id": "q-memory-calibration-coffee",
+      "text": "Which coffee should I make in the late afternoon?",
+      "group": "memory",
+      "relevant": [
+        "memory-calibration-coffee"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-calibration",
+          "page": 1,
+          "quote": "after 3 PM use decaf"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-calibration-garden",
+      "text": "How often do the balcony containers need water?",
+      "group": "memory",
+      "relevant": [
+        "memory-calibration-garden"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-calibration",
+          "page": 1,
+          "quote": "water the balcony pots every other morning"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-calibration-bench",
+      "text": "What finished height did I choose for the workbench?",
+      "group": "memory",
+      "relevant": [
+        "memory-calibration-bench"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-calibration",
+          "page": 1,
+          "quote": "940 millimeters high"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-calibration-reports",
+      "text": "How should dates look in my field notes?",
+      "group": "memory",
+      "relevant": [
+        "memory-calibration-reports"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-calibration",
+          "page": 1,
+          "quote": "day-month-year order and spell the month out"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-calibration-sensor",
+      "text": "What is the temperature sampling interval in the greenhouse?",
+      "group": "memory",
+      "relevant": [
+        "memory-calibration-sensor"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-calibration",
+          "page": 1,
+          "quote": "sample temperature every ten minutes"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-calibration-contact",
+      "text": "Where should workshop parcels be delivered?",
+      "group": "memory",
+      "relevant": [
+        "memory-calibration-contact"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-calibration",
+          "page": 1,
+          "quote": "north loading door"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-calibration-tea",
+      "text": "How long should the jasmine brew?",
+      "group": "memory",
+      "relevant": [
+        "memory-calibration-tea"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-calibration",
+          "page": 1,
+          "quote": "steep for two minutes"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-calibration-camp",
+      "text": "Which fuel goes with the cold-season camping stove?",
+      "group": "memory",
+      "relevant": [
+        "memory-calibration-camp"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-calibration",
+          "page": 1,
+          "quote": "winter stove uses white gas"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-calibration-absent-1",
+      "text": "What gate access code is saved for workshop deliveries?",
+      "group": "memory",
+      "relevant": [],
+      "answerable": false,
+      "split": "calibration",
+      "workload": "memory",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-memory-calibration-absent-2",
+      "text": "What brand of fertilizer do the balcony pots use?",
+      "group": "memory",
+      "relevant": [],
+      "answerable": false,
+      "split": "calibration",
+      "workload": "memory",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-memory-calibration-absent-3",
+      "text": "What is the greenhouse temperature alarm threshold?",
+      "group": "memory",
+      "relevant": [],
+      "answerable": false,
+      "split": "calibration",
+      "workload": "memory",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-memory-calibration-absent-4",
+      "text": "How much white gas should I buy for a winter trip?",
+      "group": "memory",
+      "relevant": [],
+      "answerable": false,
+      "split": "calibration",
+      "workload": "memory",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-memory-holdout-aquarium",
+      "text": "What fraction of aquarium water gets changed each week?",
+      "group": "memory",
+      "relevant": [
+        "memory-holdout-aquarium"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-holdout",
+          "page": 1,
+          "quote": "one quarter of the tank water"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-holdout-kiln",
+      "text": "How long is the final temperature soak for pottery?",
+      "group": "memory",
+      "relevant": [
+        "memory-holdout-kiln"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-holdout",
+          "page": 1,
+          "quote": "twelve minutes"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-holdout-bike",
+      "text": "How much cargo can the rear carrier support?",
+      "group": "memory",
+      "relevant": [
+        "memory-holdout-bike"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-holdout",
+          "page": 1,
+          "quote": "rear rack limit is eighteen kilograms"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-holdout-books",
+      "text": "Which month does the reading group skip?",
+      "group": "memory",
+      "relevant": [
+        "memory-holdout-books"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-holdout",
+          "page": 1,
+          "quote": "August when there is no meeting"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-holdout-sewing",
+      "text": "Which seam allowance did I pick for the linen coat?",
+      "group": "memory",
+      "relevant": [
+        "memory-holdout-sewing"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-holdout",
+          "page": 1,
+          "quote": "fifteen-millimeter seam allowance"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-holdout-radio",
+      "text": "Which pouch holds a battery that is ready to use?",
+      "group": "memory",
+      "relevant": [
+        "memory-holdout-radio"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-holdout",
+          "page": 1,
+          "quote": "charged battery in the red pouch"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-holdout-printer",
+      "text": "What finish should labels on frozen food use?",
+      "group": "memory",
+      "relevant": [
+        "memory-holdout-printer"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-holdout",
+          "page": 1,
+          "quote": "matte labels for freezer containers"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-holdout-orchard",
+      "text": "When did I plan to trim the cherry trees?",
+      "group": "memory",
+      "relevant": [
+        "memory-holdout-orchard"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "memory",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "memory-holdout",
+          "page": 1,
+          "quote": "after harvest"
+        }
+      ]
+    },
+    {
+      "id": "q-memory-holdout-absent-1",
+      "text": "What is the aquarium water pH target?",
+      "group": "memory",
+      "relevant": [],
+      "answerable": false,
+      "split": "holdout",
+      "workload": "memory",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-memory-holdout-absent-2",
+      "text": "What final firing temperature does the pottery kiln use?",
+      "group": "memory",
+      "relevant": [],
+      "answerable": false,
+      "split": "holdout",
+      "workload": "memory",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-memory-holdout-absent-3",
+      "text": "What tire pressure do I use on the commuter bicycle?",
+      "group": "memory",
+      "relevant": [],
+      "answerable": false,
+      "split": "holdout",
+      "workload": "memory",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-memory-holdout-absent-4",
+      "text": "What is the label printer model number?",
+      "group": "memory",
+      "relevant": [],
+      "answerable": false,
+      "split": "holdout",
+      "workload": "memory",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-history-calibration-backup",
+      "text": "What retention did we settle on for the nightly file backup?",
+      "group": "history",
+      "relevant": [
+        "history-calibration-backup"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-calibration",
+          "page": 1,
+          "quote": "fourteen daily versions"
+        }
+      ]
+    },
+    {
+      "id": "q-history-calibration-upload",
+      "text": "Which component caused the request-too-large upload error?",
+      "group": "history",
+      "relevant": [
+        "history-calibration-upload"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-calibration",
+          "page": 1,
+          "quote": "reverse proxy caps requests at 8 megabytes"
+        }
+      ]
+    },
+    {
+      "id": "q-history-calibration-sqlite",
+      "text": "Which migration introduced the customer-and-date invoice index?",
+      "group": "history",
+      "relevant": [
+        "history-calibration-sqlite"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-calibration",
+          "page": 1,
+          "quote": "Migration 027"
+        }
+      ]
+    },
+    {
+      "id": "q-history-calibration-release",
+      "text": "What version did we retain when chart labels broke?",
+      "group": "history",
+      "relevant": [
+        "history-calibration-release"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-calibration",
+          "page": 1,
+          "quote": "version 2.6.4"
+        }
+      ]
+    },
+    {
+      "id": "q-history-calibration-lens",
+      "text": "How did we stop focus hunting in the tabletop recording?",
+      "group": "history",
+      "relevant": [
+        "history-calibration-lens"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-calibration",
+          "page": 1,
+          "quote": "fixed focus distance"
+        }
+      ]
+    },
+    {
+      "id": "q-history-calibration-meeting",
+      "text": "What needs to work before we start the exporter?",
+      "group": "history",
+      "relevant": [
+        "history-calibration-meeting"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-calibration",
+          "page": 1,
+          "quote": "importer handles duplicate rows correctly"
+        }
+      ]
+    },
+    {
+      "id": "q-history-calibration-audio",
+      "text": "What change eliminated the buzz in the recording?",
+      "group": "history",
+      "relevant": [
+        "history-calibration-audio"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-calibration",
+          "page": 1,
+          "quote": "Moving it away removed the buzz"
+        }
+      ]
+    },
+    {
+      "id": "q-history-calibration-cache",
+      "text": "How long do the map tiles stay cached?",
+      "group": "history",
+      "relevant": [
+        "history-calibration-cache"
+      ],
+      "answerable": true,
+      "split": "calibration",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-calibration",
+          "page": 1,
+          "quote": "six hours for map tiles"
+        }
+      ]
+    },
+    {
+      "id": "q-history-calibration-absent-1",
+      "text": "What encryption algorithm did we choose for the nightly backup?",
+      "group": "history",
+      "relevant": [],
+      "answerable": false,
+      "split": "calibration",
+      "workload": "history",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-history-calibration-absent-2",
+      "text": "Which proxy configuration filename was edited to fix the upload?",
+      "group": "history",
+      "relevant": [],
+      "answerable": false,
+      "split": "calibration",
+      "workload": "history",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-history-calibration-absent-3",
+      "text": "Which camera model was used for the tabletop demonstration?",
+      "group": "history",
+      "relevant": [],
+      "answerable": false,
+      "split": "calibration",
+      "workload": "history",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-history-calibration-absent-4",
+      "text": "What is the exact scheduled date for starting the exporter?",
+      "group": "history",
+      "relevant": [],
+      "answerable": false,
+      "split": "calibration",
+      "workload": "history",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-history-holdout-thread",
+      "text": "What actually fixed the sewing thread breakage?",
+      "group": "history",
+      "relevant": [
+        "history-holdout-thread"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-holdout",
+          "page": 1,
+          "quote": "burr on the needle plate"
+        }
+      ]
+    },
+    {
+      "id": "q-history-holdout-solar",
+      "text": "What tilt won the winter solar-panel trial?",
+      "group": "history",
+      "relevant": [
+        "history-holdout-solar"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-holdout",
+          "page": 1,
+          "quote": "thirty-five-degree tilt"
+        }
+      ]
+    },
+    {
+      "id": "q-history-holdout-lease",
+      "text": "How frequently should a running queue worker renew its lease?",
+      "group": "history",
+      "relevant": [
+        "history-holdout-lease"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-holdout",
+          "page": 1,
+          "quote": "every twenty seconds"
+        }
+      ]
+    },
+    {
+      "id": "q-history-holdout-dns",
+      "text": "Which DNS configuration change stopped the intermittent failures?",
+      "group": "history",
+      "relevant": [
+        "history-holdout-dns"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-holdout",
+          "page": 1,
+          "quote": "Removing that resolver"
+        }
+      ]
+    },
+    {
+      "id": "q-history-holdout-bread",
+      "text": "How long was the successful loaf baked without its lid?",
+      "group": "history",
+      "relevant": [
+        "history-holdout-bread"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-holdout",
+          "page": 1,
+          "quote": "fifteen uncovered"
+        }
+      ]
+    },
+    {
+      "id": "q-history-holdout-import",
+      "text": "Which two fields form the inventory deduplication key?",
+      "group": "history",
+      "relevant": [
+        "history-holdout-import"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-holdout",
+          "page": 1,
+          "quote": "warehouse code and item SKU"
+        }
+      ]
+    },
+    {
+      "id": "q-history-holdout-chair",
+      "text": "Which wood survived the outdoor-chair selection?",
+      "group": "history",
+      "relevant": [
+        "history-holdout-chair"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-holdout",
+          "page": 1,
+          "quote": "oiled cedar"
+        }
+      ]
+    },
+    {
+      "id": "q-history-holdout-tests",
+      "text": "What boundary condition revealed the date-handling defect?",
+      "group": "history",
+      "relevant": [
+        "history-holdout-tests"
+      ],
+      "answerable": true,
+      "split": "holdout",
+      "workload": "history",
+      "kind": "paraphrase",
+      "evidence": [
+        {
+          "source_id": "history-holdout",
+          "page": 1,
+          "quote": "end of February in a leap year"
+        }
+      ]
+    },
+    {
+      "id": "q-history-holdout-absent-1",
+      "text": "What IP address did we configure for the working primary DNS resolver?",
+      "group": "history",
+      "relevant": [],
+      "answerable": false,
+      "split": "holdout",
+      "workload": "history",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-history-holdout-absent-2",
+      "text": "What was the solar array output in watts during the winter trial?",
+      "group": "history",
+      "relevant": [],
+      "answerable": false,
+      "split": "holdout",
+      "workload": "history",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-history-holdout-absent-3",
+      "text": "Which date library contained the leap-year bug?",
+      "group": "history",
+      "relevant": [],
+      "answerable": false,
+      "split": "holdout",
+      "workload": "history",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    },
+    {
+      "id": "q-history-holdout-absent-4",
+      "text": "What was the cabin location in the solar trial?",
+      "group": "history",
+      "relevant": [],
+      "answerable": false,
+      "split": "holdout",
+      "workload": "history",
+      "kind": "absent",
+      "absence_reason": "Requested specific detail is absent from this complete invented context."
+    }
+  ]
+}
