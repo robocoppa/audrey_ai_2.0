@@ -1,10 +1,10 @@
 # Campaign 4 Phase 06 — System One router assessment
 
-**Status:** Retain `qwen3.5:4b` for routing; those comparisons are closed.
-The deeper embedding comparison is prepared for Tower: EmbeddingGemma 2 and
-Qwen3 Embedding 0.6B/4B/8B against both Nomic baselines. The user approved
-adopting an improvement and reindexing the existing text stores before growth.
-The IRS index has never run; its first build waits for this decision.
+**Status:** Router assessment is closed; retain `qwen3.5:4b`. All four embedding
+candidates completed the deeper test. Nomic's two arms stopped during cold-load
+verification; only those baselines need continuation. Candidate measurements are
+preserved and corrected labels were rescored offline. Conditional adoption and
+reindexing remain approved; the IRS index has never run and still waits.
 
 ## Decision
 
@@ -53,51 +53,48 @@ with no new runner or production indexing during evaluation.
   1,000 tokens each. Frozen stress inputs avoid runtime tokenizer downloads.
   No concurrent answering worker or end-to-end answer quality is measured here.
 
-The full run has six arms and 2,070 embedding requests within a checked 4,096
-request cap. All required models must be installed before the first unload or
-embedding request. Candidates run sequentially, are unloaded afterward, and raw
-Nomic runs last. Do not run another GPU-heavy job alongside it.
+The completed candidates are retained; do not rerun them. The two-arm Nomic
+continuation needs at most 690 embedding requests. Model unload is now verified
+with bounded polling; unavailable cold samples are disclosed without discarding
+valid warm/ranking measurements. Only Nomic is loaded or unloaded in continuation.
+Do not run another GPU-heavy job alongside it.
 
-### Tower handoff
+Source review added 33 valid alternative passages across 27 questions. Only labels
+and their evidence changed; source/query text and corpus scopes have identical
+input fingerprints. Corrected candidate scores are retrospective, with the same
+calibration procedure applied solely to corrected calibration labels. Original
+and corrected full reports are saved locally; model results are in MODEL-FACTS.
 
-After committing/pushing on the laptop, on **Tower**:
+### Nomic-only Tower continuation
+
+After committing/pushing the laptop changes, on **Tower**:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
 git pull
 ```
 
-No service, UI or eval-image rebuild/restart is required. The existing runner
-copies the probe, helper and frozen fixtures into the running backend.
-Gemma and Nomic are already installed. Pull the three requested Qwen models
-if not already present; stop if a pull fails:
-
-```bash
-docker exec ollama ollama pull qwen3-embedding:0.6b
-docker exec ollama ollama pull qwen3-embedding:4b
-docker exec ollama ollama pull qwen3-embedding:8b
-```
-
-Then run once in that same **Tower** checkout:
+No service, UI or eval-image rebuild/restart is needed. No model pull, upload,
+personal token or IRS index build is required. In that same checkout run:
 
 ```bash
 scripts/probes/probe-onbox.sh embedding_document_probe.py \
   COPY=embedding_retrieval_probe.py,embedding_real_documents.json,embedding_personal_cases.json,embedding_retrieval_cases.json \
-  CANDIDATES=embeddinggemma-2:latest,qwen3-embedding:0.6b,qwen3-embedding:4b,qwen3-embedding:8b \
-  ROUNDS=2 BATCH_SIZE=16
+  ARGS=--baselines-only ROUNDS=2 BATCH_SIZE=16
 ```
 
-Allow roughly 10–30 minutes depending on loading and the larger models' batch
-cost. It self-detaches, survives SSH disconnection and sends the usual Telegram
-result/log attachment. No upload, personal token, IRS indexing or extra PDF
-download is required. Read the attachment from the laptop's Telegram Downloads.
+Allow roughly 1–3 minutes, depending on model loading. The existing detached
+runner sends the result/log through Telegram. Read the attachment on the laptop.
+Success: `measurement_status: completed`, exactly `prefixed` and `raw` comparable
+arms, and `quality_recommendation.status: baselines_measured`; exit 0 confirms
+the missing measurement is complete, not that a model has won. Cold sample status
+may be partial/unavailable and must not be presented as verified cold timing.
 
-`measurement_status: completed` and all six arms comparable prove execution.
-Exit 0 also means a candidate cleared the predeclared diagnostic gates; exit 1
-can instead mean completed measurements with quality findings. Read both the
-measurement status and per-model recommendation, rather than treating a Telegram
-verdict as a model winner. Setup errors exit 2 before model work. No store or
-configuration switches automatically.
+Use `scripts/analysis/embedding_reports.py` on the laptop to combine the corrected
+saved candidate report with this continuation. The helper rejects mismatched
+fixtures, query scopes/labels, settings, Ollama version, model digest or format.
+It preserves original failures and actual call counts; no candidate rerun or
+production change occurs during assembly. Then make the adoption decision.
 
 ## Adoption and reindexing
 

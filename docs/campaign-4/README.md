@@ -25,14 +25,13 @@ they are not ongoing task lists.
   the contract and remaining privacy/tax workflow. State jurisdictions remain
   unspecified; fine-tuning requires evidence.
 
-- **Embedding comparison — current priority:** the deeper public-document test
-  is prepared for Tower. Compare Gemma 2 and Qwen3 Embedding 0.6B/4B/8B against
-  raw/prefixed Nomic, with source-disjoint threshold validation, memory/history
-  fixtures, regression checks and realistic runtime batches. The user approved
-  adopting an improvement and reindexing existing text stores before growth.
-  IRS indexing has never run and waits for this choice. [Phase 06](phase-06-system-one-routing.md)
-  holds the single run handoff and migration order. Router assessment remains
-  closed: retain Qwen 3.5 4B. Measurements belong in the standalone model report.
+- **Embedding comparison — current priority:** all four Gemma/Qwen candidates
+  completed. The two Nomic arms stopped at unload verification; the targeted
+  continuation measures only those missing baselines. Saved candidates remain
+  valid. Corrected source labels were rescored offline; read the model report
+  for results and limits. [Phase 06](phase-06-system-one-routing.md) holds the
+  continuation and conditional reindex order. IRS indexing has never run and
+  waits for the choice. Router assessment stays closed: retain Qwen 3.5 4B.
 
 - **19 — deeper evidence tools:** complete; user accepted all five tools October 13.
   [Phase 19](phase-19-evidence-tools.md) defines calculator/conversions, CSV/XLSX
@@ -97,7 +96,7 @@ they are not ongoing task lists.
 | 03 | [Skills](phase-03-skills.md) | Explicit skills complete; native automatic selection built, acceptance pending |
 | 04 | [File downloads](phase-04-file-downloads.md) | Complete |
 | 05 | [Responses foundation](phase-05-responses-api.md) | Complete |
-| 06 | [Router candidates](phase-06-system-one-routing.md) | Router closed; deeper Gemma/Qwen embedding comparison prepared; conditional reindex approved |
+| 06 | [Router candidates](phase-06-system-one-routing.md) | Four candidates measured; Nomic-only continuation pending; conditional reindex approved |
 | 07 | [Scanned PDFs](phase-07-scanned-pdf-ocr.md) | Complete |
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
@@ -115,8 +114,9 @@ they are not ongoing task lists.
 
 ## Remaining work
 
-1. Complete the deeper embedding comparison in Phase 06. If a candidate is an
-   improvement, implement its formatting/identity and reindex existing text stores
+1. Complete the missing Nomic baseline in Phase 06 and combine it with the
+   saved candidate measurements. If a candidate improves the results, implement
+   its formatting/identity and reindex existing text stores
    before building the first IRS index. Then deploy 20B.2 and accept one
    cited document-content search in the browser. The phase document has the
    exact rebuild/index steps. Follow with 20C enforced private processing,

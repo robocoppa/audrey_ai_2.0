@@ -435,3 +435,39 @@ def test_real_reference_and_kb_pool_depths_are_explicit():
     assert probe.RETRIEVAL_POOLS["reference"] == 24
     assert probe.RETRIEVAL_POOLS["regression"] == 40
     assert probe.base.RETRIEVAL_POOL == 20
+
+
+def test_baseline_only_resume_never_calls_or_requires_a_candidate(tmp_path):
+    corpora, _ = load_body(tmp_path)
+    fake = FakeOllama(corpora, missing=True)
+    settings = probe.Settings(rounds=2, batch_size=16, baselines_only=True)
+    assert [arm.id for arm in settings.selected_arms()] == ["prefixed", "raw"]
+    report = asyncio.run(probe.collect_report(
+        settings, corpora, {}, transport=httpx.MockTransport(fake.handle),
+        stress_inputs=["frozen public text"] * 64, stress_metadata={"documents": 64}))
+    assert report["measurement_status"] == "completed"
+    assert report["quality_recommendation"]["status"] == "baselines_measured"
+    assert report["settings"]["candidate_models"] == []
+    assert all(body.get("model", "nomic-embed-text:latest") == "nomic-embed-text:latest"
+               for _, body in fake.calls)
+
+
+def test_baseline_only_check_has_only_missing_requests(monkeypatch, capsys):
+    def forbidden(*args, **kwargs):
+        pytest.fail("preflight must not contact a model")
+    monkeypatch.setattr(probe.base, "Ollama", forbidden)
+    assert probe.main(["--check", "--baselines-only"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["arms"] == ["nomic-embed-text:latest", "nomic-embed-text:latest"]
+    assert report["estimated_embedding_requests"] == 690
+    assert report["unique_queries"] == 156
+
+
+def test_input_digest_changes_for_model_text_but_not_label_corrections():
+    body = fixture_body(synthetic=False)
+    before = probe.fixture_inputs_sha256(body)
+    body["queries"][0]["relevant"] = []
+    body["queries"][0]["evidence"] = []
+    assert probe.fixture_inputs_sha256(body) == before
+    body["queries"][0]["text"] += " changed input"
+    assert probe.fixture_inputs_sha256(body) != before

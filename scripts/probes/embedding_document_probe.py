@@ -61,9 +61,12 @@ CURRENT = {"reference": (0.55, 0.5), "regression": (0.53, 0.7),
 class Settings(base.Settings):
     candidate_profile: str = "gemma"
     candidates: tuple[str, ...] = ()
+    baselines_only: bool = False
 
     def selected_arms(self):
         original = super().selected_arms()
+        if self.baselines_only:
+            return [arm for arm in original if arm.id in {"prefixed", "raw"}]
         tags = self.candidates or (self.candidate,)
         if len(tags) > 4 or len(tags) != len(set(tags)):
             raise ProbeError("CANDIDATES must contain one to four unique local model tags")
@@ -133,6 +136,20 @@ def _positive_int(value, label: str, *, zero=False) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < (0 if zero else 1):
         raise ProbeError(f"{label} must be a {'nonnegative' if zero else 'positive'} integer")
     return value
+
+
+
+def fixture_inputs_sha256(body: dict) -> str:
+    """Fingerprint model inputs and corpus scopes, independently of gold labels."""
+    keys = {
+        "sources": ("id", "url", "sha256", "split"),
+        "documents": ("id", "text", "source_id", "page", "offset", "split", "workload"),
+        "queries": ("id", "text", "group", "split", "workload", "kind"),
+    }
+    selected = {name: [{key: row[key] for key in fields if key in row}
+                       for row in body.get(name, [])] for name, fields in keys.items()}
+    data = json.dumps(selected, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(data.encode()).hexdigest()
 
 
 def load_fixture(path: Path, *, synthetic: bool) -> tuple[list[Corpus], dict]:
@@ -262,7 +279,8 @@ def load_fixture(path: Path, *, synthetic: bool) -> tuple[list[Corpus], dict]:
     for workload in {corpus.workload for corpus in corpora}:
         if {corpus.split for corpus in corpora if corpus.workload == workload} != SPLITS:
             raise ProbeError("each workload requires calibration and holdout")
-    return corpora, {"sha256": hashlib.sha256(raw).hexdigest(), "schema": 2,
+    return corpora, {"sha256": hashlib.sha256(raw).hexdigest(),
+                     "input_sha256": fixture_inputs_sha256(body), "schema": 2,
                      "public": True, "synthetic": synthetic, "language": "en",
                      "documents": len(documents), "queries": len(query_rows),
                      "sources": [{key: value for key, value in source.items()
@@ -447,20 +465,43 @@ def load_stress(path: Path) -> tuple[list[str], dict]:
         raise ProbeError("frozen public batch64 inputs are missing or invalid") from error
 
 
+async def verify_unload(client, model: str, *, timeout_seconds=5.0, poll_interval=.25) -> dict:
+    """Wait for asynchronous unload; a failed cold check must not discard warm evidence."""
+    snapshot, polls = None, 0
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            await client.unload(model)
+            attempts = math.ceil(timeout_seconds / poll_interval) + 1
+            for attempt in range(attempts):
+                snapshot = await client.residency()
+                polls += 1
+                if model not in base.resident_names(snapshot):
+                    return {"verified_unloaded": True, "after_unload": snapshot, "polls": polls}
+                if attempt + 1 < attempts:
+                    await asyncio.sleep(poll_interval)
+        reason = "model remained resident after bounded unload polling"
+    except TimeoutError:
+        reason = "model unload verification exceeded its bounded wait"
+    except ProbeError as error:
+        reason = f"model unload could not be verified: {error}"
+    return {"verified_unloaded": False, "after_unload": snapshot,
+            "polls": polls, "reason": reason}
+
+
 async def measure_arm(client, arm, corpora: list[Corpus], lexical: dict,
                       *, stress_inputs, stress_metadata, progress: dict,
                       cold_samples=3, stress_batches=2) -> dict:
     progress.update(stage="cold_samples", completed_documents=0, completed_query_samples=0)
     before = await client.residency()
-    cold = []
+    cold, cold_issues = [], []
     sample_query = corpora[0].queries[0]
-    for _ in range(cold_samples):
-        await client.unload(arm.model)
-        after_unload = await client.residency()
-        if arm.model in base.resident_names(after_unload):
-            raise ProbeError("cold sample requires verified model unload")
+    for index in range(cold_samples):
+        unload = await verify_unload(client, arm.model)
+        if not unload["verified_unloaded"]:
+            cold_issues.append({"sample": index + 1, **unload})
+            break
         _, timing = await client.embed(arm, [arm.query_prefix + sample_query.text])
-        cold.append({"verified_unloaded": True, "after_unload": after_unload, **timing})
+        cold.append({**unload, **timing})
     progress["stage"] = "corpus_embeddings"
     corpus_results, warm_times, ingest_times, norms = [], [], [], []
     for corpus in corpora:
@@ -514,7 +555,10 @@ async def measure_arm(client, arm, corpora: list[Corpus], lexical: dict,
             "format": {"document_prefix": arm.document_prefix, "query_prefix": arm.query_prefix},
             "dimensions": len(vectors[0]),
             "document_vector_norms": {"min": round(min(norms), 8), "max": round(max(norms), 8)},
-            "cold_queries": {"samples": cold,
+            "cold_queries": {"status": "completed" if len(cold) == cold_samples else (
+                                 "partial" if cold else "unavailable"),
+                             "requested_samples": cold_samples, "samples": cold,
+                             "unavailable_samples": cold_samples - len(cold), "issues": cold_issues,
                              "within_memory_4s": sum(sample["wall_seconds"] <= 4 for sample in cold),
                              "within_kb_24s": sum(sample["wall_seconds"] <= 24 for sample in cold),
                              "p50_seconds": base.percentile(
@@ -569,6 +613,9 @@ def assess_candidate(measured: dict, candidate_id: str) -> dict:
 
 def recommendation(report: dict) -> dict:
     measured = {row["arm"]: row for row in report["results"] if row.get("comparable")}
+    if report.get("settings", {}).get("baselines_only") and not report["errors"] and set(measured) == {"prefixed", "raw"}:
+        return {"status": "baselines_measured", "migration_performed": False,
+                "meaning": "combine these matching baselines with the retained candidate measurements"}
     if report["errors"] or not {"candidate", "prefixed", "raw"} <= set(measured):
         return {"status": "inconclusive", "reason": "all requested candidate and baseline arms must complete"}
     candidates = {identity: {"model": arm["model"], **assess_candidate(measured, identity)}
@@ -604,6 +651,7 @@ async def collect_report(settings, corpora: list[Corpus], fixtures: dict,
             "scope": "public English government documents plus synthetic memory/history and regression",
             "settings": {"rounds": settings.rounds, "batch_size": settings.batch_size,
                          "candidate_profile": settings.candidate_profile,
+                         "baselines_only": settings.baselines_only,
                          "candidate_models": [arm.model for arm in arms if arm.id.startswith("candidate")],
                          "cold_samples": cold_samples, "stress_batches64": stress_batches,
                          "estimated_embedding_requests": calls,
@@ -672,6 +720,7 @@ def compact_report(report):
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--summary", action="store_true")
+    parser.add_argument("--baselines-only", action="store_true", help="measure only the missing Nomic arms; preserve completed candidates")
     parser.add_argument("--check", action="store_true", help="validate frozen inputs and request budget without contacting any service")
     parser.add_argument("--public-cases", type=Path, default=default_path("embedding_real_documents.json"))
     parser.add_argument("--personal-cases", type=Path, default=default_path("embedding_personal_cases.json"))
@@ -684,6 +733,7 @@ def main(argv=None) -> int:
             candidate=os.environ.get("CANDIDATE", "embeddinggemma-2:latest"),
             incumbent=os.environ.get("INCUMBENT", "nomic-embed-text:latest"),
             candidate_profile=os.environ.get("CANDIDATE_PROFILE", "gemma"),
+            baselines_only=args.baselines_only,
             candidates=tuple(item.strip() for item in os.environ.get("CANDIDATES", "").split(",") if item.strip()),
             rounds=int(os.environ.get("ROUNDS", "2")),
             batch_size=int(os.environ.get("BATCH_SIZE", "16")),
@@ -718,7 +768,7 @@ def main(argv=None) -> int:
     print(json.dumps(compact_report(report) if args.summary else report, indent=2))
     if report["measurement_status"] != "completed":
         return 1
-    return 0 if report["quality_recommendation"]["status"] == "candidate" else 1
+    return 0 if report["quality_recommendation"]["status"] in {"candidate", "baselines_measured"} else 1
 
 
 if __name__ == "__main__":

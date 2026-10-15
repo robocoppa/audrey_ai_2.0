@@ -3099,7 +3099,8 @@
       "text": "Does a final divorce decree on the last day of the year change marital status for the whole year?",
       "group": "reference",
       "relevant": [
-        "irs-p501-2025-c0015"
+        "irs-p501-2025-c0015",
+        "irs-p501-2025-c0018"
       ],
       "answerable": true,
       "split": "calibration",
@@ -3108,6 +3109,11 @@
           "source_id": "irs-p501-2025",
           "page": 6,
           "quote": "by the last day of the year, \nyou are considered unmarried for the whole \nyear."
+        },
+        {
+          "source_id": "irs-p501-2025",
+          "page": 6,
+          "quote": "Divorced persons. If you are divorced under a \nfinal decree by the last day of the year, you are \nconsidered unmarried for the whole year and \nyou can’t choose married filing jointly as your fil-\ning status."
         }
       ],
       "kind": "condition",
@@ -3118,6 +3124,7 @@
       "text": "After a court declares that a marriage never existed, what return form is used to correct still-open prior tax years?",
       "group": "reference",
       "relevant": [
+        "irs-p501-2025-c0015",
         "irs-p501-2025-c0016"
       ],
       "answerable": true,
@@ -3127,6 +3134,11 @@
           "source_id": "irs-p501-2025",
           "page": 6,
           "quote": "File amended returns (Form(s) 1040 -X) \nclaiming single or head of household status for \nall tax years that are affected by the annulment \nand not closed by the statute of limitations"
+        },
+        {
+          "source_id": "irs-p501-2025",
+          "page": 6,
+          "quote": "Annulled marriages. If you obtain a court \ndecree of annulment, which holds that no valid \nmarriage ever existed, you are considered un-\nmarried even if you filed joint returns for earlier \nyears. File amended returns (Form(s) 1040 -X) \nclaiming single or head of household status for \nall tax years that are affected by the an"
         }
       ],
       "kind": "paraphrase",
@@ -3137,7 +3149,10 @@
       "text": "What share of household upkeep must a person pay to qualify as head of household?",
       "group": "reference",
       "relevant": [
-        "irs-p501-2025-c0027"
+        "irs-p501-2025-c0025",
+        "irs-p501-2025-c0027",
+        "irs-p501-2025-c0028",
+        "irs-p501-2025-c0029"
       ],
       "answerable": true,
       "split": "calibration",
@@ -3146,6 +3161,21 @@
           "source_id": "irs-p501-2025",
           "page": 9,
           "quote": "you \nmust pay more than half of the cost of keeping \nup a home for the year."
+        },
+        {
+          "source_id": "irs-p501-2025",
+          "page": 8,
+          "quote": "2. Y ou paid more than half the cost of keep-\ning up a home for the year."
+        },
+        {
+          "source_id": "irs-p501-2025",
+          "page": 9,
+          "quote": "Special rule for parent.  If your qualifying \nperson is your parent, you may be eligible to file \nas head of household even if your parent \ndoesn’t live with you. However, you must be \nable to claim your parent as a dependent. Also, \nyou must pay more than half the cost of keeping \nup a home that was the main home for the en-\ntire year for your parent."
+        },
+        {
+          "source_id": "irs-p501-2025",
+          "page": 9,
+          "quote": "Because you paid more than half of \nthe cost of keeping up your parent’s apartment \nfrom January 1 until your parent’s death, and \nyou can claim your parent as a dependent, you \ncan file as head of household."
         }
       ],
       "kind": "numeric",
@@ -3175,6 +3205,7 @@
       "text": "Can a dependent parent qualify someone for head-of-household filing even while living in a different home?",
       "group": "reference",
       "relevant": [
+        "irs-p501-2025-c0025",
         "irs-p501-2025-c0028"
       ],
       "answerable": true,
@@ -3184,6 +3215,11 @@
           "source_id": "irs-p501-2025",
           "page": 9,
           "quote": "If your qualifying \nperson is your parent, you may be eligible to file \nas head of household even if your parent \ndoesn’t live with you."
+        },
+        {
+          "source_id": "irs-p501-2025",
+          "page": 8,
+          "quote": "3. A qualifying person lived with you in the \nhome for more than half the year (except \nfor temporary absences, such as school). \nHowever, if the qualifying person is your \ndependent parent, your dependent parent \ndoesn’t have to live with you."
         }
       ],
       "kind": "condition",
@@ -3213,7 +3249,8 @@
       "text": "Which five tests determine whether a child is a qualifying child?",
       "group": "reference",
       "relevant": [
-        "irs-p501-2025-c0038"
+        "irs-p501-2025-c0038",
+        "irs-p501-2025-c0039"
       ],
       "answerable": true,
       "split": "calibration",
@@ -3222,6 +3259,11 @@
           "source_id": "irs-p501-2025",
           "page": 12,
           "quote": "The five tests are:\n1. Relationship,\n2. Age,\n3. Residency,\n4. Support, and\n5. Joint return."
+        },
+        {
+          "source_id": "irs-p501-2025",
+          "page": 12,
+          "quote": "Tests To Be a Qualifying Child Tests To Be a Qualifying Relative\n1. The child must be your son, daughter, stepchild, foster child, brother, \nsister, half brother, half sister, stepbrother, or stepsister, or a descendant \nof any of them.\n2. The child must be (a) under age 19 at the end of the year and younger \nthan you (or your spouse if filing jointly); (b) under age 24 at the end of the \nyear, a student, and younger than you (or your spouse if filing jointly); or \n(c) any age if permanently and totally disabled. \n3. The child must have lived with you for more than half of the year.2\n4. The child must not have provided more than half of the child’s own support \nfor the year.\n5. The child must not be filing a joint return for the year (unless that joint \nreturn is filed only to claim a refund of withheld income tax or estimated \ntax paid)."
         }
       ],
       "kind": "exact",
@@ -3314,7 +3356,8 @@
       "text": "Does a student scholarship count as the child providing their own support for the qualifying-child support test?",
       "group": "reference",
       "relevant": [
-        "irs-p501-2025-c0050"
+        "irs-p501-2025-c0050",
+        "irs-p501-2025-c0075"
       ],
       "answerable": true,
       "split": "calibration",
@@ -3323,6 +3366,11 @@
           "source_id": "irs-p501-2025",
           "page": 15,
           "quote": "A scholarship received by a \nchild who is a student isn’t taken into account in \ndetermining whether the child provided more \nthan half of their own support."
+        },
+        {
+          "source_id": "irs-p501-2025",
+          "page": 21,
+          "quote": "Don’t Include in Total Support\nThe following items aren’t included in total sup-\nport.\n1. Federal, state, and local income taxes \npaid by persons from their own income. \n2. Social security and Medicare taxes paid \nby persons from their own income. \n3. Life insurance premiums. \n4. Funeral expenses. \n5. Scholarships received by your child if your \nchild is a student."
         }
       ],
       "kind": "condition",
@@ -3352,7 +3400,8 @@
       "text": "What two amounts are compared to calculate the usual standard deduction limit for someone who can be claimed as a dependent?",
       "group": "reference",
       "relevant": [
-        "irs-p501-2025-c0085"
+        "irs-p501-2025-c0085",
+        "irs-p501-2025-c0090"
       ],
       "answerable": true,
       "split": "calibration",
@@ -3361,6 +3410,11 @@
           "source_id": "irs-p501-2025",
           "page": 24,
           "quote": "limited to the \ngreater of:\n1. $1,350, or\n2. The individual’s earned income for the \nyear plus $450"
+        },
+        {
+          "source_id": "irs-p501-2025",
+          "page": 26,
+          "quote": "Standard Deduction Worksheet for Dependents\nUse this worksheet only if someone else can claim you (or your spouse if \nfiling jointly) as a dependent.\nT able 8.\nKeep for Y our Records\nCheck the correct number of boxes below. Then go to the worksheet.\nYou: Born before January 2, 1961 \n Blind \nYour spouse: Born before January 2, 1961 \n Blind \nTotal number of boxes you checked \n1. Enter your earned income (defined below). If none, enter -0-. 1.  \n2. Additional amount. 2. $450\n3. Add lines 1 and 2. 3.  \n4. Minimum standard deduction. 4. $1,350\n5. Enter the larger of line 3 or line 4."
         }
       ],
       "kind": "numeric",
@@ -3390,6 +3444,7 @@
       "text": "What percentage of adjusted gross income must deductible medical expenses exceed?",
       "group": "reference",
       "relevant": [
+        "irs-p502-2025-c0000",
         "irs-p502-2025-c0004"
       ],
       "answerable": true,
@@ -3399,6 +3454,11 @@
           "source_id": "irs-p502-2025",
           "page": 2,
           "quote": "only the amount of your medical and dental expenses that \nis more than 7.5% of your AGI."
+        },
+        {
+          "source_id": "irs-p502-2025",
+          "page": 1,
+          "quote": "Y ou can deduct on Schedule A (Form 1040) only the \npart of your medical and dental expenses that is more \nthan 7.5% of your adjusted gross income (AGI)."
         }
       ],
       "kind": "numeric",
@@ -3409,7 +3469,9 @@
       "text": "Does the annual medical expense deduction generally use expenses paid this year or expected future treatments?",
       "group": "reference",
       "relevant": [
-        "irs-p502-2025-c0003"
+        "irs-p502-2025-c0003",
+        "irs-p502-2025-c0023",
+        "irs-p502-2025-c0036"
       ],
       "answerable": true,
       "split": "calibration",
@@ -3418,6 +3480,16 @@
           "source_id": "irs-p502-2025",
           "page": 2,
           "quote": "can include only the medical and dental expenses \nyou paid this year but generally not payments for medical \nor dental care you will receive in a future year."
+        },
+        {
+          "source_id": "irs-p502-2025",
+          "page": 10,
+          "quote": "Payments for future medical care. Generally, you can’t \ninclude in medical expenses current payments for medical \ncare (including medical insurance) to be provided sub-\nstantially beyond the end of the year. This rule doesn’t ap-\nply in situations where the future care is purchased in con-\nnection with obtaining lifetime care of the type described \nearlier."
+        },
+        {
+          "source_id": "irs-p502-2025",
+          "page": 15,
+          "quote": "Future Medical Care\nGenerally, you can’t include in medical expenses current \npayments for medical care (including medical insurance) \nto be provided substantially beyond the end of the year. \nThis rule doesn’t apply in situations where the future care \nis purchased in connection with obtaining lifetime care, as \nexplained under Lifetime Care —Advance Payments , or \nqualified long-term care insurance contracts, as explained \nunder Long-T erm Care, earlier."
         }
       ],
       "kind": "condition",
@@ -3428,7 +3500,8 @@
       "text": "Is the full price of Braille reading materials included as a medical expense, or only the extra cost over ordinary editions?",
       "group": "reference",
       "relevant": [
-        "irs-p502-2025-c0011"
+        "irs-p502-2025-c0011",
+        "irs-p502-2025-c0038"
       ],
       "answerable": true,
       "split": "calibration",
@@ -3437,6 +3510,11 @@
           "source_id": "irs-p502-2025",
           "page": 5,
           "quote": "the part of the cost \nof Braille books and magazines for use by a visually im-\npaired person that is more than the cost of regular printed \neditions."
+        },
+        {
+          "source_id": "irs-p502-2025",
+          "page": 16,
+          "quote": "Y ou can include the excess of the cost of the item in a spe-\ncial form over the cost of the item in normal form as a \nmedical expense. See Braille Books and Magazines  un-\nder What Medical Expenses Are Includible, earlier."
         }
       ],
       "kind": "condition",
@@ -3542,7 +3620,8 @@
       "text": "What nightly per-person cap applies to qualifying lodging away from home for medical care?",
       "group": "reference",
       "relevant": [
-        "irs-p502-2025-c0024"
+        "irs-p502-2025-c0024",
+        "irs-p502-2025-c0033"
       ],
       "answerable": true,
       "split": "calibration",
@@ -3551,6 +3630,11 @@
           "source_id": "irs-p502-2025",
           "page": 10,
           "quote": "can’t be more than $50 for each night for each person."
+        },
+        {
+          "source_id": "irs-p502-2025",
+          "page": 13,
+          "quote": "Trips\nY ou can include in medical expenses amounts you pay for \ntransportation to another city if the trip is primarily for and \nessential to receiving medical services. Y ou may be able \nto include up to $50 for each night for each person."
         }
       ],
       "kind": "numeric",
@@ -3561,7 +3645,9 @@
       "text": "Are meals outside inpatient care included in the medical expense deduction?",
       "group": "reference",
       "relevant": [
-        "irs-p502-2025-c0026"
+        "irs-p502-2025-c0024",
+        "irs-p502-2025-c0026",
+        "irs-p502-2025-c0034"
       ],
       "answerable": true,
       "split": "calibration",
@@ -3570,6 +3656,16 @@
           "source_id": "irs-p502-2025",
           "page": 11,
           "quote": "Y ou can’t include in medical expenses the cost of \nmeals that aren’t part of inpatient care."
+        },
+        {
+          "source_id": "irs-p502-2025",
+          "page": 10,
+          "quote": "The amount you include in medical expenses for lodg-\ning can’t be more than $50 for each night for each person. \nY ou can include lodging for a person traveling with the per-\nson receiving the medical care. For example, if a parent is \ntraveling with a sick child, up to $100 per night can be in-\ncluded as a medical expense for lodging. Meals aren’t in-\ncluded."
+        },
+        {
+          "source_id": "irs-p502-2025",
+          "page": 14,
+          "quote": "can include lodging for a person traveling with the person \nreceiving the medical care. For example, if a parent is trav-\neling with a sick child, up to $100 per night can be inclu-\nded as a medical expense for lodging. Meals aren’t inclu-\nded. See Lodging, earlier."
         }
       ],
       "kind": "condition",
@@ -3605,7 +3701,8 @@
       "text": "Does the stop-smoking expense provision cover nonprescription nicotine gum and patches?",
       "group": "reference",
       "relevant": [
-        "irs-p502-2025-c0031"
+        "irs-p502-2025-c0031",
+        "irs-p502-2025-c0038"
       ],
       "answerable": true,
       "split": "calibration",
@@ -3614,6 +3711,11 @@
           "source_id": "irs-p502-2025",
           "page": 13,
           "quote": "drugs that don’t \nrequire a prescription, such as nicotine gum or patches, \nthat are designed to help stop smoking."
+        },
+        {
+          "source_id": "irs-p502-2025",
+          "page": 16,
+          "quote": "Nonprescription Drugs and Medicines\nExcept for insulin, you can’t include in medical expenses \namounts you pay for a drug that isn’t prescribed. A prescri-\nbed drug is one that requires a prescription by a doctor for \nits use by an individual."
         }
       ],
       "kind": "condition",
@@ -3624,7 +3726,9 @@
       "text": "Can ordinary health-club membership dues paid to improve general wellness be medical expenses?",
       "group": "reference",
       "relevant": [
-        "irs-p502-2025-c0036"
+        "irs-p502-2025-c0034",
+        "irs-p502-2025-c0036",
+        "irs-p502-2025-c0039"
       ],
       "answerable": true,
       "split": "calibration",
@@ -3633,6 +3737,16 @@
           "source_id": "irs-p502-2025",
           "page": 15,
           "quote": "Y ou can’t include in medical expenses health club dues or \namounts paid to improve one’s general health"
+        },
+        {
+          "source_id": "irs-p502-2025",
+          "page": 14,
+          "quote": "Y ou can’t include membership \ndues in a gym, health club, or spa as medical expenses, \nbut you can include separate fees charged there for \nweight loss activities."
+        },
+        {
+          "source_id": "irs-p502-2025",
+          "page": 16,
+          "quote": "Also, you can’t include membership dues in a \ngym, health club, or spa."
         }
       ],
       "kind": "condition",
@@ -3643,7 +3757,8 @@
       "text": "What medical condition must a weight-loss program be treating for its cost to be included?",
       "group": "reference",
       "relevant": [
-        "irs-p502-2025-c0034"
+        "irs-p502-2025-c0034",
+        "irs-p502-2025-c0039"
       ],
       "answerable": true,
       "split": "calibration",
@@ -3652,6 +3767,11 @@
           "source_id": "irs-p502-2025",
           "page": 14,
           "quote": "if it is a treatment for a specific disease diag-\nnosed by a physician (such as obesity, hypertension, or \nheart disease)."
+        },
+        {
+          "source_id": "irs-p502-2025",
+          "page": 16,
+          "quote": "Weight-Loss Program\nY ou can’t include in medical expenses the cost of a \nweight-loss program if the purpose of the weight loss is \nthe improvement of appearance, general health, or sense \nof well-being. Y ou can’t include amounts you pay to lose \nweight unless the weight loss is a treatment for a specific \ndisease diagnosed by a physician (such as obesity, hyper-\ntension, or heart disease)."
         }
       ],
       "kind": "condition",
@@ -3700,7 +3820,8 @@
       "text": "Is a security deposit taxable rental income upon receipt if it will be returned at the end of the lease?",
       "group": "reference",
       "relevant": [
-        "irs-p527-2025-c0007"
+        "irs-p527-2025-c0007",
+        "irs-p527-2025-c0064"
       ],
       "answerable": true,
       "split": "holdout",
@@ -3709,6 +3830,11 @@
           "source_id": "irs-p527-2025",
           "page": 4,
           "quote": "Don’t include a security deposit in \nyour income when you receive it if you plan to return it to \nyour tenant at the end of the lease."
+        },
+        {
+          "source_id": "irs-p527-2025",
+          "page": 24,
+          "quote": "Y ou also received a $750 security deposit from your ten-\nant. Because you plan to return it to your tenant at the end \nof the lease, you don’t include it in your income."
         }
       ],
       "kind": "condition",
@@ -3738,7 +3864,8 @@
       "text": "If the tenant pays an expense owed by the landlord, does that payment enter rental income?",
       "group": "reference",
       "relevant": [
-        "irs-p527-2025-c0006"
+        "irs-p527-2025-c0006",
+        "irs-p527-2025-c0007"
       ],
       "answerable": true,
       "split": "holdout",
@@ -3747,6 +3874,11 @@
           "source_id": "irs-p527-2025",
           "page": 3,
           "quote": "If your tenant pays any of \nyour expenses, those payments are rental income."
+        },
+        {
+          "source_id": "irs-p527-2025",
+          "page": 4,
+          "quote": "Example 2. While you are out of town, the furnace in \nyour rental property stops working. Y our tenant pays for \nthe necessary repairs and deducts the repair bill from the \nrent payment. Include the repair bill paid by the tenant and \nany amount received as a rent payment in your rental in-\ncome. Y ou can deduct the repair payment made by your \ntenant as a rental expense."
         }
       ],
       "kind": "condition",
@@ -3833,7 +3965,8 @@
       "text": "How are local assessments for improvements such as new streets or sewers treated instead of being deducted as rental expenses?",
       "group": "reference",
       "relevant": [
-        "irs-p527-2025-c0010"
+        "irs-p527-2025-c0010",
+        "irs-p527-2025-c0028"
       ],
       "answerable": true,
       "split": "holdout",
@@ -3842,6 +3975,11 @@
           "source_id": "irs-p527-2025",
           "page": 5,
           "quote": "These charges are nonde-\npreciable capital expenditures and must be added to the \nbasis of your property."
+        },
+        {
+          "source_id": "irs-p527-2025",
+          "page": 11,
+          "quote": "Assessments for local improvements.  Assess-\nments for items which tend to increase the value of prop-\nerty, such as streets and sidewalks, must be added to the \nbasis of the property."
         }
       ],
       "kind": "condition",
@@ -3871,6 +4009,7 @@
       "text": "Is rental property placed in service when it is ready and available, or only after the first tenant actually uses it?",
       "group": "reference",
       "relevant": [
+        "irs-p527-2025-c0009",
         "irs-p527-2025-c0021"
       ],
       "answerable": true,
@@ -3880,6 +4019,11 @@
           "source_id": "irs-p527-2025",
           "page": 9,
           "quote": "Even \nif you aren’t using the property, it is in service when it is \nready and available for its specific use."
+        },
+        {
+          "source_id": "irs-p527-2025",
+          "page": 5,
+          "quote": "Y ou can begin to depreciate rental property when it is \nready and available for rent. See Placed in Service  under \nWhen Does Depreciation Begin and End? in chapter 2."
         }
       ],
       "kind": "condition",
@@ -3890,6 +4034,7 @@
       "text": "Does depreciation stop while rental property is temporarily idle between tenants?",
       "group": "reference",
       "relevant": [
+        "irs-p527-2025-c0012",
         "irs-p527-2025-c0022"
       ],
       "answerable": true,
@@ -3899,6 +4044,11 @@
           "source_id": "irs-p527-2025",
           "page": 9,
           "quote": "Continue to claim a deduction for depreciation on property \nused in your rental activity even if it is temporarily idle (not \nin use)."
+        },
+        {
+          "source_id": "irs-p527-2025",
+          "page": 6,
+          "quote": "Vacant rental property.  If you hold property for rental \npurposes, you may be able to deduct your ordinary and \nnecessary expenses (including depreciation) for manag-\ning, conserving, or maintaining the property while the \nproperty is vacant. However, you can’t deduct any loss of \nrental income for the period the property is vacant."
         }
       ],
       "kind": "condition",
@@ -3909,7 +4059,8 @@
       "text": "What GDS recovery period is given for an addition treated as residential rental property?",
       "group": "reference",
       "relevant": [
-        "irs-p527-2025-c0034"
+        "irs-p527-2025-c0034",
+        "irs-p527-2025-c0036"
       ],
       "answerable": true,
       "split": "holdout",
@@ -3918,6 +4069,11 @@
           "source_id": "irs-p527-2025",
           "page": 13,
           "quote": "the addition is de-\npreciated as residential rental property over 27.5 years."
+        },
+        {
+          "source_id": "irs-p527-2025",
+          "page": 14,
+          "quote": "Residential rental property (buildings or structures) and structural components such as furnaces, \nwaterpipes, venting, etc. ...................................................... 27.5 years 30 years1\nAdditions and improvements, such as a new roof .................................... The same recovery period as that of the property \nto which the addition or improvement is made, \ndetermined as if the property were placed in \nservice at the same time as the addition or \nimprovement."
         }
       ],
       "kind": "numeric",
@@ -3928,7 +4084,8 @@
       "text": "What special rental-income rule is described for a home rented out for fewer than fifteen days?",
       "group": "reference",
       "relevant": [
-        "irs-p527-2025-c0008"
+        "irs-p527-2025-c0008",
+        "irs-p527-2025-c0076"
       ],
       "answerable": true,
       "split": "holdout",
@@ -3937,6 +4094,11 @@
           "source_id": "irs-p527-2025",
           "page": 4,
           "quote": "If you rent \nproperty that you also use as your home and you rent it \nless than 15 days during the tax year, don’t include the \nrent you receive in your income."
+        },
+        {
+          "source_id": "irs-p527-2025",
+          "page": 28,
+          "quote": "Used as a home but rented less than 15 days.  If \nyou use a dwelling unit as a home and you rent it less than \n15 days during the year, its primary function isn’t consid-\nered to be rental and it shouldn’t be reported on Sched-\nule E (Form 1040). Y ou aren’t required to report the rental \nincome and rental expenses from this activity."
         }
       ],
       "kind": "condition",
@@ -4004,7 +4166,8 @@
       "text": "What does enrollment in Medicare mean for the listed HSA contribution eligibility requirements?",
       "group": "reference",
       "relevant": [
-        "irs-p969-2025-c0006"
+        "irs-p969-2025-c0006",
+        "irs-p969-2025-c0017"
       ],
       "answerable": true,
       "split": "holdout",
@@ -4013,6 +4176,11 @@
           "source_id": "irs-p969-2025",
           "page": 3,
           "quote": "Y ou aren’t enrolled in Medicare."
+        },
+        {
+          "source_id": "irs-p969-2025",
+          "page": 7,
+          "quote": "Enrolled in Medicare.  Beginning with the first month \nyou are enrolled in Medicare, your contribution limit is \nzero. This rule applies to periods of retroactive Medicare \ncoverage. So if you delayed applying for Medicare and \nlater your enrollment is backdated, any contributions to \nyour HSA made during the period of retroactive coverage \nare considered excess."
         }
       ],
       "kind": "condition",
@@ -4099,6 +4267,8 @@
       "text": "What additional tax percentage is generally applied to HSA distributions not used for qualified medical expenses?",
       "group": "reference",
       "relevant": [
+        "irs-p969-2025-c0022",
+        "irs-p969-2025-c0024",
         "irs-p969-2025-c0025"
       ],
       "answerable": true,
@@ -4108,6 +4278,16 @@
           "source_id": "irs-p969-2025",
           "page": 9,
           "quote": "There is an additional 20% tax on the \npart of your distributions not used for qualified medical ex-\npenses."
+        },
+        {
+          "source_id": "irs-p969-2025",
+          "page": 8,
+          "quote": "receive tax-free distributions from your HSA to \npay or be reimbursed for qualified medical expenses you \nincur after you establish the HSA. If you receive distribu-\ntions for other reasons, the amount you withdraw will be \nsubject to income tax and may be subject to an additional \n20% tax."
+        },
+        {
+          "source_id": "irs-p969-2025",
+          "page": 9,
+          "quote": "• If you don’t use a distribution from your HSA for quali-\nfied medical expenses, you must pay tax on the distri-\nbution. Report the amount on Form 8889 and file it \nwith your Form 1040, 1040-SR, or 1040-NR. Y ou may \nhave to pay an additional 20% tax on your taxable dis-\ntribution."
         }
       ],
       "kind": "numeric",
@@ -4118,6 +4298,7 @@
       "text": "Can medical expenses incurred before the HSA was established be treated as qualified expenses of that HSA?",
       "group": "reference",
       "relevant": [
+        "irs-p969-2025-c0021",
         "irs-p969-2025-c0022"
       ],
       "answerable": true,
@@ -4127,6 +4308,11 @@
           "source_id": "irs-p969-2025",
           "page": 8,
           "quote": "only those expenses incurred after \nyou actually establish your HSA are qualified medical \nexpenses."
+        },
+        {
+          "source_id": "irs-p969-2025",
+          "page": 8,
+          "quote": "Y ou can receive tax-free distributions from your HSA to \npay or be reimbursed for qualified medical expenses you \nincur after you establish the HSA."
         }
       ],
       "kind": "condition",
@@ -4214,7 +4400,8 @@
       "group": "reference",
       "relevant": [
         "irs-p969-2025-c0000",
-        "irs-p969-2025-c0042"
+        "irs-p969-2025-c0042",
+        "irs-p969-2025-c0044"
       ],
       "answerable": true,
       "split": "holdout",
@@ -4228,6 +4415,11 @@
           "source_id": "irs-p969-2025",
           "page": 16,
           "quote": "the maximum carryover amount is \n$660."
+        },
+        {
+          "source_id": "irs-p969-2025",
+          "page": 16,
+          "quote": "Plans may allow up to $660 of unused amounts remain-\ning at the end of the plan year to be paid or reimbursed for \nqualified medical expenses you incur in the following plan \nyear. The plan may specify a lower dollar amount as the \nmaximum carryover amount."
         }
       ],
       "kind": "numeric",
@@ -4238,7 +4430,8 @@
       "text": "May employees fund a health reimbursement arrangement themselves, or can only the employer contribute?",
       "group": "reference",
       "relevant": [
-        "irs-p969-2025-c0005"
+        "irs-p969-2025-c0005",
+        "irs-p969-2025-c0045"
       ],
       "answerable": true,
       "split": "holdout",
@@ -4247,6 +4440,11 @@
           "source_id": "irs-p969-2025",
           "page": 3,
           "quote": "An HRA must receive contributions from the employer \nonly. Employees may not contribute."
+        },
+        {
+          "source_id": "irs-p969-2025",
+          "page": 17,
+          "quote": "Health Reimbursement \nArrangements (HRAs)\nAn HRA must be funded solely by an employer. The con-\ntribution can’t be paid through a voluntary salary reduction \nagreement on the part of an employee."
         }
       ],
       "kind": "condition",
@@ -4481,19 +4679,302 @@
     "text_normalization": "none"
   },
   "label_policy": {
-    "created_before_model_measurement": true,
-    "model_generated_labels": false,
+    "created_before_model_measurement": false,
     "split": "Complete source families: Pub501+502 calibration; Pub527+969 holdout",
-    "query_generation": "Human-reviewed paraphrases of extracted page statements and deliberately absent source-specific facts",
-    "positive_labels": "Complete quotation containment in all overlapping page chunks; manually reviewed source semantics",
+    "query_generation": "Source-checked paraphrases prepared with coding-assistant review; not independently adjudicated by a human tax expert.",
+    "positive_labels": "Source-grounded answer passages, including reviewed alternative explanations and examples; source/product context must match.",
     "negative_labels": "No answer in the two complete source documents assigned to that split, even when related passages exist",
     "limitations": [
       "Only four IRS document families; complement with the unchanged general/code synthetic regression.",
       "Quote containment guarantees the cited labels, but semantically equivalent wording elsewhere may also answer.",
       "Absence is local to the frozen split corpus, never an assertion about tax law.",
       "Source-reading cases do not establish taxpayer eligibility or current-year applicability.",
-      "No private documents, memories, history, uploads, or personal source data are included."
-    ]
+      "No private documents, memories, history, uploads, or personal source data are included.",
+      "Alternative labels were repaired after inspecting candidate retrievals; these corrected results are retrospective, not a new independent holdout."
+    ],
+    "tested_models_generated_gold": false,
+    "revision": {
+      "date": "2026-10-15",
+      "original_fixture_sha256": "c435736dcfaeeb1d484929b26384d34ada88b7e8de062610265ba0325a13c20b",
+      "reason": "Missing alternative answer passages made legitimate retrievals look incorrect.",
+      "retrospective": true,
+      "model_inputs_changed": false,
+      "thresholds_tuned_on_holdout": false,
+      "added_passages": 33,
+      "affected_queries": 27,
+      "additions": [
+        {
+          "query_id": "calibration-p501-01",
+          "doc_id": "irs-p501-2025-c0018",
+          "source_id": "irs-p501-2025",
+          "page": 6,
+          "quote": "Divorced persons. If you are divorced under a \nfinal decree by the last day of the year, you are \nconsidered unmarried for the whole year and \nyou can’t choose married filing jointly as your fil-\ning status.",
+          "reason": "Repeats the final-divorce-decree by year-end rule, explicitly unmarried for the whole year."
+        },
+        {
+          "query_id": "calibration-p501-02",
+          "doc_id": "irs-p501-2025-c0015",
+          "source_id": "irs-p501-2025",
+          "page": 6,
+          "quote": "Annulled marriages. If you obtain a court \ndecree of annulment, which holds that no valid \nmarriage ever existed, you are considered un-\nmarried even if you filed joint returns for earlier \nyears. File amended returns (Form(s) 1040 -X) \nclaiming single or head of household status for \nall tax years that are affected by the an",
+          "reason": "Names Form 1040-X for correcting returns affected by annulment; the requested form is present, although the final limitations phrase continues in the next chunk."
+        },
+        {
+          "query_id": "calibration-p501-03",
+          "doc_id": "irs-p501-2025-c0025",
+          "source_id": "irs-p501-2025",
+          "page": 8,
+          "quote": "2. Y ou paid more than half the cost of keep-\ning up a home for the year.",
+          "reason": "Head-of-household checklist directly states more than half the cost of keeping up a home."
+        },
+        {
+          "query_id": "calibration-p501-03",
+          "doc_id": "irs-p501-2025-c0028",
+          "source_id": "irs-p501-2025",
+          "page": 9,
+          "quote": "Special rule for parent.  If your qualifying \nperson is your parent, you may be eligible to file \nas head of household even if your parent \ndoesn’t live with you. However, you must be \nable to claim your parent as a dependent. Also, \nyou must pay more than half the cost of keeping \nup a home that was the main home for the en-\ntire year for your parent.",
+          "reason": "The head-of-household parent provision expressly gives the required more-than-half upkeep share."
+        },
+        {
+          "query_id": "calibration-p501-03",
+          "doc_id": "irs-p501-2025-c0029",
+          "source_id": "irs-p501-2025",
+          "page": 9,
+          "quote": "Because you paid more than half of \nthe cost of keeping up your parent’s apartment \nfrom January 1 until your parent’s death, and \nyou can claim your parent as a dependent, you \ncan file as head of household.",
+          "reason": "A fully stated parent example connects the more-than-half upkeep amount with head-of-household status."
+        },
+        {
+          "query_id": "calibration-p501-05",
+          "doc_id": "irs-p501-2025-c0025",
+          "source_id": "irs-p501-2025",
+          "page": 8,
+          "quote": "3. A qualifying person lived with you in the \nhome for more than half the year (except \nfor temporary absences, such as school). \nHowever, if the qualifying person is your \ndependent parent, your dependent parent \ndoesn’t have to live with you.",
+          "reason": "The head-of-household checklist explicitly exempts a dependent parent from living with the taxpayer."
+        },
+        {
+          "query_id": "calibration-p501-07",
+          "doc_id": "irs-p501-2025-c0039",
+          "source_id": "irs-p501-2025",
+          "page": 12,
+          "quote": "Tests To Be a Qualifying Child Tests To Be a Qualifying Relative\n1. The child must be your son, daughter, stepchild, foster child, brother, \nsister, half brother, half sister, stepbrother, or stepsister, or a descendant \nof any of them.\n2. The child must be (a) under age 19 at the end of the year and younger \nthan you (or your spouse if filing jointly); (b) under age 24 at the end of the \nyear, a student, and younger than you (or your spouse if filing jointly); or \n(c) any age if permanently and totally disabled. \n3. The child must have lived with you for more than half of the year.2\n4. The child must not have provided more than half of the child’s own support \nfor the year.\n5. The child must not be filing a joint return for the year (unless that joint \nreturn is filed only to claim a refund of withheld income tax or estimated \ntax paid).",
+          "reason": "The overview table spells out all five qualifying-child tests in numbered order, rather than merely naming the headings."
+        },
+        {
+          "query_id": "calibration-p501-12",
+          "doc_id": "irs-p501-2025-c0075",
+          "source_id": "irs-p501-2025",
+          "page": 21,
+          "quote": "Don’t Include in Total Support\nThe following items aren’t included in total sup-\nport.\n1. Federal, state, and local income taxes \npaid by persons from their own income. \n2. Social security and Medicare taxes paid \nby persons from their own income. \n3. Life insurance premiums. \n4. Funeral expenses. \n5. Scholarships received by your child if your \nchild is a student.",
+          "reason": "The support section independently excludes scholarships received by a student child from total support."
+        },
+        {
+          "query_id": "calibration-p501-14",
+          "doc_id": "irs-p501-2025-c0090",
+          "source_id": "irs-p501-2025",
+          "page": 26,
+          "quote": "Standard Deduction Worksheet for Dependents\nUse this worksheet only if someone else can claim you (or your spouse if \nfiling jointly) as a dependent.\nT able 8.\nKeep for Y our Records\nCheck the correct number of boxes below. Then go to the worksheet.\nYou: Born before January 2, 1961 \n Blind \nYour spouse: Born before January 2, 1961 \n Blind \nTotal number of boxes you checked \n1. Enter your earned income (defined below). If none, enter -0-. 1.  \n2. Additional amount. 2. $450\n3. Add lines 1 and 2. 3.  \n4. Minimum standard deduction. 4. $1,350\n5. Enter the larger of line 3 or line 4.",
+          "reason": "The dependent worksheet explicitly compares earned income plus $450 with the $1,350 floor."
+        },
+        {
+          "query_id": "calibration-p502-16",
+          "doc_id": "irs-p502-2025-c0000",
+          "source_id": "irs-p502-2025",
+          "page": 1,
+          "quote": "Y ou can deduct on Schedule A (Form 1040) only the \npart of your medical and dental expenses that is more \nthan 7.5% of your adjusted gross income (AGI).",
+          "reason": "The publication introduction repeats the 7.5% of AGI threshold."
+        },
+        {
+          "query_id": "calibration-p502-17",
+          "doc_id": "irs-p502-2025-c0023",
+          "source_id": "irs-p502-2025",
+          "page": 10,
+          "quote": "Payments for future medical care. Generally, you can’t \ninclude in medical expenses current payments for medical \ncare (including medical insurance) to be provided sub-\nstantially beyond the end of the year. This rule doesn’t ap-\nply in situations where the future care is purchased in con-\nnection with obtaining lifetime care of the type described \nearlier.",
+          "reason": "Explains the general exclusion of current payments for care substantially beyond year end and states its lifetime-care exception."
+        },
+        {
+          "query_id": "calibration-p502-17",
+          "doc_id": "irs-p502-2025-c0036",
+          "source_id": "irs-p502-2025",
+          "page": 15,
+          "quote": "Future Medical Care\nGenerally, you can’t include in medical expenses current \npayments for medical care (including medical insurance) \nto be provided substantially beyond the end of the year. \nThis rule doesn’t apply in situations where the future care \nis purchased in connection with obtaining lifetime care, as \nexplained under Lifetime Care —Advance Payments , or \nqualified long-term care insurance contracts, as explained \nunder Long-T erm Care, earlier.",
+          "reason": "The separate nondeductible-expenses section repeats the future-medical-care exclusion and its exception."
+        },
+        {
+          "query_id": "calibration-p502-18",
+          "doc_id": "irs-p502-2025-c0038",
+          "source_id": "irs-p502-2025",
+          "page": 16,
+          "quote": "Y ou can include the excess of the cost of the item in a spe-\ncial form over the cost of the item in normal form as a \nmedical expense. See Braille Books and Magazines  un-\nder What Medical Expenses Are Includible, earlier.",
+          "reason": "The special-form personal-items rule expressly permits only excess cost over normal form and directly cites Braille Books and Magazines."
+        },
+        {
+          "query_id": "calibration-p502-24",
+          "doc_id": "irs-p502-2025-c0033",
+          "source_id": "irs-p502-2025",
+          "page": 13,
+          "quote": "Trips\nY ou can include in medical expenses amounts you pay for \ntransportation to another city if the trip is primarily for and \nessential to receiving medical services. Y ou may be able \nto include up to $50 for each night for each person.",
+          "reason": "The trips provision independently states the $50 nightly per-person limit for qualifying medical travel."
+        },
+        {
+          "query_id": "calibration-p502-25",
+          "doc_id": "irs-p502-2025-c0024",
+          "source_id": "irs-p502-2025",
+          "page": 10,
+          "quote": "The amount you include in medical expenses for lodg-\ning can’t be more than $50 for each night for each person. \nY ou can include lodging for a person traveling with the per-\nson receiving the medical care. For example, if a parent is \ntraveling with a sick child, up to $100 per night can be in-\ncluded as a medical expense for lodging. Meals aren’t in-\ncluded.",
+          "reason": "The qualifying away-from-home lodging provision explicitly excludes meals outside hospital inpatient treatment."
+        },
+        {
+          "query_id": "calibration-p502-25",
+          "doc_id": "irs-p502-2025-c0034",
+          "source_id": "irs-p502-2025",
+          "page": 14,
+          "quote": "can include lodging for a person traveling with the person \nreceiving the medical care. For example, if a parent is trav-\neling with a sick child, up to $100 per night can be inclu-\nded as a medical expense for lodging. Meals aren’t inclu-\nded. See Lodging, earlier.",
+          "reason": "The medical-travel provision explicitly excludes meals while permitting qualifying nonhospital lodging."
+        },
+        {
+          "query_id": "calibration-p502-27",
+          "doc_id": "irs-p502-2025-c0038",
+          "source_id": "irs-p502-2025",
+          "page": 16,
+          "quote": "Nonprescription Drugs and Medicines\nExcept for insulin, you can’t include in medical expenses \namounts you pay for a drug that isn’t prescribed. A prescri-\nbed drug is one that requires a prescription by a doctor for \nits use by an individual.",
+          "reason": "General nonprescription-drug exclusion applies directly to the question’s expressly nonprescription nicotine products; insulin is the only stated exception."
+        },
+        {
+          "query_id": "calibration-p502-28",
+          "doc_id": "irs-p502-2025-c0034",
+          "source_id": "irs-p502-2025",
+          "page": 14,
+          "quote": "Y ou can’t include membership \ndues in a gym, health club, or spa as medical expenses, \nbut you can include separate fees charged there for \nweight loss activities.",
+          "reason": "Explicitly excludes gym/health-club/spa membership dues while distinguishing separate qualifying treatment fees."
+        },
+        {
+          "query_id": "calibration-p502-28",
+          "doc_id": "irs-p502-2025-c0039",
+          "source_id": "irs-p502-2025",
+          "page": 16,
+          "quote": "Also, you can’t include membership dues in a \ngym, health club, or spa.",
+          "reason": "The second weight-loss-program discussion independently excludes gym/health-club/spa membership dues."
+        },
+        {
+          "query_id": "calibration-p502-29",
+          "doc_id": "irs-p502-2025-c0039",
+          "source_id": "irs-p502-2025",
+          "page": 16,
+          "quote": "Weight-Loss Program\nY ou can’t include in medical expenses the cost of a \nweight-loss program if the purpose of the weight loss is \nthe improvement of appearance, general health, or sense \nof well-being. Y ou can’t include amounts you pay to lose \nweight unless the weight loss is a treatment for a specific \ndisease diagnosed by a physician (such as obesity, hyper-\ntension, or heart disease).",
+          "reason": "The nondeductible-expenses section independently states the physician-diagnosed specific-disease requirement and examples."
+        },
+        {
+          "query_id": "holdout-p527-32",
+          "doc_id": "irs-p527-2025-c0064",
+          "source_id": "irs-p527-2025",
+          "page": 24,
+          "quote": "Y ou also received a $750 security deposit from your ten-\nant. Because you plan to return it to your tenant at the end \nof the lease, you don’t include it in your income.",
+          "reason": "A later rental example explicitly excludes a security deposit from income because the landlord intends to return it."
+        },
+        {
+          "query_id": "holdout-p527-34",
+          "doc_id": "irs-p527-2025-c0007",
+          "source_id": "irs-p527-2025",
+          "page": 4,
+          "quote": "Example 2. While you are out of town, the furnace in \nyour rental property stops working. Y our tenant pays for \nthe necessary repairs and deducts the repair bill from the \nrent payment. Include the repair bill paid by the tenant and \nany amount received as a rent payment in your rental in-\ncome. Y ou can deduct the repair payment made by your \ntenant as a rental expense.",
+          "reason": "A self-contained tenant-paid furnace-repair example explicitly includes the bill in the landlord’s rental income."
+        },
+        {
+          "query_id": "holdout-p527-39",
+          "doc_id": "irs-p527-2025-c0028",
+          "source_id": "irs-p527-2025",
+          "page": 11,
+          "quote": "Assessments for local improvements.  Assess-\nments for items which tend to increase the value of prop-\nerty, such as streets and sidewalks, must be added to the \nbasis of the property.",
+          "reason": "The basis discussion independently states that value-increasing street and sidewalk assessments are added to property basis."
+        },
+        {
+          "query_id": "holdout-p527-41",
+          "doc_id": "irs-p527-2025-c0009",
+          "source_id": "irs-p527-2025",
+          "page": 5,
+          "quote": "Y ou can begin to depreciate rental property when it is \nready and available for rent. See Placed in Service  under \nWhen Does Depreciation Begin and End? in chapter 2.",
+          "reason": "Explicitly states depreciation begins when rental property is ready and available for rent, independently of first tenant use."
+        },
+        {
+          "query_id": "holdout-p527-42",
+          "doc_id": "irs-p527-2025-c0012",
+          "source_id": "irs-p527-2025",
+          "page": 6,
+          "quote": "Vacant rental property.  If you hold property for rental \npurposes, you may be able to deduct your ordinary and \nnecessary expenses (including depreciation) for manag-\ning, conserving, or maintaining the property while the \nproperty is vacant. However, you can’t deduct any loss of \nrental income for the period the property is vacant.",
+          "reason": "The vacancy provision explicitly permits expenses including depreciation while rental property is vacant."
+        },
+        {
+          "query_id": "holdout-p527-43",
+          "doc_id": "irs-p527-2025-c0036",
+          "source_id": "irs-p527-2025",
+          "page": 14,
+          "quote": "Residential rental property (buildings or structures) and structural components such as furnaces, \nwaterpipes, venting, etc. ...................................................... 27.5 years 30 years1\nAdditions and improvements, such as a new roof .................................... The same recovery period as that of the property \nto which the addition or improvement is made, \ndetermined as if the property were placed in \nservice at the same time as the addition or \nimprovement.",
+          "reason": "The recovery-period table gives residential rental property’s 27.5-year GDS period and expressly applies the same period to additions and improvements."
+        },
+        {
+          "query_id": "holdout-p527-44",
+          "doc_id": "irs-p527-2025-c0076",
+          "source_id": "irs-p527-2025",
+          "page": 28,
+          "quote": "Used as a home but rented less than 15 days.  If \nyou use a dwelling unit as a home and you rent it less than \n15 days during the year, its primary function isn’t consid-\nered to be rental and it shouldn’t be reported on Sched-\nule E (Form 1040). Y ou aren’t required to report the rental \nincome and rental expenses from this activity.",
+          "reason": "The reporting section independently says a home rented for less than 15 days need not report the rental income or expenses."
+        },
+        {
+          "query_id": "holdout-p969-48",
+          "doc_id": "irs-p969-2025-c0017",
+          "source_id": "irs-p969-2025",
+          "page": 7,
+          "quote": "Enrolled in Medicare.  Beginning with the first month \nyou are enrolled in Medicare, your contribution limit is \nzero. This rule applies to periods of retroactive Medicare \ncoverage. So if you delayed applying for Medicare and \nlater your enrollment is backdated, any contributions to \nyour HSA made during the period of retroactive coverage \nare considered excess.",
+          "reason": "The HSA section independently states a zero contribution limit starting the first month of Medicare enrollment, including retroactive enrollment."
+        },
+        {
+          "query_id": "holdout-p969-53",
+          "doc_id": "irs-p969-2025-c0022",
+          "source_id": "irs-p969-2025",
+          "page": 8,
+          "quote": "receive tax-free distributions from your HSA to \npay or be reimbursed for qualified medical expenses you \nincur after you establish the HSA. If you receive distribu-\ntions for other reasons, the amount you withdraw will be \nsubject to income tax and may be subject to an additional \n20% tax.",
+          "reason": "The opening HSA-distribution paragraph states the additional 20% tax for distributions used for other reasons."
+        },
+        {
+          "query_id": "holdout-p969-53",
+          "doc_id": "irs-p969-2025-c0024",
+          "source_id": "irs-p969-2025",
+          "page": 9,
+          "quote": "• If you don’t use a distribution from your HSA for quali-\nfied medical expenses, you must pay tax on the distri-\nbution. Report the amount on Form 8889 and file it \nwith your Form 1040, 1040-SR, or 1040-NR. Y ou may \nhave to pay an additional 20% tax on your taxable dis-\ntribution.",
+          "reason": "The HSA distribution-reporting rule explicitly states possible additional 20% tax on nonqualified distributions."
+        },
+        {
+          "query_id": "holdout-p969-54",
+          "doc_id": "irs-p969-2025-c0021",
+          "source_id": "irs-p969-2025",
+          "page": 8,
+          "quote": "Y ou can receive tax-free distributions from your HSA to \npay or be reimbursed for qualified medical expenses you \nincur after you establish the HSA.",
+          "reason": "The HSA-distribution introduction independently limits qualifying reimbursements to expenses incurred after establishing the HSA."
+        },
+        {
+          "query_id": "holdout-p969-59",
+          "doc_id": "irs-p969-2025-c0044",
+          "source_id": "irs-p969-2025",
+          "page": 16,
+          "quote": "Plans may allow up to $660 of unused amounts remain-\ning at the end of the plan year to be paid or reimbursed for \nqualified medical expenses you incur in the following plan \nyear. The plan may specify a lower dollar amount as the \nmaximum carryover amount.",
+          "reason": "The FSA balance section independently gives the $660 maximum carryover, allowing a lower plan limit."
+        },
+        {
+          "query_id": "holdout-p969-60",
+          "doc_id": "irs-p969-2025-c0045",
+          "source_id": "irs-p969-2025",
+          "page": 17,
+          "quote": "Health Reimbursement \nArrangements (HRAs)\nAn HRA must be funded solely by an employer. The con-\ntribution can’t be paid through a voluntary salary reduction \nagreement on the part of an employee.",
+          "reason": "The full HRA section independently states employer-only funding and prohibits employee salary-reduction contributions."
+        }
+      ],
+      "limits": [
+        "The reviewed labels are not an exhaustive annotation of every one of the 336 public passages; all observed candidate top-three and admission alternatives were inspected.",
+        "This is a retrospective repair prompted by observed retrievals, so preserve the original result and distinguish rescored results from prospectively frozen-label evaluation.",
+        "No-answer admissions are related-context retrievals without the requested detail, not an observed hallucinated final answer.",
+        "A zero-admission and zero-wrong-first gate is stricter than comparative model improvement; do not silently weaken it or tune thresholds on holdout to manufacture acceptance."
+      ]
+    }
   },
   "stress": {
     "texts": [
