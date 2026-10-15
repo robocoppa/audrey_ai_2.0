@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -288,6 +290,15 @@ class TestEndToEndCollection:
         ))
 
         assert report["status"] == "measured"
+        assert report["cases"]["case_set_sha256"] == hashlib.sha256(json.dumps(
+            [{"id": "code-one", "prompt": "Write a Python function",
+              "expected": "code", "source": "expanded"}],
+            sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode()).hexdigest()
+        assert report["cases"]["case_set_digest_format"] == (
+            "canonical_json_loaded_case_records_v1"
+        )
+        assert report["results"][0]["by_production_reachability"]["status"] == "unavailable"
         assert [result["backend"] for result in report["results"]] == [
             "systemone",
             "chat-json",
@@ -296,7 +307,7 @@ class TestEndToEndCollection:
         assert report["results"][1]["samples"][0]["probabilities"] is None
         assert paths.count("/v1/systemone") == 2  # cold + warm
         assert paths.count("/api/chat") == 2      # cold + warm
-        assert paths.count("/api/generate") == 2 # one cold unload per model
+        assert paths.count("/api/generate") == 3 # cold unloads + candidate cleanup
         assert all(payload["think"] is False for payload in chat_payloads)
         assert all(payload["format"]["required"] == ["task", "confidence"]
                    for payload in chat_payloads)
@@ -319,9 +330,274 @@ def test_version_parser(raw, expected):
     [
         (("tev1:0.8b",), ((0, 35, 0), "0.35.0")),
         (("nimble:latest",), ((0, 35, 0), "0.35.0")),
+        (("nimble-v3:latest",), ((0, 40, 4), "0.40.4")),
+        (("nimble-v3:9b-q4_K_M", "clef:latest"), ((0, 40, 4), "0.40.4")),
         (("clef:latest",), ((0, 35, 1), "0.35.1")),
         (("clef-flash:latest", "nimble:latest"), ((0, 35, 1), "0.35.1")),
     ],
 )
 def test_candidate_specific_minimum_ollama_version(candidates, expected):
     assert probe._minimum_systemone_version(candidates) == expected
+
+
+
+def _settings(candidate="nimble-v3:latest"):
+    return probe.ProbeSettings(
+        base_url="http://ollama:11434", candidates=(candidate,),
+        incumbent_model="qwen3.5:4b", rounds=1, timeout_s=20,
+        keep_alive="10m", escalation_ceiling=0.95, min_winner=0.55,
+        min_margin=0.15,
+    )
+
+
+@pytest.mark.parametrize("version", ["0.35.1", "0.40.3"])
+def test_nimble_v3_old_version_fails_before_any_model_operation(version):
+    requests = []
+
+    async def handler(request):
+        requests.append((request.method, request.url.path))
+        assert request.url.path == "/api/version"
+        return httpx.Response(200, json={"version": version})
+
+    with pytest.raises(probe.ProbeError, match=r"require 0\.40\.4\+"):
+        asyncio.run(probe.collect_report(
+            _settings(), [probe.RouterCase("one", "Hello", "general", "expanded")],
+            transport=httpx.MockTransport(handler),
+        ))
+    assert requests == [("GET", "/api/version")]
+
+
+def test_model_metadata_retains_the_installed_digest_and_quantization():
+    metadata = probe._model_metadata([{
+        "name": "nimble-v3:latest", "digest": "sha256:immutable-model",
+        "size": 9_500_000_000,
+        "details": {"parameter_size": "9B", "quantization_level": "Q8_0"},
+    }], "nimble-v3:latest")
+    assert metadata == {
+        "name": "nimble-v3:latest", "digest": "sha256:immutable-model",
+        "size_bytes": 9_500_000_000, "parameter_size": "9B",
+        "quantization_level": "Q8_0",
+    }
+
+
+def test_reachability_replays_real_guard_order_and_image_sanity_without_generation():
+    cases = [
+        probe.RouterCase("strong", "Compare the available approaches", "reasoning", "expanded"),
+        probe.RouterCase("short", "Hello", "general", "expanded"),
+        probe.RouterCase("weak", "Python", "code", "expanded"),
+        probe.RouterCase("image", "What does this photo show?", "general", "expanded"),
+        probe.RouterCase("model", (
+            "Help me draft a thoughtful and professional message to announce "
+            "a team celebration next week"
+        ), "general", "expanded"),
+    ]
+    cfg = SimpleNamespace(raw={"router": {
+        "skip_llm_under_tokens": 8, "no_thinking": True, "pin_schema": True,
+    }})
+    result = asyncio.run(probe.production_reachability(cases, cfg=cfg))
+    routes = {row["case_id"]: row for row in result["cases"]}
+    assert result["status"] == "available"
+    assert result["model_reached_cases"] == 1
+    assert result["guarded_cases"] == 4
+    assert routes["strong"]["guard_reason"] == "keyword:reasoning_strong"
+    assert routes["short"]["guard_reason"] == "short_skip:general"
+    assert routes["weak"]["guard_reason"] == "short_skip_keyword:code_weak"
+    assert routes["image"]["guarded_task"] == "general"
+    assert routes["image"]["guard_reason"].startswith("vl_without_image:")
+    assert routes["model"] == {"case_id": "model", "model_reached": True}
+    assert result["assumptions"] == {
+        "conversation_has_image": False, "registered_tool_names": [],
+    }
+
+
+def test_reachability_respects_disabled_short_prompt_skip():
+    case = probe.RouterCase("short", "Hello", "general", "expanded")
+    result = asyncio.run(probe.production_reachability(
+        [case], cfg=SimpleNamespace(raw={"router": {"skip_llm_under_tokens": 0}}),
+    ))
+    assert result["model_reached_cases"] == 1
+
+
+def test_reachability_does_not_guess_missing_production_configuration():
+    result = asyncio.run(probe.production_reachability([], cfg=None))
+    assert result == {
+        "status": "unavailable", "reason": "production configuration unavailable",
+    }
+
+
+def test_tracked_fixture_groups_match_the_current_configured_rules():
+    import yaml
+
+    cases = probe.load_cases(_ROOT / "evals/cases/systemone_router_cases.json")
+    cfg = SimpleNamespace(raw=yaml.safe_load((_ROOT / "config.yaml").read_text()))
+    result = asyncio.run(probe.production_reachability(cases, cfg=cfg))
+    assert result["model_reached_cases"] == 23
+    assert result["guarded_cases"] == 13
+    assert len(result["cases"]) == len(cases)
+
+
+def test_reachability_subgroup_summaries_keep_failures_in_their_true_group():
+    samples = [
+        {"case_id": "model", "valid": False, "expected": "general",
+         "latency_seconds": 20.0, "error": "timeout"},
+        {"case_id": "guarded", "valid": True, "expected": "code",
+         "selected": "code", "correct": True, "confidence": 0.99,
+         "winner_probability": 0.9, "margin": 0.8, "latency_seconds": 0.2},
+    ]
+    summaries = probe._reachability_summaries(
+        samples, backend="systemone", settings=_settings(),
+        reachability={"status": "available", "cases": [
+            {"case_id": "model", "model_reached": True},
+            {"case_id": "guarded", "model_reached": False},
+        ]},
+    )
+    assert summaries["model_reached"]["samples"] == 1
+    assert summaries["model_reached"]["response_failures"] == 1
+    assert summaries["model_reached"]["accuracy"] is None
+    assert summaries["model_reached"]["end_to_end_accuracy"] == 0
+    assert summaries["guarded"]["samples"] == 1
+    assert summaries["guarded"]["correct"] == 1
+    assert "not production latency" in summaries["guarded"]["interpretation"]
+
+
+def _all_failed_report():
+    samples = [{
+        "case_id": "one", "round": 1, "valid": False, "expected": "code",
+        "latency_seconds": 20.0, "error": "ProbeError: timeout",
+    }]
+    return {
+        "schema": 1, "status": "measured", "ollama": {"version": "0.40.4"},
+        "cases": {"count": 1}, "settings": {"rounds": 1},
+        "results": [{
+            "backend": "systemone", "model": "nimble-v3:latest",
+            "cold": {"sample": {"latency_seconds": 20.0, "valid": False}},
+            "by_production_reachability": {"status": "unavailable"},
+            "warm": probe.summarize_samples(
+                samples, backend="systemone", escalation_ceiling=0.95,
+                min_winner=0.55, min_margin=0.15,
+            ), "samples": samples,
+        }],
+    }
+
+
+def test_summary_preserves_all_failed_measurement_instead_of_crashing(capsys):
+    report = _all_failed_report()
+    probe._print_summary(report)
+    assert "valid-only accuracy=n/a" in capsys.readouterr().err
+    compact = probe.compact_report(report)
+    assert compact["results"][0]["warm"]["response_failures"] == 1
+    assert compact["results"][0]["failure_examples"][0]["error"] == "ProbeError: timeout"
+    assert "samples" not in compact["results"][0]
+    assert report["results"][0]["samples"][0]["error"] == "ProbeError: timeout"
+
+
+@pytest.mark.parametrize("argv", [[], ["--summary"]])
+def test_cli_full_report_is_retained_when_compact_stdout_is_requested(
+    argv, monkeypatch, tmp_path, capsys,
+):
+    report = _all_failed_report()
+    report_path = tmp_path / "report.json"
+    monkeypatch.setenv("REPORT_PATH", str(report_path))
+    monkeypatch.setenv("CANDIDATES", "nimble-v3:latest")
+    monkeypatch.setattr(probe, "_read_config_defaults", lambda: (None, "qwen3.5:4b", 20, .95, None))
+
+    async def collect(*_args, **_kwargs):
+        return report
+
+    monkeypatch.setattr(probe, "collect_report", collect)
+    assert probe.main(argv) == 0
+    stdout = json.loads(capsys.readouterr().out)
+    assert json.loads(report_path.read_text()) == report
+    assert ("samples" in stdout["results"][0]) == (not argv)
+    assert stdout["results"][0]["warm"]["response_failures"] == 1
+
+
+
+def test_compact_report_omits_guard_case_details_without_mutating_full_report():
+    report = _all_failed_report()
+    report["cases"]["production_reachability"] = {
+        "status": "available", "model_reached_cases": 1, "guarded_cases": 0,
+        "cases": [{"case_id": "one", "model_reached": True}],
+    }
+    compact = probe.compact_report(report)
+    assert "cases" not in compact["cases"]["production_reachability"]
+    assert compact["cases"]["production_reachability"]["model_reached_cases"] == 1
+    assert report["cases"]["production_reachability"]["cases"] == [
+        {"case_id": "one", "model_reached": True},
+    ]
+
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_candidate_cleanup_follows_its_snapshot_and_precedes_incumbent_generation(
+    cleanup_fails,
+):
+    events = []
+    loaded = {"untested:large"}
+    candidate_unloads = 0
+
+    async def handler(request):
+        nonlocal candidate_unloads
+        path = request.url.path
+        payload = json.loads(request.content) if request.content else {}
+        model = payload.get("model")
+        events.append((path, model))
+        if path == "/api/version":
+            return httpx.Response(200, json={"version": "0.40.4"})
+        if path == "/api/tags":
+            return httpx.Response(200, json={"models": [
+                {"name": "nimble-v3:latest", "digest": "sha256:candidate"},
+                {"name": "qwen3.5:4b", "digest": "sha256:incumbent"},
+            ]})
+        if path == "/api/ps":
+            return httpx.Response(200, json={"models": [
+                {"name": name} for name in sorted(loaded)
+            ]})
+        if path == "/api/generate":
+            assert payload["keep_alive"] == 0
+            assert model in {"nimble-v3:latest", "qwen3.5:4b"}
+            if model == "nimble-v3:latest":
+                candidate_unloads += 1
+                if cleanup_fails and candidate_unloads == 2:
+                    return httpx.Response(500, json={"error": "cleanup unavailable"})
+            loaded.discard(model)
+            return httpx.Response(200, json={"done": True})
+        if path == "/v1/systemone":
+            loaded.add(model)
+            return httpx.Response(200, json=_valid_body())
+        if path == "/api/show":
+            return httpx.Response(200, json={"capabilities": ["thinking"]})
+        if path == "/api/chat":
+            loaded.add(model)
+            return httpx.Response(200, json={"message": {
+                "content": '{"task":"code","confidence":0.97}',
+            }})
+        raise AssertionError(f"unexpected request {path}")
+
+    report = asyncio.run(probe.collect_report(
+        _settings(), [probe.RouterCase("one", "Write Python code", "code", "expanded")],
+        transport=httpx.MockTransport(handler),
+    ))
+    candidate, incumbent = report["results"]
+    assert candidate["cleanup"]["succeeded"] is (not cleanup_fails)
+    assert candidate["warm"]["correct"] == 1
+    assert candidate["samples"][0]["valid"] is True
+    assert {row["name"] for row in candidate["residency"]["after"]} == {
+        "untested:large", "nimble-v3:latest",
+    }
+    candidate_unload_indices = [
+        index for index, event in enumerate(events)
+        if event == ("/api/generate", "nimble-v3:latest")
+    ]
+    assert len(candidate_unload_indices) == 2
+    cleanup_index = candidate_unload_indices[-1]
+    assert events[cleanup_index - 1] == ("/api/ps", None)
+    assert cleanup_index < events.index(("/api/chat", "qwen3.5:4b"))
+    assert events[-2:] == [("/api/chat", "qwen3.5:4b"), ("/api/ps", None)]
+    assert incumbent["warm"]["correct"] == 1
+    assert "cleanup" not in incumbent
+    assert "qwen3.5:4b" in loaded
+    assert "untested:large" in loaded
+    assert ("nimble-v3:latest" in loaded) is cleanup_fails
+    if cleanup_fails:
+        assert "cleanup unavailable" in candidate["cleanup"]["error"]

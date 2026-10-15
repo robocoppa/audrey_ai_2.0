@@ -1,0 +1,382 @@
+{
+  "schema": 1,
+  "language": "en",
+  "synthetic": true,
+  "description": "Small hand-labeled screening set, not tax guidance or a production acceptance benchmark. All policies, organizations, reports, and manuals are invented. Negative queries have no supporting document.",
+  "documents": [
+    {
+      "id": "g-starter",
+      "text": "A sourdough starter is ready to bake with when it doubles in volume after feeding, shows bubbles throughout, and has a pleasantly tangy smell. Judge its activity rather than a fixed number of days since mixing."
+    },
+    {
+      "id": "g-backup",
+      "text": "A synchronized mirror copies deletions as well as edits. To recover accidentally deleted files, keep a versioned backup with historical snapshots; a second live mirror alone does not preserve removed versions."
+    },
+    {
+      "id": "g-transit",
+      "text": "On Northbank Transit, passengers whose first bus arrives late may board the next connecting service with the same transfer ticket. The connection guarantee covers delays caused by the transit operator, not a passenger arriving late at the first stop."
+    },
+    {
+      "id": "g-address",
+      "text": "After moving house, submit a postal forwarding request and separately update the delivery address held by banks and shops. Forwarding redirects physical letters temporarily; it does not change addresses in the senders' customer records."
+    },
+    {
+      "id": "g-chain",
+      "text": "To clean a bicycle chain, remove surface dirt with a cloth, apply a bicycle-safe degreaser, and dry it before lubrication. Wipe off surplus lubricant so it does not attract grit. Keep lubricant away from brake discs and pads."
+    },
+    {
+      "id": "g-orchid",
+      "text": "An orchid with yellow leaves and a potting mix that stays wet may have damaged roots from overwatering. Let the mix dry appropriately and check drainage before adding more water; leaf color alone cannot identify the cause."
+    },
+    {
+      "id": "d-termination",
+      "text": "Cedar Services Agreement, executed version: either party may terminate the service by giving thirty calendar days of written notice to the other party. The fifteen-day renewal reminder is informational and is not the termination notice period."
+    },
+    {
+      "id": "d-refund",
+      "text": "Delta Q2 Operations Report: customers with duplicate subscription charges should receive a credit on their next invoice. Cash refunds were proposed in an early draft but were not adopted for the second quarter."
+    },
+    {
+      "id": "d-budget",
+      "text": "Meridian Purchasing Guide: reusable equipment costing at least 500 units is recorded as a capital asset. Ordinary consumables are expensed when purchased, even when the total order exceeds 500 units."
+    },
+    {
+      "id": "d-meeting",
+      "text": "Design review minutes: Rhea owns the revised accessibility checklist and must circulate it by August 10. Jonas will review the checklist after circulation. The next design review itself is scheduled for August 18."
+    },
+    {
+      "id": "d-accessibility",
+      "text": "Document intake instructions: when a PDF contains meaningful diagrams, provide descriptions of the diagrams in addition to extracted text. Translating the document is a separate service and does not replace diagram descriptions."
+    },
+    {
+      "id": "d-inventory",
+      "text": "Warehouse inventory note: the blue battery packs are stored in cabinet C4, shelf two. Cabinet C2 holds empty blue battery packaging. The red packs are stored in C4 on shelf one."
+    },
+    {
+      "id": "c-async",
+      "text": "Python asyncio guidance: calling a synchronous blocking function inside an async coroutine can stall the event loop. For blocking file operations, await asyncio.to_thread(function, arguments) so other coroutines can continue. This does not make CPU-heavy Python code parallel."
+    },
+    {
+      "id": "c-sql",
+      "text": "PostgreSQL uniqueness note: a conventional unique constraint permits multiple NULL values because NULLs are treated as distinct. Use UNIQUE NULLS NOT DISTINCT when NULL should behave like a duplicate for this constraint on supported PostgreSQL versions."
+    },
+    {
+      "id": "c-git",
+      "text": "Git shared-branch recovery: git revert creates a new commit that reverses an earlier commit while preserving published history. Resetting and force-pushing rewrites history and may disrupt colleagues who already pulled the branch."
+    },
+    {
+      "id": "c-etag",
+      "text": "HTTP optimistic concurrency: return an ETag with the resource, then require If-Match on updates. If the client's tag no longer matches, return 412 Precondition Failed rather than silently overwriting another editor's change."
+    },
+    {
+      "id": "c-flex",
+      "text": "CSS flex overflow note: a flex child defaults to an automatic minimum width that can preserve the width of a long unbroken string. Set min-width: 0 on the shrinking flex child so it can fit within the container; align-items affects a different axis."
+    },
+    {
+      "id": "c-json",
+      "text": "Python JSON output note: json.dumps(value, ensure_ascii=False) writes non-ASCII characters directly instead of escaping them as Unicode escape sequences. The file or HTTP response still needs an appropriate UTF-8 encoding."
+    },
+    {
+      "id": "r-aster-2025",
+      "text": "SYNTHETIC REFERENCE, NOT REAL POLICY. Aster Travel Bulletin, 2025 edition: a reimbursement claim must be submitted within forty-five days after the journey ends. This replaces the thirty-day claim window in the 2024 edition."
+    },
+    {
+      "id": "r-lumen-2025",
+      "text": "SYNTHETIC REFERENCE, NOT REAL POLICY. Lumen Hobby Registry Handbook, 2025 edition: the annual renewal fee is ninety credits. The one-time initial registration fee remains one hundred and twenty credits."
+    },
+    {
+      "id": "r-storm-2026",
+      "text": "SYNTHETIC REFERENCE, NOT REAL POLICY. Storm Miniature Display Manual, 2026 edition: the battery-powered display can run without a wall connection when the battery cartridge is fitted. The decorative water reservoir is unrelated to the electrical power source."
+    },
+    {
+      "id": "r-harbor-without",
+      "text": "SYNTHETIC REFERENCE, NOT REAL POLICY. Harbor Model Boat Trials, 2025: the distance trial without docking uses a continuous route and counts only time spent underway. It does not include the docking maneuver assessment."
+    },
+    {
+      "id": "r-orion-2026",
+      "text": "SYNTHETIC REFERENCE, NOT REAL POLICY. Orion Puzzle League Records Guide, 2026 edition: keep score sheets for two years after the event. The seven-year retention rule in the superseded 2021 guide no longer applies to score sheets."
+    },
+    {
+      "id": "r-atlas",
+      "text": "SYNTHETIC REFERENCE, NOT REAL POLICY. Atlas Toy Assembly Guide: the left-threaded decorative cap loosens when turned clockwise. The ordinary right-threaded base screws loosen counterclockwise. These directions refer only to this toy's labeled parts."
+    },
+    {
+      "id": "x-starter-heat",
+      "text": "Sourdough baking temperature note: a preheated covered pot retains steam around the dough during the first part of baking. Oven temperature and steam affect crust development after the dough has already fermented; they do not measure starter readiness."
+    },
+    {
+      "id": "x-orchid-dry",
+      "text": "An orchid with wrinkled leaves and dry, brittle roots may have been underwatered. Rehydrating the potting mix may help when there is no standing water. This diagnosis differs from yellow leaves in persistently wet potting media."
+    },
+    {
+      "id": "x-refund-q1",
+      "text": "Delta Q1 Operations Report: duplicate subscription charges were repaid as immediate cash refunds during the first quarter. This first-quarter policy is historical and must not be substituted for the Q2 decision."
+    },
+    {
+      "id": "x-refund-draft",
+      "text": "Delta Q2 Operations Report, REJECTED DRAFT: duplicate subscription charges would be returned as immediate cash refunds. This cash-refund proposal was rejected and must not be treated as the adopted Q2 policy."
+    },
+    {
+      "id": "x-json-escapes",
+      "text": "Python JSON output note: the default ensure_ascii=True escapes non-ASCII characters, producing an ASCII-only JSON string. This entry describes ASCII-only serialization rather than the setting for preserving original characters."
+    },
+    {
+      "id": "x-flex-axis",
+      "text": "CSS layout note: align-items controls alignment across a flex container's cross axis. It can center short controls vertically in a horizontal row, but it does not change the minimum width of an overflowing child."
+    },
+    {
+      "id": "x-aster-2024",
+      "text": "SYNTHETIC REFERENCE, NOT REAL POLICY. Aster Travel Bulletin, 2024 edition: reimbursement claims must be submitted within thirty days after travel ends. This historical bulletin documents the 2024 rules; it does not specify the rules in later editions."
+    },
+    {
+      "id": "x-harbor-with",
+      "text": "SYNTHETIC REFERENCE, NOT REAL POLICY. Harbor Model Boat Trials, 2025: the distance trial with docking includes a stop at every marked pier and adds docking assessment time to elapsed time. Do not apply this rule to the trial without docking."
+    }
+  ],
+  "queries": [
+    {
+      "id": "g-starter-ready",
+      "text": "How can I tell that my sourdough culture is active enough to bake bread?",
+      "group": "general",
+      "relevant": [
+        "g-starter"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "g-deleted-files",
+      "text": "Would a live synchronized copy protect me if I accidentally delete a document, or do I need old versions?",
+      "group": "general",
+      "relevant": [
+        "g-backup"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "g-late-bus",
+      "text": "My first Northbank bus ran late and I missed the connection. Can I reuse the transfer ticket?",
+      "group": "general",
+      "relevant": [
+        "g-transit"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "g-move-house",
+      "text": "Does redirecting my letters after moving also update my address with the companies sending them?",
+      "group": "general",
+      "relevant": [
+        "g-address"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "g-bike-grit",
+      "text": "What is the sequence for removing grime and lubricating a bicycle's chain without contaminating its brakes?",
+      "group": "general",
+      "relevant": [
+        "g-chain"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "g-wet-orchid",
+      "text": "My orchid leaves are turning yellow while its growing medium remains soggy. Should I water it more?",
+      "group": "general",
+      "relevant": [
+        "g-orchid"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "d-cancel-contract",
+      "text": "In the executed Cedar agreement, how much written notice is required to cancel the service?",
+      "group": "document",
+      "relevant": [
+        "d-termination"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "d-final-q2",
+      "text": "What treatment for duplicate subscription charges was actually adopted in Delta's second-quarter report?",
+      "group": "document",
+      "relevant": [
+        "d-refund"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "d-consumables",
+      "text": "Under Meridian's guide, does a large order of disposable supplies become a capital asset just because it costs over 500 units?",
+      "group": "document",
+      "relevant": [
+        "d-budget"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "d-checklist-owner",
+      "text": "Who must send out the accessibility checklist, and by what date, according to the review minutes?",
+      "group": "document",
+      "relevant": [
+        "d-meeting"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "d-pdf-diagrams",
+      "text": "What extra information should accompany extracted text when an intake PDF has important diagrams?",
+      "group": "document",
+      "relevant": [
+        "d-accessibility"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "d-blue-packs",
+      "text": "Where can I find the actual blue battery packs rather than their empty packaging?",
+      "group": "document",
+      "relevant": [
+        "d-inventory"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "c-event-loop",
+      "text": "How should an async Python service run a synchronous file function without freezing other coroutines?",
+      "group": "code",
+      "relevant": [
+        "c-async"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "c-null-unique",
+      "text": "How can a PostgreSQL unique constraint reject repeated NULL entries?",
+      "group": "code",
+      "relevant": [
+        "c-sql"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "c-shared-undo",
+      "text": "Which Git operation undoes a published commit while keeping the history intact for coworkers?",
+      "group": "code",
+      "relevant": [
+        "c-git"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "c-lost-update",
+      "text": "How do ETag and If-Match prevent stale clients from overwriting each other's HTTP resource updates?",
+      "group": "code",
+      "relevant": [
+        "c-etag"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "c-flex-long",
+      "text": "A long unbroken string makes a flex child wider than its parent. Which minimum-width setting permits it to shrink?",
+      "group": "code",
+      "relevant": [
+        "c-flex"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "c-unescaped",
+      "text": "Which json.dumps setting preserves original non-ASCII characters instead of backslash-u escapes?",
+      "group": "code",
+      "relevant": [
+        "c-json"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "r-current-aster",
+      "text": "According to the synthetic Aster 2025 bulletin, how long after a journey can a reimbursement claim be filed?",
+      "group": "reference",
+      "relevant": [
+        "r-aster-2025"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "r-renewal-only",
+      "text": "In the synthetic Lumen 2025 handbook, what is the renewal fee rather than the initial signup fee?",
+      "group": "reference",
+      "relevant": [
+        "r-lumen-2025"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "r-unplugged",
+      "text": "How does the fictional Storm 2026 display run when it is not plugged into a wall?",
+      "group": "reference",
+      "relevant": [
+        "r-storm-2026"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "r-no-docking",
+      "text": "For Harbor's synthetic 2025 trial without docking, does the time include the docking assessment?",
+      "group": "reference",
+      "relevant": [
+        "r-harbor-without"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "r-latest-retention",
+      "text": "In the fictional Orion 2026 guide, how many years should score sheets be retained?",
+      "group": "reference",
+      "relevant": [
+        "r-orion-2026"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "r-reverse-thread",
+      "text": "Which direction releases the left-threaded decorative cap in the fictional Atlas toy instructions?",
+      "group": "reference",
+      "relevant": [
+        "r-atlas"
+      ],
+      "answerable": true
+    },
+    {
+      "id": "none-general",
+      "text": "How do Arctic terns use Earth's magnetic field to navigate on migration?",
+      "group": "general",
+      "relevant": [],
+      "answerable": false
+    },
+    {
+      "id": "none-document",
+      "text": "What warranty exclusions appear in the executed Magnolia 2027 leasing agreement?",
+      "group": "document",
+      "relevant": [],
+      "answerable": false
+    },
+    {
+      "id": "none-code",
+      "text": "Show the exact Rust Tokio semaphore shutdown example from this corpus.",
+      "group": "code",
+      "relevant": [],
+      "answerable": false
+    },
+    {
+      "id": "none-reference",
+      "text": "What claim deadline did the fictional Aster 2023 bulletin specify? Do not substitute 2024 or 2025.",
+      "group": "reference",
+      "relevant": [],
+      "answerable": false
+    }
+  ]
+}

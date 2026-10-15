@@ -17,38 +17,26 @@ each region.
 
 ## 1. Context
 
-### 1.1 From an API behind someone else's app to an application
+### 1.1 Why Audrey has its own front end
 
-Audrey started life as an API. A chat app someone else had written owned the
-sign-in page, the conversation list and the chat screen, and it sent each
-question to Audrey's OpenAI-compatible endpoint. Audrey decided how to answer,
-streamed the reply back, and kept nothing. The most important facts lived in
-the other app's database: who the user is, which conversations exist, and what
-each one says.
+A model server can sit behind a chat app someone else wrote and answer
+whatever that app sends. Audrey has its own browser app instead, because
+three promises need the server to own facts that a third-party app would
+keep for itself:
 
-That arrangement made some promises impossible to keep. If the connection
-carrying an answer dropped, the answer died with it, because nothing else owned
-the work. The conversation Audrey answered was whatever the chat app chose to
-send, so Audrey couldn't vouch for it. And everything a person kept in Audrey
-was filed under the email address the other app reported, so a changed email
-cut a person off from their own memories and files.
+- **An answer survives a dropped connection.** The work belongs to a **run**
+  that Audrey owns, not to the connection that asked for it, so a refresh or
+  a closed laptop doesn't lose the answer.
+- **The conversation is the one Audrey stored.** Conversations and their
+  messages are rows in Audrey's own database, and each new turn is answered
+  against that stored history, never against a transcript the browser sends.
+- **A person's data stays theirs.** Audrey keeps its own accounts, so
+  conversations, memories and files belong to a fixed account rather than to
+  an email address that might change. People in a browser prove who they are
+  through Cloudflare Access; bots and scripts use a personal access token.
 
-So Audrey now owns those facts itself:
-
-- **Identity.** Audrey keeps its own accounts. Something outside Audrey still
-  proves who is calling: Cloudflare Access for people in a browser, a personal
-  access token for bots and scripts. Audrey decides which account that is,
-  what role it has, and where its private data lives.
-- **Conversations.** Conversations, their messages, and a record of each answer
-  being produced (a **run**) are rows in Audrey's own database. The browser
-  displays them; it never owns them.
-- **Files.** What each person uploaded, whether it's ready, and who may read it
-  are Audrey's records too.
-
-The browser app is part of this repository (the `web/` directory) and runs in
-its own small container. The earlier third-party chat app, Open WebUI, is
-stopped. A compatibility adapter for its sign-in is still in `auth.py`,
-switched off by default, which is why you'll still meet `owui` in a few names.
+The browser app lives in this repository (the `web/` directory) and runs in
+its own small container. It displays conversations; it never owns them.
 
 ### 1.2 The whole-system map
 
@@ -465,16 +453,14 @@ workers, the synthesizer) and emits stream events as it goes.
 | Produces | one final state, returned as one JSON response | a stream of events: banners, stages, words |
 
 The streaming driver's fast-or-deep decision is a short chain of rules, starting
-at [`pipeline.py:343`](../../src/audrey/routes/openai/pipeline.py#L343) (the
-code comments between the branches are left out here):
+at [`pipeline.py:343`](../../src/audrey/routes/openai/pipeline.py#L343)
+(shortened here):
 
 ```python
 forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local", "audrey_research")
 forced_fast = payload.model == "audrey_fast"
 image_turn = has_image_part(decision_messages)
 if image_turn and not (forced_deep and describe_enabled(cfg)):
-    use_deep = False
-elif owui_task:
     use_deep = False
 elif forced_deep:
     use_deep = True
@@ -487,10 +473,8 @@ else:
 ```
 
 A turn with an attached image goes fast, because a vision model has to see the
-image, unless you explicitly picked a deep model. `owui_task` is compatibility
-behavior: it's true only for a `/v1` request that looks like a chat app's
-housekeeping prompt (write a title, suggest tags), and native runs never set
-it. The deep models are always deep, `audrey_fast` is always fast, and
+image, unless you explicitly picked a deep model. The deep models are always
+deep, `audrey_fast` is always fast, and
 `audrey_auto` goes deep when the prompt is long or asks for depth. The lesson
 on classification and routing walks these rules properly.
 

@@ -234,7 +234,7 @@ writer only; lesson prose must not cite phase numbers.
   checked on every use, shown once. The internal service token and
   `resolve_kb_caller`. Model access: a catalog filtered by access groups and
   rechecked at run time, because hiding a picker option is not enforcement.
-  First-admin bootstrap. The dormant Open WebUI adapter.
+  First-admin bootstrap.
 - **Files:** `src/audrey/identity/`, `src/audrey/auth.py`,
   `src/audrey/model_catalog.py`, `src/audrey/routes/app/{me,admin,models}.py`,
   bootstrap in `src/audrey/admin_cli.py`, identity and token parts of
@@ -600,15 +600,17 @@ bot calling the API reach the same pipeline?"
 **README:** the out-of-scope line about Open WebUI becomes "React internals;
 the course covers the browser boundary".
 
-**Not in this cycle:** the Open WebUI mentions in L6–L8 and the utility-prompt
-relabel (cycle 6); identity in depth (L14); the research lesson's footer (when
-L20 ships).
+**Not in this cycle:** the Open WebUI mentions in L6–L8 and dropping the
+utility-prompt passage (cycle 6); identity in depth (L14); the research
+lesson's footer (when L20 ships).
 
 ## Replacing the Open WebUI material
 
 Open WebUI material is **replaced, not appended to**: after its cycle, a
-passage describes the native app (or an API client) as the client. It survives
-only where code still carries compatibility behavior, labelled as such. About
+passage describes the native app (or an API client) as the client. Lessons
+never name Open WebUI or say it still exists, and its compatibility leftovers
+are not taught (user rule 2026-10-15; the user is removing it from the code).
+About
 110 mentions across 14 files; the identity-specific ones wait for L14, which
 explains the mechanism they need. Existing lessons keep their current numbers
 here; 13–17 become 15–19 in cycle 4.
@@ -621,7 +623,7 @@ here; 13–17 become 15–19 in cycle 4.
 | L6 (1), L8 (1) | Open WebUI named as *the* client in examples | The native app or an API client | Cycle 6 |
 | L3 (3 of 11) | "No Open WebUI required"; a trace starting "OWUI sends POST" | Current dependency list; the trace starts at the native app | Cycle 1 (done, in review) |
 | L4 (17) | The walk-through starts in Open WebUI; auth asks Open WebUI who owns the token | The native app sends the request, with `/v1` clients as the second door; identity in two sentences (Access assertion or personal token) | Cycle 1 (done, in review) |
-| L7 (3) | Open WebUI utility prompts force fast mode | Keep, relabelled: applies to `/v1` compatibility requests; native requests skip it | Cycle 6 |
+| L7 (3) | Open WebUI utility prompts force fast mode | Drop: a compatibility leftover, being removed from the code | Cycle 6 |
 | L3 (8 of 11) | The httpx "real example" is the Open WebUI token check | A current httpx example; the Open WebUI adapter is dormant | Cycle 1 (done, in review) |
 | L11 (1), L12 (2) | The user id comes from the Open WebUI session or JWT | The authenticated user's stable id and private namespace (mechanism in L14) | Cycle 3 |
 | L13 §2.1 | Identity via Open WebUI's `/api/v1/auths/` | A recap of L14 | With L14 |

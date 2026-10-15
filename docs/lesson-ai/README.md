@@ -49,8 +49,7 @@ plan.
 - [Lesson 17 — Research mode](lesson-17-research-mode.md)
 
 Lessons 6–17 are being brought up to date one at a time. Until a lesson's
-refresh lands, parts of it may still describe the earlier frontend, Open
-WebUI, as the client.
+refresh lands, parts of it may describe an earlier version of Audrey.
 
 ## Prerequisites
 

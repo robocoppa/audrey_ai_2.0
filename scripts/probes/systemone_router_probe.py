@@ -4,11 +4,14 @@
 This is Campaign 4 Phase 6A: measurement only. It calls the incumbent through
 Audrey's real ``router_classify`` function and calls decision models through
 Ollama's typed ``/v1/systemone`` endpoint. It does not edit ``config.yaml`` or
-change production classification.
+change production classification. ``--summary`` prints compact JSON; the default
+retains every sample for the existing Telegram log/report workflow.
 
 The probe deliberately unloads each model before its cold sample, so run it
 while the box is otherwise idle. Candidates run first and the incumbent runs
-last, leaving Audrey's current router warm when the probe finishes. Residency
+last, leaving Audrey's current router warm when the probe finishes. Each tested
+candidate is unloaded after its residency snapshot; cleanup failures remain in
+the report. Residency
 snapshots show displacement of already-loaded models; they do not prove what
 happens during concurrent generation.
 
@@ -33,7 +36,8 @@ Environment:
   CASE_FILE           alternate labeled JSON fixture
   REPORT_PATH         optional path for the complete JSON report
 
-Clef and Clef Flash require Ollama 0.35.1 or later; older System One models
+Nimble v3 requires Ollama 0.40.4 or later. Clef and Clef Flash require
+Ollama 0.35.1 or later; older System One models
 retain the endpoint's 0.35.0 minimum. The proposed winner/margin floors are
 reported, not shipped. System One's
 ``confidence`` measures distribution concentration; this probe keeps it
@@ -42,7 +46,9 @@ separate from Audrey's self-reported chat confidence and 0.95 escalation gate.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import hashlib
 import json
 import math
 import os
@@ -63,6 +69,7 @@ TASKS = ("code", "reasoning", "general", "vl")
 LIVE_EXPECTED_TASKS = frozenset({"code", "reasoning", "general"})
 MIN_OLLAMA_VERSION = (0, 35, 0)
 CLEF_MIN_OLLAMA_VERSION = (0, 35, 1)
+NIMBLE_V3_MIN_OLLAMA_VERSION = (0, 40, 4)
 CLEF_MODEL_FAMILIES = frozenset({"clef", "clef-flash"})
 
 ROUTER_QUESTION: dict[str, Any] = {
@@ -311,6 +318,8 @@ def _minimum_systemone_version(
     candidates: tuple[str, ...],
 ) -> tuple[tuple[int, int, int], str]:
     families = {model.partition(":")[0] for model in candidates}
+    if "nimble-v3" in families:
+        return NIMBLE_V3_MIN_OLLAMA_VERSION, "0.40.4"
     if families & CLEF_MODEL_FAMILIES:
         return CLEF_MIN_OLLAMA_VERSION, "0.35.1"
     return MIN_OLLAMA_VERSION, "0.35.0"
@@ -326,6 +335,7 @@ def _model_metadata(tags: list[dict[str, Any]], model: str) -> dict[str, Any] | 
             details = row.get("details") if isinstance(row.get("details"), dict) else {}
             return {
                 "name": _model_name(row),
+                "digest": row.get("digest"),
                 "size_bytes": row.get("size"),
                 "parameter_size": details.get("parameter_size"),
                 "quantization_level": details.get("quantization_level"),
@@ -463,6 +473,90 @@ def summarize_samples(
     }
 
 
+class _RouterReachedError(RuntimeError):
+    """Stop a local guard replay before any model request can occur."""
+
+
+class _NoGenerationClient:
+    async def thinking_flag(self, *_args: Any, **_kwargs: Any) -> None:
+        raise _RouterReachedError
+
+    async def chat(self, *_args: Any, **_kwargs: Any) -> None:
+        raise _RouterReachedError
+
+
+async def production_reachability(
+    cases: list[RouterCase], *, cfg: Any,
+) -> dict[str, Any]:
+    """Replay the incumbent's real deterministic rules without inference.
+
+    These are text-only fixture turns. No running tool registry is available to
+    the standalone probe, so dynamic tool-name overrides are not simulated.
+    Missing configuration is disclosed rather than assigned guessed defaults.
+    """
+    if cfg is None or not isinstance(getattr(cfg, "raw", None), dict):
+        return {"status": "unavailable", "reason": "production configuration unavailable"}
+
+    from audrey.pipeline.classify import classify_with_registry
+
+    router_config = cfg.raw.get("router") or {}
+    routes = []
+    for case in cases:
+        try:
+            task, reason, _confidence = await classify_with_registry(
+                _NoGenerationClient(),
+                user_text=case.prompt,
+                messages=[{"role": "user", "content": case.prompt}],
+                router_cfg=router_config,
+                cfg=cfg,
+                registry=None,
+            )
+        except _RouterReachedError:
+            routes.append({"case_id": case.id, "model_reached": True})
+        else:
+            routes.append({
+                "case_id": case.id,
+                "model_reached": False,
+                "guarded_task": task,
+                "guard_reason": reason,
+                "guard_correct": task == case.expected,
+            })
+    return {
+        "status": "available",
+        "method": "actual_classify_with_registry_stopped_before_router_inference",
+        "skip_llm_under_tokens": int(router_config.get("skip_llm_under_tokens", 0)),
+        "assumptions": {"conversation_has_image": False, "registered_tool_names": []},
+        "model_reached_cases": sum(row["model_reached"] for row in routes),
+        "guarded_cases": sum(not row["model_reached"] for row in routes),
+        "cases": routes,
+    }
+
+
+def _reachability_summaries(
+    samples: list[dict[str, Any]], *, reachability: dict[str, Any],
+    backend: str, settings: ProbeSettings,
+) -> dict[str, Any]:
+    if reachability.get("status") != "available":
+        return {"status": "unavailable", "reason": reachability.get("reason")}
+    routes = {row["case_id"]: row for row in reachability["cases"]}
+    groups: dict[str, Any] = {"status": "available"}
+    for name, reached in (("model_reached", True), ("guarded", False)):
+        subset = [sample for sample in samples
+                  if routes[sample["case_id"]]["model_reached"] == reached]
+        groups[name] = summarize_samples(
+            subset, backend=backend, escalation_ceiling=settings.escalation_ceiling,
+            min_winner=settings.min_winner, min_margin=settings.min_margin,
+        )
+        groups[name]["case_count"] = sum(
+            row["model_reached"] == reached for row in routes.values()
+        )
+    groups["guarded"]["interpretation"] = (
+        "Forced probe calls on cases production would handle without the model; "
+        "these are not production latency or escalation estimates."
+    )
+    return groups
+
+
 async def _safe_ps(client: SystemOneProbeClient) -> tuple[list[dict[str, Any]], str | None]:
     try:
         return await client.ps(), None
@@ -478,6 +572,7 @@ async def _measure_model(
     cases: list[RouterCase],
     settings: ProbeSettings,
     metadata: dict[str, Any],
+    reachability: dict[str, Any],
     decide: Callable[[str], Awaitable[Decision]],
 ) -> dict[str, Any]:
     observation_errors: list[str] = []
@@ -521,6 +616,9 @@ async def _measure_model(
             escalation_ceiling=settings.escalation_ceiling,
             min_winner=settings.min_winner,
             min_margin=settings.min_margin,
+        ),
+        "by_production_reachability": _reachability_summaries(
+            warm, reachability=reachability, backend=backend, settings=settings,
         ),
         "samples": warm,
         "residency": {
@@ -626,6 +724,7 @@ async def collect_report(
             raise ProbeError(f"required model tags are not installed: {', '.join(missing)}")
         initial_residency, initial_ps_error = await _safe_ps(client)
 
+        reachability = await production_reachability(cases, cfg=cfg)
         results: list[dict[str, Any]] = []
         for model in settings.candidates:
             async def decide_systemone(prompt: str, *, _model: str = model) -> Decision:
@@ -633,15 +732,27 @@ async def collect_report(
                     model=_model, state=prompt, keep_alive=settings.keep_alive,
                 )
 
-            results.append(await _measure_model(
+            candidate_result = await _measure_model(
                 client=client,
                 model=model,
                 backend="systemone",
                 cases=cases,
                 settings=settings,
                 metadata=_model_metadata(tags, model) or {},
+                reachability=reachability,
                 decide=decide_systemone,
-            ))
+            )
+            # Capture the measurement's residency before unloading only this
+            # tested tag. Other resident models are never globally unloaded.
+            try:
+                await client.unload(model)
+            except ProbeError as exc:
+                candidate_result["cleanup"] = {
+                    "attempted": True, "succeeded": False, "error": str(exc),
+                }
+            else:
+                candidate_result["cleanup"] = {"attempted": True, "succeeded": True}
+            results.append(candidate_result)
 
         async def decide_incumbent(prompt: str) -> Decision:
             task, confidence, body = await router_classify(
@@ -670,6 +781,7 @@ async def collect_report(
             cases=cases,
             settings=settings,
             metadata=_model_metadata(tags, settings.incumbent_model) or {},
+            reachability=reachability,
             decide=decide_incumbent,
         ))
 
@@ -690,6 +802,12 @@ async def collect_report(
                 "legacy_count": sum(case.source == "legacy" for case in cases),
                 "expanded_count": sum(case.source == "expanded" for case in cases),
                 "by_expected": dict(sorted(counts.items())),
+                "production_reachability": reachability,
+                "case_set_sha256": hashlib.sha256(json.dumps(
+                    [asdict(case) for case in cases], sort_keys=True,
+                    separators=(",", ":"), ensure_ascii=False,
+                ).encode("utf-8")).hexdigest(),
+                "case_set_digest_format": "canonical_json_loaded_case_records_v1",
             },
             "settings": asdict(settings),
             "config_note": config_note,
@@ -705,6 +823,31 @@ async def collect_report(
         await client.aclose()
 
 
+def _number(value: float | None, digits: int = 2) -> str:
+    return "n/a" if value is None else f"{value:.{digits}f}"
+
+
+def compact_report(report: dict[str, Any]) -> dict[str, Any]:
+    """Keep counts and failure evidence while omitting per-call distributions."""
+    result = {key: value for key, value in report.items() if key != "results"}
+    cases = report["cases"]
+    if "production_reachability" in cases:
+        result["cases"] = {**cases, "production_reachability": {
+            key: value for key, value in cases["production_reachability"].items()
+            if key != "cases"
+        }}
+    result["results"] = []
+    for model in report["results"]:
+        compact = {key: value for key, value in model.items() if key != "samples"}
+        compact["failure_examples"] = [
+            {key: sample[key] for key in ("case_id", "round", "error")}
+            for sample in model["samples"] if not sample["valid"]
+        ][:5]
+        result["results"].append(compact)
+    result["sample_detail"] = "omitted_by_summary_flag; full report retained at REPORT_PATH if set"
+    return result
+
+
 def _print_summary(report: dict[str, Any]) -> None:
     print(
         f"Ollama {report['ollama']['version']} | {report['cases']['count']} cases | "
@@ -717,19 +860,33 @@ def _print_summary(report: dict[str, Any]) -> None:
         print(
             f"{result['backend']:>10} {result['model']}: "
             f"{warm['correct']}/{warm['samples']} correct across all samples, "
-            f"valid-only accuracy={warm['accuracy']:.4f}, "
+            f"valid-only accuracy={_number(warm['accuracy'], 4)}, "
             f"failures={warm['response_failures']}, "
             f"costly false reasoning={warm['costly_false_reasoning']}, "
             f"projected escalations={warm['projected_fast_to_deep_escalations']}, "
             f"cold={cold['latency_seconds']:.2f}s, "
-            f"warm p50/p95={warm['latency_p50_seconds']:.2f}/"
-            f"{warm['latency_p95_seconds']:.2f}s",
+            f"warm p50/p95={_number(warm['latency_p50_seconds'])}/"
+            f"{_number(warm['latency_p95_seconds'])}s",
             file=sys.stderr,
         )
-    print("Full distributions and per-case results follow as JSON.", file=sys.stderr)
+        groups = result["by_production_reachability"]
+        if groups.get("status") == "available":
+            reached = groups["model_reached"]
+            print(
+                f"  production model-reached cases: {reached['correct']}/"
+                f"{reached['samples']} correct, failures={reached['response_failures']}, "
+                f"p50/p95={_number(reached['latency_p50_seconds'])}/"
+                f"{_number(reached['latency_p95_seconds'])}s; "
+                f"{groups['guarded']['case_count']} fixture cases bypass the model",
+                file=sys.stderr,
+            )
+    print("Measurement completed; this is not an automatic model acceptance.", file=sys.stderr)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--summary", action="store_true", help="print compact report JSON")
+    args = parser.parse_args(argv)
     cfg, default_model, default_timeout, ceiling, config_note = _read_config_defaults()
     try:
         settings = _settings_from_env(default_model, default_timeout, ceiling)
@@ -749,7 +906,7 @@ def main() -> int:
 
     _print_summary(report)
     rendered = json.dumps(report, indent=2, sort_keys=True)
-    print(rendered)
+    print(json.dumps(compact_report(report), indent=2, sort_keys=True) if args.summary else rendered)
     report_path = os.environ.get("REPORT_PATH", "").strip()
     if report_path:
         Path(report_path).write_text(rendered + "\n", encoding="utf-8")

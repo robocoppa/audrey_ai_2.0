@@ -2,7 +2,7 @@
 
 **Results, strengths, and failure modes from practical tests**
 
-Updated October 8, 2026 · Measurements collected July–October 2026
+Updated October 15, 2026 · Measurements collected July–October 2026
 
 This report compares local and hosted language models for writing, coding,
 answering from supplied documents, selecting tools, and interpreting images.
@@ -287,6 +287,21 @@ beyond the host's combined GPU capacity. That is memory arithmetic, not a
 concurrent-load test. Qwen 3.5 offered the better speed/memory/reliability fit
 for this workload; the result is not a universal classifier ranking.
 
+### Nimble v3: candidate, not yet measured locally
+
+[Ollama's model page](https://ollama.com/library/nimble-v3) lists a 9B text-only
+decision model with a 32K context, requiring Ollama 0.40.4 or later. On Linux,
+`nimble-v3:latest` selects Q8_0 weights, about 9.5 GB to download. It uses the
+decision endpoint rather than generating chat answers. Its license is **CC BY-NC
+4.0 (noncommercial)**, a change from the earlier Nimble release.
+
+The new candidate has no local quality or latency result yet. The planned
+comparison reuses the same English routing cases and incumbent, separating
+rule-handled cases from those that actually reach the classifier. Earlier
+Nimble's results do not transfer to v3. A faster warm decision alone would not
+establish an improvement if loading time, memory pressure or costly misroutes
+become worse.
+
 ### Confidence can change costs without changing accuracy
 
 An earlier 10-prompt, three-round comparison gave Qwen 3.5 and Ornith 1.5 9B
@@ -494,6 +509,28 @@ literal-word search with meaning-based search was proposed in response; no
 comparative retrieval benchmark was retained. The small score gap does not
 establish a reliable cutoff across queries.
 
+### EmbeddingGemma 2: candidate, not yet measured locally
+
+[Ollama's current default](https://ollama.com/library/embeddinggemma-2) is a
+roughly 1.3 GB, 740M parameter multimodal package producing 768-dimensional
+vectors. Smaller variants are available. [Google's model card](https://ai.google.dev/gemma/docs/embeddinggemma/model_card_2?hl=en)
+specifies separate query and document instructions for retrieval; comparisons
+must format each model's inputs appropriately.
+
+No local retrieval or timing result is available yet. The initial English
+comparison uses the same synthetic passages and relevance labels for three
+arms: raw Nomic, Nomic with retrieval prefixes, and EmbeddingGemma with its
+documented task prefixes. It measures rankings and query/batch costs, with
+meaning-based search reported separately from combined keyword retrieval.
+This separates a model improvement from the effect of fixing input formatting.
+
+A small synthetic text test does not establish performance on a large document
+collection, personal memories or image/audio search. Matching vector dimensions
+does not make different models' vectors compatible: adopting a new model needs
+fresh corpus embeddings and separately validated score thresholds. If the
+default package is too slow or memory-heavy, compare a smaller variant on the
+same cases before drawing a family-wide conclusion.
+
 ## How to use these results
 
 Match the evidence to the intended job: test the model's tool choices for a
@@ -514,7 +551,9 @@ Keep these limits visible:
 
 ## Sources and traceability
 
-No new model calls were made for this report revision. Findings come from saved
+No new model calls were made for this report revision. The October 15 candidate
+notes describe published specifications and pending tests, not measurements.
+Findings come from saved
 answers, machine-readable test results, runtime diagnostics, and attributed
 client observations. Older test evidence without full controlled settings is
 retained with its limitations. The following sources support the sections above;
