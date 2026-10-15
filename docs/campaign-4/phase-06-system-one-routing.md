@@ -1,8 +1,9 @@
 # Campaign 4 Phase 06 — System One router assessment
 
 **Status:** Earlier comparisons are complete; retain `qwen3.5:4b`. The user's
-October 15 Nimble v3 and EmbeddingGemma 2 comparisons are prepared, with live
-results pending. No production model or index changes are part of the tests.
+October 15 Nimble v3 comparison is complete: retain Qwen. EmbeddingGemma 2's
+first launches stopped at settings validation; the corrected probe is ready to
+run. No production model or index changes are part of the tests.
 
 ## Decision
 
@@ -67,22 +68,23 @@ copies both probe scripts and their fixtures into the running backend. Both
 models are already pulled; Nomic and the current router must also be installed.
 No upload, personal token, collector run or new production index is needed.
 
-Run the router comparison first:
+The router comparison is completed; do not rerun it. Two saved comparisons
+support retaining the incumbent; measurements are in the model report.
+
+The embedding launches requested ten and five rounds. Both stopped at the old
+three-round limit before any model call. The probe now accepts 1–10 rounds,
+with a maximum of 1,024 embedding requests checked before model operations.
+The default fixture uses 855 requests at ten rounds or 435 at five.
+
+After pulling this harness fix, run only the embedding comparison in the same
+Tower checkout:
 
 ```bash
-scripts/probes/probe-onbox.sh systemone_router_probe.py COPY=systemone_router_cases.json CANDIDATES=nimble-v3:latest ROUNDS=3
+scripts/probes/probe-onbox.sh embedding_retrieval_probe.py COPY=embedding_retrieval_cases.json CANDIDATE=embeddinggemma-2:latest ROUNDS=10
 ```
 
-It self-detaches, survives a disconnect and sends the full result log/report to
-Telegram through the existing runner. Allow a few minutes, depending on loading
-and host conditions. **Wait for its completion message** before starting the
-embedding comparison in the same Tower checkout:
-
-```bash
-scripts/probes/probe-onbox.sh embedding_retrieval_probe.py COPY=embedding_retrieval_cases.json CANDIDATE=embeddinggemma-2:latest ROUNDS=3
-```
-
-It uses the same detached/Telegram workflow. The candidate runs before both
+It self-detaches and uses the same Telegram workflow; allow a few minutes
+depending on loading and host conditions. The candidate runs before both
 Nomic arms, leaving the incumbent embedder warm. Read the downloaded Telegram
 files from `~/Downloads/Telegram Desktop/` on the laptop; the logs also remain
 in Tower's `testing-out/probes/` directory. No separate transfer or rerun is

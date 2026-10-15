@@ -287,20 +287,51 @@ beyond the host's combined GPU capacity. That is memory arithmetic, not a
 concurrent-load test. Qwen 3.5 offered the better speed/memory/reliability fit
 for this workload; the result is not a universal classifier ranking.
 
-### Nimble v3: candidate, not yet measured locally
+### Nimble v3: faster decisions, weaker routing fit
 
-[Ollama's model page](https://ollama.com/library/nimble-v3) lists a 9B text-only
-decision model with a 32K context, requiring Ollama 0.40.4 or later. On Linux,
-`nimble-v3:latest` selects Q8_0 weights, about 9.5 GB to download. It uses the
-decision endpoint rather than generating chat answers. Its license is **CC BY-NC
-4.0 (noncommercial)**, a change from the earlier Nimble release.
+Two October 15 runs on Ollama **0.40.4** compared `nimble-v3:latest` (9B Q8_0)
+with `qwen3.5:4b` (4.7B Q4_K_M), using the same 36 English prompts for three
+then five repetitions. Production rules handle 13 prompts before inference;
+the comparison below uses the **23 that actually reach the classifier**.
+The five-round run provides the timing figures; both runs repeated the same
+classification outcomes on that subset.
 
-The new candidate has no local quality or latency result yet. The planned
-comparison reuses the same English routing cases and incumbent, separating
-rule-handled cases from those that actually reach the classifier. Earlier
-Nimble's results do not transfer to v3. A faster warm decision alone would not
-establish an improvement if loading time, memory pressure or costly misroutes
-become worse.
+| Model | Correct model-reached case-runs | Warm median / p95 | Observed model VRAM |
+|---|---:|---:|---:|
+| `nimble-v3:latest` | 100/115 (87.0%) | 0.074 / 0.076s | 10.53 GB |
+| `qwen3.5:4b` | 110/115 (95.7%) | 0.170 / 0.184s | 4.22 GB |
+
+Nimble's strength was warm speed: roughly 95 ms saved per classified request.
+It matched Qwen on general requests (8/8 unique cases) and reasoning accuracy
+(4/5), with different reasoning misses. Coding was weaker: **8/10 versus
+Qwen's 10/10**. Nimble labeled SQL rewriting as reasoning and TypeScript
+narrowing as general; the former would select a more expensive workflow under
+the tested routing policy. It also missed the database-design reasoning case.
+Qwen missed the incomplete train reasoning prompt despite reporting confidence
+1.0. These are fixture results, not general production failure rates.
+
+Nimble used about **2.5 times the GPU memory**. Its first cold attempt timed
+out at 20 seconds, followed by two early timeouts in the nominal warm set;
+its next cold attempt completed in 11.23 seconds. The first full-fixture result
+was 92/108 including failures, versus 99/108 for Qwen. Startup failures matter
+even though most warm requests were fast. The probe confirms unload-request
+acknowledgement, not verified absence from GPU memory; Qwen's second 0.248s
+"cold" sample therefore does not establish a reproducible cold-loading time.
+
+The proposed System One uncertainty thresholds flagged 3/23 model-reached cases
+per round, versus none under Qwen's existing self-confidence threshold. Two of
+Nimble's three flagged cases were correctly labeled. These are **uncertainty
+flags, not observed downstream runs**; the confidence scales differ and are not
+calibrated probabilities of correctness. Repeating 23 prompts five times does
+not create 115 independent questions. No resident model was observed evicted,
+but coexistence with a large answering model was not tested.
+
+**Current choice: retain Qwen 3.5 4B for routing.** Nimble's warm speed does not
+offset the lower labeled accuracy, extra costly coding misroute, larger memory
+footprint and startup failures in this comparison. [Ollama's model page](https://ollama.com/library/nimble-v3)
+also specifies Ollama 0.40.4+, a 32K text context, a decision-only API and
+**CC BY-NC 4.0 (noncommercial)** licensing. These findings do not transfer to
+the earlier Nimble release or to another quantization.
 
 ### Confidence can change costs without changing accuracy
 
@@ -517,7 +548,10 @@ vectors. Smaller variants are available. [Google's model card](https://ai.google
 specifies separate query and document instructions for retrieval; comparisons
 must format each model's inputs appropriately.
 
-No local retrieval or timing result is available yet. The initial English
+No local retrieval or timing result is available yet: the first two launches
+stopped at the probe's three-round settings cap before making an embedding call.
+That setup failure says nothing about either model. The cap now allows up to
+ten rounds, with an explicit total-request budget. The initial English
 comparison uses the same synthetic passages and relevance labels for three
 arms: raw Nomic, Nomic with retrieval prefixes, and EmbeddingGemma with its
 documented task prefixes. It measures rankings and query/batch costs, with
@@ -551,8 +585,8 @@ Keep these limits visible:
 
 ## Sources and traceability
 
-No new model calls were made for this report revision. The October 15 candidate
-notes describe published specifications and pending tests, not measurements.
+This revision analyzes the user's October 15 router runs; no additional model
+calls were made during report writing. EmbeddingGemma 2 remains unmeasured.
 Findings come from saved
 answers, machine-readable test results, runtime diagnostics, and attributed
 client observations. Older test evidence without full controlled settings is
@@ -570,6 +604,8 @@ the report can be read without opening them.
   and `model-2026-10-01-142858`; associated result/narrative files.
 - **Classification:** [September results](results/2026-09-30-systemone-router-probe-results.json),
   [October Clef comparison](results/2026-10-03-clef-systemone-router-results.json),
+  [Nimble v3 three-round comparison](results/2026-10-15-082632-nimble-v3-router-results.json),
+  [Nimble v3 five-round comparison](results/2026-10-15-082843-nimble-v3-router-results.json),
   [broader Clef decisions](results/2026-10-03-clef-systemone-decision-results.json),
   and [historical workflow-selection study](results/2026-10-06-skill-selection-v3-prospective-full.json).
 - **Hosted writing/documents:** [July writer comparison](results/2026-07-14-writer-ab-report.md),

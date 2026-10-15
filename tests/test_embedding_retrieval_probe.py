@@ -173,9 +173,9 @@ class FakeOllama:
                                        "load_duration": 5, "total_duration": 10,
                                        "prompt_eval_count": 20})
 
-    def run(self):
+    def run(self, settings=None):
         return asyncio.run(probe.collect_report(
-            probe.Settings(), self.documents, self.queries, self.digest,
+            settings or probe.Settings(), self.documents, self.queries, self.digest,
             transport=httpx.MockTransport(self.handle),
         ))
 
@@ -189,7 +189,7 @@ def test_full_collection_is_sequential_same_content_three_arms_and_retains_incum
     assert report["settings"] == {
         "timeout_seconds": 120, "keep_alive": "10m", "batch_size": 8, "rounds": 1,
         "selected_arms": ["gemma", "prefixed", "raw"],
-        "estimated_embedding_requests": 99, "maximum_embedding_requests": 512,
+        "estimated_embedding_requests": 99, "maximum_embedding_requests": 1024,
     }
     assert report["provenance"]["ollama_version"] == "0.40.4"
     assert report["provenance"]["installed_models"]["embeddinggemma-2:latest"]["digest"] == "f" * 64
@@ -245,7 +245,7 @@ def test_malformed_vectors_cannot_publish_comparative_quality_metrics():
 
 
 @pytest.mark.parametrize("settings", [
-    probe.Settings(rounds=0), probe.Settings(batch_size=99),
+    probe.Settings(rounds=0), probe.Settings(rounds=11), probe.Settings(batch_size=99),
     probe.Settings(arms=("unknown",)), probe.Settings(arms=("raw", "raw")),
     probe.Settings(timeout=math.inf), probe.Settings(base_url="file:///tmp/local"),
     probe.Settings(candidate="remote:cloud"),
@@ -307,3 +307,40 @@ def test_excessive_direct_fixture_is_rejected_without_touching_models():
             [probe.Query("q", "query", "general", ("1",))], "digest",
             transport=httpx.MockTransport(lambda request: pytest.fail("unexpected request")),
         ))
+
+
+@pytest.mark.parametrize("rounds,requests", [(5, 435), (10, 855)])
+def test_extended_rounds_complete_with_accurate_bounded_request_estimates(rounds, requests):
+    fake = FakeOllama()
+    report = fake.run(probe.Settings(rounds=rounds))
+    assert report["measurement_status"] == "completed"
+    assert report["settings"]["rounds"] == rounds
+    assert report["settings"]["estimated_embedding_requests"] == requests
+    assert report["settings"]["maximum_embedding_requests"] == 1024
+    assert report["embedding_calls"] == requests
+    assert sum(path == "/api/embed" for _, path, _ in fake.calls) == requests
+    assert all(arm["warm_single_query"]["samples"] == 28 * rounds
+               for arm in report["results"])
+
+
+@pytest.mark.parametrize("rounds", [0, 11])
+def test_invalid_rounds_fail_before_metadata_or_model_requests(rounds):
+    fake = FakeOllama()
+    with pytest.raises(probe.ProbeError, match=r"ROUNDS must be 1\.\.10"):
+        fake.run(probe.Settings(rounds=rounds))
+    assert fake.calls == []
+
+
+def test_large_fixture_budget_is_reported_before_metadata_or_model_requests():
+    fake = FakeOllama()
+    # This is within the fixture dimensions but would make 1467 embedding requests.
+    queries = [probe.Query(str(i), "query", "general", ("document",)) for i in range(48)]
+    with pytest.raises(
+        probe.ProbeError, match="estimated embedding requests 1467 exceed maximum 1024",
+    ):
+        asyncio.run(probe.collect_report(
+            probe.Settings(rounds=10),
+            [probe.Document(str(i), "text") for i in range(64)], queries, "digest",
+            transport=httpx.MockTransport(fake.handle),
+        ))
+    assert fake.calls == []

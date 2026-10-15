@@ -14,7 +14,7 @@ be displaced by Ollama; residency snapshots record that fact.
 
 Environment: OLLAMA (default http://ollama:11434), CASE_FILE, CANDIDATE
 (default embeddinggemma-2:latest), INCUMBENT (default nomic-embed-text:latest),
-ARMS (comma-separated gemma,prefixed,raw; default all three), ROUNDS (1..3),
+ARMS (comma-separated gemma,prefixed,raw; default all three), ROUNDS (1..10),
 BATCH_SIZE (1..16, default 8), TIMEOUT (seconds, default 120), KEEP_ALIVE
 (default 10m). --summary prints compact metrics; full output is the default
 for the existing Telegram log handoff. --report optionally saves full JSON.
@@ -45,7 +45,7 @@ from audrey.kb.qdrant import KBHit
 GROUPS = frozenset({"general", "document", "code", "reference"})
 MAX_DOCUMENTS = 64
 MAX_QUERIES = 48
-MAX_EMBED_CALLS = 512
+MAX_EMBED_CALLS = 1024
 RETRIEVAL_POOL = 20
 
 
@@ -90,8 +90,8 @@ class Settings:
     def selected_arms(self) -> list[Arm]:
         if not self.base_url.startswith(("http://", "https://")):
             raise ProbeError("OLLAMA must use http:// or https://")
-        if not 1 <= self.rounds <= 3 or not 1 <= self.batch_size <= 16:
-            raise ProbeError("ROUNDS must be 1..3 and BATCH_SIZE must be 1..16")
+        if not 1 <= self.rounds <= 10 or not 1 <= self.batch_size <= 16:
+            raise ProbeError("ROUNDS must be 1..10 and BATCH_SIZE must be 1..16")
         if not math.isfinite(self.timeout) or not 1 <= self.timeout <= 600:
             raise ProbeError("TIMEOUT must be finite and between 1 and 600 seconds")
         if not self.arms or len(set(self.arms)) != len(self.arms):
@@ -463,8 +463,16 @@ async def collect_report(
     calls = len(arms) * (1 + math.ceil(len(documents) / settings.batch_size)
                         + len(queries) * settings.rounds)
     if (not 1 <= len(documents) <= MAX_DOCUMENTS
-            or not 1 <= len(queries) <= MAX_QUERIES or calls > MAX_EMBED_CALLS):
-        raise ProbeError("fixture/rounds exceed bounded embedding call budget")
+            or not 1 <= len(queries) <= MAX_QUERIES):
+        raise ProbeError(
+            f"fixture exceeds bounded counts: documents must be 1..{MAX_DOCUMENTS} "
+            f"and queries must be 1..{MAX_QUERIES}"
+        )
+    if calls > MAX_EMBED_CALLS:
+        raise ProbeError(
+            f"estimated embedding requests {calls} exceed maximum {MAX_EMBED_CALLS}; "
+            "reduce ROUNDS, select fewer ARMS, or use fewer fixture queries"
+        )
     client = Ollama(settings, transport)
     try:
         metadata = await preflight(client, arms)

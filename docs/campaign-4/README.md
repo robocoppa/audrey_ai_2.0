@@ -26,8 +26,10 @@ they are not ongoing task lists.
 
 - **Requested model comparison (October 15):** benchmark `nimble-v3:latest`
   against the current router and `embeddinggemma-2:latest` against raw/prefixed
-  Nomic. Prepared isolated probes reuse the existing Telegram runner; live
-  measurements are pending. Keep production models and indexes unchanged.
+  Nomic. Nimble's comparison is complete: retain Qwen. The embedding probe's
+  three-round cap blocked the user's launches; it now accepts 1–10 rounds within
+  a checked request budget. Only embedding measurement remains pending. Keep
+  production models and indexes unchanged.
   Commands and assessment scope are in [Phase 06](phase-06-system-one-routing.md);
   specifications/results belong in the standalone model report.
 
@@ -94,7 +96,7 @@ they are not ongoing task lists.
 | 03 | [Skills](phase-03-skills.md) | Explicit skills complete; native automatic selection built, acceptance pending |
 | 04 | [File downloads](phase-04-file-downloads.md) | Complete |
 | 05 | [Responses foundation](phase-05-responses-api.md) | Complete |
-| 06 | [Router candidates](phase-06-system-one-routing.md) | Retain qwen3.5:4b; requested new-candidate comparison pending |
+| 06 | [Router candidates](phase-06-system-one-routing.md) | Nimble v3 assessed; retain qwen3.5:4b; embedding comparison pending |
 | 07 | [Scanned PDFs](phase-07-scanned-pdf-ocr.md) | Complete |
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
