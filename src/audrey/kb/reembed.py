@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import traceback
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -52,6 +53,33 @@ def atomic_json(path, value):
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def private_diagnostic(state, error):
+    """Keep exception details on Tower; never follow a diagnostic symlink."""
+    state_fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        try:
+            os.mkdir("diagnostics", mode=0o700, dir_fd=state_fd)
+        except FileExistsError:
+            pass
+        directory_fd = os.open("diagnostics", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                               dir_fd=state_fd)
+        try:
+            os.fchmod(directory_fd, 0o700)
+            name = f"failure-{uuid.uuid4().hex}.traceback.txt"
+            descriptor = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                 0o600, dir_fd=directory_fd)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+                traceback.print_exception(error, file=output)
+                output.flush()
+                os.fsync(output.fileno())
+            os.fsync(directory_fd)
+            return f"diagnostics/{name}"
+        finally:
+            os.close(directory_fd)
+    finally:
+        os.close(state_fd)
 
 
 def readonly(path):
@@ -427,6 +455,8 @@ def main(argv=None):
     previous_umask = os.umask(0o077)
     report, code = {"schema": 1, "status": "setup_error"}, 2
     report_allowed = False
+    stage = "setup"
+    failure = None
     try:
         if not args.maintenance_confirmed or args.retention_days < 0:
             raise MigrationError("Stopped writers must be confirmed")
@@ -437,35 +467,71 @@ def main(argv=None):
         if not args.report.resolve().is_relative_to(args.state.resolve()) or args.report.is_symlink():
             raise MigrationError("Report must be inside private migration state")
         report_allowed = True
+        stage = "configuration"
         config = yaml.safe_load(args.config.read_text())
         load_profile(args.config)
         with (args.state / ".lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            client = QdrantClient(host=os.getenv("QDRANT_HOST", "qdrant"),
-                                  port=int(os.getenv("QDRANT_PORT", "6333")))
-            ollama = OllamaClient(os.getenv("OLLAMA_HOST", "http://ollama:11434"))
             async def run():
+                nonlocal stage, code
+                client = ollama = None
+                primary_error = None
                 try:
+                    stage = "qdrant_client"
+                    client = QdrantClient(host=os.getenv("QDRANT_HOST", "qdrant"),
+                                          port=int(os.getenv("QDRANT_PORT", "6333")))
+                    stage = "ollama_client"
+                    ollama = OllamaClient(os.getenv("OLLAMA_HOST", "http://ollama:11434"))
+                    stage = "migration"
+                    code = 1
                     return await migrate(client, text_embedder(ollama, config), config,
                         state=args.state, uploads=args.uploads_db, archive=args.archive_db,
                         app_db=args.app_db, memory=args.memory_collection,
                         history=args.archive_collection, retention_days=args.retention_days,
                         progress=lambda event: print(json.dumps(event), flush=True))
+                except BaseException as error:
+                    primary_error = error
+                    raise
                 finally:
-                    await ollama.aclose()
-                    client.close()
-            code = 1
+                    cleanup_error = None
+                    if ollama is not None:
+                        try:
+                            await ollama.aclose()
+                        except BaseException as error:  # noqa: BLE001 — still close Qdrant
+                            cleanup_error = error
+                    if client is not None:
+                        try:
+                            client.close()
+                        except BaseException as error:  # noqa: BLE001 — preserve the primary failure
+                            if cleanup_error is None:
+                                cleanup_error = error
+                    if cleanup_error is not None:
+                        if primary_error is not None:
+                            primary_error.add_note(
+                                f"Client cleanup also failed: {type(cleanup_error).__name__}")
+                        else:
+                            stage = "cleanup"
+                            raise cleanup_error
             report = asyncio.run(run())
             code = 0
     except (MigrationError, ValueError, OSError, sqlite3.Error) as error:
+        failure = error
         report = {"schema": 1, "status": "failed", "error_kind": type(error).__name__,
                   "writers_must_remain_stopped": True}
         if isinstance(error, MigrationError):
             report["error"] = str(error)
     except Exception as error:  # noqa: BLE001 — private details stay off Telegram
+        failure = error
         code = 3
         report = {"schema": 1, "status": "failed", "error_kind": type(error).__name__,
                   "writers_must_remain_stopped": True}
+    if failure is not None:
+        report["stage"] = stage
+        if report_allowed:
+            try:
+                report["private_diagnostic"] = private_diagnostic(args.state, failure)
+            except OSError:
+                report["private_diagnostic_saved"] = False
     report["exit_code"] = code
     try:
         if report_allowed:

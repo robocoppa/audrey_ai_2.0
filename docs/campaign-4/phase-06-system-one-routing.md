@@ -3,8 +3,9 @@
 **Status:** Router assessment is closed; retain `qwen3.5:4b`. The embedding
 comparison is complete. The user approved replacing Nomic throughout text
 retrieval with Qwen3 Embedding 4B and rebuilding the existing small data set.
-Unified configuration and a recoverable maintenance migration are built;
-Tower migration, browser acceptance and the first IRS index remain pending.
+Unified configuration and a recoverable maintenance migration are built.
+The first Tower attempt failed; recovery changes are prepared. Migration
+completion, browser acceptance and the first IRS index remain pending.
 
 ## Decision
 
@@ -118,6 +119,11 @@ Success: exit 0, `status: completed`, Qwen4/2,560 in `embedding`, all collection
 verified, `source_sqlite_unchanged: true`, and the runner's restart succeeds.
 On failure writers stay stopped: retain state and rerun the same command after
 diagnosis. Never discard the journal/staging during an unfinished cutover.
+The container limits local BLAS/OpenMP to one thread; embedding computation runs
+in Ollama. Unexpected failures save a mode-0600 traceback under the private
+state's `diagnostics/` directory. The Telegram report carries only the failure
+type, safe phase and relative diagnostic filename. Exception text and tracebacks
+remain on Tower and should not be attached to public reports.
 
 ### Browser acceptance after migration
 

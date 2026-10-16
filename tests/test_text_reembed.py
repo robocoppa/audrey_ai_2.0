@@ -1,9 +1,11 @@
 """Real local collections prove safe re-embedding and interrupted cutover recovery."""
+import asyncio
 import json
+import os
 import sqlite3
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from qdrant_client import QdrantClient
@@ -168,3 +170,124 @@ def test_cli_without_maintenance_confirmation_does_not_create_report_outside_sta
         "--archive-db", str(tmp_path/"a"), "--app-db", str(tmp_path/"b"),
         "--state", str(tmp_path/"state"), "--report", str(report)]) != 0
     assert not report.exists()
+
+
+@pytest.fixture
+def cli(setup, monkeypatch):
+    client, embedder, args, _ = setup
+    config = args["state"].parent / "config.yaml"
+    profile = embedder.profile
+    config.write_text(json.dumps({"text_embedding": {
+        "model": profile.model, "digest": profile.digest, "dimensions": profile.dimensions,
+        "document_prefix": profile.document_prefix, "query_prefix": profile.query_prefix,
+    }}))
+    report = args["state"] / "reports" / "result.json"
+    ollama = SimpleNamespace(aclose=AsyncMock())
+    closed = Mock(wraps=client.close)
+    monkeypatch.setattr(client, "close", closed)
+
+    def qdrant_client(**_):
+        assert asyncio.get_running_loop().is_running()
+        return client
+
+    def ollama_client(_):
+        assert asyncio.get_running_loop().is_running()
+        return ollama
+
+    monkeypatch.setattr(m, "QdrantClient", qdrant_client)
+    monkeypatch.setattr(m, "OllamaClient", ollama_client)
+    monkeypatch.setattr(m, "text_embedder", lambda *_: embedder)
+    argv = ["--config", str(config), "--uploads-db", str(args["uploads"]),
+        "--archive-db", str(args["archive"]), "--app-db", str(args["app_db"]),
+        "--state", str(args["state"]), "--report", str(report), "--maintenance-confirmed"]
+    return SimpleNamespace(argv=argv, report=report, state=args["state"], client=client,
+        embedder=embedder, ollama=ollama, closed=closed)
+
+
+def test_main_runs_real_migration_and_closes_both_clients(cli):
+    assert m.main(cli.argv) == 0
+    report = json.loads(cli.report.read_text())
+    assert report["status"] == "completed" and report["exit_code"] == 0
+    assert [row["points"] for row in report["collections"]] == [1, 1, 1, 2]
+    assert "private_diagnostic" not in report
+    cli.ollama.aclose.assert_awaited_once()
+    cli.closed.assert_called_once()
+
+
+@pytest.mark.parametrize(("error_type", "expected_code"), [(RuntimeError, 3), (ValueError, 1)])
+def test_main_private_traceback_preserves_primary_failure_and_closes_both_clients(
+    cli, capsys, error_type, expected_code,
+):
+    cli.embedder.verify_identity.side_effect = error_type("PRIVATE_SOURCE_SENTINEL")
+    cli.ollama.aclose.side_effect = OSError("PRIVATE_CLOSE_SENTINEL")
+    before = os.umask(0o077)
+    os.umask(before)
+    try:
+        assert m.main(cli.argv) == expected_code
+        after = os.umask(before)
+        assert after == before
+    finally:
+        os.umask(before)
+    report = json.loads(cli.report.read_text())
+    assert report["error_kind"] == error_type.__name__ and report["stage"] == "migration"
+    assert report["writers_must_remain_stopped"]
+    public = cli.report.read_text() + capsys.readouterr().out
+    assert "PRIVATE_SOURCE_SENTINEL" not in public and "PRIVATE_CLOSE_SENTINEL" not in public
+    diagnostic = cli.state / report["private_diagnostic"]
+    assert diagnostic.is_relative_to(cli.state / "diagnostics")
+    assert diagnostic.stat().st_mode & 0o777 == 0o600
+    private = diagnostic.read_text()
+    assert "PRIVATE_SOURCE_SENTINEL" in private and "Traceback" in private
+    assert error_type.__name__ in private
+    cli.ollama.aclose.assert_awaited_once()
+    cli.closed.assert_called_once()
+
+
+def test_main_reports_cleanup_failure_after_verified_migration(cli, capsys):
+    cli.ollama.aclose.side_effect = RuntimeError("PRIVATE_CLOSE_SENTINEL")
+    assert m.main(cli.argv) == 3
+    report = json.loads(cli.report.read_text())
+    assert report["stage"] == "cleanup" and report["error_kind"] == "RuntimeError"
+    assert json.loads((cli.state / "manifest.json").read_text())["status"] == "completed"
+    assert "PRIVATE_CLOSE_SENTINEL" not in cli.report.read_text() + capsys.readouterr().out
+    assert "PRIVATE_CLOSE_SENTINEL" in (cli.state / report["private_diagnostic"]).read_text()
+    cli.closed.assert_called_once()
+
+
+def test_main_refuses_symlinked_private_diagnostic_directory(cli, tmp_path, capsys):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (cli.state / "diagnostics").symlink_to(outside, target_is_directory=True)
+    cli.embedder.verify_identity.side_effect = RuntimeError("PRIVATE_SOURCE_SENTINEL")
+    assert m.main(cli.argv) == 3
+    report = json.loads(cli.report.read_text())
+    assert report["private_diagnostic_saved"] is False
+    assert "private_diagnostic" not in report
+    assert list(outside.iterdir()) == []
+    assert "PRIVATE_SOURCE_SENTINEL" not in capsys.readouterr().out
+
+
+def test_main_constructor_failure_closes_already_created_client(cli, monkeypatch):
+    def failed_ollama(_):
+        raise RuntimeError("PRIVATE_CONSTRUCTOR_SENTINEL")
+
+    monkeypatch.setattr(m, "OllamaClient", failed_ollama)
+    assert m.main(cli.argv) == 3
+    report = json.loads(cli.report.read_text())
+    assert report["stage"] == "ollama_client"
+    assert "PRIVATE_CONSTRUCTOR_SENTINEL" not in cli.report.read_text()
+    cli.closed.assert_called_once()
+
+
+def test_private_diagnostic_never_replaces_or_follows_an_existing_file(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    diagnostics = state / "diagnostics"
+    diagnostics.mkdir(parents=True)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("retained")
+    target = diagnostics / "failure-collision.traceback.txt"
+    target.symlink_to(outside)
+    monkeypatch.setattr(m.uuid, "uuid4", lambda: SimpleNamespace(hex="collision"))
+    with pytest.raises(FileExistsError):
+        m.private_diagnostic(state, RuntimeError("PRIVATE_SOURCE_SENTINEL"))
+    assert outside.read_text() == "retained" and target.is_symlink()

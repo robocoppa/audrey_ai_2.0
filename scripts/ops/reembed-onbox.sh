@@ -148,11 +148,14 @@ for setting in OLLAMA_HOST QDRANT_HOST QDRANT_PORT MEMORY_COLLECTION CHAT_ARCHIV
     fi
 done
 
+# Embeddings run in Ollama. Local NumPy/OpenBLAS needs no parallel pool;
+# on high-core hosts it can consume the container's thread budget before DNS.
 docker run --rm --network none --read-only --no-healthcheck --cap-drop ALL \
     --security-opt no-new-privileges \
+    -e OPENBLAS_NUM_THREADS=1 -e OMP_NUM_THREADS=1 \
     --mount "type=bind,src=${STATE_HOST},dst=/migration" \
     --entrypoint /opt/venv/bin/python "${IMAGE}" -c \
-    'import importlib.util,tempfile; from pathlib import Path; handle=tempfile.NamedTemporaryFile(dir="/migration"); handle.close(); raise SystemExit(0 if importlib.util.find_spec("audrey.kb.reembed") else 2)' \
+    'import tempfile; import audrey.kb.reembed; handle=tempfile.NamedTemporaryFile(dir="/migration"); handle.close()' \
     >/dev/null 2>&1 || die "Current migration CLI and writable private migration state are required"
 
 notify "▶ Audrey text embedding migration started. Private backups stay on Tower; only counts and digests are reported. Services restart after verified success. Report: ${REPORT}" || true
@@ -164,6 +167,7 @@ set +e
     docker run --rm --name "${MIGRATION_CONTAINER}" --network "${NETWORK}" \
         --read-only --no-healthcheck --cap-drop ALL \
         --security-opt no-new-privileges --pids-limit 64 --memory 2g \
+        -e OPENBLAS_NUM_THREADS=1 -e OMP_NUM_THREADS=1 \
         --tmpfs /tmp:rw,nosuid,nodev,size=128m \
         --mount "type=bind,src=${CONFIG_FILE},dst=/app/config.yaml,readonly" \
         --mount "type=bind,src=${DATA_HOST},dst=/data,readonly" \

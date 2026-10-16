@@ -69,6 +69,13 @@ def test_verified_run_mounts_sources_readonly_filters_credentials_and_restarts_i
     assert result.returncode==0,result.stderr
     seen=calls(path)
     migration=next(call for call in seen if '-m' in call)
+    launches = [call for call in seen if call[0] == 'run']
+    assert len(launches) == 2
+    for launch in launches:
+        assert 'OPENBLAS_NUM_THREADS=1' in launch
+        assert 'OMP_NUM_THREADS=1' in launch
+    preflight = next(call for call in launches if '-c' in call)
+    assert 'import audrey.kb.reembed' in preflight[preflight.index('-c') + 1]
     assert '--maintenance-confirmed' in migration
     assert any('dst=/data,readonly' in arg for arg in migration)
     assert any('dst=/tools-data,readonly' in arg for arg in migration)
