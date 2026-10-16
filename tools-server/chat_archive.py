@@ -44,7 +44,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import aiosqlite
 import httpx
@@ -108,13 +108,43 @@ class SearchHit:
     chunk_id: str
     created_at: str
     snippet: str
-    score: float
+    # Keyword matches have no cosine score. Never label a lexical match 1.0.
+    score: float | None
+    match_type: Literal["semantic", "keyword"] = "semantic"
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────
 
 _DEFAULT_SNIPPET_CHARS = 600
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_SEARCH_WORDS = re.compile(r"[a-z0-9]+")
+_SEARCH_FILLERS = frozenset(
+    "a an and are as at be been before but by can could did do does for from "
+    "had has have how i in is it its me my of on or our please previously "
+    "said show tell than that the their them then there these they this those "
+    "to us was we were what when where which who why will with would you your asked".split()
+)
+_KEYWORD_CANDIDATE_LIMIT = 200
+
+
+def _keyword_terms(query: str) -> tuple[str, ...]:
+    """Keep exact informative English words, never request-only filler."""
+    terms = tuple(dict.fromkeys(
+        word for word in _SEARCH_WORDS.findall(query.casefold())
+        if word not in _SEARCH_FILLERS
+    ))
+    # Long prose queries belong to semantic search; do not silently broaden
+    # them by discarding only some of their informative words.
+    return terms if len(terms) <= 12 else ()
+
+
+def _keyword_snippet(text: str, terms: tuple[str, ...], max_chars: int) -> str:
+    """Show the matching passage even when it is late in a long chunk."""
+    match = next((word for word in _SEARCH_WORDS.finditer(text.casefold())
+                  if word.group() in terms), None)
+    start = max(0, match.start() - max_chars // 3) if match is not None else 0
+    prefix = "…" if start else ""
+    return prefix + _snippet(text[start:], max_chars - len(prefix))
 
 
 def _now_iso() -> str:
@@ -287,6 +317,10 @@ def _snippet(text: str, max_chars: int) -> str:
 
 
 # ─── Embedding (mirrors db.MemoryStore._embed) ────────────────────────
+
+class ChatHistorySearchUnavailableError(RuntimeError):
+    """History could not be searched; this is not evidence of no matches."""
+
 
 class _EmbedError(RuntimeError):
     pass
@@ -965,6 +999,88 @@ class ChatArchiveStore:
 
     # ─── Search ────────────────────────────────────────────────────────
 
+    async def _visible_search_rows(
+        self,
+        *,
+        user: str,
+        date_from: str | None,
+        date_to: str | None,
+        terms: tuple[str, ...] = (),
+        chunk_ids: list[str] | None = None,
+    ) -> list[tuple[str, str, str, str]]:
+        """Bounded authoritative rows with the same live-data gates for both searches."""
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+        sql = """
+            SELECT c.chunk_id, c.conversation_id, c.text, c.created_at
+            FROM archive_chunks AS c
+            WHERE c.user = ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM archive_deletion_outbox AS d
+                  WHERE d.chunk_id = c.chunk_id
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM archive_conversation_deletions AS d
+                  WHERE d.user = c.user AND d.conversation_id = c.conversation_id
+                    AND c.created_at <= d.cutoff_at
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM archive_user_purges AS p
+                  WHERE p.user = c.user AND c.created_at <= p.cutoff_at
+              )
+        """
+        params: list[Any] = [user]
+        if date_from:
+            sql += " AND julianday(c.created_at) >= julianday(?)"
+            params.append(date_from)
+        if date_to:
+            sql += " AND julianday(c.created_at) <= julianday(?)"
+            params.append(date_to)
+        if self._retention_days > 0:
+            cutoff = (_dt.datetime.now(_dt.UTC)
+                      - _dt.timedelta(days=self._retention_days)).isoformat()
+            sql += " AND julianday(c.created_at) >= julianday(?)"
+            params.append(cutoff)
+        for term in terms:
+            sql += " AND instr(lower(c.text), ?) > 0"
+            params.append(term)
+        if chunk_ids is not None:
+            if not chunk_ids:
+                return []
+            sql += " AND c.chunk_id IN (" + ",".join("?" for _ in chunk_ids) + ")"
+            params.extend(chunk_ids)
+        sql += " ORDER BY c.created_at DESC, c.chunk_id LIMIT ?"
+        params.append(_KEYWORD_CANDIDATE_LIMIT)
+        async with self._db_lock:
+            cursor = await self._db.execute(sql, params)
+            rows = await cursor.fetchall()
+            await cursor.close()
+        return [(str(row[0]), str(row[1]), str(row[2]), str(row[3])) for row in rows]
+
+    async def _keyword_hits(
+        self, *, user: str, query: str, limit: int, snippet_chars: int,
+        date_from: str | None, date_to: str | None,
+    ) -> list[SearchHit]:
+        terms = _keyword_terms(query)
+        if not terms:
+            return []
+        rows = await self._visible_search_rows(
+            user=user, date_from=date_from, date_to=date_to, terms=terms,
+        )
+        hits: list[SearchHit] = []
+        for chunk_id, conversation_id, text, created_at in rows:
+            if not set(terms).issubset(_SEARCH_WORDS.findall(text.casefold())):
+                continue
+            hits.append(SearchHit(
+                conversation_id=conversation_id, chunk_id=chunk_id,
+                created_at=created_at,
+                snippet=_keyword_snippet(text, terms, snippet_chars),
+                score=None, match_type="keyword",
+            ))
+            if len(hits) >= limit:
+                break
+        return hits
+
     async def search(
         self,
         *,
@@ -975,18 +1091,23 @@ class ChatArchiveStore:
         date_from: str | None = None,
         date_to: str | None = None,
     ) -> list[SearchHit]:
-        """Vector search over a single user's chat archive.
+        """Exact-keyword matches first, then thresholded semantic history hits.
 
-        Filter is `user == <user>` plus optional `created_at` range. The
-        threshold is tuned looser than durable memory's because chat-archive
-        recall is human-triggered ("did we talk about X?"), so a few low-
-        relevance hits are tolerable when memory_search false-positives
-        would not be.
+        Keyword hits come from live SQLite chunks, including those awaiting
+        indexing, and have a null score. Semantic hits retain their cosine
+        score and configured threshold. Neither search can read another user's
+        chunks or bypass deletion, purge, date or retention boundaries.
         """
         if not user:
             raise ValueError("search requires a non-empty user")
         if not query.strip():
             return []
+        out = await self._keyword_hits(
+            user=user, query=query, limit=limit, snippet_chars=snippet_chars,
+            date_from=date_from, date_to=date_to,
+        )
+        if len(out) >= limit:
+            return out
         cutoff_at = await self.user_purge_cutoff(user=user)
         try:
             qvec = await _embed(
@@ -997,7 +1118,18 @@ class ChatArchiveStore:
             )
         except _EmbedError as e:
             log.warning("chat_archive: embed failed for search query: %s", e)
-            return []
+            if out:
+                live_rows = await self._visible_search_rows(
+                    user=user, date_from=date_from, date_to=date_to,
+                    chunk_ids=[hit.chunk_id for hit in out],
+                )
+                live_ids = {row[0] for row in live_rows}
+                visible = [hit for hit in out if hit.chunk_id in live_ids]
+                if visible:
+                    return visible
+            raise ChatHistorySearchUnavailableError(
+                "Chat history search is temporarily unavailable (embedder)."
+            ) from e
 
         must: list[qm.FieldCondition] = [
             qm.FieldCondition(key="user", match=qm.MatchValue(value=user)),
@@ -1021,40 +1153,31 @@ class ChatArchiveStore:
             query_filter=qm.Filter(must=must),
             with_payload=True,
         )
-        payloads = [point.payload or {} for point in result.points]
-        candidate_ids = [
-            str(payload.get("chunk_id", ""))
-            for payload in payloads
-            if payload.get("chunk_id")
-        ]
-        pending_ids: set[str] = set()
-        if candidate_ids:
-            async with self._db_lock:
-                for chunk_id in candidate_ids:
-                    cursor = await self._db.execute(
-                        """
-                        SELECT 1 FROM archive_deletion_outbox
-                        WHERE chunk_id = ?
-                        """,
-                        (chunk_id,),
-                    )
-                    if await cursor.fetchone() is not None:
-                        pending_ids.add(chunk_id)
-                    await cursor.close()
-
-        out: list[SearchHit] = []
-        for point, payload in zip(result.points, payloads, strict=True):
-            chunk_id = str(payload.get("chunk_id", ""))
-            created_at = str(payload.get("created_at", ""))
-            if chunk_id in pending_ids or (cutoff_at and not created_at > cutoff_at):
+        candidate_ids = [str((point.payload or {}).get("chunk_id", ""))
+                         for point in result.points if (point.payload or {}).get("chunk_id")]
+        live_rows = {
+            row[0]: row for row in await self._visible_search_rows(
+                user=user, date_from=date_from, date_to=date_to,
+                chunk_ids=[*candidate_ids, *(hit.chunk_id for hit in out)],
+            )
+        }
+        # Embedding/query awaits may overlap a delete or purge. Re-check
+        # prefetched keyword matches under the same final gates as dense hits.
+        out = [hit for hit in out if hit.chunk_id in live_rows]
+        seen = {hit.chunk_id for hit in out}
+        for point in result.points:
+            chunk_id = str((point.payload or {}).get("chunk_id", ""))
+            if chunk_id in seen or chunk_id not in live_rows:
                 continue
+            _, conversation_id, text, created_at = live_rows[chunk_id]
             out.append(SearchHit(
-                conversation_id=str(payload.get("conversation_id", "")),
-                chunk_id=chunk_id,
-                created_at=created_at,
-                snippet=_snippet(str(payload.get("text", "")), snippet_chars),
+                conversation_id=conversation_id, chunk_id=chunk_id,
+                created_at=created_at, snippet=_snippet(text, snippet_chars),
                 score=float(point.score or 0.0),
             ))
+            seen.add(chunk_id)
+            if len(out) >= limit:
+                break
         return out
 
     async def export_user_messages(
@@ -2313,6 +2436,7 @@ class ChatArchiveMaintainer:
 __all__ = [
     "ArchiveMessage",
     "ChatArchiveMaintainer",
+    "ChatHistorySearchUnavailableError",
     "SearchHit",
     "ChatArchiveStore",
     "build_chunks",

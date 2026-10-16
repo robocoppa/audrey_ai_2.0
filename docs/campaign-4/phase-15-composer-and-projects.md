@@ -27,8 +27,10 @@ Arrow keys navigate model, project, and skill choices. Open panels suspend
 pull-to-refresh. Mobile history uses the Phase 12 drawer.
 
 The empty draft stays centered; the composer pins to the bottom after the first
-message. Existing attachment limits/progress, model availability, Stop, and retry
-remain intact.
+message. Explicit New conversation/New chat actions, including from a Project,
+focus the message field once the new draft loads. Initial page load and opening
+an existing chat do not steal focus. Existing attachment limits/progress, model
+availability, Stop, and retry remain intact.
 
 ## Personal Project contract
 

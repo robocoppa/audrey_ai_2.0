@@ -3,9 +3,11 @@
 **Status:** Router assessment is closed; retain `qwen3.5:4b`. The embedding
 comparison is complete. The user approved replacing Nomic throughout text
 retrieval with Qwen3 Embedding 4B and rebuilding the existing small data set.
-Unified configuration and a recoverable maintenance migration are built.
-Tower migration recovery is prepared, including read-only WAL source handling.
-Migration completion, browser acceptance and the first IRS index remain pending.
+The unified Tower migration and service restart completed successfully October
+15, 2026. October 16 browser acceptance exposed memory/history lookup misses:
+correctly owned records existed but fell below semantic cutoffs. Literal lookup
+fixes are built; deployed acceptance and the existing-file check remain pending,
+followed by the first IRS index under Phase 20. Do not repeat the migration.
 
 ## Decision
 
@@ -84,66 +86,45 @@ No further comparison run is queued.
   eight-second inner deadline and ten-second outer deadline, plus startup warming
   and 24-hour residency; GPU contention can still cause a clean timeout.
 
-## One-time Tower migration
+## Tower migration — complete
 
-Commit/push on the laptop. On **Tower**, build images while the old services are
-still running. Do not start the new images before migrating their existing indexes:
+The completed migration verified the canonical Qwen4 profile across every
+selected collection, retained private backups, left source SQLite/images
+unchanged and restarted the application services successfully. The later
+personal-retrieval repair requires rebuilding `custom-tools` and restarting
+`audrey`; New conversation autofocus also requires rebuilding `audrey-ui`.
+No repeated migration or new upload is needed.
 
-```bash
-cd /mnt/user/appdata/audrey_ai_2.0
-git pull
-docker compose build audrey custom-tools
-```
+Retain `/mnt/user/appdata/runtime/embedding-migration-qwen4/` through acceptance.
+The recoverable maintenance implementation is `scripts/ops/reembed-onbox.sh`;
+private failure tracebacks stay under that state's `diagnostics/` directory.
 
-When no answer or upload is in progress, stop the application writers:
+### Personal retrieval behavior
 
-```bash
-docker compose stop audrey custom-tools media-worker media-fetcher
-```
+Memory search checks whole-key spellings with spaces, underscores or hyphens
+before semantic fallback. History search combines literal English keyword
+matches from the saved archive with semantic results, including recently saved
+chunks awaiting vector indexing. Both paths preserve owner, deletion, purge and
+date visibility. Keyword history hits identify their match type and have no
+cosine score; semantic hits keep their measured score and existing cutoff.
+An unavailable embedder produces a clear search error when no literal history
+evidence can answer; it must not masquerade as an empty archive.
 
-Start the migration from that same Tower checkout:
+### Remaining browser acceptance
 
-```bash
-nohup bash scripts/ops/reembed-onbox.sh > testing-out/last-text-reembed.log 2>&1 &
-```
+After deploying the repair, open **https://ai.builtryte.xyz**, Tools **Automatic**.
+Use the same account and the existing saved records; no upload or new memory
+write is needed:
 
-Chat and uploads are unavailable during this maintenance window. Qdrant and
-Ollama stay running. The script automatically restarts backend/tools/media only
-after successful verification; the UI needs no rebuild. No new file upload,
-model pull, answering-model evaluation, archive collection or personal token is
-required. Duration depends on the retained chunk count; allow a long run rather
-than treating it as a short smoke. Do not run another GPU-heavy job alongside it.
+1. In a new conversation ask `Use memory_search to find my migration test phrase`.
+   Confirm `memory_search` appears and the value is **blue canoe**.
+2. In another new conversation ask `Use chat_history_search to tell me what I
+   asked you to calculate`. Confirm the tool finds the earlier calculation,
+   **1250 × 1.08 = 1,350**, rather than saying nothing was saved.
+3. The existing-file check remains unreported: use `kb_search` to find a known
+   fact in an existing Ready file and confirm the expected fact and source.
 
-The existing notification flow sends start/finish messages and the compact report
-through Telegram. Download that attachment on the laptop for review. Reports
-contain roles/counts/digests, not private text or owner identifiers. Private
-backups, exports and the recovery journal stay in
-`/mnt/user/appdata/runtime/embedding-migration-qwen4/`; keep them through acceptance.
-Success: exit 0, `status: completed`, Qwen4/2,560 in `embedding`, all collections
-verified, `source_sqlite_unchanged: true`, and the runner's restart succeeds.
-On failure writers stay stopped: retain state and rerun the same command after
-diagnosis. Never discard the journal/staging during an unfinished cutover.
-The container limits local BLAS/OpenMP to one thread; embedding computation runs
-in Ollama. Unexpected failures save a mode-0600 traceback under the private
-state's `diagnostics/` directory. The Telegram report carries only the failure
-type, safe phase and relative diagnostic filename. Exception text and tracebacks
-remain on Tower and should not be attached to public reports.
-
-### Browser acceptance after migration
-
-Open **https://ai.builtryte.xyz**, Tools **Automatic**. No upload is needed:
-
-1. Ask `Use kb_search to find [a fact or topic] in my existing uploaded files`.
-   Choose a Ready file you already know. Confirm the expected fact and source;
-   the Tools disclosure must show `kb_search`, so a raw file read does not stand
-   in for an embedding search.
-2. Ask Audrey to remember a harmless new fact, then in a new conversation ask
-   her to search saved memories for it. Confirm `memory_store`/`memory_search`
-   and the correct value.
-3. Ask her to search previous conversations for a known earlier topic. Confirm
-   `chat_history_search` and the correct earlier conversation.
-
-If one fails, keep its conversation/run for diagnosis; do not repeat all checks
-or rerun the model comparison. After acceptance, retire this temporary migration
-handoff and continue [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md)
+Retest only the failed or unreported surfaces. Keep a failed run for diagnosis;
+do not rerun migration or the model comparison. After acceptance, retire these
+temporary browser instructions and continue [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md)
 with the first current-catalog IRS index, then 20C.

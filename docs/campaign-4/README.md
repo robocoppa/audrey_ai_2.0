@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 15, 2026.** English user input only. Passed work stays closed.
+**Updated October 16, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -25,13 +25,15 @@ they are not ongoing task lists.
   the contract and remaining privacy/tax workflow. State jurisdictions remain
   unspecified; fine-tuning requires evidence.
 
-- **Embedding comparison — complete; unified migration next:** Qwen3 Embedding
-  4B is selected for all text retrieval at the user's explicit request. Shared
-  model identity/formatting and a staged, backed-up rebuild cover existing files,
-  memories and chat history. Images retain CLIP. [Phase 06](phase-06-system-one-routing.md)
-  has the one-time Tower maintenance command and targeted browser acceptance.
-  Recovery changes are prepared for a retry using retained state and private
-  SQLite read copies. Complete that migration before the first IRS index. Model
+- **Embedding comparison and unified migration — complete:** Qwen3 Embedding
+  4B now serves all text retrieval at the user's explicit request. Tower migration
+  and service restart passed October 15; source SQLite and image vectors remain
+  unchanged, with private backups retained. [Phase 06](phase-06-system-one-routing.md)
+  holds existing-data acceptance: memory/history searches failed in the browser
+  despite correctly owned saved records. Literal memory-key and saved-history
+  keyword lookup fixes are built; targeted acceptance is pending. Semantic
+  cutoffs stay unchanged. Finish this repair and the outstanding file check
+  before the first IRS index; no migration or model-comparison rerun is queued. Model
   measurements remain in MODEL-FACTS; the clearest quality win is reference
   retrieval, not a proven universal personal-memory improvement. Router assessment
   stays closed: retain Qwen 3.5 4B.
@@ -99,7 +101,7 @@ they are not ongoing task lists.
 | 03 | [Skills](phase-03-skills.md) | Explicit skills complete; native automatic selection built, acceptance pending |
 | 04 | [File downloads](phase-04-file-downloads.md) | Complete |
 | 05 | [Responses foundation](phase-05-responses-api.md) | Complete |
-| 06 | [Router candidates](phase-06-system-one-routing.md) | Comparison complete; unified Qwen 4B migration built, Tower acceptance pending |
+| 06 | [Router candidates](phase-06-system-one-routing.md) | Migration complete; personal retrieval repair built, acceptance pending |
 | 07 | [Scanned PDFs](phase-07-scanned-pdf-ocr.md) | Complete |
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
@@ -117,8 +119,10 @@ they are not ongoing task lists.
 
 ## Remaining work
 
-1. Run Phase 06's one-time unified Qwen4 text reindex on Tower and accept the
-   three existing-data search checks. Then build the first current-catalog IRS
+1. Deploy and accept Phase 06's personal retrieval repair using the already
+   saved memory/calculation, plus New conversation autofocus. The existing-file
+   check remains unreported; the unified migration and service restart are complete.
+   Then build the first current-catalog IRS
    index and accept one cited document-content search in the browser (20B.2).
    Follow with 20C enforced private processing, 20D's tax workflow and targeted
    20E evaluation. The embedding comparison and broad archive collection are

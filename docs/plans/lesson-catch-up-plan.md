@@ -605,6 +605,22 @@ the course covers the browser boundary".
 utility-prompt passage (cycle 6); identity in depth (L14); the research
 lesson's footer (when L20 ships).
 
+## Cycle 2a — tool policy, Lesson 9 (outline approved 2026-10-15; written, awaiting review)
+
+Its audit findings were resolved in source the same day (record in the
+AUDIT), and the lesson describes the code after those fixes. As written:
+the declaration catalogue and failing closed per server (§2.1); discovery,
+schema clean-up and availability merged into one section (§2.2); what a
+model is offered, including a skill's narrower set (§2.3); the dispatcher's
+steps in their real order (§2.6); identity binding, refusal without a
+caller identity, and the purge block (§2.7); truncation that drops whole
+items and says what was cut (§2.8); parallel calls and the per-worker
+search budget (§2.9); compaction by message priority (§2.10). The Context
+table now shows deep and research workers taking the GPU gate per model
+call, as the fast path does. Five questions, down from ten; 635 lines, down
+from 713. Scoped checks: conventions 0, cites 30/30, every snippet line
+found in its cited code.
+
 ## Replacing the Open WebUI material
 
 Open WebUI material is **replaced, not appended to**: after its cycle, a
@@ -646,7 +662,7 @@ references. Items marked † are stale *snippets or values* found by the
 | L6 | Thinking descriptors and per-role thinking, model catalog and direct models, vision sidecar; † the cloud-cap snippet (the cap now logs the dropped worker) | Cycle 6 |
 | L7 | Schema-pinned router without thinking; failed classify no longer escalates. ‡ §2.3 `node_classify` and §2.7 complexity snippets predate skill routing (`routing_messages`) and research (`audrey_research` is forced deep); utility-prompt detection now applies to compatibility requests only | Cycle 6 |
 | L8 | Per-role thinking, shared stage lifecycle, worker-exception handling. ‡ §2.3 pool snippet, §2.4 synthesizer example and question 3 use retired model names | Cycle 6 |
-| L9 | † §2.7 snippet and prose still show `_USER_SCOPED_TOOLS`; user binding is now declared per tool in `TOOL_DECLARATIONS`. † Truncation default is 6000, not 2000, and the result now says what was cut. Compaction counted in tool messages with failures evicted first; per-worker search budget. ‡ §2.8 `_truncate` snippet: the marker now gives shown and total characters and says a retry will not help, and `_truncate_payload` (drops whole list items so JSON stays valid) is tried first. ‡ §2.9 dispatch goes through `_dispatch_observed` after the search budget stubs excess calls | Cycle 2a |
+| L9 | † §2.7 snippet and prose still show `_USER_SCOPED_TOOLS`; user binding is now declared per tool in `TOOL_DECLARATIONS`. † Truncation default is 6000, not 2000, and the result now says what was cut. Compaction counted in tool messages with failures evicted first; per-worker search budget. ‡ §2.8 `_truncate` snippet: the marker now gives shown and total characters and says a retry will not help, and `_truncate_payload` (drops whole list items so JSON stays valid) is tried first. ‡ §2.9 dispatch goes through `_dispatch_observed` after the search budget stubs excess calls | Cycle 2a (done, in review) |
 | L10 | Client tool calls and results through passthrough; Responses function tools | Cycle 6; with L32 |
 | L11 | Hybrid retrieval, private-read isolation, resident embedder. ‡ §2.2 ingest snippet lacks the thread offload and sparse vectors; ‡ §2.5 `kb_query` snippet predates caller resolution, file and artifact scope, deleted-file exclusion and the hybrid branch, which is on by default, so §2.6's raw-score merge is the hybrid-off path. The text embedder is now `qwen3-embedding:4b` (one shared profile in `embedding_profile.py`, a query instruction prefix, a recoverable re-embedding job); nomic, 768-d and the 0.53 floor are stale | Cycle 3 |
 | L12 | † §2.9 upload steps: storage is now reserved atomically and committed after ingest; statuses, tombstones, durable deletion; the upload page is retired. §2.10 the startup reconcile no longer prunes: it backfills missing legacy rows, reports missing index content and never deletes catalog rows, so §2.11's "the next boot's `reconcile_with_qdrant` cleans up the orphan points" is stale too; the embedder change also dates its nomic mentions | Cycle 3 (§2.11 and the nomic mentions to confirm) |
@@ -704,6 +720,8 @@ Hard rules for the writer:
 - No labs (2026-10-13): never ask the reader to open a terminal, install
   anything, create files or run code. Show code and what it prints, and explain
   why.
+- At most five comprehension questions (2026-10-15). L6 and L7 (ten each), and
+  L8, L14, L15, L16 and L17 (six each), are trimmed to five in their cycles.
 - Teach the principle, not the war story. The phase docs are full of
   incidents; the lesson explains why the code is shaped the way it is.
 - Define every new concept on first use (see the learner profile in `AGENTS.md`).

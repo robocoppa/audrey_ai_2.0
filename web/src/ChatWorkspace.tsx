@@ -305,6 +305,10 @@ export function ChatWorkspace({
   const [projectError, setProjectError] = useState("");
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [composerFocusId, setComposerFocusId] = useState<string | null>(null);
+  const composerFocused = useCallback((conversationId: string) => {
+    setComposerFocusId((current) => current === conversationId ? null : current);
+  }, []);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -334,6 +338,7 @@ export function ChatWorkspace({
   });
 
   function selectConversation(conversation: Conversation | null) {
+    setComposerFocusId((current) => current === conversation?.id ? current : null);
     const previousId = selectedIdRef.current;
     if (previousId && previousId !== conversation?.id) {
       const previous = openedConversations.find(({ id }) => id === previousId)
@@ -531,7 +536,7 @@ export function ChatWorkspace({
     selectConversation(conversation);
   }
 
-  async function startConversation() {
+  async function startConversation({ focusComposer = false } = {}) {
     if (!defaultModelId) return;
     setCreating(true);
     setError("");
@@ -548,6 +553,7 @@ export function ChatWorkspace({
         setView("active");
       }
       selectConversation(conversation);
+      if (focusComposer) setComposerFocusId(conversation.id);
       closeNavigation();
     } catch (reason) {
       setError(messageOf(reason));
@@ -652,6 +658,7 @@ export function ChatWorkspace({
     setConversations((current) => upsertConversation(current, conversation));
     setProjectConversations((current) => upsertConversation(current, conversation));
     openConversation(conversation);
+    setComposerFocusId(conversation.id);
   }
 
   async function archiveFromSidebar(conversation: Conversation) {
@@ -892,7 +899,7 @@ export function ChatWorkspace({
           className="workspace-header-button"
           type="button"
           aria-label="New chat"
-          onClick={startConversation}
+          onClick={() => void startConversation({ focusComposer: true })}
           disabled={creating || loading || catalogUnavailable}
         >
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
@@ -939,7 +946,7 @@ export function ChatWorkspace({
             <button
               className="new-conversation"
               type="button"
-              onClick={startConversation}
+              onClick={() => void startConversation({ focusComposer: true })}
               disabled={creating || loading || catalogUnavailable}
             >
               <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
@@ -1104,6 +1111,8 @@ export function ChatWorkspace({
             <ConversationThread
               conversation={opened}
               isSelected={opened.id === selectedId}
+              focusComposer={composerFocusId === opened.id && opened.id === selectedId && !navigationOpen}
+              onComposerFocused={composerFocused}
               compactNavigation={compactNavigation}
               models={models}
               projects={projects}
@@ -1133,6 +1142,8 @@ export function ChatWorkspace({
 function ConversationThread({
   conversation,
   isSelected,
+  focusComposer,
+  onComposerFocused,
   compactNavigation,
   models,
   projects,
@@ -1145,6 +1156,8 @@ function ConversationThread({
 }: {
   conversation: Conversation;
   isSelected: boolean;
+  focusComposer: boolean;
+  onComposerFocused: (conversationId: string) => void;
   compactNavigation: boolean;
   models: AudreyModel[];
   projects: AudreyProject[];
@@ -1538,6 +1551,8 @@ function ConversationThread({
         <AudreyThread
           key={threadRevision}
           conversationId={conversation.id}
+          focusComposer={focusComposer}
+          onComposerFocused={onComposerFocused}
           projectPicker={projectPicker}
           models={models}
           skills={skills}
@@ -1563,6 +1578,8 @@ function ConversationThread({
 
 function AudreyThread({
   conversationId,
+  focusComposer,
+  onComposerFocused,
   projectPicker,
   models,
   skills,
@@ -1579,6 +1596,8 @@ function AudreyThread({
   onRunFinished,
 }: {
   conversationId: string;
+  focusComposer: boolean;
+  onComposerFocused: (conversationId: string) => void;
   projectPicker: ReactNode;
   canBrowseDirectModels: boolean;
   models: AudreyModel[];
@@ -1656,6 +1675,17 @@ function AudreyThread({
   const attachButtonRef = useRef<HTMLButtonElement>(null);
   const skillButtonRef = useRef<HTMLButtonElement>(null);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!focusComposer || readOnly) return;
+    // Wait until the loaded draft is mounted and drawer focus restoration ends.
+    const frame = window.requestAnimationFrame(() => {
+      const input = composerInputRef.current;
+      if (!input || input.closest("[hidden], [inert]")) return;
+      input.focus({ preventScroll: true });
+      onComposerFocused(conversationId);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [conversationId, focusComposer, onComposerFocused, readOnly]);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const userRequestedCancelRef = useRef(false);
   const attachmentBusy = Boolean(uploadingFile) || pendingAttachment !== null;

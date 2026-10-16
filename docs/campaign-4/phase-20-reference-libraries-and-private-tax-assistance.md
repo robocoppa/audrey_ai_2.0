@@ -3,8 +3,10 @@
 Requested October 14, 2026. The archive is sufficient; 20B.1 is deployed and
 accepted. 20B.2 is built; the user confirms the IRS index has never run.
 The Phase 06 comparison is complete: its first build uses Qwen3 Embedding 4B,
-as part of the user's approved unified text-model replacement. Complete Phase
-06's existing-data migration first; Tower indexing/browser acceptance remain pending.
+as part of the user's approved unified text-model replacement. Phase 06's
+existing-data migration and restart passed October 15. Repair and accept its
+failed personal-retrieval checks first; the initial IRS index build and its
+browser acceptance remain pending.
 English content and requests only. Federal coverage can begin independently;
 state jurisdiction and priority tax years await the user's answer.
 
@@ -273,10 +275,10 @@ The embedding comparison is complete. Build the current catalog directly with
 Qwen3 Embedding 4B; there is no existing IRS index to migrate. The user already
 downloaded this model. No further broad benchmark or IRS collection is needed.
 
-First finish [Phase 06's unified text migration](phase-06-system-one-routing.md#one-time-tower-migration).
-That handoff builds/restarts `audrey` and `custom-tools`; it is required before
-starting the new model against existing stores. No UI/media-image rebuild,
-new upload, archive collection or personal token is needed here.
+The [unified text migration](phase-06-system-one-routing.md#tower-migration--complete)
+is complete; finish its personal-retrieval acceptance before this first IRS build.
+Use the deployed Qwen4 profile without repeating migration. This index run needs
+no new upload, archive collection or personal token.
 
 In the same **Tower** checkout, start the initial current-catalog index:
 

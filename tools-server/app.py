@@ -9,8 +9,8 @@ Endpoints, OpenAPI auto-discovered by the Audrey orchestrator:
   POST /kb_image_search        — image query proxied to Audrey /v1/kb/query/image
   POST /memory_store           — save (key, value, user:<id>-tagged) to Qdrant
   POST /memory_recall          — fetch by exact key
-  POST /memory_search          — semantic search over a user's memories
-  POST /chat_history_search    — semantic search over a user's prior conversations
+  POST /memory_search          — whole-key lookup and semantic memory search
+  POST /chat_history_search    — keyword and semantic search over prior conversations
   POST /list_my_files          — a user's own uploaded files, via Audrey
                                  /v1/files/list (service token)
 
@@ -43,7 +43,7 @@ import hashlib
 import hmac
 import logging
 from contextlib import asynccontextmanager
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import httpx
 from brave import (
@@ -55,7 +55,12 @@ from brave import (
 )
 from calculator import router as calculator_router
 from capabilities import CapabilityRegistry, CapabilitySupervisor
-from chat_archive import ChatArchiveMaintainer, ChatArchiveStore, ChatExportMessage
+from chat_archive import (
+    ChatArchiveMaintainer,
+    ChatArchiveStore,
+    ChatExportMessage,
+    ChatHistorySearchUnavailableError,
+)
 from db import EmbedError, MemoryEntry, MemoryStore
 from evidence_tools import router as evidence_tools_router
 from fastapi import Depends, FastAPI, Header, HTTPException, status
@@ -363,7 +368,7 @@ class MemoryRecallRequest(BaseModel):
 
 class MemorySearchRequest(BaseModel):
     user: Annotated[str, Field(min_length=1, max_length=200, description="User scope. Filled in automatically by Audrey — you don't need to supply it. Memories are per-user.")]
-    query: Annotated[str, Field(min_length=1, max_length=1000, description="Text to keyword-match against memory keys, values, and tags.")]
+    query: Annotated[str, Field(min_length=1, max_length=1000, description="A memory key or a semantic description of the saved fact.")]
     top_k: Annotated[int, Field(ge=1, le=20)] = 5
 
 
@@ -876,13 +881,14 @@ async def memory_recall(req: MemoryRecallRequest) -> MemoryEntryResponse:
     operation_id="memory_search",
     response_model=MemorySearchResponse,
     tags=["tools"],
-    summary="Semantic search over a user's memories",
+    summary="Find a user's saved memories",
     description=(
-        "Find a user's memories by embedding the query and cosine-matching "
-        "against each stored memory's embedding in the configured vector space. "
-        "Scoped by the `user:<id>` tag. Results below the similarity "
-        "threshold are dropped. Used by the orchestrator for auto-recall "
-        "at the top of every request, but also callable as a tool."
+        "Find saved memories by whole-key matching first, treating spaces, "
+        "underscores and hyphens as equivalent key separators, then semantic "
+        "cosine search when no key matches. Scoped by the `user:<id>` tag. "
+        "The similarity threshold applies to semantic matches. Used by the "
+        "orchestrator for auto-recall at the top of every request, but also "
+        "callable as a tool."
     ),
 )
 async def memory_search(req: MemorySearchRequest) -> MemorySearchResponse:
@@ -936,7 +942,8 @@ class ChatHistorySearchHit(BaseModel):
     chunk_id: str
     created_at: str
     snippet: str
-    score: float
+    score: float | None = Field(description="Cosine similarity for semantic hits; null for keyword matches.")
+    match_type: Literal["semantic", "keyword"] = "semantic"
 
 
 class ChatHistorySearchResponse(BaseModel):
@@ -955,15 +962,25 @@ class ChatHistorySearchResponse(BaseModel):
         "user references something previously discussed, or when answering "
         "requires a specific prior decision. Do not call to personalize "
         "ordinary answers or to repeat back recent context. Returns short "
-        "snippets and conversation ids; never returns another user's data."
+        "snippets and conversation ids; never returns another user's data. "
+        "Combines exact keyword matching with semantic search. Keyword matches "
+        "have match_type='keyword' and score=null; semantic scores are cosine similarities."
     ),
 )
 async def chat_history_search(req: ChatHistorySearchRequest) -> ChatHistorySearchResponse:
     archive = _searchable_archive()
-    hits = await archive.search(
-        user=req.user, query=req.query, limit=req.limit,
-        date_from=req.date_from, date_to=req.date_to,
-    )
+    try:
+        hits = await archive.search(
+            user=req.user, query=req.query, limit=req.limit,
+            date_from=req.date_from, date_to=req.date_to,
+        )
+    except ChatHistorySearchUnavailableError as error:
+        # The model must distinguish an unavailable search from no matches.
+        # Keep transport details and any provider response out of the tool body.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Chat history search is temporarily unavailable (embedder). Try again later.",
+        ) from error
     return ChatHistorySearchResponse(
         query=req.query,
         results=[
@@ -973,6 +990,7 @@ async def chat_history_search(req: ChatHistorySearchRequest) -> ChatHistorySearc
                 created_at=h.created_at,
                 snippet=h.snippet,
                 score=h.score,
+                match_type=h.match_type,
             )
             for h in hits
         ],

@@ -24,12 +24,15 @@ import asyncio
 import importlib
 import json
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import aiosqlite
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 # Add tools-server to sys.path so we can import the chat_archive module
 # directly. The custom-tools service isn't packaged for installation; it
@@ -392,3 +395,295 @@ def test_chat_history_search_has_argument_scope_policy():
 
     policy = TOOL_DECLARATIONS["chat_history_search"]
     assert policy.user_scope is ToolUserScope.ARGUMENT
+
+
+# A failed embed must never look like a successful search with no matches.
+async def test_history_embedding_failure_is_not_an_empty_result(monkeypatch):
+    store = chat_archive_module.ChatArchiveStore.__new__(chat_archive_module.ChatArchiveStore)
+    store.user_purge_cutoff = AsyncMock(return_value="")
+    store._keyword_hits = AsyncMock(return_value=[])
+    store._http = MagicMock()
+    store._qdrant = SimpleNamespace(query_points=AsyncMock())
+    store._embed_model = "test-embedding-model"
+    store._embed_keep_alive = "24h"
+    cause = chat_archive_module._EmbedError("Embedding request failed (TimeoutError)")
+    monkeypatch.setattr(chat_archive_module, "_embed", AsyncMock(side_effect=cause))
+
+    with pytest.raises(chat_archive_module.ChatHistorySearchUnavailableError) as caught:
+        await store.search(user="alice@example.com", query="asked to calculate", limit=5)
+
+    assert caught.value.__cause__ is cause
+    store._qdrant.query_points.assert_not_awaited()
+
+
+@pytest.fixture
+def post_history(monkeypatch):
+    @asynccontextmanager
+    async def noop_lifespan(_app):
+        yield
+
+    monkeypatch.setattr(app_module.app.router, "lifespan_context", noop_lifespan)
+    monkeypatch.setattr(
+        app_module.app.state, "capabilities",
+        app_module.CapabilityRegistry.all_available(), raising=False,
+    )
+
+    def post(archive, body):
+        monkeypatch.setattr(app_module.app.state, "chat_archive", archive, raising=False)
+        with TestClient(app_module.app) as client:
+            return client.post("/chat_history_search", json=body)
+
+    return post
+
+
+def test_history_search_unavailable_returns_safe_503(post_history):
+    archive = SimpleNamespace(search=AsyncMock(side_effect=(
+        chat_archive_module.ChatHistorySearchUnavailableError("private-provider-response")
+    )))
+    response = post_history(archive, {"user": "alice@example.com", "query": "calculation"})
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Chat history search is temporarily unavailable (embedder). Try again later.",
+    }
+    assert "private-provider-response" not in response.text
+    assert "results" not in response.json()
+
+
+def test_history_search_genuine_no_match_remains_success(post_history):
+    archive = SimpleNamespace(search=AsyncMock(return_value=[]))
+    response = post_history(archive, {"user": "alice@example.com", "query": "calculation"})
+
+    assert response.status_code == 200
+    assert response.json() == {"query": "calculation", "results": []}
+    archive.search.assert_awaited_once_with(
+        user="alice@example.com", query="calculation", limit=5,
+        date_from=None, date_to=None,
+    )
+
+
+def test_history_search_success_preserves_hits_and_requested_scope(post_history):
+    archive = SimpleNamespace(search=AsyncMock(return_value=[
+        chat_archive_module.SearchHit(
+            conversation_id="conversation-1", chunk_id="chunk-1",
+            created_at="2026-10-15T12:00:00+00:00",
+            snippet="User: Calculate 1250 × 1.08 using the calculator", score=0.8,
+        ),
+    ]))
+    response = post_history(archive, {
+        "user": "alice@example.com", "query": "calculation", "limit": 2,
+        "date_from": "2026-10-15T00:00:00+00:00",
+    })
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["conversation_id"] == "conversation-1"
+    assert response.json()["results"][0]["snippet"].startswith("User: Calculate 1250")
+    archive.search.assert_awaited_once_with(
+        user="alice@example.com", query="calculation", limit=2,
+        date_from="2026-10-15T00:00:00+00:00", date_to=None,
+    )
+
+
+@pytest.fixture
+async def history_store(tmp_path, monkeypatch):
+    """Real archive schema with mocked vector and embedding transports."""
+    store = chat_archive_module.ChatArchiveStore.__new__(chat_archive_module.ChatArchiveStore)
+    store._db = await aiosqlite.connect(tmp_path / "history.db")
+    await store._db.executescript(chat_archive_module._SCHEMA)
+    store._db_lock = asyncio.Lock()
+    store._retention_days = 0
+    store._http = None
+    store._embed_model = "test-embedding-model"
+    store._embed_keep_alive = "24h"
+    store._collection = "history"
+    store._threshold = 0.62
+    store._qdrant = SimpleNamespace(query_points=AsyncMock(
+        return_value=SimpleNamespace(points=[]),
+    ))
+    monkeypatch.setattr(chat_archive_module, "_embed", AsyncMock(return_value=[1.0, 0.0]))
+    try:
+        yield store
+    finally:
+        await store._db.close()
+
+
+async def save_history_chunk(
+    store, chunk_id, text, *, user="alice@example.com", conversation_id="calculation",
+    created_at=None, indexed_at=None,
+):
+    await store._db.execute(
+        "INSERT INTO archive_chunks "
+        "(chunk_id, conversation_id, user, message_ids_json, text, created_at, indexed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (chunk_id, conversation_id, user, f"message-{chunk_id}", text,
+         created_at or chat_archive_module._now_iso(), indexed_at),
+    )
+    await store._db.commit()
+
+
+async def test_literal_history_finds_actual_unindexed_calculation_below_dense_cutoff(history_store):
+    await save_history_chunk(
+        history_store, "actual-calculation",
+        "User: Calculate 1250 × 1.08 using the calculator\nAssistant: 1350",
+    )
+    await save_history_chunk(
+        history_store, "later-question",
+        "User: Use chat history search to tell me what I asked you to calculate\n"
+        "Assistant: I could not find the calculation.",
+    )
+    hits = await history_store.search(user="alice@example.com", query="asked to calculate", limit=5)
+
+    assert {hit.chunk_id for hit in hits} == {"actual-calculation", "later-question"}
+    actual = next(hit for hit in hits if hit.chunk_id == "actual-calculation")
+    assert "1250 × 1.08" in actual.snippet
+    assert actual.score is None and actual.match_type == "keyword"
+    assert history_store._qdrant.query_points.await_args.kwargs["score_threshold"] == 0.62
+
+
+@pytest.mark.parametrize("query", ["foo", "please tell me what I asked before", "unrelated"])
+async def test_literal_history_ignores_substrings_fillers_and_unrelated_queries(history_store, query):
+    await save_history_chunk(history_store, "foo-substring", "User: Discuss foobar\nAssistant: Details")
+    hits = await history_store.search(user="alice@example.com", query=query, limit=5)
+    assert hits == []
+
+
+async def test_literal_history_requires_all_informative_terms_and_bounds_results(history_store):
+    await save_history_chunk(history_store, "only-one", "User: calculate\nAssistant: Done")
+    await save_history_chunk(history_store, "both-a", "User: calculate invoice\nAssistant: Done")
+    await save_history_chunk(history_store, "both-b", "User: calculate invoice\nAssistant: Done")
+    hits = await history_store.search(user="alice@example.com", query="calculate invoice", limit=1)
+    assert len(hits) == 1
+    assert hits[0].chunk_id in {"both-a", "both-b"}
+
+
+@pytest.mark.parametrize(
+    "gate", ["foreign", "date_from", "date_to", "purge", "conversation_delete", "outbox", "retention"],
+)
+async def test_history_visibility_gates_keyword_and_semantic_hits_independently(history_store, gate):
+    now = chat_archive_module._dt.datetime.now(chat_archive_module._dt.UTC)
+    hour = chat_archive_module._dt.timedelta(hours=1)
+    visible_at = now - hour
+    blocked_at = now - 2 * hour
+    kwargs = {}
+    if gate == "retention":
+        blocked_at = now - chat_archive_module._dt.timedelta(days=2)
+        history_store._retention_days = 1
+    if gate == "date_from":
+        kwargs["date_from"] = (now - 1.5 * hour).isoformat()
+    if gate == "date_to":
+        blocked_at = now
+        kwargs["date_to"] = (now - 0.5 * hour).isoformat()
+    await save_history_chunk(
+        history_store, "visible", "User: calculate invoice\nAssistant: 1350",
+        conversation_id="visible-conversation", created_at=visible_at.isoformat(),
+    )
+    await save_history_chunk(
+        history_store, "blocked", "User: calculate invoice\nAssistant: PRIVATE_BLOCKED",
+        user="bob@example.com" if gate == "foreign" else "alice@example.com",
+        conversation_id="blocked-conversation", created_at=blocked_at.isoformat(),
+    )
+    cutoff = (now - 1.5 * hour).isoformat()
+    if gate == "purge":
+        await history_store._db.execute(
+            "INSERT INTO archive_user_purges "
+            "(purge_id, user, cutoff_at, requested_at) VALUES (?, ?, ?, ?)",
+            ("purge", "alice@example.com", cutoff, now.isoformat()),
+        )
+    if gate == "conversation_delete":
+        await history_store._db.execute(
+            "INSERT INTO archive_conversation_deletions "
+            "(user, conversation_id, cutoff_at, requested_at) VALUES (?, ?, ?, ?)",
+            ("alice@example.com", "blocked-conversation", cutoff, now.isoformat()),
+        )
+    if gate == "outbox":
+        await history_store._db.execute(
+            "INSERT INTO archive_deletion_outbox "
+            "(chunk_id, conversation_id, message_ids_json, point_id, requested_at) VALUES (?, ?, ?, ?, ?)",
+            ("blocked", "blocked-conversation", "message-blocked", "point", now.isoformat()),
+        )
+    await history_store._db.commit()
+    # Even stale vector results cannot bypass the authoritative source gates.
+    history_store._qdrant.query_points.return_value = SimpleNamespace(points=[
+        SimpleNamespace(payload={"chunk_id": "blocked"}, score=0.95),
+        SimpleNamespace(payload={"chunk_id": "visible"}, score=0.9),
+    ])
+    hits = await history_store.search(
+        user="alice@example.com", query="calculate invoice", limit=20, **kwargs,
+    )
+    assert [hit.chunk_id for hit in hits] == ["visible"]
+    assert all("PRIVATE_BLOCKED" not in hit.snippet for hit in hits)
+
+
+async def test_literal_history_recovers_matches_when_embedding_is_unavailable(history_store, monkeypatch):
+    await save_history_chunk(history_store, "calculation", "User: calculate 1250 × 1.08\nAssistant: 1350")
+    monkeypatch.setattr(chat_archive_module, "_embed", AsyncMock(
+        side_effect=chat_archive_module._EmbedError("timeout"),
+    ))
+    hits = await history_store.search(user="alice@example.com", query="calculate", limit=5)
+    assert [hit.chunk_id for hit in hits] == ["calculation"]
+    assert hits[0].score is None
+    with pytest.raises(chat_archive_module.ChatHistorySearchUnavailableError):
+        await history_store.search(user="alice@example.com", query="unrelated", limit=5)
+
+
+async def test_history_dense_fallback_preserves_cosine_and_deduplicates_literal_matches(history_store):
+    await save_history_chunk(history_store, "semantic", "User: invoice total\nAssistant: 1350")
+    await save_history_chunk(history_store, "literal", "User: calculate\nAssistant: 1350")
+    history_store._qdrant.query_points.return_value = SimpleNamespace(points=[
+        SimpleNamespace(payload={"chunk_id": "literal"}, score=0.9),
+        SimpleNamespace(payload={"chunk_id": "semantic"}, score=0.8),
+        SimpleNamespace(payload={"chunk_id": "unknown"}, score=0.9),
+    ])
+    hits = await history_store.search(user="alice@example.com", query="calculate", limit=5)
+    assert [(hit.chunk_id, hit.match_type, hit.score) for hit in hits] == [
+        ("literal", "keyword", None), ("semantic", "semantic", 0.8),
+    ]
+    # A different query with no literal matches retains semantic fallback.
+    hits = await history_store.search(user="alice@example.com", query="arithmetic", limit=5)
+    assert [hit.match_type for hit in hits] == ["semantic", "semantic"]
+
+
+async def test_literal_history_snippet_shows_a_late_matching_passage(history_store):
+    await save_history_chunk(
+        history_store, "late-match", "Unrelated setup. " * 70 + "Calculate 1250 × 1.08 = 1350.",
+    )
+    hits = await history_store.search(user="alice@example.com", query="calculate", limit=5, snippet_chars=100)
+    assert "Calculate 1250" in hits[0].snippet
+    assert len(hits[0].snippet) <= 100
+
+
+@pytest.mark.parametrize("embedding_failure", [False, True])
+async def test_literal_history_rechecks_visibility_after_embedding_await(history_store, monkeypatch, embedding_failure):
+    await save_history_chunk(history_store, "deleted-during-search", "User: calculate\nAssistant: 1350")
+
+    async def embed_then_delete(*_args, **_kwargs):
+        await history_store._db.execute(
+            "INSERT INTO archive_conversation_deletions "
+            "(user, conversation_id, cutoff_at, requested_at) VALUES (?, ?, ?, ?)",
+            ("alice@example.com", "calculation", chat_archive_module._now_iso(), chat_archive_module._now_iso()),
+        )
+        await history_store._db.commit()
+        if embedding_failure:
+            raise chat_archive_module._EmbedError("timeout")
+        return [1.0, 0.0]
+
+    monkeypatch.setattr(chat_archive_module, "_embed", embed_then_delete)
+    if embedding_failure:
+        # The only literal hit disappeared; do not claim the unavailable
+        # semantic search found nothing either.
+        with pytest.raises(chat_archive_module.ChatHistorySearchUnavailableError):
+            await history_store.search(user="alice@example.com", query="calculate", limit=5)
+    else:
+        hits = await history_store.search(user="alice@example.com", query="calculate", limit=5)
+        assert hits == []
+
+
+def test_history_route_keyword_match_has_null_score(post_history):
+    archive = SimpleNamespace(search=AsyncMock(return_value=[chat_archive_module.SearchHit(
+        conversation_id="calculation", chunk_id="chunk", created_at="2026-10-15T12:00:00+00:00",
+        snippet="Calculate 1250 × 1.08", score=None, match_type="keyword",
+    )]))
+    response = post_history(archive, {"user": "alice@example.com", "query": "calculate"})
+    assert response.status_code == 200
+    assert response.json()["results"][0]["score"] is None
+    assert response.json()["results"][0]["match_type"] == "keyword"

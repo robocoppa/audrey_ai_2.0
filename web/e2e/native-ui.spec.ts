@@ -1107,7 +1107,11 @@ test("opens mobile history on demand and keeps chat and project navigation reach
   await expect(historyToggle).toBeFocused();
 
   await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await expect(page.locator(".sidebar")).toBeHidden();
   await expect(page.locator(".conversation-thread-slot:not([hidden]) .composer-model-picker img")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toBeFocused();
+  await page.keyboard.type("Typing directly into a new mobile chat");
+  await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toHaveValue("Typing directly into a new mobile chat");
   await expectInViewport(page, page.getByRole("textbox", { name: "Ask Audrey" }));
   expect(creations).toBe(1);
   await historyToggle.click();
@@ -4365,6 +4369,7 @@ test("creates and manages a personal project without losing conversations or fil
 
   await page.getByRole("button", { name: "New conversation in project" }).click();
   await expect(page.getByRole("navigation", { name: "Project breadcrumb" })).toContainText("Renamed launch");
+  await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toBeFocused();
   await page.getByRole("navigation", { name: "Project breadcrumb" }).getByRole("button", { name: "Renamed launch" }).click();
   await page.getByRole("button", { name: "New conversation in project" }).click();
   await page.getByRole("navigation", { name: "Project breadcrumb" }).getByRole("button", { name: "Renamed launch" }).click();
@@ -4372,6 +4377,7 @@ test("creates and manages a personal project without losing conversations or fil
 
   const ordinaryHistory = page.getByRole("navigation", { name: "Conversation history" });
   await ordinaryHistory.getByRole("button", { name: /^Ordinary conversation/u }).click();
+  await expect(page.getByRole("textbox", { name: "Ask Audrey" })).not.toBeFocused();
   await chooseConversationProject(page, "Renamed launch");
   await expect(page.getByRole("navigation", { name: "Project breadcrumb" })).toContainText("Renamed launch");
   await chooseConversationProject(page, "No project");
@@ -4388,6 +4394,8 @@ test("creates and manages a personal project without losing conversations or fil
 });
 
 test("discards abandoned empty conversations from history", async ({ page }) => {
+  let messagesReady = Promise.resolve();
+  let releaseMessages: () => void = () => undefined;
   let next = 0;
   const drafts: Array<ReturnType<typeof browserConversation>> = [];
   const discarded: string[] = [];
@@ -4397,6 +4405,8 @@ test("discards abandoned empty conversations from history", async ({ page }) => 
     if (url.pathname === "/api/me/preferences") return json(route, browserPreferences());
     if (url.pathname === "/api/me") return json(route, browserTester());
     if (url.pathname === "/api/models") return json(route, { items: browserModels() });
+    if (url.pathname === "/api/skills") return json(route, { enabled: true, status: "ready", items: browserSkills() });
+    if (url.pathname === "/api/projects") return json(route, { items: [], next_cursor: null });
     if (url.pathname === "/api/conversations" && request.method() === "GET") {
       return json(route, { items: drafts, next_cursor: null });
     }
@@ -4406,7 +4416,10 @@ test("discards abandoned empty conversations from history", async ({ page }) => 
       drafts.unshift(draft);
       return json(route, draft);
     }
-    if (url.pathname.endsWith("/messages")) return json(route, { items: [], next_cursor: null });
+    if (url.pathname.endsWith("/messages")) {
+      await messagesReady;
+      return json(route, { items: [], next_cursor: null });
+    }
     if (url.pathname.endsWith("/empty") && request.method() === "DELETE") {
       const id = url.pathname.split("/").at(-2)!;
       discarded.push(id);
@@ -4418,10 +4431,21 @@ test("discards abandoned empty conversations from history", async ({ page }) => 
   });
   await page.goto("./");
   await expect(page.getByRole("heading", { name: "New conversation" })).toBeVisible();
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await expect(composer).toBeVisible();
+  await expect(composer).not.toBeFocused();
+  messagesReady = new Promise<void>((resolve) => { releaseMessages = resolve; });
   await page.getByRole("button", { name: "New conversation" }).click();
   await expect.poll(() => discarded.length).toBe(1);
+  await expect(page.getByRole("status", { name: "Loading conversation" })).toBeVisible();
+  releaseMessages();
+  await expect(composer).toBeFocused();
+  await page.keyboard.type("Typing without clicking the message field");
+  await expect(composer).toHaveValue("Typing without clicking the message field");
   await page.getByRole("button", { name: "New conversation" }).click();
   await expect.poll(() => discarded.length).toBe(2);
+  await expect(composer).toBeFocused();
+  await expect(composer).toHaveValue("");
   expect(drafts).toHaveLength(1);
   await expect(page.getByRole("navigation", { name: "Conversation history" }).locator(".conversation-row")).toHaveCount(0);
 });

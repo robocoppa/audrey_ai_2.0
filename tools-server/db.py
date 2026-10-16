@@ -11,8 +11,8 @@ Point IDs are deterministic: `uuid5(user, key)` — re-storing the same
 `(user, key)` overwrites the previous point rather than creating duplicates.
 
 `recall(key)` is a payload-only scroll (no vector search); `search(user,
-query, top_k)` is a vector search filtered by `user == <id>` and threshold
-`MEMORY_SIMILARITY_THRESHOLD`.
+query, top_k)` first checks literal key spellings, then falls back to vector
+search filtered by `user == <id>` and threshold `MEMORY_SIMILARITY_THRESHOLD`.
 
 Startup: if a legacy `memory.db` SQLite file exists, read every row, embed,
 and upsert into Qdrant. Rename the file to `memory.db.migrated` only after
@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import logging
+import re
 import time as _time
 import uuid
 from dataclasses import dataclass
@@ -65,6 +66,23 @@ def _parse_user(tags: str) -> str:
 def _point_id(user: str, key: str) -> str:
     """Deterministic UUIDv5 so re-stores overwrite."""
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{user}|{key}"))
+
+
+def _literal_key_variants(query: str) -> list[str]:
+    """Try the whole query as a key, including common separator spellings.
+
+    Model-written keys often use underscores where a later search uses spaces.
+    These are finite literal candidates, not substring or keyword matching.
+    Casefolding also finds lowercase keys for mixed-case queries; it does not
+    make arbitrary stored mixed-case keys case-insensitive.
+    """
+    raw = query.strip()
+    parts = re.split(r"[\s_-]+", raw)
+    candidates = [raw, raw.casefold()]
+    for separator in (" ", "_", "-"):
+        candidate = separator.join(part for part in parts if part)
+        candidates.extend((candidate, candidate.casefold()))
+    return list(dict.fromkeys(candidate for candidate in candidates if candidate))
 
 
 def _embedding_text(key: str, value: str, tags: str) -> str:
@@ -598,10 +616,12 @@ class MemoryStore:
         top_k: int = 5,
         visible_after: str = "",
     ) -> list[MemoryEntry]:
-        """Semantic search scoped to a user.
+        """Find a literal memory key, otherwise search semantically.
 
-        Embeds `query`, vector-searches with `user == <user>` payload filter,
-        drops results below `MEMORY_SIMILARITY_THRESHOLD`.
+        Exact whole-key spellings are evidence without an embedding score.
+        Other queries embed `query`, vector-search with `user == <user>`
+        payload filter, and drop results below `MEMORY_SIMILARITY_THRESHOLD`.
+        Both paths apply the same owner and purge-cutoff filters.
 
         Raises `EmbedError` when the query can't be embedded. It used to
         swallow that and return `[]`, which is a different claim: "you have no
@@ -612,6 +632,34 @@ class MemoryStore:
         """
         if not query.strip():
             return []
+        variants = _literal_key_variants(query)
+        points, _ = await self._qdrant.scroll(
+            collection_name=self._collection,
+            scroll_filter=qm.Filter(must=[
+                *_user_filter(user, visible_after=visible_after).must,
+                qm.FieldCondition(key="key", match=qm.MatchAny(any=variants)),
+            ]),
+            limit=max(top_k, len(variants)),
+            with_payload=True,
+            with_vectors=False,
+        )
+        if points:
+            # Prefer the query's original spelling, then the generated literal
+            # candidates. Legacy duplicate keys keep their newest visible row.
+            by_key: dict[str, MemoryEntry] = {}
+            for point in points:
+                payload = point.payload or {}
+                key = str(payload.get("key", ""))
+                entry = MemoryEntry(
+                    key=key,
+                    value=str(payload.get("value", "")),
+                    tags=str(payload.get("tags", "")),
+                    created_at=str(payload.get("created_at", "")),
+                    updated_at=str(payload.get("updated_at", "")),
+                )
+                if key not in by_key or entry.updated_at > by_key[key].updated_at:
+                    by_key[key] = entry
+            return [by_key[key] for key in variants if key in by_key][:top_k]
         qvec = await self._embed(query, query=True) if getattr(self, "_embedding_profile", None) else await self._embed(query)
         result = await self._qdrant.query_points(
             collection_name=self._collection,

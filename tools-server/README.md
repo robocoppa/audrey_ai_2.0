@@ -12,8 +12,8 @@ matching declaration in Audrey's central capability policy.
 - `POST /kb_image_search` — image query → Audrey `/v1/kb/query/image`
 - `POST /memory_store` — save `(key, value, tags)` to durable memory
 - `POST /memory_recall` — fetch by key
-- `POST /memory_search` — user-scoped semantic memory search
-- `POST /chat_history_search` — user-scoped semantic chat-history search
+- `POST /memory_search` — user-scoped whole-key lookup, then semantic memory search
+- `POST /chat_history_search` — user-scoped keyword and semantic chat-history search
 - `POST /list_my_files` — list the authenticated user's Audrey uploads
 - `POST /get_file_text` — read one bounded page of a user's file artifact
 - `POST /calculate` — decimal arithmetic, unit conversion, linear/quadratic equations
@@ -21,6 +21,15 @@ matching declaration in Audrey's central capability policy.
 - `POST /inspect_pdf_page` — visual observations from one owned PDF page
 - `POST /open_chat_history` — paged owned saved conversations, respecting deletion cutoffs
 - `POST /inspect_video_frame` — visual observations from a retained video at a timestamp
+
+Memory search first matches a whole saved key, with spaces, underscores and
+hyphens treated as equivalent separators, then falls back to semantic search.
+History search combines exact informative-word matches from live SQLite chunks
+with cosine matches above the configured threshold. Keyword history matches
+have `match_type: "keyword"` and `score: null`; semantic hits retain their cosine
+score and `match_type: "semantic"`. Both paths preserve ownership and deletion
+boundaries. An embedding failure is reported as unavailable rather than no
+matches, unless literal matches already answer the search.
 
 Internal archive routes are excluded from OpenAPI so models cannot call them:
 

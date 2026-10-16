@@ -47,10 +47,10 @@ async def test_sidecar_memory_documents_queries_and_owner_isolation(tmp_path, mo
     try:
         await memory.init_qdrant()
         await memory.store("desk", "oak", "user:owner furniture")
-        assert len(await memory.search(user="owner", query="desk")) == 1
-        assert await memory.search(user="different", query="desk") == []
+        assert len(await memory.search(user="owner", query="furniture")) == 1
+        assert await memory.search(user="different", query="furniture") == []
         assert seen[0]["input"] == ["desk: oak [tags: furniture]"]
-        assert seen[1]["input"] == [PROFILE.query("desk")]
+        assert seen[1]["input"] == [PROFILE.query("furniture")]
         assert all(body["truncate"] is False for body in seen)
         assert (await memory._qdrant.get_collection("memory")).config.metadata == PROFILE.metadata
     finally:
