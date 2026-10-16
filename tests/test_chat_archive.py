@@ -521,7 +521,10 @@ async def save_history_chunk(
     await store._db.commit()
 
 
-async def test_literal_history_finds_actual_unindexed_calculation_below_dense_cutoff(history_store):
+@pytest.mark.parametrize("query", [
+    "calculate", "asked to calculate", "what did I ask you to calculate",
+])
+async def test_literal_history_finds_actual_unindexed_calculation_below_dense_cutoff(history_store, query):
     await save_history_chunk(
         history_store, "actual-calculation",
         "User: Calculate 1250 × 1.08 using the calculator\nAssistant: 1350",
@@ -531,7 +534,7 @@ async def test_literal_history_finds_actual_unindexed_calculation_below_dense_cu
         "User: Use chat history search to tell me what I asked you to calculate\n"
         "Assistant: I could not find the calculation.",
     )
-    hits = await history_store.search(user="alice@example.com", query="asked to calculate", limit=5)
+    hits = await history_store.search(user="alice@example.com", query=query, limit=5)
 
     assert {hit.chunk_id for hit in hits} == {"actual-calculation", "later-question"}
     actual = next(hit for hit in hits if hit.chunk_id == "actual-calculation")

@@ -29,10 +29,12 @@ they are not ongoing task lists.
   4B now serves all text retrieval at the user's explicit request. Tower migration
   and service restart passed October 15; source SQLite and image vectors remain
   unchanged, with private backups retained. [Phase 06](phase-06-system-one-routing.md)
-  holds existing-data acceptance: memory/history searches failed in the browser
-  despite correctly owned saved records. Literal memory-key and saved-history
-  keyword lookup fixes are built; targeted acceptance is pending. Semantic
-  cutoffs stay unchanged. Finish this repair and the outstanding file check
+  holds existing-data acceptance: memory search is user-accepted October 16.
+  History's full-question lookup still failed; the deployed direct keyword
+  lookup finds the saved calculation. A request-word filter correction is built
+  for the exact failed query; targeted browser acceptance remains pending.
+  Semantic cutoffs stay unchanged. Finish history repair and the outstanding
+  file check
   before the first IRS index; no migration or model-comparison rerun is queued. Model
   measurements remain in MODEL-FACTS; the clearest quality win is reference
   retrieval, not a proven universal personal-memory improvement. Router assessment
@@ -101,7 +103,7 @@ they are not ongoing task lists.
 | 03 | [Skills](phase-03-skills.md) | Explicit skills complete; native automatic selection built, acceptance pending |
 | 04 | [File downloads](phase-04-file-downloads.md) | Complete |
 | 05 | [Responses foundation](phase-05-responses-api.md) | Complete |
-| 06 | [Router candidates](phase-06-system-one-routing.md) | Migration complete; personal retrieval repair built, acceptance pending |
+| 06 | [Router candidates](phase-06-system-one-routing.md) | Migration complete; memory accepted; history correction awaiting acceptance |
 | 07 | [Scanned PDFs](phase-07-scanned-pdf-ocr.md) | Complete |
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
@@ -119,9 +121,9 @@ they are not ongoing task lists.
 
 ## Remaining work
 
-1. Deploy and accept Phase 06's personal retrieval repair using the already
-   saved memory/calculation, plus New conversation autofocus. The existing-file
-   check remains unreported; the unified migration and service restart are complete.
+1. Deploy and accept Phase 06's history-query correction using the already
+   saved calculation, plus New conversation autofocus. Memory search is passed;
+   the existing-file check remains unreported. Migration and restart are complete.
    Then build the first current-catalog IRS
    index and accept one cited document-content search in the browser (20B.2).
    Follow with 20C enforced private processing, 20D's tax workflow and targeted

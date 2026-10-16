@@ -122,7 +122,7 @@ _SEARCH_FILLERS = frozenset(
     "a an and are as at be been before but by can could did do does for from "
     "had has have how i in is it its me my of on or our please previously "
     "said show tell than that the their them then there these they this those "
-    "to us was we were what when where which who why will with would you your asked".split()
+    "to us was we were what when where which who why will with would you your ask asked".split()
 )
 _KEYWORD_CANDIDATE_LIMIT = 200
 

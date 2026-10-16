@@ -6,8 +6,10 @@ retrieval with Qwen3 Embedding 4B and rebuilding the existing small data set.
 The unified Tower migration and service restart completed successfully October
 15, 2026. October 16 browser acceptance exposed memory/history lookup misses:
 correctly owned records existed but fell below semantic cutoffs. Literal lookup
-fixes are built; deployed acceptance and the existing-file check remain pending,
-followed by the first IRS index under Phase 20. Do not repeat the migration.
+fixes are built. Memory search is user-accepted October 16. History still
+failed on full-question wording; its request-word correction is built, awaiting
+browser acceptance. The existing-file check and first IRS index remain pending.
+Do not repeat the migration.
 
 ## Decision
 
@@ -104,8 +106,9 @@ private failure tracebacks stay under that state's `diagnostics/` directory.
 Memory search checks whole-key spellings with spaces, underscores or hyphens
 before semantic fallback. History search combines literal English keyword
 matches from the saved archive with semantic results, including recently saved
-chunks awaiting vector indexing. Both paths preserve owner, deletion, purge and
-date visibility. Keyword history hits identify their match type and have no
+chunks awaiting vector indexing. Request phrasing such as "what did I ask you
+to calculate" reduces to the topic word "calculate". Both paths preserve
+owner, deletion, purge and date visibility. Keyword history hits identify their match type and have no
 cosine score; semantic hits keep their measured score and existing cutoff.
 An unavailable embedder produces a clear search error when no literal history
 evidence can answer; it must not masquerade as an empty archive.
@@ -116,12 +119,13 @@ After deploying the repair, open **https://ai.builtryte.xyz**, Tools **Automatic
 Use the same account and the existing saved records; no upload or new memory
 write is needed:
 
-1. In a new conversation ask `Use memory_search to find my migration test phrase`.
-   Confirm `memory_search` appears and the value is **blue canoe**.
-2. In another new conversation ask `Use chat_history_search to tell me what I
+Memory search is accepted: the saved migration test phrase was retrieved
+correctly. Keep that check closed.
+
+1. In a new conversation ask `Use chat_history_search to tell me what I
    asked you to calculate`. Confirm the tool finds the earlier calculation,
    **1250 × 1.08 = 1,350**, rather than saying nothing was saved.
-3. The existing-file check remains unreported: use `kb_search` to find a known
+2. The existing-file check remains unreported: use `kb_search` to find a known
    fact in an existing Ready file and confirm the expected fact and source.
 
 Retest only the failed or unreported surfaces. Keep a failed run for diagnosis;
