@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from audrey.embedding_profile import EmbeddingProfile, profile_from_mapping
 from audrey.models.ollama import OllamaClient
 
 if TYPE_CHECKING:
@@ -135,11 +136,31 @@ class TextEmbedder:
     batch_size: int = 64
     keep_alive: str | None = "24h"
 
+    profile: EmbeddingProfile | None = None
+
+    def __post_init__(self):
+        if self.profile is not None:
+            self.model = self.profile.model
+
+    async def verify_identity(self):
+        if self.profile is None:
+            return
+        tags = await self.ollama.tags()
+        matches = [tag for tag in tags if tag.get("name") == self.model]
+        if len(matches) != 1 or matches[0].get("digest") != self.profile.digest:
+            raise ValueError("Installed text embedding model differs from its pinned digest")
+
     async def embed_one(self, text: str) -> list[float]:
-        out = await self.embed_many([text], timeout_s=self.query_timeout_s)
-        return out[0]
+        query = self.profile.query(text) if self.profile is not None else text
+        return (await self._embed([query], timeout_s=self.query_timeout_s))[0]
 
     async def embed_many(
+        self, texts: list[str], *, timeout_s: float | None = None,
+    ) -> list[list[float]]:
+        documents = [self.profile.document(text) for text in texts] if self.profile is not None else texts
+        return await self._embed(documents, timeout_s=timeout_s)
+
+    async def _embed(
         self, texts: list[str], *, timeout_s: float | None = None,
     ) -> list[list[float]]:
         if not texts:
@@ -148,12 +169,30 @@ class TextEmbedder:
         vectors: list[list[float]] = []
         for i in range(0, len(texts), self.batch_size):
             batch = texts[i : i + self.batch_size]
-            got = await self.ollama.embed(
-                model=self.model, texts=batch, timeout_s=budget,
-                keep_alive=self.keep_alive,
-            )
-            vectors.extend(_normalize(v) for v in got)
+            async with asyncio.timeout(budget):
+                if self.profile is not None:
+                    await self.verify_identity()
+                kwargs = {"truncate": False} if self.profile is not None else {}
+                got = await self.ollama.embed(
+                    model=self.model, texts=batch, timeout_s=budget,
+                    keep_alive=self.keep_alive, **kwargs,
+                )
+                if self.profile is not None:
+                    await self.verify_identity()
+                    vectors.extend(self.profile.normalize_vectors(got, len(batch)))
+                else:
+                    vectors.extend(_normalize(v) for v in got)
         return vectors
+
+
+def text_embedder(ollama: OllamaClient, config: dict) -> TextEmbedder:
+    """Production entry point shared by interactive queries and ingest jobs."""
+    settings = config["text_embedding"]
+    profile = profile_from_mapping(settings)
+    return TextEmbedder(
+        ollama=ollama, profile=profile, model=profile.model,
+        batch_size=16, keep_alive=settings.get("keep_alive", "24h"), timeout_s=120.0,
+    )
 
 
 # ─── Image embedder (CLIP) ────────────────────────────────────────────
@@ -292,4 +331,4 @@ def _clip_encode_text(model, text: str) -> list[float]:
     return [float(x) for x in out[0].tolist()]
 
 
-__all__ = ["TextEmbedder", "ImageEmbedder"]
+__all__ = ["TextEmbedder", "ImageEmbedder", "text_embedder"]

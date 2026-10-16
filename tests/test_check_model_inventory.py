@@ -116,7 +116,7 @@ class TestTheRealConfigIsFullyCovered:
         # And the load-bearing ones.
         assert "router.model" in paths
         assert any("tool_capable_models" in p for p in paths)
-        assert any("text_embedder" in p for p in paths)
+        assert "text_embedding.model" in paths
         assert any(p.startswith("model_registry.vl") for p in paths)
 
     def test_the_router_model_is_named_and_would_be_checked(self):

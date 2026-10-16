@@ -8,12 +8,16 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from audrey.kb.qdrant import KBHit
+from audrey.references.embedding import EmbeddingProfile
 from audrey.references.library import ReferenceNotFound, ReferenceQueryError, ReferenceUnavailable
+from audrey.references.releases import reference_collection_name
 from audrey.references.search import ReferenceSearchService
 
 _DOC = "a" * 64
 _SHA = "b" * 64
 _TEXT = "Gross income filing requirements depend on filing status and age."
+_PROFILE = EmbeddingProfile("nomic-embed-text", "a" * 64, 1, "search_document: ", "search_query: ")
+_COLLECTION = reference_collection_name("irs-federal", _PROFILE.identity)
 
 
 @pytest.fixture
@@ -39,14 +43,13 @@ def services():
         "id": "release-test",
         "library_id": "irs-federal",
         "catalog": "current",
-        "collection": "audrey_reference_irs-federal",
+        "collection": _COLLECTION,
         "status": "published",
         "provenance": {
             "asof_year": 2026,
             "history_years": 5,
-            "embedding_model": "nomic-embed-text",
-            "document_prefix": "search_document: ",
-            "query_prefix": "search_query: ",
+            **_PROFILE.provenance,
+            "embedding_identity": _PROFILE.identity,
         },
         "coverage": {"eligible_total": 2407, "subset": True},
         "expected_documents": 1,
@@ -77,11 +80,12 @@ def services():
     )
     qdrant = SimpleNamespace(
         collection_exists=AsyncMock(return_value=True),
+        collection_compatible=AsyncMock(return_value=True),
         has_sparse=AsyncMock(return_value=True),
         count_text=AsyncMock(return_value=1),
         search_hybrid=AsyncMock(return_value=([hit], [hit])),
     )
-    embedder = SimpleNamespace(model="nomic-embed-text", embed_one=AsyncMock(return_value=[1.0]))
+    embedder = SimpleNamespace(model="nomic-embed-text", profile=_PROFILE, embed_one=AsyncMock(return_value=[1.0]))
     service = ReferenceSearchService(registry, store, qdrant, embedder)
     return service, registry, store, qdrant, embedder, hit, metadata
 
@@ -98,7 +102,7 @@ async def test_both_retrievers_receive_one_published_scope_and_nomic_query_prefi
     assert scope.reference_catalog == "current"
     assert scope.reference_tax_year == 2025
     assert scope.reference_status == "active"
-    assert kwargs["collection"] == "audrey_reference_irs-federal"
+    assert kwargs["collection"] == _COLLECTION
     assert response["returned"] == 1
     assert response["results"][0]["page"] == 4
     assert response["results"][0]["offset"] == 120
@@ -199,6 +203,10 @@ async def test_unavailable_dependency_never_falls_back_to_global_or_private_kb(s
         ("history_years", 10),
         ("asof_year", 2025),
         ("embedding_model", "different"),
+        ("embedding_digest", "b" * 64),
+        ("embedding_dimensions", 2560),
+        ("embedding_identity", "b" * 64),
+        ("embedding_truncate", True),
         ("query_prefix", ""),
     ],
 )
@@ -230,5 +238,30 @@ async def test_lost_published_vectors_are_reported_unavailable_before_embedding(
     service, _, _, qdrant, embedder, _, _ = services
     qdrant.count_text.return_value = 0
     with pytest.raises(ReferenceUnavailable, match="incomplete"):
+        await service.search("irs-federal", "income")
+    embedder.embed_one.assert_not_awaited()
+
+
+async def test_lexical_admission_can_be_disabled_without_disabling_hybrid_ranking(services):
+    service, _, _, qdrant, _, hit, _ = services
+    service.min_term_overlap = None
+    hit.score = .1
+    response = await service.search("irs-federal", "Gross income filing requirements")
+    assert response["results"] == []
+    qdrant.search_hybrid.assert_awaited_once()
+
+
+async def test_changed_collection_schema_is_refused_before_embedding(services):
+    service, _, _, qdrant, embedder, _, _ = services
+    qdrant.collection_compatible.return_value = False
+    with pytest.raises(ReferenceUnavailable, match="schema"):
+        await service.search("irs-federal", "income")
+    embedder.embed_one.assert_not_awaited()
+
+
+async def test_collection_identity_cannot_be_redirected_to_another_space(services):
+    service, _, releases, _, embedder, _, _ = services
+    releases.published.return_value["collection"] = "other_collection"
+    with pytest.raises(ReferenceUnavailable, match="policy"):
         await service.search("irs-federal", "income")
     embedder.embed_one.assert_not_awaited()

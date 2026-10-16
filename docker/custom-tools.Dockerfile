@@ -41,6 +41,7 @@ COPY tools-server/README.md /app/README.md
 COPY tools-server/*.py      /app/
 # Shared table request schema has one authority; only the backend parses files.
 COPY src/audrey/kb/table_analysis.py /app/table_analysis.py
+COPY src/audrey/embedding_profile.py /app/embedding_profile.py
 
 # Data dir for memory.db and chat_archive.db (bind-mounted in production).
 ARG APP_UID=99

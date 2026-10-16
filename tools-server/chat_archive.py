@@ -2,7 +2,7 @@
 
 Audrey calls `archive_turn()` after every chat completion (streaming or
 not). The store writes raw user/assistant messages to SQLite, derives
-Q+A-pair chunks, embeds them with `nomic-embed-text`, and upserts the
+Q+A-pair chunks, embeds them with the configured text model, and upserts the
 embeddings to Qdrant. The model can later look conversations back up via
 the user-scoped `chat_history_search` tool — search filters by `user`
 payload field, never by tag substring.
@@ -50,6 +50,7 @@ import aiosqlite
 import httpx
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models as qm
+from text_embedding import EmbeddingProfile, TextEmbeddingError, embed_text, validate_collection
 
 log = logging.getLogger(__name__)
 
@@ -292,8 +293,18 @@ class _EmbedError(RuntimeError):
 
 
 async def _embed(
-    http: httpx.AsyncClient, model: str, text: str, keep_alive: str = "",
+    http: httpx.AsyncClient, model: str, text: str, keep_alive: str = "", *,
+    profile: EmbeddingProfile | None = None, query: bool = False,
+    timeout_s: float = 10.0,
 ) -> list[float]:
+    if profile is not None:
+        try:
+            return await embed_text(
+                http, profile, text, query=query, keep_alive=keep_alive,
+                timeout_s=timeout_s,
+            )
+        except TextEmbeddingError as error:
+            raise _EmbedError(str(error)) from error
     payload: dict[str, Any] = {"model": model, "input": [text]}
     if keep_alive:
         # Same reasoning as MemoryStore._embed: Ollama's 5-minute default
@@ -441,6 +452,7 @@ class ChatArchiveStore:
         embed_keep_alive: str = "",
         repair_batch_size: int = 50,
         max_retry_attempts: int = 5,
+        embedding_profile: EmbeddingProfile | None = None,
     ) -> None:
         if max_bytes:
             raise ValueError("CHAT_ARCHIVE_MAX_BYTES is not implemented; it must be 0")
@@ -448,8 +460,10 @@ class ChatArchiveStore:
         self._qdrant = AsyncQdrantClient(url=qdrant_url)
         self._http = httpx.AsyncClient(base_url=ollama_url, timeout=embed_timeout_s)
         self._collection = collection
-        self._embed_model = embed_model
-        self._embed_dim = embed_dim
+        self._embedding_profile = embedding_profile
+        self._embed_model = embedding_profile.model if embedding_profile else embed_model
+        self._embed_dim = embedding_profile.dimensions if embedding_profile else embed_dim
+        self._embed_timeout_s = embed_timeout_s
         self._chunk_max = chunk_max_chars
         self._chunk_overlap = chunk_overlap_chars
         self._threshold = search_threshold
@@ -493,6 +507,8 @@ class ChatArchiveStore:
         if self._db is None:
             raise RuntimeError("ChatArchiveStore.init_source() not called")
         await self._ensure_collection()
+        if getattr(self, "_embedding_profile", None) is not None:
+            await self._repair_empty_index()
         log.info(
             "chat_archive: index ready collection=%s dim=%d retention_days=%d",
             self._collection, self._embed_dim, self._retention_days,
@@ -544,7 +560,11 @@ class ChatArchiveStore:
 
     async def _ensure_collection(self) -> None:
         existing = {c.name for c in (await self._qdrant.get_collections()).collections}
+        profile = getattr(self, "_embedding_profile", None)
         if self._collection in existing:
+            if profile is not None:
+                info = await self._qdrant.get_collection(self._collection)
+                validate_collection(info, profile)
             return
         await self._qdrant.create_collection(
             collection_name=self._collection,
@@ -552,6 +572,7 @@ class ChatArchiveStore:
                 size=self._embed_dim,
                 distance=qm.Distance.COSINE,
             ),
+            **({"metadata": profile.metadata} if profile is not None else {}),
         )
         await self._qdrant.create_payload_index(
             collection_name=self._collection,
@@ -559,6 +580,31 @@ class ChatArchiveStore:
             field_schema=qm.PayloadSchemaType.KEYWORD,
         )
         log.info("chat_archive: created Qdrant collection %r", self._collection)
+
+    async def _repair_empty_index(self) -> None:
+        """An empty compatible index must not inherit old SQLite receipts."""
+        count = await self._qdrant.count(collection_name=self._collection, exact=True)
+        if count.count != 0:
+            return
+        async with self._db_lock:
+            await self._db.execute(
+                """
+                UPDATE archive_chunks AS c
+                SET indexed_at = NULL, index_attempts = 0,
+                    index_last_attempt_at = NULL, index_last_error = NULL
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM archive_deletion_outbox AS d WHERE d.chunk_id = c.chunk_id
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM archive_user_purges AS p
+                    WHERE p.user = c.user AND c.created_at <= p.cutoff_at
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM archive_conversation_deletions AS d
+                    WHERE d.user = c.user AND d.conversation_id = c.conversation_id
+                      AND c.created_at <= d.cutoff_at
+                )
+                """
+            )
+            await self._db.commit()
 
     # ─── Writes ────────────────────────────────────────────────────────
 
@@ -798,6 +844,8 @@ class ChatArchiveStore:
             vec = await _embed(
                 self._http, self._embed_model, str(chunk_text),
                 self._embed_keep_alive,
+                **({"profile": self._embedding_profile, "timeout_s": self._embed_timeout_s}
+                   if getattr(self, "_embedding_profile", None) is not None else {}),
             )
             async with self._qdrant_write_lock:
                 # A retention sweep can tombstone the row while embedding is
@@ -941,7 +989,12 @@ class ChatArchiveStore:
             return []
         cutoff_at = await self.user_purge_cutoff(user=user)
         try:
-            qvec = await _embed(self._http, self._embed_model, query, self._embed_keep_alive)
+            qvec = await _embed(
+                self._http, self._embed_model, query, self._embed_keep_alive,
+                **({"profile": self._embedding_profile, "query": True,
+                    "timeout_s": self._embed_timeout_s}
+                   if getattr(self, "_embedding_profile", None) is not None else {}),
+            )
         except _EmbedError as e:
             log.warning("chat_archive: embed failed for search query: %s", e)
             return []

@@ -11,14 +11,18 @@ from qdrant_client import QdrantClient
 from test_reference_library import _entry, _pdf, _record, _registry
 from test_reference_library import archive as reference_archive_fixture
 
+from audrey.embedding_profile import QWEN_QUERY_PREFIX, EmbeddingProfile
 from audrey.kb.qdrant import TEXT_DIM, QdrantKB, SearchScope
+from audrey.references.embedding import ReferenceEmbedder
 from audrey.references.indexing import applicability, build_reference_index, chunks
 from audrey.references.irs_archive import ArchiveStore
-from audrey.references.library import document_id
-from audrey.references.releases import ReleaseStore
+from audrey.references.library import ReferenceUnavailable, document_id
+from audrey.references.releases import ReleaseStore, reference_collection_name
 from audrey.references.search import ReferenceSearchService
 
 archive = reference_archive_fixture
+_PROFILE = EmbeddingProfile("nomic-embed-text", "a" * 64, TEXT_DIM, "search_document: ", "search_query: ")
+_COLLECTION = reference_collection_name("irs-federal", _PROFILE.identity)
 
 
 @pytest.fixture
@@ -42,7 +46,7 @@ def services(tmp_path):
     qdrant.image_collection = "private_images_must_not_be_used"
     vector = [1.0] + [0.0] * (TEXT_DIM - 1)
     embedder = SimpleNamespace(
-        model="nomic-embed-text",
+        model="nomic-embed-text", profile=_PROFILE, verify_identity=AsyncMock(),
         embed_many=AsyncMock(side_effect=lambda texts: [vector for _ in texts]),
         embed_one=AsyncMock(return_value=vector),
     )
@@ -76,7 +80,7 @@ async def test_actual_pdf_hybrid_search_has_exact_page_spans_and_year_evidence(s
         assert original["text"][hit["offset"] : hit["char_end"]] == hit["text"]
         assert hit["applicable_tax_years"] == [2025]
     assert (await service.search("irs-federal", "gross income", tax_year=2026))["results"] == []
-    assert set(await qdrant.list_collections()) == {"audrey_reference_irs-federal"}
+    assert set(await qdrant.list_collections()) == {_COLLECTION}
 
 
 @pytest.mark.parametrize("erase_checkpoint_vectors", [False, True])
@@ -101,16 +105,16 @@ async def test_interrupted_replacement_preserves_old_release_and_resumes(
     assert releases.published("irs-federal")["id"] == first["release_id"]
     assert (
         await qdrant.count_text(
-            collection="audrey_reference_irs-federal",
+            collection=_COLLECTION,
             scope=SearchScope(reference_release_id=first["release_id"]),
         )
         == first["chunks"]
     )
     if erase_checkpoint_vectors:
-        for _hit_id, payload in await qdrant.scroll_collection("audrey_reference_irs-federal"):
+        for _hit_id, payload in await qdrant.scroll_collection(_COLLECTION):
             if payload["release_id"] == failed["release_id"]:
                 await qdrant.delete_by_source(
-                    payload["source"], collection="audrey_reference_irs-federal"
+                    payload["source"], collection=_COLLECTION
                 )
     qdrant.upsert_text = original_upsert
     resumed = await build_reference_index(
@@ -201,3 +205,77 @@ async def test_unchanged_published_release_is_reused_without_embedding(services)
     assert repeated["status"] == "published" and repeated["unchanged"]
     assert repeated["release_id"] == first["release_id"]
     embedder.embed_many.assert_not_awaited()
+
+
+async def test_qwen_reference_space_is_separate_and_old_release_is_retained(services):
+    registry, releases, qdrant, nomic, _, _ = services
+    original = await build_reference_index(registry, releases, qdrant, nomic)
+    model = "qwen3-embedding:4b"
+    digest = "b" * 64
+    vector = [2.0] + [0.0] * 2559
+    ollama = SimpleNamespace(
+        tags=AsyncMock(return_value=[{"name": model, "digest": digest}]),
+        embed=AsyncMock(side_effect=lambda **kw: [vector for _ in kw["texts"]]),
+    )
+    profile = EmbeddingProfile(model, digest, 2560, "", QWEN_QUERY_PREFIX)
+    qwen = ReferenceEmbedder(ollama, profile)
+    replacement = await build_reference_index(registry, releases, qdrant, qwen)
+    assert replacement["status"] == "published", replacement
+    published = releases.published("irs-federal")
+    new_collection = reference_collection_name("irs-federal", profile.identity)
+    assert published["collection"] == new_collection
+    assert published["provenance"]["embedding_digest"] == digest
+    assert published["provenance"]["embedding_dimensions"] == 2560
+    assert await qdrant.collection_compatible(new_collection, dim=2560, sparse=True)
+    assert set(await qdrant.list_collections()) == {_COLLECTION, new_collection}
+    assert await qdrant.count_text(collection=_COLLECTION) == original["chunks"]
+    assert not any(
+        text.startswith("search_document:")
+        for call in ollama.embed.call_args_list for text in call.kwargs["texts"]
+    )
+    service = ReferenceSearchService(
+        registry, releases, qdrant, qwen,
+        config={"min_dense_score": .54, "min_term_overlap": None},
+    )
+    result = await service.search("irs-federal", "gross income filing", tax_year=2025)
+    assert result["returned"] > 0
+    assert ollama.embed.call_args.kwargs["texts"] == [QWEN_QUERY_PREFIX + "gross income filing"]
+    assert all(call.kwargs["truncate"] is False for call in ollama.embed.call_args_list)
+    calls = ollama.embed.await_count
+    ollama.tags.return_value[0]["digest"] = "c" * 64
+    with pytest.raises(ReferenceUnavailable, match=r"identity|digest|unavailable"):
+        await service.search("irs-federal", "gross income filing")
+    assert ollama.embed.await_count == calls
+
+
+async def test_incompatible_existing_reference_collection_cannot_replace_publication(services):
+    registry, releases, qdrant, nomic, _, _ = services
+    original = await build_reference_index(registry, releases, qdrant, nomic)
+    profile = EmbeddingProfile("qwen3-embedding:4b", "b" * 64, 2560, "", QWEN_QUERY_PREFIX)
+    collection = reference_collection_name("irs-federal", profile.identity)
+    await qdrant.ensure_collection(collection, dim=TEXT_DIM)
+    embedder = SimpleNamespace(profile=profile, verify_identity=AsyncMock(), embed_many=AsyncMock())
+    result = await build_reference_index(registry, releases, qdrant, embedder)
+    assert result["status"] == "failed"
+    assert "incompatible" in result["error"]
+    assert releases.published("irs-federal")["id"] == original["release_id"]
+    embedder.embed_many.assert_not_awaited()
+
+
+async def test_last_batch_model_replacement_prevents_publication(services):
+    registry, releases, qdrant, nomic, _, _ = services
+    original = await build_reference_index(registry, releases, qdrant, nomic)
+    profile = EmbeddingProfile("qwen3-embedding:4b", "b" * 64, 2560, "", QWEN_QUERY_PREFIX)
+    client = SimpleNamespace(tags=AsyncMock(return_value=[{"name": profile.model, "digest": profile.digest}]))
+    calls = 0
+    async def embed(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            client.tags.return_value[0]["digest"] = "c" * 64
+        return [[1.0] + [0.0] * 2559 for _ in kwargs["texts"]]
+    client.embed = AsyncMock(side_effect=embed)
+    report = await build_reference_index(registry, releases, qdrant, ReferenceEmbedder(client, profile))
+    assert report["status"] == "failed"
+    assert "digest" in report["error"]
+    assert releases.published("irs-federal")["id"] == original["release_id"]

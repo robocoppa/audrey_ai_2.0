@@ -1,7 +1,7 @@
 """Per-user KB collections.
 
 Each user who uploads files gets two lazily-created Qdrant collections:
-  - `kb_user_text_<sanitized>`   — 768-d cosine, nomic-embed
+  - `kb_user_text_<sanitized>`   — configured text-vector space
   - `kb_user_images_<sanitized>` — 512-d cosine, CLIP
 
 Sanitization is `[^a-z0-9]+ -> "_"`, lowercased, stripped of leading/

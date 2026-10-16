@@ -94,9 +94,14 @@ def _document_id(value: str) -> str:
     return value
 
 
-def reference_collection_name(library_id: str) -> str:
-    """The server's sole collection naming rule; callers never select a collection."""
-    return "audrey_reference_" + _library_id(library_id)
+def reference_collection_name(library_id: str, embedding_identity: str | None = None) -> str:
+    """One collection per library and immutable embedding space; older releases survive."""
+    name = "audrey_reference_" + _library_id(library_id)
+    if embedding_identity is not None:
+        if not isinstance(embedding_identity, str) or not _SHA.fullmatch(embedding_identity):
+            raise ReleaseStateError("Reference embedding identity is invalid")
+        name += "_" + embedding_identity
+    return name
 
 
 def _bounded_json(value: Mapping[str, Any], *, maximum: int = 32768) -> str:
@@ -313,7 +318,7 @@ class ReleaseStore:
                         library_id,
                         catalog,
                         fingerprint,
-                        reference_collection_name(library_id),
+                        reference_collection_name(library_id, provenance.get("embedding_identity")),
                         provenance_json,
                         "{}",
                         now,

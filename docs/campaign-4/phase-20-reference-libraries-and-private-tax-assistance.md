@@ -2,8 +2,9 @@
 
 Requested October 14, 2026. The archive is sufficient; 20B.1 is deployed and
 accepted. 20B.2 is built; the user confirms the IRS index has never run.
-Its first build waits for the deeper embedding comparison in Phase 06;
-Tower indexing and browser acceptance remain pending.
+The Phase 06 comparison is complete: its first build uses Qwen3 Embedding 4B,
+as part of the user's approved unified text-model replacement. Complete Phase
+06's existing-data migration first; Tower indexing/browser acceptance remain pending.
 English content and requests only. Federal coverage can begin independently;
 state jurisdiction and priority tax years await the user's answer.
 
@@ -131,7 +132,7 @@ A missing historical year is a gap, not permission to substitute today's form.
 
 A server-owned registry maps a stable library ID, description and published
 release to authorized roots and a dedicated text collection in existing Qdrant.
-Use one collection per named library, with edition/year/status metadata filters;
+Use one collection per named library and embedding space, with edition/year/status filters;
 do not create a collection per form or silently search unrelated subjects.
 Apply identical scope to keyword and vector retrieval. Unknown or unavailable
 libraries produce an explicit result.
@@ -172,8 +173,8 @@ official-source citations in the existing Sources disclosure.
 
 #### 20B.2 — published content search (built October 14)
 
-`reference_search` searches PDF text using local Nomic embeddings and the existing
-Qdrant keyword/vector fusion. It selects one published library/catalog release;
+`reference_search` searches PDF text using local Qwen3 Embedding 4B and the
+existing Qdrant keyword/vector fusion. It selects one published library/catalog release;
 both retrievers receive the same document, release, status and optional year
 filters. It never falls back to another subject or a private upload collection.
 The default build covers current English catalog entries only. Optional recent
@@ -181,9 +182,9 @@ history needs its own explicitly selected build and search.
 
 Public derivative state lives at
 `/mnt/user/appdata/runtime/reference-libraries/` (`index.sqlite` and job reports),
-with one dedicated Qdrant collection per library. The job mounts only the public
+with a dedicated Qdrant collection for each library/embedding space. The job mounts only the public
 archive read-only, repository configuration and that public index state. It
-uses the existing local embedding model; it does not call an answering model,
+uses the dedicated reference embedding profile; it does not call an answering model,
 download more PDFs or receive private uploads or API credentials.
 
 Each bounded extraction verifies the retained PDF checksum and keeps exact PDF
@@ -207,7 +208,17 @@ as "For use in preparing 2025 Returns" establishes that document's stated return
 year, with its quote/page/checksum retained. Other documents stay unknown and are
 excluded from year-filtered search. Revision dates and isolated years do not
 establish applicability. This metadata does not decide taxpayer eligibility.
-The initial retrieval thresholds still require tax-case calibration in 20E.
+The reference embedding profile pins the tested model digest, query/document
+format and native 2,560-dimensional vectors. Indexing and query use the same
+configuration; releases/collections separate incompatible profiles. Changed
+model identity or collection schema fails clearly. Keyword vectors are enabled
+independently of dense width. Inputs cannot silently truncate. The same text profile serves uploads, memories and history after Phase 06's
+existing-data rebuild. Image embeddings remain unchanged.
+
+The dense cutoff `0.54` comes from calibration questions; lexical matches rank
+results but cannot independently pass admission. The held-out test still admitted
+some related passages without the requested detail. This is an initial measured
+retrieval policy, not complete tax accuracy; 20E remains required.
 Private tax processing and the assistance workflow remain 20C/20D work.
 
 ### 20C — private processing
@@ -258,23 +269,14 @@ final export/report files are not prerequisites.
 
 ### 20B.2 deployment and acceptance
 
-**Hold the first index build:** the user confirmed October 15 that indexing has
-never run. Complete Phase 06's embedding comparison and any selected-model
-formatting/schema changes first, then refresh this handoff for the chosen model.
-The commands below describe the existing Nomic implementation and are not the
-next action while that decision is pending.
+The embedding comparison is complete. Build the current catalog directly with
+Qwen3 Embedding 4B; there is no existing IRS index to migrate. The user already
+downloaded this model. No further broad benchmark or IRS collection is needed.
 
-After committing/pushing on the laptop, run on **Tower**:
-
-```bash
-cd /mnt/user/appdata/audrey_ai_2.0
-git pull
-docker compose up -d --build --force-recreate --wait custom-tools audrey
-```
-
-Only the backend and tools sidecar rebuild for this slice. The command waits for both
-services to become healthy before the index starts. No UI/media-worker rebuild,
-private file upload, new archive collection or personal token is needed.
+First finish [Phase 06's unified text migration](phase-06-system-one-routing.md#one-time-tower-migration).
+That handoff builds/restarts `audrey` and `custom-tools`; it is required before
+starting the new model against existing stores. No UI/media-image rebuild,
+new upload, archive collection or personal token is needed here.
 
 In the same **Tower** checkout, start the initial current-catalog index:
 
@@ -284,7 +286,9 @@ nohup bash scripts/reference/index-irs-onbox.sh > testing-out/last-reference-ind
 
 This is a long first build over the retained current catalog, not all historical
 PDFs. Its duration depends on PDF size and local embedding throughput; it is not
-expected to finish as a short smoke check. It survives disconnects and sends the
+expected to finish as a short smoke check. Qwen 4B trades slower batch indexing
+and more GPU residency for better reference retrieval; avoid starting another
+GPU-heavy evaluation during the build. It survives disconnects and sends the
 usual Telegram start/finish messages and stamped JSON report. It uses local
 embedding calls, which can share Ollama resources with chat. Progress is in
 `testing-out/last-reference-index.log`; the last `document_indexed` event shows
@@ -293,7 +297,9 @@ completed/selected documents. The report and detailed log also reside in
 
 Success: exit 0, `status: published`, `coverage.subset: false`,
 `coverage.complete_for_selected_documents: true`, zero failed/pending documents,
-and a nonzero chunk count. `no_text_documents` discloses originals without
+and a nonzero chunk count. The report's embedding provenance must name
+`qwen3-embedding:4b`, `embedding_dimensions: 2560` and the digest pinned in
+`config.yaml`. `no_text_documents` discloses originals without
 extractable text. A failed build leaves the previous publication untouched;
 rerun the same command to resume after resolving the reported cause. An unchanged
 verified publication returns `unchanged: true` without re-embedding.

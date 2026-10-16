@@ -14,9 +14,10 @@ from pathlib import Path
 from time import monotonic
 
 from audrey.config import get_config
-from audrey.kb.embed import TextEmbedder
+from audrey.embedding_profile import profile_from_mapping
 from audrey.kb.qdrant import QdrantKB
 from audrey.models.ollama import OllamaClient
+from audrey.references.embedding import reference_embedder
 from audrey.references.indexing import build_reference_index
 from audrey.references.library import ReferenceLibraryError, ReferenceLibraryRegistry
 from audrey.references.releases import ReleaseError, ReleaseStore
@@ -24,14 +25,8 @@ from audrey.references.releases import ReleaseError, ReleaseStore
 
 async def _run(args, cfg, registry, releases):
     ollama = OllamaClient(cfg.env.ollama_host)
-    qdrant = QdrantKB(cfg.env.qdrant_host, cfg.env.qdrant_port)
-    kb = cfg.raw.get("kb", {})
-    embedder = TextEmbedder(
-        ollama,
-        model=kb.get("text_embedder", "nomic-embed-text"),
-        batch_size=16,
-        keep_alive=kb.get("text_embedder_keep_alive", "24h"),
-    )
+    qdrant = QdrantKB(cfg.env.qdrant_host, cfg.env.qdrant_port, embedding_profile=profile_from_mapping(cfg.raw["text_embedding"]))
+    embedder = reference_embedder(ollama, cfg.raw)
     task = asyncio.current_task()
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):

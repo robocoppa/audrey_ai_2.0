@@ -24,8 +24,10 @@ from audrey.auth import AuthedUser, require_admin, require_principal
 from audrey.chat_projection import ChatProjectionPromoter
 from audrey.config import get_config
 from audrey.conversation_titles import ConversationTitleGenerator
+from audrey.embedding_profile import profile_from_mapping
 from audrey.identity import Principal, build_cloudflare_access_verifier
-from audrey.kb.embed import ImageEmbedder, TextEmbedder
+from audrey.kb.embed import ImageEmbedder
+from audrey.kb.embed import text_embedder as build_text_embedder
 from audrey.kb.file_deletion import FileDeletionWorker, FileOperationLocks
 from audrey.kb.qdrant import QdrantKB
 from audrey.kb.reconcile import KBReconciler
@@ -40,6 +42,7 @@ from audrey.pipeline.chat_archive import ChatArchiveClient, ChatArchiveQueue
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.graph import build_graph
 from audrey.readiness import ReadinessCollector
+from audrey.references.embedding import reference_embedder
 from audrey.references.library import ReferenceLibraryRegistry
 from audrey.references.releases import ReleaseError, ReleaseStore
 from audrey.references.search import ReferenceSearchService
@@ -194,6 +197,7 @@ async def lifespan(app: FastAPI):
         port=cfg.env.qdrant_port,
         text_collection=kb_cfg.get("text_collection", "kb_text"),
         image_collection=kb_cfg.get("image_collection", "kb_images"),
+        embedding_profile=profile_from_mapping(cfg.raw["text_embedding"]),
     )
     try:
         await qdrant.ensure_collections()
@@ -233,11 +237,7 @@ async def lifespan(app: FastAPI):
             fetch_recovery.restored_pending,
             fetch_recovery.released_stranded,
         )
-    text_embedder = TextEmbedder(
-        ollama=ollama,
-        model=kb_cfg.get("text_embedder", "nomic-embed-text"),
-        keep_alive=kb_cfg.get("text_embedder_keep_alive", "24h"),
-    )
+    text_embedder = build_text_embedder(ollama, cfg.raw)
     image_embedder = ImageEmbedder(
         model_name=kb_cfg.get("image_model", "clip-ViT-B-32"),
         cache_folder=kb_cfg.get("image_cache_folder", "/home/audrey/.cache/clip"),
@@ -296,7 +296,8 @@ async def lifespan(app: FastAPI):
         try:
             releases = ReleaseStore(Path(reference_cfg.get("index_root", "/data/reference-libraries")))
             app.state.reference_search = ReferenceSearchService(
-                app.state.reference_libraries, releases, qdrant, text_embedder,
+                app.state.reference_libraries, releases, qdrant,
+                reference_embedder(ollama, cfg.raw),
                 config=reference_cfg.get("search", {}),
             )
             app.state.reference_releases = releases

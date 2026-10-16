@@ -22,9 +22,10 @@ conclusion. It is a small practical study, not a general leaderboard.
 - **Qwen 3.5 4B was the best fit for lightweight request classification on the
   tested hardware.** Clef classified well but required much more memory and
   loading time; the smallest Tev model frequently escalated simple requests.
-- **EmbeddingGemma 2 improved short-passage retrieval and warm query speed**
-  against two Nomic baselines. The small synthetic test does not validate
-  real-document accuracy or thresholds for rejecting unsupported results.
+- **Qwen3 Embedding 4B gave the strongest practical reference-retrieval result.**
+  It improved on correctly prefixed Nomic; 8B added cost without improving the
+  headline counts. Gemma was promising on short synthetic passages, but its
+  real-document advantage narrowed. No model reliably rejected unsupported details.
 - **Evidence for current Kimi K3 and GLM 5.3 answer quality remains limited.**
   Successful function calls do not establish good writing or reasoning, and
   older Kimi/GLM results cannot be transferred to their successors.
@@ -601,8 +602,9 @@ context, image, audio or personal-memory retrieval was evaluated.
 [Google's model card](https://ai.google.dev/gemma/docs/embeddinggemma/model_card_2?hl=en)
 describe the model family and retrieval formatting.
 
-**Recommendation:** validate Gemma on held-out real documents and calibrate
-rejection rules before replacing an existing embedder. Its query speed gives
+**Initial screening recommendation:** validate Gemma on held-out real documents
+and calibrate rejection rules before replacing an existing embedder. The completed
+follow-up below narrows this recommendation. Its query speed gives
 no reason to seek a smaller variant for latency yet. Adoption requires fresh
 embeddings in separate indexes: equal dimensions do not make vectors from
 different models compatible. The complete comparison, including model digests,
@@ -611,74 +613,99 @@ fixture checksum and per-question rankings, is in the
 
 ### Real-document follow-up: Gemma 2 and Qwen3 Embedding
 
-A larger October 15 test measured **336 passages from four official IRS
+A larger October 15 comparison used **336 passages from four official IRS
 publications**, with 60 answerable and 20 unsupported questions. Two whole
 publications supplied calibration examples; two different publications supplied
-the 30 answerable test questions below. Another 48 questions tested invented
-memory/conversation records, and 28 repeated the earlier general/code fixture.
-Each model embedded the same **416 passages and 156 unique queries**, with two
-query repetitions. Tests used model-specific query/document instructions and
-native vector widths; no production index or private records were touched.
+the 30 answerable test questions below. Invented memory/conversation records
+and the earlier general/code fixture brought each model's workload to **416
+passages and 156 unique queries**, repeated twice. Repetitions check consistency;
+they do not double the independent evidence.
 
-**The incumbent comparison is incomplete.** All four candidates finished, but
-both Nomic arms stopped during unload verification before retrieving passages.
-Their absence prevents a replacement verdict. Candidate-to-candidate results
-remain usable; only the missing baselines need measurement.
+All six formats completed. Nomic ran with raw text and its recommended
+query/document prefixes; Gemma used its own prefixes; Qwen used an instruction
+on queries and raw document text. Meaning-based ranking used exact cosine
+similarity; hybrid ranking combined it with keyword search using the same
+reciprocal rank fusion for every model. No production index or private records
+were touched.
 
-Review found **33 missing alternative answer passages across 27 questions**.
-For example, an employer-only funding rule appeared in both a summary and its
-full section; the original labels accepted only the summary. The table uses
-source-checked corrected labels and the original saved rankings, with no new
-embedding calls. The labels were corrected with a coding assistant after the
-run. This is retrospective analysis, not a fresh independent holdout, and does
-not establish expert tax accuracy.
+Source review corrected **33 missing alternative answer passages across 27
+questions**. Every model was scored against the same repaired labels, without
+changing source text, questions or saved rankings. A coding assistant checked
+these alternatives after the first run. This is retrospective annotation, not
+an independent expert assessment or validation of tax-return accuracy.
 
-| Model | Correct first, dense | Correct first, hybrid | Dense hit within three | Warm median | Observed GPU memory |
+| Model | Correct first, dense | Dense hit within three | Correct first, hybrid | Hybrid hit within three |
+|---|---:|---:|---:|---:|
+| Nomic raw | 12/30 | 22/30 | 16/30 | 27/30 |
+| Nomic prefixed | 22/30 | 26/30 | 22/30 | 27/30 |
+| Gemma 2 | 22/30 | 28/30 | 23/30 | 27/30 |
+| Qwen3 Embedding 0.6B | 25/30 | 29/30 | 23/30 | 29/30 |
+| Qwen3 Embedding 4B | 25/30 | 30/30 | 25/30 | 29/30 |
+| Qwen3 Embedding 8B | 25/30 | 30/30 | 25/30 | 29/30 |
+
+**Reference retrieval favors Qwen 4B.** Against correctly prefixed Nomic, it
+improved three hybrid first results without losing any previously correct first
+result, and recovered two more questions within three results. Qwen 8B matched
+these totals with greater runtime and storage costs; that does not establish
+equal quality on other documents. Gemma's larger advantage in the earlier
+synthetic screening narrowed here: one extra hybrid first result, with the
+same top-three total as prefixed Nomic.
+
+**Other workloads do not justify replacing every embedder.** On 16 invented
+memory/history test questions, dense first-result counts were **14** for raw
+Nomic, **14** for Gemma, and **16 / 15 / 16** for Qwen 0.6B / 4B / 8B.
+The general/code fixture gave Gemma **24/24** dense first results, versus Nomic
+**21/24** and Qwen **21 / 22 / 22**. These small fixtures do not establish
+private-memory accuracy or a universal winner.
+
+| Model | Warm query median | Cold query median | Embed 416 passages | Resident GPU memory | Vector width |
 |---|---:|---:|---:|---:|---:|
-| `embeddinggemma-2:latest` | 22/30 | 23/30 | 28/30 | **9.2 ms** | **0.50 GB** |
-| `qwen3-embedding:0.6b` | 25/30 | 23/30 | 29/30 | 10.8 ms | 5.80 GB |
-| `qwen3-embedding:4b` | 25/30 | 25/30 | 30/30 | 17.9 ms | 8.78 GB |
-| `qwen3-embedding:8b` | 25/30 | 25/30 | 30/30 | 26.2 ms | 11.01 GB |
+| Nomic raw | 33.1 ms | 2.19 s | 3.8 s | 0.34 GB | 768 |
+| Nomic prefixed | 33.5 ms | 2.20 s | 3.9 s | 0.34 GB | 768 |
+| Gemma 2 | 9.2 ms | 3.82 s | 10.4 s | 0.50 GB | 768 |
+| Qwen 0.6B | 10.8 ms | 3.98 s | 12.6 s | 5.80 GB | 1,024 |
+| Qwen 4B | 17.9 ms | 5.72 s | 29.6 s | 8.78 GB | 2,560 |
+| Qwen 8B | 26.2 ms | 8.02 s | 43.3 s | 11.01 GB | 4,096 |
 
-**Quality trade-off.** The larger Qwens supplied a relevant passage within three
-results for every answerable reference test question. On these counts 4B matched
-8B with lower query latency, memory and indexing cost. This does not establish
-equal quality generally. Gemma retained the strongest earlier dense regression
-result: **24/24**, versus Qwen **21/24, 22/24 and 22/24**. On the tiny invented
-memory/history test split, dense first-result scores were **14/16, 16/16, 15/16
-and 16/16**, respectively. These small workloads do not establish production
-memory accuracy.
+Cold medians use three verified unload/load samples. Every Qwen 4B/8B cold
+sample exceeded four seconds; Qwen 0.6B's first sample took 14.89 seconds.
+All models completed the larger 64-passage, approximately 1,000-token batch
+checks without truncation. Larger vectors increase index storage independently
+of model residency.
 
-**Runtime trade-off.** Reported GPU memory includes each loaded runner at its
-configured 32,768 context; it is neither weight-file size nor minimum required
-memory. Whether a smaller context reduces Qwen residency was not tested. Actual
-vector widths were **768 / 1,024 / 2,560 / 4,096**; larger vectors also increase
-index storage. Embedding all 416 passages took **10.4 / 12.6 / 29.6 / 43.3
-seconds**. The second 64-passage, approximately 1,000-token batch took **2.0 /
-3.7 / 9.5 / 14.5 seconds**. Every candidate completed those larger batches.
-These are observations from this host, not steady-state capacity guarantees.
+GPU figures include the loaded runtime: **2,048 context for Nomic, 32,768 for
+the others**. They are not package sizes or minimum memory requirements; smaller
+Qwen contexts were not measured. Nomic's continuation used the same fixtures,
+model digests and Ollama version as the candidate run, but ran separately.
+Concurrent answering-model load and sustained service capacity were not tested.
 
-Three verified unload/load samples gave cold medians of **3.82 / 3.98 / 5.72 /
-8.02 seconds**. Qwen 0.6B's first sample took 14.89 seconds. Holding a model
-warm matters for applications with a four-second memory-recall deadline. No
-concurrent large answering-model test was performed.
+**No model passed the strict unsupported-query gate.** Calibration required
+retaining at least 90% of answerable questions while rejecting every unsupported
+question; none met that target. With thresholds selected only on calibration
+data, the reference test retained **27/30** positives for prefixed Nomic and
+Gemma, and **29/30** for each Qwen. Related material was admitted for **6/10,
+6/10, 5/10, 2/10 and 2/10** unsupported questions, respectively. These are
+retrieved passages, not observed fabricated answers. A related passage may omit
+the requested year, amount or exception; filters and reading the cited evidence
+remain necessary. Completed measurement is not a passed promotion gate.
 
-**Unsupported details remain a problem.** None of the four candidates met the
-strict calibration target of retaining at least 90% of answerable queries while
-rejecting every unsupported query. After calibration-only threshold selection,
-the corrected reference test retained **27/30, 29/30, 29/30 and 29/30** positives
-but admitted related material for **6/10, 5/10, 2/10 and 2/10** unsupported
-questions. These are retrieval admissions, not fabricated final answers. A
-passage about a topic need not contain the particular amount, year or exception
-being requested; an embedding cutoff alone cannot enforce those distinctions.
+**Recommendation:** Qwen 4B is the strongest reference-retrieval choice in this
+comparison. Qwen 8B's extra cost bought no improvement on the headline counts;
+Gemma remains attractive for fast warm queries but did not establish a broad
+quality upgrade. Using Qwen 4B as one common embedder is a reasonable operational
+choice when simplifying a small deployment matters, with explicit trade-offs:
+the personal fixtures are small, memory recall at the calibrated cutoff retained
+6/8 positives, indexing is slower and GPU residency is larger. A single-model
+deployment is not evidence of a universal quality win. Rebuild every existing
+text index with matching input formatting; unchanged vector dimensions alone
+never make embedding spaces interchangeable.
 
-**Current assessment:** Gemma is the efficiency contender; Qwen 4B is a promising
-reference-quality alternative. Finish the matched Nomic baseline before choosing
-or rebuilding indexes. Preserve source/product filters, inspect cited passages
-and assess personal-memory/history behavior separately. Full compressed JSON
-[original measurements](results/2026-10-15-132341-embedding-documents-results.json.gz)
-and [corrected-label analysis](results/2026-10-15-132341-embedding-documents-rescored.json.gz)
-retain digests, timings, source checksums, rankings and annotation provenance.
+The full [combined comparison](results/2026-10-15-embedding-documents-combined.json.gz)
+and [completed Nomic baselines](results/2026-10-15-140040-embedding-documents-baselines.json.gz)
+retain model identities, settings, timings and per-question rankings. The
+[original candidate measurements](results/2026-10-15-132341-embedding-documents-results.json.gz)
+and [annotation repair](results/2026-10-15-132341-embedding-documents-rescored.json.gz)
+preserve the original evidence and correction provenance.
 
 ## How to use these results
 

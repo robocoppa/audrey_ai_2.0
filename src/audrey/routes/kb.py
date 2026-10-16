@@ -569,7 +569,7 @@ async def _search_text_merged(
     merged in (user supplied + collection exists). The metrics label uses it.
 
     Score-merge precondition: both collections must use the same embedder
-    (currently 768-d nomic-embed-text, cosine) so the raw scores are
+    (the same configured text profile and cosine distance) so the raw scores are
     comparable. If a per-user collection ever ships with a different model,
     switch to reciprocal-rank-fusion rather than sorting by raw score.
 

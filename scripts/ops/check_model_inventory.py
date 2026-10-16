@@ -80,7 +80,8 @@ _MODEL_SECTIONS: tuple[tuple[str, ...], ...] = (
     ("router", "model"),
     ("fast_path", "tool_capable_models"),
     ("passthrough", "allowed_models"),
-    ("kb", "text_embedder"),
+    ("kb", "text_embedder"),  # legacy configs
+    ("text_embedding", "model"),
     ("kb", "video", "summarise_model"),
     ("kb", "video", "summarise_fallback_model"),
     ("vision", "model"),

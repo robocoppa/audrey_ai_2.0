@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-import pytest
 
 from audrey.kb.embed import TextEmbedder
 from audrey.models.ollama import OllamaClient
@@ -202,13 +201,10 @@ async def test_warm_up_never_raises_when_ollama_is_down():
     await store.warm_embedder()  # must not raise
 
 
-@pytest.mark.parametrize("budget_attr", ["memory_embed_timeout_s"])
-async def test_the_cold_load_does_not_fit_the_hot_path_budget(budget_attr):
-    """The measurement that justifies all of the above, kept as an assertion so
-    the reasoning survives a future timeout tweak: 4.18s cold does NOT fit the
-    recall budget. Widening the budget to cover a cold load is the fix this
-    rejects — it would make every affected turn slower instead of making the
-    cold load stop happening."""
+def test_qwen_cold_load_fits_memory_deadline_while_warmup_retains_larger_budget():
+    """The selected model's measured cold load fits the inner request deadline."""
+    from db import _WARM_TIMEOUT_S
     from settings import Settings
 
-    assert getattr(Settings(_env_file=None), budget_attr) < 4.18
+    budget = Settings(_env_file=None).memory_embed_timeout_s
+    assert 5.721892 < budget < _WARM_TIMEOUT_S

@@ -2,7 +2,7 @@
 
 Stores each memory as a single Qdrant point whose payload holds `key`,
 `value`, `tags`, `user`, `created_at`, `updated_at`. The vector is a
-`nomic-embed-text` embedding of
+configured text-model embedding of
 `f"{key}: {value} [tags: {tags}]"` — concatenating tags into the embedded
 text gives tag keywords some semantic weight even though we primarily filter
 by the `user` payload field.
@@ -34,6 +34,7 @@ import aiosqlite
 import httpx
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models as qm
+from text_embedding import EmbeddingProfile, TextEmbeddingError, embed_text, validate_collection
 
 log = logging.getLogger(__name__)
 
@@ -119,9 +120,8 @@ class EmbedError(RuntimeError):
     """Raised when Ollama refuses to produce an embedding."""
 
 
-# Startup warm-up budget. Wide because it covers a cold model load (~4.2s
-# measured for nomic-embed-text on the box, and far more if Ollama has to pull
-# the model first) and nobody is waiting on it.
+# Startup warm-up pays the cold model load before a user request. Models
+# must already be installed; this service never pulls or replaces them.
 _WARM_TIMEOUT_S = 120.0
 
 
@@ -140,12 +140,15 @@ class MemoryStore:
         embed_timeout_s: float,
         legacy_sqlite_path: Path,
         embed_keep_alive: str = "",
+        embedding_profile: EmbeddingProfile | None = None,
     ) -> None:
         self._qdrant = AsyncQdrantClient(url=qdrant_url)
         self._http = httpx.AsyncClient(base_url=ollama_url, timeout=embed_timeout_s)
         self._collection = collection
-        self._embed_model = embed_model
-        self._embed_dim = embed_dim
+        self._embedding_profile = embedding_profile
+        self._embed_model = embedding_profile.model if embedding_profile else embed_model
+        self._embed_dim = embedding_profile.dimensions if embedding_profile else embed_dim
+        self._embed_timeout_s = embed_timeout_s
         self._threshold = similarity_threshold
         self._legacy_sqlite_path = legacy_sqlite_path
         self._embed_keep_alive = embed_keep_alive
@@ -204,7 +207,11 @@ class MemoryStore:
 
     async def _ensure_collection(self) -> None:
         existing = {c.name for c in (await self._qdrant.get_collections()).collections}
+        profile = getattr(self, "_embedding_profile", None)
         if self._collection in existing:
+            if profile is not None:
+                info = await self._qdrant.get_collection(self._collection)
+                validate_collection(info, profile)
             return
         await self._qdrant.create_collection(
             collection_name=self._collection,
@@ -212,6 +219,7 @@ class MemoryStore:
                 size=self._embed_dim,
                 distance=qm.Distance.COSINE,
             ),
+            **({"metadata": profile.metadata} if profile is not None else {}),
         )
         # Index on `user` so per-user filters don't scan every point.
         await self._qdrant.create_payload_index(
@@ -604,7 +612,7 @@ class MemoryStore:
         """
         if not query.strip():
             return []
-        qvec = await self._embed(query)
+        qvec = await self._embed(query, query=True) if getattr(self, "_embedding_profile", None) else await self._embed(query)
         result = await self._qdrant.query_points(
             collection_name=self._collection,
             query=qvec,
@@ -627,19 +635,31 @@ class MemoryStore:
 
     # ─── Internals ────────────────────────────────────────────────────
 
-    async def _embed(self, text: str, *, timeout_s: float | None = None) -> list[float]:
-        """Call Ollama /api/embed and return a single 768-d vector.
+    async def _embed(
+        self, text: str, *, timeout_s: float | None = None, query: bool = False,
+    ) -> list[float]:
+        """Embed one document or query in the configured vector space.
 
         `keep_alive` holds the embedder in VRAM between calls. Without it
-        Ollama evicts after 5 minutes and the next recall pays a ~4.2s cold
-        load — which does not fit the 4s budget this call runs under, so recall
-        failed on every turn that followed a quiet spell.
+        Ollama may evict between sessions; startup warming and canonical residency
+        reduce cold loads on the request path. The configured request deadline
+        includes identity checks and embedding.
 
         `timeout_s` overrides the client default. Only the warm-up uses it: a
         cold load is LONGER than the hot-path budget by design, so a warm-up
         held to that budget would time out every single time and never warm
         anything.
         """
+        profile = getattr(self, "_embedding_profile", None)
+        if profile is not None:
+            try:
+                return await embed_text(
+                    self._http, profile, text, query=query,
+                    keep_alive=self._embed_keep_alive,
+                    timeout_s=timeout_s or self._embed_timeout_s,
+                )
+            except TextEmbeddingError as error:
+                raise EmbedError(str(error)) from error
         payload: dict[str, Any] = {"model": self._embed_model, "input": [text]}
         if self._embed_keep_alive:
             payload["keep_alive"] = self._embed_keep_alive

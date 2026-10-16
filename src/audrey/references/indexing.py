@@ -12,7 +12,7 @@ import tempfile
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from audrey.kb.qdrant import TEXT_DIM, SearchScope, build_text_point
+from audrey.kb.qdrant import SearchScope, build_text_point
 from audrey.references.extract import MAX_OUTPUT_BYTES
 from audrey.references.library import ReferenceReadError, ReferenceUnavailable
 
@@ -140,14 +140,14 @@ async def build_reference_index(
         raise ReferenceUnavailable(
             "Selected catalog includes undownloaded originals; update the archive first"
         )
-    model = str(embedder.model)
-    prefix = "search_document: " if model.split(":")[0] == "nomic-embed-text" else ""
+    await embedder.verify_identity()
+    profile = embedder.profile
+    prefix = profile.document_prefix
     provenance = {
         "asof_year": registry.asof_year,
         "history_years": registry.history_years,
-        "embedding_model": model,
-        "document_prefix": prefix,
-        "query_prefix": "search_query: " if prefix else "",
+        **profile.provenance,
+        "embedding_identity": profile.identity,
         "chunk_policy": 1,
         "chunk_chars": CHUNK_CHARS,
         "chunk_overlap": CHUNK_OVERLAP,
@@ -179,6 +179,7 @@ async def build_reference_index(
         if (
             await qdrant.collection_exists(collection)
             and await qdrant.has_sparse(collection)
+            and await qdrant.collection_compatible(collection, dim=profile.dimensions, sparse=True)
             and await qdrant.count_text(
                 collection=collection,
                 scope=SearchScope(
@@ -204,6 +205,7 @@ async def build_reference_index(
                 "pending_documents": 0,
                 "chunks": published["chunk_count"],
                 "resumed_documents": published["expected_documents"],
+                "embedding": {**profile.provenance, "embedding_identity": profile.identity},
                 "failures": [],
             }
     release = await asyncio.to_thread(
@@ -225,6 +227,7 @@ async def build_reference_index(
         "release_id": identifier,
         "coverage": coverage,
         "resumed_documents": 0,
+        "embedding": {**profile.provenance, "embedding_identity": profile.identity},
         "failures": [],
     }
 
@@ -234,7 +237,10 @@ async def build_reference_index(
 
     emit({"event": "index_started", "release_id": identifier, **coverage})
     try:
-        await qdrant.ensure_collection(collection, dim=TEXT_DIM)
+        try:
+            await qdrant.ensure_collection(collection, dim=profile.dimensions, sparse=True)
+        except ValueError as exc:
+            raise ReferenceUnavailable("Reference collection schema is incompatible with configured embeddings") from exc
         if not await qdrant.has_sparse(collection):
             raise ReferenceUnavailable(
                 "Reference collection must support keyword and vector search"
@@ -304,7 +310,7 @@ async def build_reference_index(
             for start in range(0, len(pieces), batch_size):
                 batch = pieces[start : start + batch_size]
                 vectors = await embedder.embed_many([prefix + piece["text"] for piece in batch])
-                if len(vectors) != len(batch) or any(len(vector) != TEXT_DIM for vector in vectors):
+                if len(vectors) != len(batch) or any(len(vector) != profile.dimensions for vector in vectors):
                     raise ReferenceUnavailable(
                         "Embedding output does not match reference vector dimensions"
                     )
@@ -382,6 +388,9 @@ async def build_reference_index(
             raise ReferenceUnavailable(
                 "Remote chunk count does not match the release; rerun to repair checkpoints"
             )
+        await embedder.verify_identity()
+        if not await qdrant.collection_compatible(collection, dim=profile.dimensions, sparse=True):
+            raise ReferenceUnavailable("Reference collection schema changed before publication")
         release = await asyncio.to_thread(releases.publish, identifier, verified_chunks=count)
         report["status"] = "published"
     except asyncio.CancelledError:

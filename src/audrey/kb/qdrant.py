@@ -1,7 +1,7 @@
 """Qdrant wrapper for Audrey's knowledge base.
 
 Two collections:
-  - `kb_text`   : 768-d (nomic-embed-text via ollama /api/embed)
+  - `kb_text`   : configured text profile via Ollama /api/embed
   - `kb_images` : 512-d (CLIP ViT-B-32 via sentence-transformers)
 
 We create collections eagerly at startup with explicit vector dim + cosine
@@ -36,6 +36,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 from qdrant_client.http.exceptions import UnexpectedResponse
 
+from audrey.embedding_profile import EmbeddingProfile
 from audrey.kb import bm25
 
 log = logging.getLogger(__name__)
@@ -200,10 +201,12 @@ class QdrantKB:
         *,
         text_collection: str = "kb_text",
         image_collection: str = "kb_images",
+        embedding_profile: EmbeddingProfile | None = None,
     ) -> None:
         self._client = QdrantClient(host=host, port=port)
         self.text_collection = text_collection
         self.image_collection = image_collection
+        self.embedding_profile = embedding_profile
         self._sparse_cache: dict[str, bool] = {}
 
     async def ensure_collections(self) -> None:
@@ -216,26 +219,54 @@ class QdrantKB:
 
     def _ensure_sync(self) -> None:
         existing = {c.name for c in self._client.get_collections().collections}
+        profile = getattr(self, "embedding_profile", None)
         if self.text_collection not in existing:
-            self._create_collection_sync(self.text_collection, dim=TEXT_DIM)
+            self._create_collection_sync(self.text_collection, dim=profile.dimensions if profile else TEXT_DIM, sparse=True)
+        elif profile is not None:
+            self._validate_embedding_sync(self.text_collection)
         if self.image_collection not in existing:
             self._create_collection_sync(self.image_collection, dim=IMAGE_DIM)
 
-    async def ensure_collection(self, name: str, *, dim: int) -> None:
-        """Create a named collection if missing. Used for per-user kb_user_* collections."""
-        await asyncio.to_thread(self._ensure_named_sync, name, dim)
+    async def ensure_collection(self, name: str, *, dim: int, sparse: bool | None = None) -> None:
+        """Create a named collection; explicit sparse requests also validate existing schema."""
+        await asyncio.to_thread(self._ensure_named_sync, name, dim, sparse)
 
-    def _ensure_named_sync(self, name: str, dim: int) -> None:
+    def _ensure_named_sync(self, name: str, dim: int, sparse: bool | None = None) -> None:
+        profile = getattr(self, "embedding_profile", None)
+        if profile is not None and name.startswith("kb_user_text_"):
+            dim, sparse = profile.dimensions, True
         if not self._client.collection_exists(name):
-            self._create_collection_sync(name, dim=dim)
+            self._create_collection_sync(name, dim=dim, sparse=sparse)
+        elif sparse is not None and not self._collection_compatible_sync(name, dim, sparse):
+            raise ValueError("Existing collection has incompatible vector or keyword schema")
+        if profile is not None and (name == self.text_collection or name.startswith("kb_user_text_")):
+            self._validate_embedding_sync(name)
 
-    def _create_collection_sync(self, name: str, *, dim: int) -> None:
+    async def collection_compatible(self, name: str, *, dim: int, sparse: bool) -> bool:
+        """Read-only validation for a published reference collection."""
+        return await asyncio.to_thread(self._collection_compatible_sync, name, dim, sparse)
+
+    def _collection_compatible_sync(self, name: str, dim: int, sparse: bool) -> bool:
+        params = self._client.get_collection(name).config.params
+        vectors = params.vectors
+        if (
+            not isinstance(vectors, qmodels.VectorParams)
+            or vectors.size != dim or vectors.distance != qmodels.Distance.COSINE
+        ):
+            return False
+        keyword = (params.sparse_vectors or {}).get(SPARSE_NAME)
+        return (keyword is not None and keyword.modifier == qmodels.Modifier.IDF) if sparse else keyword is None
+
+    def _create_collection_sync(self, name: str, *, dim: int, sparse: bool | None = None) -> None:
         # New text collections are born with sparse config, so only the ones
         # that predate Phase 39 ever need migrating. A user who uploads for the
         # first time after this ships never enters the migration path at all.
-        sparse = _SPARSE_CONFIG if dim == TEXT_DIM else None
+        sparse = _SPARSE_CONFIG if (dim == TEXT_DIM if sparse is None else sparse) else None
+        profile = getattr(self, "embedding_profile", None)
+        metadata = profile.metadata if profile is not None and dim == profile.dimensions else None
         self._client.create_collection(
             collection_name=name,
+            **({"metadata": metadata} if metadata else {}),
             vectors_config=qmodels.VectorParams(size=dim, distance=qmodels.Distance.COSINE),
             sparse_vectors_config=sparse,
         )
@@ -243,6 +274,22 @@ class QdrantKB:
             "qdrant: created collection %s (dim=%d%s)",
             name, dim, ", sparse=bm25" if sparse else "",
         )
+
+    def _validate_embedding_sync(self, name: str) -> None:
+        profile = getattr(self, "embedding_profile", None)
+        if profile is None:
+            return
+        info = self._client.get_collection(name)
+        vectors = info.config.params.vectors
+        if (not isinstance(vectors, qmodels.VectorParams)
+                or vectors.size != profile.dimensions
+                or vectors.distance != qmodels.Distance.COSINE
+                or (info.config.metadata or {}).get("audrey_embedding") != profile.metadata["audrey_embedding"]):
+            raise ValueError("Text collection embedding identity changed; run the text reindex migration")
+
+    async def validate_text_embedding(self, name: str) -> None:
+        if getattr(self, "embedding_profile", None) is not None:
+            await asyncio.to_thread(self._validate_embedding_sync, name)
 
     async def has_sparse(self, collection: str) -> bool:
         """Whether `collection` can accept BM25 vectors, cached after first look.
@@ -340,6 +387,7 @@ class QdrantKB:
     ) -> None:
         if not points:
             return
+        await self.validate_text_embedding(collection or self.text_collection)
         await asyncio.to_thread(
             self._client.upsert,
             collection_name=collection or self.text_collection,
@@ -366,6 +414,8 @@ class QdrantKB:
         field, so no count is reported back. A source with zero matching
         points is a no-op, not an error.
         """
+        if collection == self.text_collection or collection.startswith(("kb_user_text_", "audrey_reference_")):
+            await self.validate_text_embedding(collection)
         flt = qmodels.Filter(
             must=[qmodels.FieldCondition(key="source", match=qmodels.MatchValue(value=source))]
         )
@@ -390,6 +440,7 @@ class QdrantKB:
         self, vector: list[float], *, top_k: int = 5, collection: str | None = None,
         scope: SearchScope | None = None,
     ) -> list[KBHit]:
+        await self.validate_text_embedding(collection or self.text_collection)
         return await self._search(
             vector, collection or self.text_collection, top_k=top_k, scope=scope,
         )
@@ -426,6 +477,7 @@ class QdrantKB:
         the evidence rule are retrieval *policy* and belong with the route that
         owns the config for them, not in the storage wrapper.
         """
+        await self.validate_text_embedding(collection or self.text_collection)
         return await asyncio.gather(
             self.search_text(vector, top_k=top_k, collection=collection, scope=scope),
             self.search_lexical(query, top_k=top_k, collection=collection, scope=scope),

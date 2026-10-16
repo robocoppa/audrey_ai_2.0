@@ -15,6 +15,7 @@ from audrey.references.library import (
     ReferenceQueryError,
     ReferenceUnavailable,
 )
+from audrey.references.releases import reference_collection_name
 
 _IDENTIFIER = re.compile(r"[0-9a-f]{64}")
 
@@ -29,9 +30,10 @@ class ReferenceSearchService:
         self.embedder = embedder
         config = config or {}
         self.min_dense_score = float(config.get("min_dense_score", 0.55))
-        self.min_term_overlap = float(config.get("min_term_overlap", 0.5))
+        overlap = config.get("min_term_overlap", 0.5)
+        self.min_term_overlap = None if overlap is None else float(overlap)
         if any(
-            not math.isfinite(value) or not 0 <= value <= 1
+            value is not None and (not math.isfinite(value) or not 0 <= value <= 1)
             for value in (
                 self.min_dense_score,
                 self.min_term_overlap,
@@ -86,17 +88,18 @@ class ReferenceSearchService:
                 "This reference scope has no published search index; build it first"
             )
         provenance = release["provenance"]
-        model = str(self.embedder.model)
-        query_prefix = "search_query: " if model.split(":")[0] == "nomic-embed-text" else ""
-        document_prefix = "search_document: " if query_prefix else ""
+        profile = self.embedder.profile
+        query_prefix = profile.query_prefix
         expected = {
             "asof_year": self.registry.asof_year,
             "history_years": self.registry.history_years,
-            "embedding_model": model,
-            "query_prefix": query_prefix,
-            "document_prefix": document_prefix,
+            **profile.provenance,
+            "embedding_identity": profile.identity,
         }
-        if any(provenance.get(key) != value for key, value in expected.items()):
+        if (
+            any(provenance.get(key) != value for key, value in expected.items())
+            or release["collection"] != reference_collection_name(library_id, profile.identity)
+        ):
             raise ReferenceUnavailable(
                 "Published reference index policy or embedding model changed; rebuild it"
             )
@@ -147,6 +150,10 @@ class ReferenceSearchService:
                 raise ReferenceUnavailable(
                     "Published reference collection is unavailable; rebuild the index"
                 )
+            if not await self.qdrant.collection_compatible(
+                release["collection"], dim=profile.dimensions, sparse=True
+            ):
+                raise ReferenceUnavailable("Published reference collection schema changed; rebuild it")
             if not await self.qdrant.has_sparse(release["collection"]):
                 raise ReferenceUnavailable(
                     "Published reference keyword index is unavailable; rebuild the index"
@@ -182,7 +189,7 @@ class ReferenceSearchService:
             if not passes_evidence(
                 entry,
                 min_score=self.min_dense_score,
-                min_overlap=self.min_term_overlap,
+                min_overlap=1.01 if self.min_term_overlap is None else self.min_term_overlap,
             ):
                 continue
             result = await asyncio.to_thread(

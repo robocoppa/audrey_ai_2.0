@@ -27,8 +27,8 @@ Internal-only (hidden from /openapi.json so the model can't call them):
   POST /chat_history/prune     — apply retention policy
   GET  /chat_history/stats     — row counts for admin/debug
 
-Memory and chat archive are both Qdrant-backed and embedded with
-nomic-embed-text. On startup, a legacy `memory.db` SQLite file (from an
+Memory and chat archive are both Qdrant-backed and embedded with the
+pinned text model in config.yaml. On startup, a legacy `memory.db` SQLite file (from an
 earlier backend) is migrated automatically. Its deterministic point IDs make
 partial retries idempotent, and the source is renamed to `memory.db.migrated`
 only after every row has succeeded.
@@ -66,6 +66,7 @@ from pydantic import BaseModel, Field
 from reference_tools import router as reference_tools_router
 from searxng import SearxngClient, SearxngError
 from settings import settings
+from text_embedding import load_settings, profile_from_mapping
 
 log = logging.getLogger("custom-tools")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -79,6 +80,9 @@ def _service_headers(token: str) -> dict[str, str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    embedding_settings = load_settings(settings.embedding_config_path)
+    embedding_profile = profile_from_mapping(embedding_settings)
+    embed_keep_alive = str(embedding_settings.get("keep_alive", "24h"))
     capabilities = CapabilityRegistry()
     brave = BraveClient(
         api_key=settings.brave_api_key,
@@ -90,12 +94,13 @@ async def lifespan(app: FastAPI):
         qdrant_url=settings.qdrant_url,
         ollama_url=settings.ollama_url,
         collection=settings.memory_collection,
-        embed_model=settings.memory_embed_model,
-        embed_dim=settings.memory_embed_dim,
-        similarity_threshold=settings.memory_similarity_threshold,
-        embed_timeout_s=settings.memory_embed_timeout_s,
+        embed_model=embedding_profile.model,
+        embed_dim=embedding_profile.dimensions,
+        embedding_profile=embedding_profile,
+        similarity_threshold=float(embedding_settings.get("memory_min_score", 0.6)),
+        embed_timeout_s=float(embedding_settings.get("memory_timeout_s", 8)),
         legacy_sqlite_path=settings.memory_db_path,
-        embed_keep_alive=settings.embed_keep_alive,
+        embed_keep_alive=embed_keep_alive,
     )
     audrey = httpx.AsyncClient(
         base_url=settings.audrey_url,
@@ -107,15 +112,16 @@ async def lifespan(app: FastAPI):
         qdrant_url=settings.qdrant_url,
         ollama_url=settings.ollama_url,
         collection=settings.chat_archive_collection,
-        embed_model=settings.memory_embed_model,
-        embed_dim=settings.memory_embed_dim,
+        embed_model=embedding_profile.model,
+        embed_dim=embedding_profile.dimensions,
+        embedding_profile=embedding_profile,
         embed_timeout_s=settings.ollama_embed_timeout_s,
         chunk_max_chars=settings.chat_archive_chunk_max_chars,
         chunk_overlap_chars=settings.chat_archive_chunk_overlap_chars,
-        search_threshold=settings.chat_archive_search_threshold,
+        search_threshold=float(embedding_settings.get("history_min_score", 0.62)),
         retention_days=settings.chat_archive_retention_days,
         max_bytes=settings.chat_archive_max_bytes,
-        embed_keep_alive=settings.embed_keep_alive,
+        embed_keep_alive=embed_keep_alive,
         repair_batch_size=settings.chat_archive_repair_batch_size,
         max_retry_attempts=settings.chat_archive_max_retry_attempts,
     )
@@ -873,7 +879,7 @@ async def memory_recall(req: MemoryRecallRequest) -> MemoryEntryResponse:
     summary="Semantic search over a user's memories",
     description=(
         "Find a user's memories by embedding the query and cosine-matching "
-        "against each stored memory's embedding (via nomic-embed-text). "
+        "against each stored memory's embedding in the configured vector space. "
         "Scoped by the `user:<id>` tag. Results below the similarity "
         "threshold are dropped. Used by the orchestrator for auto-recall "
         "at the top of every request, but also callable as a tool."

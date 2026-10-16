@@ -68,7 +68,13 @@ class Settings(BaseSettings):
     # Local storage
     data_dir: Path = Field(default=Path("/app/data"), alias="TOOLS_DATA_DIR")
 
-    # Memory (Qdrant-backed, semantic search via nomic-embed-text)
+    # All production text embeddings come from the mounted canonical config.
+    # Legacy model/dimension fields remain for generic constructors and tests;
+    # runtime app wiring deliberately ignores these retired environment flags.
+    embedding_config_path: Path = Field(default=(Path(__file__).resolve().parent.parent / "config.yaml"
+                 if (Path(__file__).resolve().parent.parent / "config.yaml").is_file()
+                 else Path("/app/config.yaml")), alias="AUDREY_CONFIG")
+    # Memory (Qdrant-backed semantic search)
     qdrant_url: str = Field(default="http://qdrant:6333", alias="QDRANT_URL")
     capability_probe_timeout_s: float = Field(
         default=2.0, ge=0.1, alias="CAPABILITY_PROBE_TIMEOUT_S",
@@ -92,30 +98,14 @@ class Settings(BaseSettings):
     memory_backup_retain: int = Field(default=7, ge=1, le=100, alias="MEMORY_BACKUP_RETAIN")
     memory_backup_timeout_s: float = Field(default=120, ge=1, alias="MEMORY_BACKUP_TIMEOUT_S")
 
-    # Ollama URL for nomic-embed-text calls
     ollama_url: str = Field(default="http://ollama:11434", alias="OLLAMA_URL")
     ollama_embed_timeout_s: float = Field(default=10.0, alias="OLLAMA_EMBED_TIMEOUT_S")
-    # Memory auto-recall runs on the hot path of EVERY request, and Audrey
-    # gives it a 5s deadline (`agentic.memory.timeout_s`). That is the tightest
-    # outer budget in the system, so the memory embed needs its own rung BELOW
-    # it — sharing the 10s general embed budget inverted the ladder, and the
-    # outer always won: custom-tools kept embedding for another 5s after Audrey
-    # had given up, and every stall reached the logs as a bare `timeout in
-    # 5.00s` with no cause attached. Same failure shape as the KB ladder
-    # (`test_kb_timeout_ladder.py`), same root cause on this box — the embedder
-    # being evicted from VRAM by a local panel worker. A memory embed is one
-    # short string; warm it is ~100ms, so anything past 4s is an eviction
-    # stall, and on the hot path failing fast beats waiting.
-    memory_embed_timeout_s: float = Field(default=4.0, alias="MEMORY_EMBED_TIMEOUT_S")
-    # How long Ollama holds the embedder in VRAM after a call. Its default is 5
-    # minutes — shorter than the gap between bursts of chat on a personal box,
-    # so the embedder was cold on effectively every recall and a cold load
-    # (4.18s measured 2026-08-10) does not fit the 4s budget above. It never
-    # could: `nomic-embed-text` is 323 MB and residency is close to free, so
-    # the right fix is to stop it being evicted rather than to widen the
-    # budget. Warm, the same call takes 0.059s.
-    # ⚠️ Occupies one `OLLAMA_MAX_LOADED_MODELS` slot (2 on this box).
-    # Empty string sends no field and restores Ollama's default.
+    # One overall deadline includes model identity reads and embedding. Keep
+    # this below Audrey's outer auto-recall timeout (10s) so errors return cleanly.
+    # Qwen 4B cold loads measured about 5.7s; startup warmup and canonical
+    # keep_alive reduce the frequency of paying that cost on a chat request.
+    memory_embed_timeout_s: float = Field(default=8.0, alias="MEMORY_EMBED_TIMEOUT_S")
+    # Kept for non-production constructors; production uses text_embedding.keep_alive.
     embed_keep_alive: str = Field(default="24h", alias="EMBED_KEEP_ALIVE")
 
     # Chat archive (per-user searchable conversation history).

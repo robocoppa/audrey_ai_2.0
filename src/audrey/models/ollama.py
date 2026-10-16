@@ -589,6 +589,7 @@ class OllamaClient:
         texts: list[str],
         timeout_s: float | None = None,
         keep_alive: str | None = None,
+        truncate: bool | None = None,
     ) -> list[list[float]]:
         """Return one embedding vector per input text.
 
@@ -606,6 +607,8 @@ class OllamaClient:
         if not texts:
             return []
         payload: dict[str, Any] = {"model": model, "input": texts}
+        if truncate is not None:
+            payload["truncate"] = truncate
         if keep_alive is not None:
             payload["keep_alive"] = keep_alive
         try:

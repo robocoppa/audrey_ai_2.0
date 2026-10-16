@@ -19,19 +19,21 @@ they are not ongoing task lists.
   from catalog/revision dates. Deployed tools, page citations and historical
   refusal are user-accepted. **20B.2 built:** local scoped hybrid content search,
   resumable bounded indexing, verified publication and page citations. Tower
-  deployment and browser acceptance remain pending. The user confirms no IRS
-  index has run; hold its first build until the embedding decision below.
+  deployment and browser acceptance remain pending. Its first IRS index uses
+  the selected Qwen3 Embedding 4B profile; no IRS index has run yet.
   [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds
   the contract and remaining privacy/tax workflow. State jurisdictions remain
   unspecified; fine-tuning requires evidence.
 
-- **Embedding comparison — current priority:** all four Gemma/Qwen candidates
-  completed. The two Nomic arms stopped at unload verification; the targeted
-  continuation measures only those missing baselines. Saved candidates remain
-  valid. Corrected source labels were rescored offline; read the model report
-  for results and limits. [Phase 06](phase-06-system-one-routing.md) holds the
-  continuation and conditional reindex order. IRS indexing has never run and
-  waits for the choice. Router assessment stays closed: retain Qwen 3.5 4B.
+- **Embedding comparison — complete; unified migration next:** Qwen3 Embedding
+  4B is selected for all text retrieval at the user's explicit request. Shared
+  model identity/formatting and a staged, backed-up rebuild cover existing files,
+  memories and chat history. Images retain CLIP. [Phase 06](phase-06-system-one-routing.md)
+  has the one-time Tower maintenance command and targeted browser acceptance.
+  Deploy through that migration handoff before the first IRS index. Model
+  measurements remain in MODEL-FACTS; the clearest quality win is reference
+  retrieval, not a proven universal personal-memory improvement. Router assessment
+  stays closed: retain Qwen 3.5 4B.
 
 - **19 — deeper evidence tools:** complete; user accepted all five tools October 13.
   [Phase 19](phase-19-evidence-tools.md) defines calculator/conversions, CSV/XLSX
@@ -96,7 +98,7 @@ they are not ongoing task lists.
 | 03 | [Skills](phase-03-skills.md) | Explicit skills complete; native automatic selection built, acceptance pending |
 | 04 | [File downloads](phase-04-file-downloads.md) | Complete |
 | 05 | [Responses foundation](phase-05-responses-api.md) | Complete |
-| 06 | [Router candidates](phase-06-system-one-routing.md) | Four candidates measured; Nomic-only continuation pending; conditional reindex approved |
+| 06 | [Router candidates](phase-06-system-one-routing.md) | Comparison complete; unified Qwen 4B migration built, Tower acceptance pending |
 | 07 | [Scanned PDFs](phase-07-scanned-pdf-ocr.md) | Complete |
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
@@ -114,14 +116,12 @@ they are not ongoing task lists.
 
 ## Remaining work
 
-1. Complete the missing Nomic baseline in Phase 06 and combine it with the
-   saved candidate measurements. If a candidate improves the results, implement
-   its formatting/identity and reindex existing text stores
-   before building the first IRS index. Then deploy 20B.2 and accept one
-   cited document-content search in the browser. The phase document has the
-   exact rebuild/index steps. Follow with 20C enforced private processing,
-   20D's tax workflow and targeted 20E evaluation. The owned archive is sufficient;
-   another broad collection is unnecessary.
+1. Run Phase 06's one-time unified Qwen4 text reindex on Tower and accept the
+   three existing-data search checks. Then build the first current-catalog IRS
+   index and accept one cited document-content search in the browser (20B.2).
+   Follow with 20C enforced private processing, 20D's tax workflow and targeted
+   20E evaluation. The embedding comparison and broad archive collection are
+   complete; no repetition is queued.
 2. Confirm Tower deployment and close pending targeted acceptance for the
    current course-reviewed work. The local, gitignored [AUDIT](../lesson-ai/AUDIT.md)
    holds its review record; the [operations guide](../reference/box-operations.md#10-memory-backups-and-isolated-restore-verification)

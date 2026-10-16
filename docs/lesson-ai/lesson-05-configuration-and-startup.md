@@ -699,47 +699,7 @@ tool-capable model lists describe Audrey itself. Those belong in YAML.
 The short version: YAML for Audrey's design, env for deployment location and
 secrets.
 
-**4. custom-tools is still starting when Audrey discovers tools, and discovery
-comes back empty. What happens next?**
-
-Audrey starts anyway, with an empty tool registry, and readiness reports the
-missing tools. Because the first discovery came back empty, `lifespan` starts
-`_retry_tool_discovery`, which tries again every few seconds for about two
-minutes. When custom-tools answers, it refreshes the same registry object in
-place, so the compiled graph picks the tools up on its next request without a
-restart. If custom-tools stays down past that window, an admin can call
-`/v1/tools/rediscover` once it's healthy. That route refuses an empty answer
-with a 503 rather than replacing the live registry with nothing. The deployment
-side already does its part: compose makes `audrey` wait for custom-tools'
-healthcheck before starting, so this path is for the unlucky case.
-
-**5. Why does Audrey crash on a bad config file but keep booting when Qdrant is
-temporarily unavailable?**
-
-A bad config file means Audrey does not know its own model registry, routing
-rules, timeouts, tools config, or KB config. Serving requests from that state
-would be pretending the app is valid when it is not, so startup should fail.
-
-Qdrant being down is different. Audrey can still authenticate people, route
-requests, call models, and answer prompts that do not need KB search. The KB
-parts degrade, readiness reports `degraded`, and the rest of the application
-works. That is why Qdrant startup checks are caught and logged instead of
-crashing the process. The application database is on the other side of the
-line: if it can't be opened, Audrey can't tell who anyone is or what they own,
-so startup fails.
-
-**6. The server loses power in the middle of an answer. What does that
-conversation show after Audrey comes back, and which code decides it?**
-
-The answer shows as interrupted, not as still running. Before serving any
-request, `lifespan` calls `recover_interrupted_runs`, which finds every run the
-database still calls `running`. No task can be running for them in a process
-that just started, so it marks them failed with the error code `server_restart`
-and marks their half-written answers incomplete. Whatever had already been
-saved is still there; the live task, and anything it hadn't yet written, is
-gone.
-
-**7. What is `app.state` for?**
+**4. What is `app.state` for?**
 
 `app.state` is FastAPI's app-level storage for objects that should live for the
 whole process and be reused by routes. Audrey uses it for the config, the
@@ -752,22 +712,7 @@ The key idea is lifetime. These objects are too expensive or too stateful to
 rebuild on every request, and most need cleanup on shutdown. `lifespan` owns
 their lifecycle; `app.state` makes them reachable during requests.
 
-**8. Why does `/v1/tools/rediscover` mutate `reg.by_name` instead of assigning
-`app.state.tools = fresh`, and why does it check for an empty result first?**
-
-Because the compiled graph captured the original `ToolRegistry` object when
-`build_graph(...)` ran. Replacing `app.state.tools` would only change the
-attribute on the FastAPI app; the graph would still have the old object.
-Mutating `reg.by_name` changes the contents of the same object. Both
-`app.state.tools` and the graph closure still point at that object, so the next
-request sees the refreshed tools.
-
-The empty check exists because clearing and refilling replaces everything. A
-discovery that returned nothing (custom-tools restarting, say) would turn a
-working registry into an empty one, so the route refuses with a 503 and leaves
-the live tools alone.
-
-**9. What does the `yield` inside `lifespan` mean?**
+**5. What does the `yield` inside `lifespan` mean?**
 
 It marks the boundary between startup and shutdown.
 

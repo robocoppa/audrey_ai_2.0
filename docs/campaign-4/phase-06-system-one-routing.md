@@ -1,10 +1,10 @@
 # Campaign 4 Phase 06 — System One router assessment
 
-**Status:** Router assessment is closed; retain `qwen3.5:4b`. All four embedding
-candidates completed the deeper test. Nomic's two arms stopped during cold-load
-verification; only those baselines need continuation. Candidate measurements are
-preserved and corrected labels were rescored offline. Conditional adoption and
-reindexing remain approved; the IRS index has never run and still waits.
+**Status:** Router assessment is closed; retain `qwen3.5:4b`. The embedding
+comparison is complete. The user approved replacing Nomic throughout text
+retrieval with Qwen3 Embedding 4B and rebuilding the existing small data set.
+Unified configuration and a recoverable maintenance migration are built;
+Tower migration, browser acceptance and the first IRS index remain pending.
 
 ## Decision
 
@@ -27,101 +27,113 @@ Strong keywords, cheap short-prompt routing, explicit tool-name handling, image 
 English-only evaluation applies. Skill-selection research is separate under
 Phase 03; native automatic selection uses the approved deterministic rules.
 
-## Deeper embedding comparison
+## Embedding decision
 
-The initial Gemma screening is complete; measurements are in the model report.
-The follow-up uses the existing `probe-onbox.sh` and Telegram reporting flow,
-with no new runner or production indexing during evaluation.
+The existing probe/Telegram workflow measured Gemma 2, Qwen3 Embedding 0.6B/4B/8B,
+and both raw and correctly prefixed Nomic. Four official English publications
+provided separate calibration/test source families; invented memory/history and
+the existing general/code fixture supplied regression checks. Both Nomic arms
+completed in a matched continuation; completed candidates were not rerun.
+Source-checked alternative-label corrections were applied to all models, with
+unchanged source/query inputs and calibration restricted to its original split.
+The model report preserves the retrospective-annotation and separate-run limits.
 
-- Four frozen, official English IRS publications contribute 336 page-preserving
-  passages and 80 queries: 60 answerable and 20 unsupported. Source PDFs have
-  recorded URLs/digests; labels identify reviewed quotes and pages. Publications
-  501/502 calibrate thresholds; 527/969 test them without retuning. Entire source
-  families stay in one split. These are source-reading cases, not tax advice.
-- Invented memory and chat-history records contribute 48 queries; the existing
-  general/document/code/reference fixture contributes 28 reused regression cases.
-  No private uploads, saved memories or real conversations are read or reported.
-- Every candidate gets its documented query/document format and native vector
-  width. Both raw Nomic and prefixed Nomic remain baselines; repeated questions
-  add timing/stability evidence, not independent quality examples.
-- Measure dense/hybrid ranking, positive support and wrong/unsupported admission
-  under current thresholds and thresholds fitted only on calibration. The strict
-  diagnostic target is at least 90% positive support, zero unsupported admissions;
-  report infeasible calibration honestly. Review per-query outcomes before choosing.
-- Measure three verified unload/cold loads per arm, warm median/p95, residency,
-  production-sized reference batches and two 64-passage batches at approximately
-  1,000 tokens each. Frozen stress inputs avoid runtime tokenizer downloads.
-  No concurrent answering worker or end-to-end answer quality is measured here.
+**Use Qwen 4B for all text embeddings, as approved October 15.** The clearest
+measured win is reference retrieval; 8B added cost without improving the headline
+counts. The personal fixtures are small and show trade-offs rather than a
+universal improvement. The user explicitly chose one model across the small
+existing corpus and authorized reindexing it. Preserve that distinction between
+the deployment choice and the narrower quality evidence.
 
-The completed candidates are retained; do not rerun them. The two-arm Nomic
-continuation needs at most 690 embedding requests. Model unload is now verified
-with bounded polling; unavailable cold samples are disclosed without discarding
-valid warm/ranking measurements. Only Nomic is loaded or unloaded in continuation.
-Do not run another GPU-heavy job alongside it.
+All arms, including Nomic, failed the strict zero-unsupported-admissions target.
+The comparison establishes a relative retrieval improvement, not tax-answer
+accuracy or an ability to infer eligibility from similarity. Source/product/year
+scope, page reading and Phase 20E accuracy work remain necessary. Measurements
+and complete saved reports live only in [MODEL-FACTS](../../evals/MODEL-FACTS.md).
+No further comparison run is queued.
 
-Source review added 33 valid alternative passages across 27 questions. Only labels
-and their evidence changed; source/query text and corpus scopes have identical
-input fingerprints. Corrected candidate scores are retrospective, with the same
-calibration procedure applied solely to corrected calibration labels. Original
-and corrected full reports are saved locally; model results are in MODEL-FACTS.
+## Unified text integration
 
-### Nomic-only Tower continuation
+- `text_embedding` in canonical `config.yaml` owns the tested model/digest,
+  native 2,560 dimensions, raw documents, exact Qwen query instruction, residency
+  and personal-retrieval cutoffs. Backend, reference indexer and tools sidecar
+  share profile/format/vector checks. Retired memory model/dimension environment
+  values cannot override the profile; no Tower config or `.env` edit is needed.
+- Every production embedding checks model identity, refuses silent truncation
+  and validates vector count, width, finite values and norm. Text collections
+  carry explicit profile metadata; incompatible collections fail clearly until
+  migrated. BM25 works independently of dense width. Image/CLIP search is unchanged.
+- Ordinary global/user collections keep their names, point IDs and payloads.
+  Memories preserve keys, tags, ownership and timestamps. History rebuilds from
+  every live SQLite chunk, including previously unindexed chunks. File tombstones,
+  account purge cutoffs and conversation deletion receipts exclude deleted data.
+- The maintenance job backs up SQLite and full old vector/payload exports to
+  private Tower state, builds separate staged collections, verifies preserved
+  payloads/counts/vectors, then copies to the original names. A journal resumes
+  interrupted cutover from verified staging. Source changes invalidate an
+  unfinished resume. Completed reruns do not replay old backups over newer data.
+- Reference cutoff `0.54`, memory `0.60` and history `0.62` come from calibration
+  questions; they did not pass the absolute quality gate. Ordinary KB starts at
+  `0.53` and retains its scoped-file behavior. Reference lexical matches rank
+  results but cannot independently pass admission. Personal recall gets an
+  eight-second inner deadline and ten-second outer deadline, plus startup warming
+  and 24-hour residency; GPU contention can still cause a clean timeout.
 
-After committing/pushing the laptop changes, on **Tower**:
+## One-time Tower migration
+
+Commit/push on the laptop. On **Tower**, build images while the old services are
+still running. Do not start the new images before migrating their existing indexes:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
 git pull
+docker compose build audrey custom-tools
 ```
 
-No service, UI or eval-image rebuild/restart is needed. No model pull, upload,
-personal token or IRS index build is required. In that same checkout run:
+When no answer or upload is in progress, stop the application writers:
 
 ```bash
-scripts/probes/probe-onbox.sh embedding_document_probe.py \
-  COPY=embedding_retrieval_probe.py,embedding_real_documents.json,embedding_personal_cases.json,embedding_retrieval_cases.json \
-  ARGS=--baselines-only ROUNDS=2 BATCH_SIZE=16
+docker compose stop audrey custom-tools media-worker media-fetcher
 ```
 
-Allow roughly 1–3 minutes, depending on model loading. The existing detached
-runner sends the result/log through Telegram. Read the attachment on the laptop.
-Success: `measurement_status: completed`, exactly `prefixed` and `raw` comparable
-arms, and `quality_recommendation.status: baselines_measured`; exit 0 confirms
-the missing measurement is complete, not that a model has won. Cold sample status
-may be partial/unavailable and must not be presented as verified cold timing.
+Start the migration from that same Tower checkout:
 
-Use `scripts/analysis/embedding_reports.py` on the laptop to combine the corrected
-saved candidate report with this continuation. The helper rejects mismatched
-fixtures, query scopes/labels, settings, Ollama version, model digest or format.
-It preserves original failures and actual call counts; no candidate rerun or
-production change occurs during assembly. Then make the adoption decision.
+```bash
+nohup bash scripts/ops/reembed-onbox.sh > testing-out/last-text-reembed.log 2>&1 &
+```
 
-## Adoption and reindexing
+Chat and uploads are unavailable during this maintenance window. Qdrant and
+Ollama stay running. The script automatically restarts backend/tools/media only
+after successful verification; the UI needs no rebuild. No new file upload,
+model pull, answering-model evaluation, archive collection or personal token is
+required. Duration depends on the retained chunk count; allow a long run rather
+than treating it as a short smoke. Do not run another GPU-heavy job alongside it.
 
-Compare supported retrieval, wrong/unsupported hits and the unchanged regression
-first, then latency, cold failures, batch costs and GPU use. A document winner
-does not automatically win memory/history. Keep Nomic in a workload where a
-candidate regresses. Fit thresholds on calibration only; do not tune on holdout
-or infer year/ownership policy from a cosine score. Runtime coexistence and a
-targeted browser/tool check remain part of migration verification.
+The existing notification flow sends start/finish messages and the compact report
+through Telegram. Download that attachment on the laptop for review. Reports
+contain roles/counts/digests, not private text or owner identifiers. Private
+backups, exports and the recovery journal stay in
+`/mnt/user/appdata/runtime/embedding-migration-qwen4/`; keep them through acceptance.
+Success: exit 0, `status: completed`, Qwen4/2,560 in `embedding`, all collections
+verified, `source_sqlite_unchanged: true`, and the runner's restart succeeds.
+On failure writers stay stopped: retain state and rerun the same command after
+diagnosis. Never discard the journal/staging during an unfinished cutover.
 
-If the results establish an improvement, the user's conditional adoption request
-authorizes implementing the switch and a recoverable reindex:
+### Browser acceptance after migration
 
-1. Add consistent document/query formatting and explicit model/digest/dimension
-   identity across ingest, query and rebuild. References currently special-case
-   Nomic prefixes; ordinary KB, memory and history currently embed raw text.
-   Qwen's native dimensions differ from the current fixed 768; update schemas
-   deliberately. Matching dimensions never make two models' vectors compatible.
-2. Inventory and snapshot global/user text collections, memories and durable
-   history/upload SQLite state. Keep existing originals, IDs, owner metadata,
-   sparse vectors, timestamps and deletion/purge boundaries.
-3. Re-embed retained text into separate staging collections; verify counts,
-   payload hashes and retrieval before cutover. Pause writers during the final
-   switch and change backend/sidecar configuration together where applicable.
-   BM25 migration and missing-index reconciliation do not rebuild dense vectors.
-4. Verify existing file, memory and history search using the selected model;
-   retain recovery snapshots through acceptance. Image collections remain CLIP.
-5. Build the IRS current-catalog index for the first time with the selected
-   model, then resume Phase 20B.2 acceptance. Do not build a Nomic IRS index first
-   or re-download the owned archive.
+Open **https://ai.builtryte.xyz**, Tools **Automatic**. No upload is needed:
+
+1. Ask `Use kb_search to find [a fact or topic] in my existing uploaded files`.
+   Choose a Ready file you already know. Confirm the expected fact and source;
+   the Tools disclosure must show `kb_search`, so a raw file read does not stand
+   in for an embedding search.
+2. Ask Audrey to remember a harmless new fact, then in a new conversation ask
+   her to search saved memories for it. Confirm `memory_store`/`memory_search`
+   and the correct value.
+3. Ask her to search previous conversations for a known earlier topic. Confirm
+   `chat_history_search` and the correct earlier conversation.
+
+If one fails, keep its conversation/run for diagnosis; do not repeat all checks
+or rerun the model comparison. After acceptance, retire this temporary migration
+handoff and continue [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md)
+with the first current-catalog IRS index, then 20C.

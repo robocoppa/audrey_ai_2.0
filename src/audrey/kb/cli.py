@@ -25,7 +25,9 @@ import sys
 from pathlib import Path
 
 from audrey.config import get_config
-from audrey.kb.embed import ImageEmbedder, TextEmbedder
+from audrey.embedding_profile import profile_from_mapping
+from audrey.kb.embed import ImageEmbedder
+from audrey.kb.embed import text_embedder as build_text_embedder
 from audrey.kb.ingest import ingest_many
 from audrey.kb.qdrant import QdrantKB, normalize_source
 from audrey.models.ollama import OllamaClient
@@ -55,6 +57,7 @@ async def _run(args: argparse.Namespace) -> int:
         port=cfg.env.qdrant_port,
         text_collection=kb_cfg.get("text_collection", "kb_text"),
         image_collection=kb_cfg.get("image_collection", "kb_images"),
+        embedding_profile=profile_from_mapping(cfg.raw["text_embedding"]),
     )
     await qdrant.ensure_collections()
 
@@ -74,7 +77,7 @@ async def _run(args: argparse.Namespace) -> int:
         return 0
 
     ollama = OllamaClient(cfg.env.ollama_host, default_timeout_s=float(cfg.timeouts.get("medium", 180)))
-    text_embedder = TextEmbedder(ollama=ollama, model=kb_cfg.get("text_embedder", "nomic-embed-text"))
+    text_embedder = build_text_embedder(ollama, cfg.raw)
     image_embedder: ImageEmbedder | None = None
     if not args.no_images:
         image_embedder = ImageEmbedder(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -69,3 +70,26 @@ def test_report_refuses_symlink_target(tmp_path):
     with pytest.raises(ValueError):
         module.write_report(link, {"status": "failed"})
     assert target.read_text() == "retained"
+
+
+async def test_index_job_uses_the_same_reference_factory_as_runtime(monkeypatch):
+    import yaml
+    config = yaml.safe_load((Path(__file__).parents[1] / "config.yaml").read_text())
+    cfg = SimpleNamespace(raw=config,
+                          env=SimpleNamespace(ollama_host="http://local", qdrant_host="local", qdrant_port=6333))
+    ollama = SimpleNamespace(aclose=AsyncMock())
+    qdrant = SimpleNamespace(close=Mock())
+    embedder = object()
+    factory = Mock(return_value=embedder)
+    monkeypatch.setattr(module, "OllamaClient", lambda _: ollama)
+    monkeypatch.setattr(module, "QdrantKB", lambda *_, **kw: qdrant)
+    monkeypatch.setattr(module, "reference_embedder", factory)
+    build = AsyncMock(return_value={"status": "published"})
+    monkeypatch.setattr(module, "build_reference_index", build)
+    args = SimpleNamespace(library="irs-federal", catalog="current", max_documents=None,
+                           product_number=[], release_id=None, rebuild=False)
+    assert await module._run(args, cfg, object(), object()) == {"status": "published"}
+    factory.assert_called_once_with(ollama, config)
+    assert build.await_args.args[3] is embedder
+    ollama.aclose.assert_awaited_once()
+    qdrant.close.assert_called_once()
