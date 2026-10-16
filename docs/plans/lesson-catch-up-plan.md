@@ -120,8 +120,9 @@ the cycle that writes the first inserted lesson, so the course never has a gap.
 1. **System map:** rewrite L0, L4 and L5; client examples in L1–L3. Replaces
    the L18 cycle. The platform audit of these files (filed 2026-10-09) is
    recorded in the local, gitignored course AUDIT.
-2. **Tool policy:** L9, plus the sidecar lesson's §2.1, §2.3, §2.4 and §2.7
-   (to confirm: the refresh table also marks its §1.2 and §2.6).
+2. **Tool policy,** split into two full cycles (confirmed 2026-10-15): 2a is
+   L9; 2b is the sidecar lesson's §1.2, §2.1, §2.3, §2.4, §2.6 and §2.7. 2a's
+   audit (2026-10-15) is in the AUDIT, with another agent for assessment.
 3. **Search:** L11, plus L12 §2.9–2.10 (to confirm: §2.11 is stale too).
 4. **New 13, the application database,** with the 13–17 renumber.
 5. **New 14, identity and access,** with the L15 (was 13) recap.
@@ -485,7 +486,7 @@ writer only; lesson prose must not cite phase numbers.
   **Background:** C4 phases 01, 17A.
 - **Updates:** L19's footer (the wrap-up moves here).
 
-## Cycle 1 — the system map (outline approved 2026-10-10; committed 2026-10-12; awaiting review)
+## Cycle 1 — the system map (outline approved 2026-10-10; accepted 2026-10-15)
 
 Rewrites L0 and L4, refreshes L5, swaps the client examples in L1–L3, and
 updates the course README. Audit records live in the gitignored AUDIT.
@@ -617,14 +618,14 @@ here; 13–17 become 15–19 in cycle 4.
 
 | Where | What it says now | Replace with | Cycle |
 |---|---|---|---|
-| lesson-ai README | "Frontend integration (Open WebUI)" is out of scope | The course covers the browser boundary (L22); React internals stay out of scope | Cycle 1 (done, in review) |
-| L0 (2) | Audrey sits behind Open WebUI, which authenticates every request | The native app and API clients; Audrey-owned identity in one sentence | Cycle 1 (done, in review) |
-| L1 (1), L2 (5), L5 (1) | Open WebUI named as *the* client in examples | The native app or an API client | Cycle 1 (done, in review) |
+| lesson-ai README | "Frontend integration (Open WebUI)" is out of scope | The course covers the browser boundary (L22); React internals stay out of scope | Cycle 1 (done) |
+| L0 (2) | Audrey sits behind Open WebUI, which authenticates every request | The native app and API clients; Audrey-owned identity in one sentence | Cycle 1 (done) |
+| L1 (1), L2 (5), L5 (1) | Open WebUI named as *the* client in examples | The native app or an API client | Cycle 1 (done) |
 | L6 (1), L8 (1) | Open WebUI named as *the* client in examples | The native app or an API client | Cycle 6 |
-| L3 (3 of 11) | "No Open WebUI required"; a trace starting "OWUI sends POST" | Current dependency list; the trace starts at the native app | Cycle 1 (done, in review) |
-| L4 (17) | The walk-through starts in Open WebUI; auth asks Open WebUI who owns the token | The native app sends the request, with `/v1` clients as the second door; identity in two sentences (Access assertion or personal token) | Cycle 1 (done, in review) |
+| L3 (3 of 11) | "No Open WebUI required"; a trace starting "OWUI sends POST" | Current dependency list; the trace starts at the native app | Cycle 1 (done) |
+| L4 (17) | The walk-through starts in Open WebUI; auth asks Open WebUI who owns the token | The native app sends the request, with `/v1` clients as the second door; identity in two sentences (Access assertion or personal token) | Cycle 1 (done) |
 | L7 (3) | Open WebUI utility prompts force fast mode | Drop: a compatibility leftover, being removed from the code | Cycle 6 |
-| L3 (8 of 11) | The httpx "real example" is the Open WebUI token check | A current httpx example; the Open WebUI adapter is dormant | Cycle 1 (done, in review) |
+| L3 (8 of 11) | The httpx "real example" is the Open WebUI token check | A current httpx example; the Open WebUI adapter is dormant | Cycle 1 (done) |
 | L11 (1), L12 (2) | The user id comes from the Open WebUI session or JWT | The authenticated user's stable id and private namespace (mechanism in L14) | Cycle 3 |
 | L13 §2.1 | Identity via Open WebUI's `/api/v1/auths/` | A recap of L14 | With L14 |
 | L13 §2.3–2.6 | Archive stitching keyed on Open WebUI chat ids | Native conversation ids; `/v1` stitching as compatibility | With L23 |
@@ -641,18 +642,18 @@ references. Items marked † are stale *snippets or values* found by the
 
 | Lesson | Now stale | When |
 |---|---|---|
-| L5 | Startup opens the store and migrates, loads skills and the model catalog, starts durable workers; readiness | Cycle 1 (done, in review); a store pointer with L13 |
+| L5 | Startup opens the store and migrates, loads skills and the model catalog, starts durable workers; readiness | Cycle 1 (done); a store pointer with L13 |
 | L6 | Thinking descriptors and per-role thinking, model catalog and direct models, vision sidecar; † the cloud-cap snippet (the cap now logs the dropped worker) | Cycle 6 |
 | L7 | Schema-pinned router without thinking; failed classify no longer escalates. ‡ §2.3 `node_classify` and §2.7 complexity snippets predate skill routing (`routing_messages`) and research (`audrey_research` is forced deep); utility-prompt detection now applies to compatibility requests only | Cycle 6 |
 | L8 | Per-role thinking, shared stage lifecycle, worker-exception handling. ‡ §2.3 pool snippet, §2.4 synthesizer example and question 3 use retired model names | Cycle 6 |
-| L9 | † §2.7 snippet and prose still show `_USER_SCOPED_TOOLS`; user binding is now declared per tool in `TOOL_DECLARATIONS`. † Truncation default is 6000, not 2000, and the result now says what was cut. Compaction counted in tool messages with failures evicted first; per-worker search budget. ‡ §2.8 `_truncate` snippet: the marker now gives shown and total characters and says a retry will not help, and `_truncate_payload` (drops whole list items so JSON stays valid) is tried first. ‡ §2.9 dispatch goes through `_dispatch_observed` after the search budget stubs excess calls | Cycle 2 |
+| L9 | † §2.7 snippet and prose still show `_USER_SCOPED_TOOLS`; user binding is now declared per tool in `TOOL_DECLARATIONS`. † Truncation default is 6000, not 2000, and the result now says what was cut. Compaction counted in tool messages with failures evicted first; per-worker search budget. ‡ §2.8 `_truncate` snippet: the marker now gives shown and total characters and says a retry will not help, and `_truncate_payload` (drops whole list items so JSON stays valid) is tried first. ‡ §2.9 dispatch goes through `_dispatch_observed` after the search budget stubs excess calls | Cycle 2a |
 | L10 | Client tool calls and results through passthrough; Responses function tools | Cycle 6; with L32 |
-| L11 | Hybrid retrieval, private-read isolation, resident embedder. ‡ §2.2 ingest snippet lacks the thread offload and sparse vectors; ‡ §2.5 `kb_query` snippet predates caller resolution, file and artifact scope, deleted-file exclusion and the hybrid branch, which is on by default, so §2.6's raw-score merge is the hybrid-off path | Cycle 3 |
-| L12 | † §2.9 upload steps: storage is now reserved atomically and committed after ingest; statuses, tombstones, durable deletion; the upload page is retired. §2.10 the startup reconcile no longer prunes: it backfills missing legacy rows, reports missing index content and never deletes catalog rows, so §2.11's "the next boot's `reconcile_with_qdrant` cleans up the orphan points" is stale too | Cycle 3 (§2.11 to confirm) |
-| L13 (→15) | §2.1 identity through Open WebUI; §2.3–2.6 archive capture and stitching. §2.6 the streaming bypass: plain fast streams now recall too, through `_prepare_stream_context`, which `_phase_thinking` also calls | With L14 (§2.1); with L23 (§2.3–2.6) |
+| L11 | Hybrid retrieval, private-read isolation, resident embedder. ‡ §2.2 ingest snippet lacks the thread offload and sparse vectors; ‡ §2.5 `kb_query` snippet predates caller resolution, file and artifact scope, deleted-file exclusion and the hybrid branch, which is on by default, so §2.6's raw-score merge is the hybrid-off path. The text embedder is now `qwen3-embedding:4b` (one shared profile in `embedding_profile.py`, a query instruction prefix, a recoverable re-embedding job); nomic, 768-d and the 0.53 floor are stale | Cycle 3 |
+| L12 | † §2.9 upload steps: storage is now reserved atomically and committed after ingest; statuses, tombstones, durable deletion; the upload page is retired. §2.10 the startup reconcile no longer prunes: it backfills missing legacy rows, reports missing index content and never deletes catalog rows, so §2.11's "the next boot's `reconcile_with_qdrant` cleans up the orphan points" is stale too; the embedder change also dates its nomic mentions | Cycle 3 (§2.11 and the nomic mentions to confirm) |
+| L13 (→15) | §2.1 identity through Open WebUI; §2.3–2.6 archive capture and stitching. §2.6 the streaming bypass: plain fast streams now recall too, through `_prepare_stream_context`, which `_phase_thinking` also calls; its nomic mention is stale (one Qwen text embedding space for files, references, memories and chat history) | With L14 (§2.1); with L23 (§2.3–2.6) |
 | L14 (→16) | Queue grants have explicit owners; cancellation releases slots. ‡ §2.2 step 5: a waiter cancelled after its grant re-releases the slot | Cycle 6 |
 | L15 (→17) | † §2.3 shows retired `_delta_frame`/`_stop_frame` (now `OpenAIStreamAdapter._frame`); §2.5–2.7 deep stream and cancellation run through `StreamStageRunner` and `OpenAIStreamSession`; typed passthrough outcomes; reasoning controls; a Responses route. ‡ §2.5 error handler and §2.7 cancellation snippets show `pipeline_outcome` and `synth_task.cancel()`: the deep stream now records outcomes on `runner.terminal`, drains owned tasks with `runner.cancel_and_drain()`, and archives through `runner.finalize` | Cycle 7 |
-| L16 (→18) | `list_my_files`, `get_file_text`; † `_USER_SCOPED_TOOLS` prose; capability supervisor; archive outboxes; `kb_search` scope. ‡ §2.4 teaches Brave only, with a 429 becoming 503 and other errors escaping as 500: `web_search` now alternates Brave and SearXNG with cross-fallback, returns 503 only when both fail, and normalizes non-429 errors. ‡ §2.6 the user filter is now the shared `_user_filter` helper, and the memory collection now has scheduled snapshots and restore verification (`memory_backup.py`). §1.2 the file list lacks `capabilities.py`, `searxng.py` and `memory_backup.py` | Cycle 2 (§2.1, §2.3, §2.4, §2.6, §2.7; §1.2 to confirm); with L23 (§2.8); with L28 (`kb_search` scope) |
+| L16 (→18) | `list_my_files`, `get_file_text`; † `_USER_SCOPED_TOOLS` prose; capability supervisor; archive outboxes; `kb_search` scope. ‡ §2.4 teaches Brave only, with a 429 becoming 503 and other errors escaping as 500: `web_search` now alternates Brave and SearXNG with cross-fallback, returns 503 only when both fail, and normalizes non-429 errors. ‡ §2.6 the user filter is now the shared `_user_filter` helper, and the memory collection now has scheduled snapshots and restore verification (`memory_backup.py`). §1.2 the file list lacks `capabilities.py`, `searxng.py` and `memory_backup.py`; §1.2 also lacks `text_embedding.py`, and §2.6's nomic mentions are stale (memories embed through the shared Qwen profile) | Cycle 2b (§1.2, §2.1, §2.3, §2.4, §2.6, §2.7); with L23 (§2.8); with L28 (`kb_search` scope) |
 | L17 (→19) | Footer ends the course | With L20 (points onward); the wrap-up moves to L33 |
 
 ## Out of scope
@@ -729,6 +730,9 @@ Hard rules for the writer:
   full sweep afterwards: 370 cites, 0 drift, 0 broken.
 - **Platform audit (2026-10-10).** The review record is in the local AUDIT.
 - **Restructure decided (2026-10-10).** See the decisions below.
+- **Cycle 1 accepted (2026-10-15).** The Qwen embedding switch landed the same
+  day; L3's model facts were updated and the cites it moved in L4 and L5
+  re-anchored (scoped check: 89 cites, 0 drift).
 
 ## Decisions (2026-10-10)
 

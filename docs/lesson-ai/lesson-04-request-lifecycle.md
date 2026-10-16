@@ -798,10 +798,10 @@ Telling them apart matters the day one of them is lost.
 | Where | What's in it | Kind |
 |---|---|---|
 | The application database ([`application.sqlite_path`](../../config.yaml#L72)) | accounts, tokens, conversations, messages, runs, preferences, Projects | authority |
-| The uploads database ([`kb.uploads_db_path`](../../config.yaml#L1043)) and the files under [`kb.upload_root`](../../config.yaml#L1025) | what each person uploaded, its processing status, and the bytes | authority |
+| The uploads database ([`kb.uploads_db_path`](../../config.yaml#L1031)) and the files under [`kb.upload_root`](../../config.yaml#L1013) | what each person uploaded, its processing status, and the bytes | authority |
 | The knowledge-base source folders (mounted read-only into `audrey`) | the shared documents and images | authority, kept outside Audrey |
 | Qdrant's knowledge-base and upload collections | vectors for searching documents, images and uploads | projection |
-| The chat archive (the sidecar's [`ChatArchiveStore`](../../tools-server/chat_archive.py#L413): SQLite plus a Qdrant index) | a searchable copy of past turns | projection of native conversations; the only copy of `/v1` turns |
+| The chat archive (the sidecar's [`ChatArchiveStore`](../../tools-server/chat_archive.py#L424): SQLite plus a Qdrant index) | a searchable copy of past turns | projection of native conversations; the only copy of `/v1` turns |
 | Qdrant's memory collection (the sidecar's [`MemoryStore`](../../tools-server/db.py#L128)) | facts people asked Audrey to remember | **authority**: the one that lives inside Qdrant |
 
 Two rows deserve a second look. The chat archive's copy of native conversations
@@ -813,7 +813,7 @@ points rather than rows in the application database, so nothing can rebuild
 them. What protects them is a backup. The sidecar snapshots the memory
 collection when it starts and then once a day, and keeps a configured number
 of the newest snapshots
-([`memory_backup_retain`](../../tools-server/settings.py#L92)) in a private
+([`memory_backup_retain`](../../tools-server/settings.py#L98)) in a private
 folder outside Qdrant's storage. Each snapshot is bundled with a copy of the
 chat archive's database, because that's where the sidecar records which
 accounts have been purged (deleted along with their data), and a restore must

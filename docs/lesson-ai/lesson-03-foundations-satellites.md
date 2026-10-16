@@ -189,15 +189,17 @@ Think of each list as an address on a map of meanings. The model has
 learned to give text about the same thing nearby addresses. "My car
 won't start" lands close to "engine trouble", though they share no
 words, and far from "a bread recipe". The map just has far more
-directions than a street map: hundreds of numbers per address instead
-of two.
+directions than a street map: hundreds or thousands of numbers per
+address instead of two.
 
 That turns searching by meaning into measuring distance. Audrey
 converts the question the same way, then finds the stored lists closest
 to it. Closeness is scored with **cosine similarity**, which runs from
 near 1 for very similar meanings down to around 0 for unrelated ones.
 
-- `nomic-embed-text` (run by Ollama) turns text into 768 numbers.
+- `qwen3-embedding:4b` (run by Ollama) turns text into 2,560 numbers. The
+  model is set under [`text_embedding`](../../config.yaml#L921) in
+  `config.yaml`.
 - `clip-ViT-B-32` (CLIP) turns images into 512 numbers, and can put
   text on the same map: A query like "a black dog" lands near photos
   of black dogs, which is how a written question finds a picture.
@@ -249,15 +251,15 @@ queries.
 ### How they fit together in Audrey
 
 ```
-text content ──► nomic-embed-text ──► 768-d vector ──► Qdrant.upsert(point)
-                                                             │
-                                                             ▼
-                                                       kb_text collection
+text content ──► qwen3-embedding ──► 2560-d vector ──► Qdrant.upsert(point)
+                                                              │
+                                                              ▼
+                                                        kb_text collection
 
-text query ──► nomic-embed-text ──► 768-d query vector ──► Qdrant.search(top_k=5)
-                                                                  │
-                                                                  ▼
-                                                          5 nearest hits + payloads
+text query ──► qwen3-embedding ──► 2560-d query vector ──► Qdrant.search(top_k=5)
+                                                                   │
+                                                                   ▼
+                                                           5 nearest hits + payloads
 ```
 
 Same flow for images, but with CLIP and the `kb_images` collection.

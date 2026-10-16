@@ -17,11 +17,13 @@ Pure-function tests over httpx; no real network calls.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
 
 from audrey.tools.discovery import (
+    TOOL_DECLARATIONS,
     ToolRegistry,
     ToolSpec,
     ToolUserScope,
@@ -156,6 +158,39 @@ async def test_discover_one_finds_tools_tag():
     assert tools[0].unavailable_reason is None
 
 
+async def test_inspection_timeouts_are_dispatch_metadata_only():
+    """Inspection deadlines come from trusted declarations, not model schemas."""
+    inspections = {"inspect_pdf_page", "inspect_video_frame"}
+    assert {
+        name: declaration.timeout_s
+        for name, declaration in TOOL_DECLARATIONS.items()
+        if declaration.timeout_s is not None
+    } == {name: 150.0 for name in inspections}
+    schema = {
+        "type": "object",
+        "properties": {"user": {"type": "string"}},
+    }
+    doc = _openapi({
+        f"/{name}": _post(name, tags=["tools"], schema=schema)
+        for name in sorted(inspections | {"get_file_text"})
+    })
+
+    async with _client_with_doc(doc) as client:
+        tools = await discover_one(client, "http://server.test")
+
+    assert len(tools) == 3
+    for tool in tools:
+        assert tool.timeout_s == (150.0 if tool.name in inspections else None)
+        assert tool.to_ollama_tool() == {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.name,
+                "parameters": schema,
+            },
+        }
+
+
 async def test_discover_one_skips_endpoints_without_tools_tag():
     """The `system`-tagged /health endpoint is filtered out by the tag check.
     No special-case needed for operationId == 'health'."""
@@ -240,7 +275,7 @@ async def test_discover_one_rejects_non_object_openapi():
     assert tools == []
 
 
-async def test_discover_one_rejects_undeclared_public_tool():
+async def test_discover_one_rejects_undeclared_public_tool(caplog):
     doc = _openapi({
         "/web_search": _post(
             "web_search",
@@ -256,9 +291,12 @@ async def test_discover_one_rejects_undeclared_public_tool():
     async with _client_with_doc(doc) as client:
         tools = await discover_one(client, "http://server.test")
     assert tools == []
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelno == logging.ERROR
+    assert "http://server.test rejected:" in caplog.records[0].message
 
 
-async def test_discover_one_rejects_user_schema_without_scope_policy():
+async def test_discover_one_rejects_user_schema_without_scope_policy(caplog):
     doc = _openapi({
         "/web_search": _post(
             "web_search",
@@ -275,6 +313,9 @@ async def test_discover_one_rejects_user_schema_without_scope_policy():
     async with _client_with_doc(doc) as client:
         tools = await discover_one(client, "http://server.test")
     assert tools == []
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelno == logging.ERROR
+    assert "http://server.test rejected:" in caplog.records[0].message
 
 
 async def test_discover_one_resolves_refs_in_request_body():

@@ -9,8 +9,8 @@ context burns fast otherwise. **A truncated result says how much was lost and
 that retrying will not help**, because saying only that a cut happened is worse
 than it sounds: on 2026-08-05 a model read a bare `…[truncated]`, correctly
 reported it could give only a partial excerpt, and then invented a way to ask
-for the rest. Whole list items are dropped in preference to a character cut, so
-the body the model receives is still parseable JSON it can count.
+for the rest. Whole list items are dropped first to preserve parseable JSON
+when possible; otherwise a character cut reports how much text was omitted.
 
 Errors (network, 4xx, 5xx) become tool messages too — the model can decide
 whether to retry, re-prompt the user, or apologize. We never raise out of
@@ -28,7 +28,7 @@ from typing import Any
 import httpx
 
 from audrey.metrics import tool_call_seconds, tool_calls_total
-from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, ToolUserScope
+from audrey.tools.discovery import ToolRegistry, ToolUserScope
 from audrey.user_data_visibility import remote_personal_reads_blocked
 
 log = logging.getLogger(__name__)
@@ -219,6 +219,24 @@ async def dispatch_one(
             is_error=True,
         )
 
+    # Personal capabilities require a caller-owned identity, even when the
+    # model supplies a plausible `user` argument or `user:` tag. A purge-gated
+    # capability also needs an identity so the visibility check cannot be skipped.
+    if (spec.user_scoped or spec.purge_gated) and (
+        not isinstance(user_id, str) or not user_id.strip()
+    ):
+        tool_calls_total.labels(tool=name, outcome="error").inc()
+        return ToolResult(
+            name=name,
+            call_id=call_id,
+            content=json.dumps({
+                "error": "authenticated_user_required",
+                "detail": "This tool requires the authenticated caller's identity.",
+            }),
+            elapsed_s=0.0,
+            is_error=True,
+        )
+
     # Bind the authenticated identity exactly as the declared policy says.
     # The model never chooses another user for a scoped capability.
     if user_id and spec.user_scope is ToolUserScope.TAGS:
@@ -249,10 +267,7 @@ async def dispatch_one(
     url = f"{spec.server_url}{spec.path}"
     start = time.monotonic()
     try:
-        dispatch_timeout = (
-            150.0 if name in {"inspect_pdf_page", "inspect_video_frame"}
-            and name in TOOL_DECLARATIONS else timeout_s
-        )
+        dispatch_timeout = spec.timeout_s if spec.timeout_s is not None else timeout_s
         r = await client.post(url, json=args, timeout=dispatch_timeout)
     except httpx.TimeoutException as e:
         elapsed = round(time.monotonic() - start, 2)
@@ -294,8 +309,8 @@ async def dispatch_one(
     except ValueError:
         content = r.text  # fall back to raw body if not JSON
 
-    # `_truncate_payload` when we have parsed JSON, so the cut drops whole
-    # results and stays parseable; the plain char cut only for a raw body.
+    # Prefer whole JSON result rows when they fit; oversized individual
+    # rows, unstructured payloads and raw responses use the character fallback.
     truncated = _truncate_payload(payload, content, max_result_chars)
     log.info("dispatch: %s ok in %.2fs (%d chars%s)",
              name, elapsed, len(truncated),

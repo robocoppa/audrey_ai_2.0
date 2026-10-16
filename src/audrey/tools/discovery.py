@@ -22,6 +22,8 @@ Failure modes:
   - Server unreachable → log warning, skip; the rest still load.
   - Endpoint with no POST or no request body → skip (not a tool, e.g. /health).
   - $ref resolution failure → skip the endpoint, don't poison the registry.
+  - Undeclared tool or invalid identity/component policy → log an error and
+    reject every tool from that server; other servers can still load.
 """
 
 from __future__ import annotations
@@ -55,13 +57,14 @@ class ToolUserScope(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ToolDeclaration:
-    """Static security and dependency policy for one known tool name."""
+    """Static security, dependency and dispatch policy for one known tool."""
 
     name: str
     visibility: ToolVisibility
     user_scope: ToolUserScope
     dependencies: frozenset[str]
     purge_gated: bool = False
+    timeout_s: float | None = None
 
     @property
     def user_scoped(self) -> bool:
@@ -74,6 +77,7 @@ def _declare(
     user_scope: ToolUserScope = ToolUserScope.NONE,
     dependencies: tuple[str, ...],
     purge_gated: bool = False,
+    timeout_s: float | None = None,
 ) -> ToolDeclaration:
     return ToolDeclaration(
         name=name,
@@ -81,12 +85,14 @@ def _declare(
         user_scope=user_scope,
         dependencies=frozenset(dependencies),
         purge_gated=purge_gated,
+        timeout_s=timeout_s,
     )
 
 
 # The sole model-tool security catalogue. Adding a `tags=["tools"]` route is
-# insufficient: discovery refuses it until its identity binding and component
-# dependencies are declared here. Dispatch consumes the same record, removing
+# insufficient: an undeclared or policy-incompatible route rejects the entire
+# server catalogue, so routes and declarations must ship together. Dispatch
+# consumes the same identity, dependency and timeout record, removing
 # the former tools-server-route plus user-scope-set two-file invariant.
 TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
     declaration.name: declaration
@@ -98,8 +104,14 @@ TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
             "reference_search", dependencies=("audrey_references", "qdrant", "text_embedding"),
         ),
         _declare("analyze_table", user_scope=ToolUserScope.ARGUMENT, dependencies=("audrey_files",)),
-        _declare("inspect_pdf_page", user_scope=ToolUserScope.ARGUMENT, dependencies=("audrey_files",)),
-        _declare("inspect_video_frame", user_scope=ToolUserScope.ARGUMENT, dependencies=("audrey_files",)),
+        _declare(
+            "inspect_pdf_page", user_scope=ToolUserScope.ARGUMENT,
+            dependencies=("audrey_files",), timeout_s=150.0,
+        ),
+        _declare(
+            "inspect_video_frame", user_scope=ToolUserScope.ARGUMENT,
+            dependencies=("audrey_files",), timeout_s=150.0,
+        ),
         _declare(
             "open_chat_history", user_scope=ToolUserScope.ARGUMENT,
             dependencies=("audrey_history", "chat_archive_source"), purge_gated=True,
@@ -172,6 +184,7 @@ class ToolSpec:
     purge_gated: bool = False
     available: bool = True
     unavailable_reason: str | None = None
+    timeout_s: float | None = None  # None keeps the caller's default timeout.
 
     @property
     def user_scoped(self) -> bool:
@@ -376,6 +389,7 @@ def _build_tool_from_operation(
         user_scope=declaration.user_scope,
         dependencies=declaration.dependencies,
         purge_gated=declaration.purge_gated,
+        timeout_s=declaration.timeout_s,
         available=not unavailable,
         unavailable_reason=(
             f"dependency_unavailable:{','.join(unavailable)}"
@@ -391,7 +405,12 @@ async def discover_one(
     *,
     timeout_s: float = 10.0,
 ) -> list[ToolSpec]:
-    """Discover tools from one server. Returns [] on any error (logged)."""
+    """Discover one server, rejecting its whole catalogue on policy errors.
+
+    Transport failures return [] with a warning. Invalid documents or tool
+    identity/dependency policies return [] with an error, even when earlier
+    endpoints were valid. Unsuitable request schemas are skipped individually.
+    """
     base = server_url.rstrip("/")
     try:
         r = await client.get(f"{base}/openapi.json", timeout=timeout_s)
@@ -458,7 +477,7 @@ async def discover_one(
                 tools.append(tool)
         return tools
     except Exception as e:  # noqa: BLE001 — isolate one malformed server
-        log.warning("discovery: %s rejected: %s", base, e)
+        log.error("discovery: %s rejected: %s", base, e)
         return []
 
 

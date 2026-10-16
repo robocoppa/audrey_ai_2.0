@@ -89,6 +89,7 @@ async def recall_for_request(
         http, registry, call,
         max_result_chars=10_000,   # keep the complete JSON body for parsing
         timeout_s=timeout_s,
+        user_id=user_id,
     )
     elapsed = time.monotonic() - started
     if result.is_error:

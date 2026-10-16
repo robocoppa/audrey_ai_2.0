@@ -5,8 +5,8 @@ gate) and would need heavy mocking. The helpers it uses are pure
 functions — that's what we pin here.
 
 What this file covers:
-  - `_compress_history(keep_last_round=N)` keeps N most-recent tool
-    messages verbatim and stubs older ones. Pins behavior across
+  - `_compress_history(keep_last_round=N)` keeps N tool messages verbatim,
+    favoring usable evidence before recency, and stubs the remainder. Pins behavior across
     multiple values of N so a future tuning change to the
     `agentic.react.compress_keep_last` knob is testable in code.
   - The stub names the tool and reads as a *compaction*, not a failed or
@@ -125,6 +125,48 @@ def test_compress_history_evicts_failures_before_successful_searches():
     # Both failures are stubbed despite being newest.
     assert out[2]["role"] == "tool" and "web_fetch" in out[2]["content"]
     assert out[3]["role"] == "tool" and "web_fetch" in out[3]["content"]
+
+
+def test_compress_history_keeps_real_results_ahead_of_newer_budget_notes():
+    convo = [
+        {**_tool_msg("web_search", f"evidence {i}"), "tool_call_id": f"call-{i}"}
+        for i in range(3)
+    ] + [
+        {**_tool_msg("web_search", _WEB_SEARCH_BUDGET_STUB), "tool_call_id": f"budget-{i}"}
+        for i in range(2)
+    ]
+    out = _compress_history(convo, keep_last_round=4)
+
+    assert out[:3] == convo[:3]
+    assert out[3]["content"].startswith("[history compacted:")
+    assert out[4] == convo[4]  # The kept note retains its exact safe wording.
+    assert [m["tool_call_id"] for m in out] == [m["tool_call_id"] for m in convo]
+    assert all(m["role"] == "tool" and m["name"] == "web_search" for m in out)
+    assert convo[3]["content"] == _WEB_SEARCH_BUDGET_STUB  # Input unchanged.
+
+
+def test_repeated_compaction_never_promotes_prior_stubs_above_real_results():
+    convo = [
+        _tool_msg("web_search", f"evidence {i}") for i in range(3)
+    ] + [
+        _tool_msg("web_search", _WEB_SEARCH_BUDGET_STUB),
+        _tool_msg("web_fetch", json.dumps({"error": "http_502"})),
+    ]
+    first = _compress_history(convo, keep_last_round=3)
+    assert first[:3] == convo[:3]
+    assert all(m["content"].startswith("[history compacted:") for m in first[3:])
+    assert _compress_history(first, keep_last_round=3) == first
+
+    # A later small budget or final-answer pass still favors actual evidence.
+    smaller = _compress_history(first, keep_last_round=2)
+    assert smaller[1:3] == convo[1:3]
+    assert _compress_history(smaller, keep_last_round=2) == smaller
+
+
+def test_existing_stubs_do_not_displace_failure_details_either():
+    failed = _tool_msg("web_fetch", json.dumps({"error": "http_502"}))
+    stub = _tool_msg("web_fetch", _summarize_tool_message(failed))
+    assert _compress_history([failed, stub], keep_last_round=1) == [failed, stub]
 
 
 def test_compress_history_recency_still_decides_among_successes():
@@ -816,3 +858,27 @@ class TestObservedEvidence:
             "url": "https://example.org/releases/latest",
             "tool": "web_search",
         }]
+
+
+@pytest.mark.parametrize("tool", ["read_reference", "reference_search"])
+@pytest.mark.parametrize("url", [
+    "https://example.org/p17.pdf",
+    "https://www.irs.gov.evil.example/p17.pdf",
+    "http://www.irs.gov/pub/irs-pdf/p17.pdf",
+])
+def test_reference_provenance_keeps_official_https_source_restriction(tool, url):
+    row = {"source_url": url, "page": 2, "text": "public passage"}
+    body = {"results": [row]} if tool == "reference_search" else row
+    assert _observed_evidence([_tr(tool, body)]) == []
+
+
+@pytest.mark.parametrize("tool", ["read_reference", "reference_search"])
+@pytest.mark.parametrize("page", [None, 0, -1, True, "2"])
+def test_reference_provenance_requires_a_positive_integer_page(tool, page):
+    row = {
+        "source_url": "https://www.irs.gov/pub/irs-pdf/p17.pdf",
+        "page": page,
+        "text": "public passage",
+    }
+    body = {"results": [row]} if tool == "reference_search" else row
+    assert _observed_evidence([_tr(tool, body)]) == []

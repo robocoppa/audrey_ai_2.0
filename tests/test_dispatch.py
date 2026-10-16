@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 import httpx
+import pytest
 
 from audrey.tools.discovery import (
     TOOL_DECLARATIONS,
@@ -74,6 +75,7 @@ def _spec(name: str, server: str = "http://server.test", path: str | None = None
         ),
         dependencies=(declaration.dependencies if declaration else frozenset()),
         purge_gated=(declaration.purge_gated if declaration else False),
+        timeout_s=(declaration.timeout_s if declaration else None),
     )
 
 
@@ -139,6 +141,43 @@ async def test_dispatch_one_overwrites_user_for_scoped_tool():
     assert seen["body"]["query"] == "secrets"
 
 
+@pytest.mark.parametrize("user_id", [None, "", " \t\n"])
+@pytest.mark.parametrize("policy", ["argument", "tags", "purge_only"])
+async def test_dispatch_refuses_personal_tools_without_authenticated_identity(user_id, policy):
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"results": ["private data"]})
+
+    if policy == "argument":
+        spec = _spec("memory_search")
+        args = {"user": "victim@example.com", "query": "private data"}
+    elif policy == "tags":
+        spec = _spec("memory_store")
+        args = {"key": "x", "value": "y", "tags": "user:victim@example.com"}
+    else:
+        # A future purge-gated capability must not silently skip its visibility
+        # check even if its payload has no explicit identity binding.
+        spec = ToolSpec(
+            name="purge_only", description="purge-gated tool",
+            parameters={"type": "object", "properties": {}},
+            server_url="http://server.test", path="/purge_only", purge_gated=True,
+        )
+        args = {"user": "victim@example.com"}
+
+    async with _client(handler) as http:
+        result = await dispatch_one(
+            http, _registry([spec]), _call(spec.name, args),
+            max_result_chars=2000, timeout_s=5.0, user_id=user_id,
+        )
+
+    assert result.is_error is True
+    assert result.elapsed_s == 0.0
+    assert json.loads(result.content)["error"] == "authenticated_user_required"
+    assert calls == []
+
+
 async def test_dispatch_blocks_remote_personal_reads_until_purge_acknowledged():
     called = False
 
@@ -196,7 +235,8 @@ async def test_dispatch_one_overwrites_memory_store_tags():
     assert "user:evil@example.com" not in tags
 
 
-async def test_dispatch_one_does_not_overwrite_unscoped_tool():
+@pytest.mark.parametrize("user_id", [None, "", " ", "alice@example.com"])
+async def test_dispatch_one_does_not_overwrite_unscoped_tool(user_id):
     """Tools declared with no user scope (e.g. `web_search`) leave the
     model's arguments alone — there's no user identity to overwrite for
     an anonymous web search."""
@@ -212,7 +252,7 @@ async def test_dispatch_one_does_not_overwrite_unscoped_tool():
             http, registry,
             _call("web_search", {"q": "btrfs"}),
             max_result_chars=2000, timeout_s=5.0,
-            user_id="alice@example.com",
+            user_id=user_id,
         )
     # `user` was never in the args and should not have been added.
     assert "user" not in seen["body"]
@@ -413,6 +453,26 @@ async def test_restricted_registry_blocks_disallowed_tool_without_network():
     }
     assert calls == 0
     assert platform.names() == ["kb_search", "web_search"]
+
+
+@pytest.mark.parametrize("declared_timeout", [None, 0.25, 150.0])
+async def test_dispatch_uses_declared_timeout_or_caller_default(declared_timeout):
+    observed = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed.append(request.extensions["timeout"]["read"])
+        return httpx.Response(200, json={"results": []})
+
+    spec = _spec("web_search")
+    spec.timeout_s = declared_timeout
+    async with _client(handler) as http:
+        result = await dispatch_one(
+            http, _registry([spec]), _call("web_search", {"q": "deadline"}),
+            max_result_chars=2000, timeout_s=5.0,
+        )
+
+    assert result.is_error is False
+    assert observed == [declared_timeout if declared_timeout is not None else 5.0]
 
 
 async def test_dispatch_one_timeout_returns_error_result():

@@ -13,8 +13,9 @@ Flow per request (when the chosen model is tool-capable and tools exist):
 
 Context compression: after `compress_after_round` rounds, prior `role=tool`
 messages get collapsed into a short summary line so the prompt doesn't bloat
-into the context window. The model still sees the most recent tool round
-verbatim — only older rounds are summarized.
+into the context window. The configured number of tool messages stays
+verbatim, favoring usable results over failures, budget notes and prior stubs;
+recency decides between messages of the same kind.
 
 Tool dispatch is fully concurrent within a round (Ollama may emit multiple
 tool_calls in one assistant turn). Errors come back as tool messages so the
@@ -194,6 +195,16 @@ def _is_error_tool_message(msg: dict[str, Any]) -> bool:
     return isinstance(content, str) and content.lstrip().startswith('{"error"')
 
 
+def _tool_message_priority(msg: dict[str, Any]) -> int:
+    """Keep usable results before notices/failures, and prior stubs last."""
+    content = msg.get("content")
+    if isinstance(content, str) and content.startswith(_COMPACTED_MARKER):
+        return 2
+    if _is_error_tool_message(msg) or content == _WEB_SEARCH_BUDGET_STUB:
+        return 1
+    return 0
+
+
 def _compress_history(messages: list[dict[str, Any]], *, keep_last_round: int) -> list[dict[str, Any]]:
     """Replace older tool messages with one-line summaries, keeping N verbatim.
 
@@ -205,10 +216,9 @@ def _compress_history(messages: list[dict[str, Any]], *, keep_last_round: int) -
     a worker lost all four `web_search` results while retaining two failures,
     then reported that its searches "returned empty results".
 
-    Eviction order: **failures go before successes**, then oldest-first. Without
-    that tier, two failed `web_fetch` calls landing at the end of a round
-    displace the four good `web_search` results the worker needs in order to
-    write — the newest messages are not the most valuable ones.
+    Keep usable results first, then failures and search-budget notices, with
+    prior compaction stubs last. Within each tier, keep the newest first.
+    Notices and stubs carry no evidence and must not displace real results.
 
     `keep_last_round <= 0` is a no-op (see the config note in `config.yaml`); to
     wipe tool history aggressively, lower `compress_after_round` instead.
@@ -217,12 +227,13 @@ def _compress_history(messages: list[dict[str, Any]], *, keep_last_round: int) -
     tool_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
     if keep_last_round <= 0 or len(tool_indices) <= keep_last_round:
         return list(messages)
-    # Successes (False) sort before errors (True); within a tier, `-i` puts the
-    # most recent first. Keep the top `keep_last_round`, stub everything else.
-    ranked = sorted(tool_indices, key=lambda i: (_is_error_tool_message(messages[i]), -i))
+    # Keep at most N original tool bodies. Prior stubs cannot recover their
+    # evidence, so they never consume a slot ahead of an uncompressed result.
+    ranked = sorted(tool_indices, key=lambda i: (_tool_message_priority(messages[i]), -i))
     keep = set(ranked[:keep_last_round])
     for i, m in enumerate(messages):
-        if m.get("role") == "tool" and i not in keep:
+        if (m.get("role") == "tool" and i not in keep
+                and not str(m.get("content") or "").startswith(_COMPACTED_MARKER)):
             # ⚠️ The stub keeps `role: "tool"`. It was `role: "system"` until
             # 2026-08-17, which put a system message in the MIDDLE of the
             # conversation — and Ollama's qwen3-family renderer rejects that
@@ -246,7 +257,7 @@ def _compress_history(messages: list[dict[str, Any]], *, keep_last_round: int) -
 # ─── The catalogue-only guard ─────────────────────────────────────────
 #
 # `list_my_files` returns filenames and WHICH artifacts exist — never a word of
-# what any of them says (`tools-server/app.py:718`, and the `summary` field was
+# what any of them says (`list_my_files` in `tools-server/app.py`, and the `summary` field was
 # deleted from that row on 2026-08-06 to keep it that way). So a turn that
 # stops with `list_my_files` as its only successful call and then describes
 # what a file CONTAINS is describing something it was never shown.
@@ -291,10 +302,10 @@ _ARTIFACT_PREFERENCE = ("summary", "transcript", "visual")
 def _catalogue_rows(results: list[ToolResult]) -> list[dict[str, Any]]:
     """Rows from the most recent successful `list_my_files`, `[]` if unreadable.
 
-    ⚠️ Returns `[]` rather than raising when the body will not parse. A listing
-    long enough to be cut at `max_tool_result_chars` arrives as invalid JSON,
-    and a guard that cannot read the catalogue must let the answer stand — the
-    alternative is fetching a file chosen from half a row.
+    Returns `[]` rather than raising when the body will not parse. Dispatch
+    normally shortens JSON by dropping whole rows, but its character-cut
+    fallback can still leave invalid JSON. In that case, the guard must let
+    the answer stand rather than fetch a file chosen from half a row.
     """
     for r in reversed(results):
         if r.name != _CATALOGUE_TOOL or r.is_error:
@@ -310,26 +321,31 @@ def _catalogue_rows(results: list[ToolResult]) -> list[dict[str, Any]]:
     return []
 
 
-# Tools whose successful results carry retrievable `(title, url)` rows. Kept
-# narrow on purpose: a tool that returns a user's own files or memories is not a
-# citable source, and putting one in this list would let private content surface
-# in an answer's Sources list.
-_RETRIEVAL_TOOLS: frozenset[str] = frozenset({"web_search", "kb_search"})
+# Evidence adapters for successful tool results. Keep tool names together so
+# the public catalogue and native provenance use the same admission rules.
+# A tool may expose public URL rows and private filename identities (kb_search),
+# but private passages, storage paths and memories never become public sources.
+_PUBLIC_EVIDENCE_ADAPTERS: dict[str, str] = {
+    "web_search": "rows",
+    "kb_search": "rows",
+    "web_fetch": "page",
+    "reference_search": "reference_rows",
+    "read_reference": "reference_page",
+}
+_PRIVATE_EVIDENCE_ADAPTERS: dict[str, str] = {
+    "kb_search": "rows",
+    "kb_image_search": "rows",
+    "get_file_text": "item",
+    "analyze_table": "item",
+    "inspect_pdf_page": "item",
+    "inspect_video_frame": "item",
+}
+_PUBLIC_EVIDENCE_TOOLS = frozenset(_PUBLIC_EVIDENCE_ADAPTERS)
+_PRIVATE_EVIDENCE_TOOLS = frozenset(_PRIVATE_EVIDENCE_ADAPTERS)
 
-# `web_fetch` answers `{url, text}` — one page, no `results` rows — so it needs
-# its own branch. ⚠️ Leaving it out was a real hole: a page the researcher
-# actually FETCHED is the strongest grounding it has, stronger than a search
-# snippet, and run `065953` dropped `rustsec.org` and the Tokio releases page
-# from a ledger whose claims plainly rested on them. Search-only catalogues
-# quietly punish the worker that did the most thorough job.
-_FETCH_TOOL = "web_fetch"
-
-# Private-file tools have no public URL. Their successful result bodies do,
-# however, carry the exact user-visible filename and artifact that reached the
-# model. Project that identity into native answer provenance without changing
-# the research catalogue or exposing document text and storage paths.
-_FILE_SEARCH_TOOLS: frozenset[str] = frozenset({"kb_search", "kb_image_search"})
-_FILE_READ_TOOL = "get_file_text"
+# Reference citations are limited to official IRS pages whose contents reached
+# the model. Catalog metadata alone is not evidence, and cannot widen this rule.
+_REFERENCE_SOURCE_PREFIX = "https://www.irs.gov/"
 
 # Ceiling on the catalogue handed to the structuring pass. Three researchers at
 # ~6 searches each returning ~8 rows is ~150 URLs, which would crowd out the notes
@@ -340,9 +356,9 @@ _MAX_RETRIEVED = 60
 def _retrieved_sources(results: list[ToolResult]) -> list[dict[str, str]]:
     """`[{title, url, tool}]` actually retrieved, in call order, deduped by URL.
 
-    Pure and fail-soft — an unparseable body contributes nothing rather than
-    raising, because a body long enough to be cut at `max_tool_result_chars`
-    arrives as invalid JSON and a truncated catalogue is still worth having.
+    Pure and fail-soft: an unparseable body contributes nothing. Dispatch
+    normally drops whole JSON rows, but its character-cut fallback can still
+    leave invalid JSON. Other successfully parsed results remain usable.
 
     ⚠️ This exists because the pipeline was throwing away exactly the thing it
     then asked a model to reproduce from memory. `WorkerDraft.tool_calls` kept
@@ -356,13 +372,14 @@ def _retrieved_sources(results: list[ToolResult]) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     seen: set[str] = set()
     for r in results:
-        if r.is_error or (r.name not in _RETRIEVAL_TOOLS and r.name not in {_FETCH_TOOL, "read_reference", "reference_search"}):
+        if r.is_error or r.name not in _PUBLIC_EVIDENCE_TOOLS:
             continue
         try:
             body = json.loads(r.content)
         except (json.JSONDecodeError, TypeError, ValueError):
             continue
-        if r.name == "reference_search":
+        adapter = _PUBLIC_EVIDENCE_ADAPTERS[r.name]
+        if adapter == "reference_rows":
             if not isinstance(body, dict) or not isinstance(body.get("results"), list):
                 continue
             for item in body["results"]:
@@ -370,7 +387,7 @@ def _retrieved_sources(results: list[ToolResult]) -> list[dict[str, str]]:
                     continue
                 url = str(item.get("source_url") or "").strip()
                 page = item.get("page")
-                if (not url.startswith("https://www.irs.gov/") or isinstance(page, bool)
+                if (not url.startswith(_REFERENCE_SOURCE_PREFIX) or isinstance(page, bool)
                         or not isinstance(page, int) or page < 1):
                     continue
                 url = f"{url}#page={page}"
@@ -381,13 +398,13 @@ def _retrieved_sources(results: list[ToolResult]) -> list[dict[str, str]]:
                     if len(out) >= _MAX_RETRIEVED:
                         return out
             continue
-        if r.name == "read_reference":
+        if adapter == "reference_page":
             # Catalog metadata alone is not evidence that PDF contents reached
             # the model. Only a successful nonempty page read becomes a source.
             if not isinstance(body, dict) or not body.get("text"):
                 continue
             url = str(body.get("source_url") or "").strip()
-            if not url.startswith("https://www.irs.gov/"):
+            if not url.startswith(_REFERENCE_SOURCE_PREFIX):
                 continue
             page = body.get("page")
             if isinstance(page, bool) or not isinstance(page, int) or page < 1:
@@ -400,7 +417,7 @@ def _retrieved_sources(results: list[ToolResult]) -> list[dict[str, str]]:
                 if len(out) >= _MAX_RETRIEVED:
                     return out
             continue
-        if r.name == _FETCH_TOOL:
+        if adapter == "page":
             # One page, `{url, text}`. No title, so the catalogue renders it
             # `(untitled)` — the URL is the part that has to be right.
             url = str((body or {}).get("url") or "").strip() if isinstance(body, dict) else ""
@@ -442,13 +459,13 @@ def _observed_evidence(results: list[ToolResult]) -> list[dict[str, str]]:
     observed = list(_retrieved_sources(results))
     seen_files: set[str] = set()
     for result in results:
-        if result.is_error or result.name not in {*_FILE_SEARCH_TOOLS, _FILE_READ_TOOL, "analyze_table", "inspect_pdf_page", "inspect_video_frame"}:
+        if result.is_error or result.name not in _PRIVATE_EVIDENCE_TOOLS:
             continue
         try:
             body = json.loads(result.content)
         except (json.JSONDecodeError, TypeError, ValueError):
             continue
-        if result.name in {_FILE_READ_TOOL, "analyze_table", "inspect_pdf_page", "inspect_video_frame"}:
+        if _PRIVATE_EVIDENCE_ADAPTERS[result.name] == "item":
             rows = [body] if isinstance(body, dict) else []
         else:
             values = body.get("results") if isinstance(body, dict) else None
@@ -556,11 +573,13 @@ async def run_react(
     #: is the pre-2026-08-07 behaviour and the only universally safe request.
     #:
     #: ⚠️ **This loop is NOT fast-path-only.** `deep_panel.py` drives its
-    #: workers through it (`:210`) and its factchecker too (`:1502`), so this
+    #: workers through `_run_one_worker` and its factchecker through
+    #: `run_research_pipeline_streaming`, so this
     #: default is the only thing keeping `think=False` out of two roles where
     #: it would be wrong: panel workers are **reasoning-is-the-product**, and
     #: the factchecker runs with `format=`, where thinking has broken JSON
-    #: before (`ledger.py:203-207`). Only `fast_path` passes a value.
+    #: before (see `parse_factcheck_result` in `ledger.py`). Only `fast_path`
+    #: passes a value.
     #:
     #: **Do not add one to the deep-panel calls without probing those roles.**
     #: The measurement behind the fast path's setting was `TOOLS=1` on a

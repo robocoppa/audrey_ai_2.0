@@ -107,14 +107,14 @@ caller. The comments in
 when its port was published.
 
 **The media worker can reach Audrey and nothing else.** It joins only
-[`media-net`](../../compose.yaml#L361), which is declared `internal: true`. The
+[`media-net`](../../compose.yaml#L362), which is declared `internal: true`. The
 worker parses video, audio and scanned PDFs that someone uploaded, the riskiest
 input Audrey handles, so a compromised worker should have nowhere to go. It
 must not reach Ollama either: its model work (describing video frames) has to
 go through Audrey, where fair scheduling applies.
 
 **The media fetcher can reach the internet, because downloading is its whole
-job.** It joins only [`fetch-net`](../../compose.yaml#L368), an ordinary network
+job.** It joins only [`fetch-net`](../../compose.yaml#L369), an ordinary network
 with a route out.
 
 > **Concept spotlight — Docker networks, and why a missing name is not a
@@ -199,7 +199,7 @@ partial, Audrey retries in the background (§2.5).
 
 Now open [`src/audrey/main.py`](../../src/audrey/main.py). When uvicorn imports
 `audrey.main:app`, Python executes the module top to bottom and creates the
-FastAPI [`app`](../../src/audrey/main.py#L477) object near the end of the file.
+FastAPI [`app`](../../src/audrey/main.py#L498) object near the end of the file.
 Importing the module does not mean Audrey is ready yet. The app exists, but
 the expensive shared objects are built later, by `lifespan`.
 
@@ -348,7 +348,7 @@ merged config.
 
 ### 2.3 `lifespan`: the startup and shutdown owner
 
-Open [`main.py:65`](../../src/audrey/main.py#L65):
+Open [`main.py:74`](../../src/audrey/main.py#L74):
 
 ```python
 @asynccontextmanager
@@ -401,7 +401,7 @@ Opening the application database does real work. The
 connects to SQLite, switches on the settings Audrey relies on, and applies any
 pending schema migrations before anything else can touch the data. Then
 `lifespan` settles runs a previous process left behind, at
-[`main.py:108`](../../src/audrey/main.py#L108):
+[`main.py:117`](../../src/audrey/main.py#L117):
 
 ```python
 recovered_runs = await application_store.conversations.recover_interrupted_runs()
@@ -452,7 +452,7 @@ retry their queues until each item is done: file deletions, archive
 deliveries, account purges. `NativeRunManager` holds every live run.
 
 Ordering matters at startup too. The uploads reconcile,
-[`reconcile_with_qdrant`](../../src/audrey/main.py#L204), must finish before
+[`reconcile_with_qdrant`](../../src/audrey/main.py#L214), must finish before
 uvicorn accepts traffic, because it isn't safe alongside uploads that are in
 progress. It restores missing legacy catalog rows, preserves existing
 ownership and lifecycle metadata, and reports missing search content. Empty
@@ -460,7 +460,7 @@ or partially lost search collections never delete upload records. The
 lifespan runs this before `yield`, so that ordering is structural.
 
 At shutdown, the `finally` block at
-[`main.py:396`](../../src/audrey/main.py#L396) stops things in a deliberate
+[`main.py:417`](../../src/audrey/main.py#L417) stops things in a deliberate
 order:
 
 ```python
@@ -549,7 +549,7 @@ One subtle part of `main.py` is easy to miss if you are new to Python
 closures.
 
 During startup, Audrey compiles the graph at
-[`main.py:180`](../../src/audrey/main.py#L180):
+[`main.py:189`](../../src/audrey/main.py#L189):
 
 ```python
 graph = build_graph(
@@ -578,7 +578,7 @@ returned, because it captured that object.
 Audrey's graph does the same thing with `tool_registry`. So when tools are
 rediscovered, the existing registry object has to be refreshed in place. Here
 is the admin route that does it,
-[`rediscover_tools`](../../src/audrey/main.py#L568):
+[`rediscover_tools`](../../src/audrey/main.py#L592):
 
 ```python
 fresh = await discover_all(tool_servers)
@@ -611,7 +611,7 @@ and the live registry stays as it was.
 
 The same in-place refresh runs without anyone asking, too. If the first
 discovery at startup comes back empty, or with some tools unavailable,
-[`_retry_tool_discovery`](../../src/audrey/main.py#L419) retries in the
+[`_retry_tool_discovery`](../../src/audrey/main.py#L440) retries in the
 background for about two minutes, mutating the same registry when it succeeds.
 After that window, the admin route is the way to retry.
 
@@ -639,7 +639,7 @@ busy the GPU gate is. It boils all of that down to one status:
 - **ready**: everything is up;
 - **degraded**: something optional is down, but chat works;
 - **unready**: a *required* component is down. By default only Ollama is
-  required ([`readiness`](../../config.yaml#L1387) in `config.yaml`), because
+  required ([`readiness`](../../config.yaml#L1375) in `config.yaml`), because
   without it Audrey can't answer at all.
 
 The snapshot can be read three ways: admins call `GET /v1/admin/readiness`

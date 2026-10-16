@@ -5,14 +5,15 @@ search) and `memory_system_message` (formats the system-message body).
 Both have small surface areas with a handful of skip cases each — these
 tests pin each branch.
 
-Recall tests monkeypatch `dispatch_one` rather than wire up an httpx
-mock; the dispatcher's own tests live in test_dispatch.py.
+Recall parsing tests monkeypatch `dispatch_one`. Privacy-boundary coverage
+uses the real dispatcher with an httpx MockTransport.
 """
 
 from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 
 from audrey.pipeline import memory as memory_mod
@@ -21,8 +22,12 @@ from audrey.pipeline.memory import (
     memory_system_message,
     recall_for_request,
 )
-from audrey.tools.discovery import ToolRegistry, ToolSpec
+from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, ToolSpec
 from audrey.tools.dispatch import ToolResult
+from audrey.user_data_visibility import (
+    block_remote_personal_reads,
+    unblock_remote_personal_reads,
+)
 
 _HTTP = object()
 
@@ -31,12 +36,16 @@ _HTTP = object()
 
 def _registry_with_memory_search() -> ToolRegistry:
     r = ToolRegistry()
+    declaration = TOOL_DECLARATIONS["memory_search"]
     r.by_name["memory_search"] = ToolSpec(
         name="memory_search",
         description="search memory",
         parameters={"type": "object", "properties": {}},
         server_url="http://server.test",
         path="/memory_search",
+        user_scope=declaration.user_scope,
+        dependencies=declaration.dependencies,
+        purge_gated=declaration.purge_gated,
     )
     return r
 
@@ -116,6 +125,7 @@ async def test_recall_returns_hits_on_success(monkeypatch):
     async def fake_dispatch(http, registry, call, **kwargs):
         captured["http"] = http
         captured["args"] = call["function"]["arguments"]
+        captured["user_id"] = kwargs.get("user_id")
         return _result(json.dumps({"results": [
             {"key": "favorite_color", "value": "blue"},
             {"key": "city", "value": "Portland"},
@@ -132,6 +142,7 @@ async def test_recall_returns_hits_on_success(monkeypatch):
     assert out[0]["key"] == "favorite_color"
     # The exact caller-owned client reaches dispatch; recall creates no transport.
     assert captured["http"] is _HTTP
+    assert captured["user_id"] == "alice@example.com"
     assert captured["args"]["user"] == "alice@example.com"
     assert captured["args"]["query"] == "what's my favorite color?"
     assert captured["args"]["top_k"] == 3
@@ -231,6 +242,42 @@ async def test_recall_returns_empty_when_results_not_list(monkeypatch):
         messages=[_user_msg("hello")],
     )
     assert out == []
+
+
+@pytest.mark.asyncio
+async def test_recall_obeys_purge_block_and_resumes_after_acknowledgment():
+    user = "recall-purge@example.com"
+    purge_id = "automatic-recall-purge"
+    hits = [{"key": "favorite_color", "value": "blue"}]
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"results": hits})
+
+    block_remote_personal_reads(user=user, purge_id=purge_id)
+    try:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            registry = _registry_with_memory_search()
+            blocked = await recall_for_request(
+                registry, http=http, user_id=user,
+                messages=[_user_msg("What is my favorite color?")],
+            )
+            assert blocked == []
+            assert requests == []
+            assert memory_system_message(blocked) is None
+
+            unblock_remote_personal_reads(user=user, purge_id=purge_id)
+            resumed = await recall_for_request(
+                registry, http=http, user_id=user,
+                messages=[_user_msg("What is my favorite color?")],
+            )
+            assert resumed == hits
+            assert requests == [{
+                "user": user, "query": "What is my favorite color?", "top_k": 3,
+            }]
+    finally:
+        unblock_remote_personal_reads(user=user, purge_id=purge_id)
 
 
 # ─── memory_system_message formatting ─────────────────────────────────
