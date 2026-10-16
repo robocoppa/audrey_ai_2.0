@@ -2,8 +2,10 @@
 import asyncio
 import json
 import os
+import shutil
 import sqlite3
 import uuid
+from contextlib import closing
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -291,3 +293,186 @@ def test_private_diagnostic_never_replaces_or_follows_an_existing_file(tmp_path,
     with pytest.raises(FileExistsError):
         m.private_diagnostic(state, RuntimeError("PRIVATE_SOURCE_SENTINEL"))
     assert outside.read_text() == "retained" and target.is_symlink()
+
+
+def sqlite_source_bytes(path):
+    return {suffix: candidate.read_bytes()
+            for suffix in ("", "-wal", "-shm", "-journal")
+            if (candidate := type(path)(str(path) + suffix)).exists()}
+
+
+def freeze_wal_source(path, target, statements):
+    """Leave a stopped source with committed WAL rows and no rebuilt SHM."""
+    target.parent.mkdir()
+    with closing(sqlite3.connect(path)) as db:
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        for statement in statements:
+            db.execute(statement)
+        db.commit()
+        shutil.copyfile(path, target)
+        shutil.copyfile(str(path) + "-wal", str(target) + "-wal")
+    for child in target.parent.iterdir():
+        child.chmod(0o400)
+    target.parent.chmod(0o500)
+    return target
+
+
+def test_closed_wal_source_on_readonly_directory_fingerprints_and_backs_up(tmp_path):
+    directory = tmp_path / "readonly"
+    directory.mkdir()
+    source = directory / "source.sqlite"
+    with closing(sqlite3.connect(source)) as db:
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("CREATE TABLE retained(value TEXT)")
+        db.execute("INSERT INTO retained VALUES('saved')")
+        db.commit()
+    assert set(sqlite_source_bytes(source)) == {""}
+    source.chmod(0o400)
+    directory.chmod(0o500)
+    before = sqlite_source_bytes(source)
+    state = tmp_path / "private"
+    state.mkdir(mode=0o700)
+    target = state / "backup.sqlite"
+    try:
+        fingerprint = m.sql_fingerprint(source, scratch_root=state)
+        assert m.backup_sql(source, target) == fingerprint
+        assert sqlite_source_bytes(source) == before
+        with m.readonly(target) as db:
+            assert db.execute("SELECT value FROM retained").fetchall() == [("saved",)]
+            assert db.execute("PRAGMA journal_mode").fetchone() == ("delete",)
+        assert target.stat().st_mode & 0o777 == 0o600
+        assert list(state.glob(".sqlite-snapshot-*")) == []
+    finally:
+        directory.chmod(0o700)
+
+
+def test_wal_only_commits_survive_private_backup_without_source_changes(tmp_path):
+    original = tmp_path / "original.sqlite"
+    with closing(sqlite3.connect(original)) as db:
+        db.execute("CREATE TABLE retained(value TEXT)")
+        db.execute("INSERT INTO retained VALUES('checkpointed')")
+        db.commit()
+    source = freeze_wal_source(original, tmp_path / "readonly" / "source.sqlite",
+        ["INSERT INTO retained VALUES('only-in-wal')"])
+    state = tmp_path / "private"
+    state.mkdir(mode=0o700)
+    before = sqlite_source_bytes(source)
+    assert set(before) == {"", "-wal"}
+    try:
+        target = state / "backup.sqlite"
+        assert m.backup_sql(source, target) == m.sql_fingerprint(source, scratch_root=state)
+        with m.readonly(target) as db:
+            assert db.execute("SELECT value FROM retained ORDER BY rowid").fetchall() == [
+                ("checkpointed",), ("only-in-wal",)]
+        assert sqlite_source_bytes(source) == before
+        assert list(state.glob(".sqlite-snapshot-*")) == []
+    finally:
+        source.parent.chmod(0o700)
+
+
+def test_nonempty_rollback_journal_refuses_snapshot_without_touching_source(tmp_path):
+    source = tmp_path / "source.sqlite"
+    with closing(sqlite3.connect(source)) as db:
+        db.execute("CREATE TABLE retained(value TEXT)")
+    journal = tmp_path / "source.sqlite-journal"
+    journal.write_bytes(b"unrecovered rollback state")
+    state = tmp_path / "private"
+    state.mkdir(mode=0o700)
+    before = sqlite_source_bytes(source)
+    with pytest.raises(m.MigrationError, match="rollback journal"):
+        m.backup_sql(source, state / "backup.sqlite")
+    assert sqlite_source_bytes(source) == before
+    assert list(state.iterdir()) == []
+
+
+async def test_wal_migration_reads_verified_backups_for_history_and_deletion_policy(setup, monkeypatch):
+    client, embedder, args, _ = setup
+    changes = {
+        "uploads": ["INSERT INTO file_deletions VALUES('owner','file-1')"],
+        "archive": [
+            "INSERT INTO archive_chunks VALUES('c4','conversation','owner','m7,m8',"
+            "'History committed only in WAL','2026-02-04T00:00:00+00:00',NULL)",
+            "INSERT INTO archive_user_purges VALUES('owner','2026-02-01T00:00:00+00:00')",
+        ],
+        "app_db": ["INSERT INTO accounts VALUES('wal-account')"],
+    }
+    sources = []
+    for key, statements in changes.items():
+        original = args[key]
+        args[key] = freeze_wal_source(original, original.parent / f"readonly-{key}" / original.name,
+                                     statements)
+        sources.append((args[key], sqlite_source_bytes(args[key])))
+    policies, live_archive = m.policies, m.live_archive
+
+    def read_policies(uploads, archive):
+        assert uploads == args["state"] / "uploads.sqlite"
+        assert archive == args["state"] / "archive.sqlite"
+        return policies(uploads, archive)
+
+    def read_archive(path, cutoff):
+        assert path == args["state"] / "archive.sqlite"
+        return live_archive(path, cutoff)
+
+    monkeypatch.setattr(m, "policies", read_policies)
+    monkeypatch.setattr(m, "live_archive", read_archive)
+    try:
+        report = await m.migrate(client, embedder, {}, **args)
+        assert report["status"] == "completed"
+        assert {row["role"]: row["points"] for row in report["collections"]} == {
+            "kb": 1, "user_files": 0, "memory": 0, "history": 2}
+        embedded = [text for call in embedder.embed_many.await_args_list for text in call.args[0]]
+        assert "History committed only in WAL" in embedded
+        assert "First chat text" not in embedded
+        with m.readonly(args["state"] / "app.sqlite") as db:
+            assert db.execute("SELECT id FROM accounts").fetchall() == [("wal-account",)]
+        assert all(sqlite_source_bytes(path) == before for path, before in sources)
+        assert list(args["state"].glob(".sqlite-snapshot-*")) == []
+    finally:
+        for path, _ in sources:
+            path.parent.chmod(0o700)
+
+
+async def test_resume_guard_detects_source_change_committed_only_in_wal(setup, monkeypatch):
+    client, embedder, args, _ = setup
+    await fail_cutover(client, embedder, args, monkeypatch)
+    calls = embedder.embed_many.await_count
+    with closing(sqlite3.connect(args["uploads"])) as db:
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        db.execute("INSERT INTO file_deletions VALUES('owner','file-1')")
+        db.commit()
+        with pytest.raises(m.MigrationError, match="Source SQLite changed"):
+            await m.migrate(client, embedder, {}, **args)
+    assert embedder.embed_many.await_count == calls
+    assert client.get_collection("kb_memory").config.params.vectors.size == 768
+
+
+@pytest.mark.parametrize("remove", [False, True])
+async def test_resume_refuses_changed_or_missing_private_sql_backup(setup, monkeypatch, remove):
+    client, embedder, args, _ = setup
+    await fail_cutover(client, embedder, args, monkeypatch)
+    backup = args["state"] / "archive.sqlite"
+    if remove:
+        backup.unlink()
+    else:
+        with closing(sqlite3.connect(backup)) as db:
+            db.execute("DELETE FROM archive_deletion_outbox")
+            db.commit()
+    calls = embedder.embed_many.await_count
+    with pytest.raises(m.MigrationError, match="Private SQLite backup differs"):
+        await m.migrate(client, embedder, {}, **args)
+    assert embedder.embed_many.await_count == calls
+    assert client.get_collection("kb_memory").config.params.vectors.size == 768
+
+
+async def test_absent_original_archive_never_replays_stale_sql_backup(setup):
+    client, embedder, args, _ = setup
+    client.delete_collection("kb_memory")
+    shutil.copyfile(args["archive"], args["state"] / "archive.sqlite")
+    args["archive"].unlink()
+    report = await m.migrate(client, embedder, {}, **args)
+    assert {row["role"]: row["points"] for row in report["collections"]}["history"] == 0
+    journal = json.loads((args["state"] / "manifest.json").read_text())
+    assert journal["sql"]["archive"] is None
+    assert m.verified_sql_backups(journal, args["state"])["archive"] is None

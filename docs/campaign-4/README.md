@@ -30,8 +30,8 @@ they are not ongoing task lists.
   model identity/formatting and a staged, backed-up rebuild cover existing files,
   memories and chat history. Images retain CLIP. [Phase 06](phase-06-system-one-routing.md)
   has the one-time Tower maintenance command and targeted browser acceptance.
-  The first migration attempt failed; recovery changes are prepared for a retry
-  using the retained state. Complete that migration before the first IRS index. Model
+  Recovery changes are prepared for a retry using retained state and private
+  SQLite read copies. Complete that migration before the first IRS index. Model
   measurements remain in MODEL-FACTS; the clearest quality win is reference
   retrieval, not a proven universal personal-memory improvement. Router assessment
   stays closed: retain Qwen 3.5 4B.

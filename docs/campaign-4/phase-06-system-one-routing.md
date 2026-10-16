@@ -4,8 +4,8 @@
 comparison is complete. The user approved replacing Nomic throughout text
 retrieval with Qwen3 Embedding 4B and rebuilding the existing small data set.
 Unified configuration and a recoverable maintenance migration are built.
-The first Tower attempt failed; recovery changes are prepared. Migration
-completion, browser acceptance and the first IRS index remain pending.
+Tower migration recovery is prepared, including read-only WAL source handling.
+Migration completion, browser acceptance and the first IRS index remain pending.
 
 ## Decision
 
@@ -68,6 +68,10 @@ No further comparison run is queued.
   Memories preserve keys, tags, ownership and timestamps. History rebuilds from
   every live SQLite chunk, including previously unindexed chunks. File tombstones,
   account purge cutoffs and conversation deletion receipts exclude deleted data.
+- SQLite source volumes stay read-only. The maintenance job first copies each
+  database and any committed WAL to private writable disk, letting SQLite rebuild
+  its own SHM there. Verified retained SQLite backups supply history and deletion
+  policy; fresh source snapshots enforce resume/cutover checks.
 - The maintenance job backs up SQLite and full old vector/payload exports to
   private Tower state, builds separate staged collections, verifies preserved
   payloads/counts/vectors, then copies to the original names. A journal resumes

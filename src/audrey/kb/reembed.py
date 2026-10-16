@@ -13,9 +13,12 @@ import gzip
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
+import tempfile
 import traceback
 import uuid
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -82,33 +85,95 @@ def private_diagnostic(state, error):
         os.close(state_fd)
 
 
+@contextmanager
 def readonly(path):
-    return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as db:
+        yield db
 
 
-def sql_fingerprint(path):
-    if not path.exists():
-        return None
+@contextmanager
+def sql_snapshot(path, scratch_root):
+    """Read stopped WAL sources without creating sidecars on read-only mounts.
+
+    SQLite may need a writable SHM even for a read-only connection. Copy the
+    database and its committed WAL to private disk, then regenerate SHM there.
+    Immutable reads would ignore the WAL and can silently lose committed rows.
+    """
+    wal = Path(str(path) + "-wal")
+    rollback = Path(str(path) + "-journal")
+
+    def signature():
+        result = []
+        for source in (path, wal, rollback):
+            try:
+                info = source.stat()
+                result.append((info.st_dev, info.st_ino, info.st_size,
+                               info.st_mtime_ns, info.st_ctime_ns))
+            except FileNotFoundError:
+                result.append(None)
+        return result
+
+    before = signature()
+    if before[2] is not None and before[2][2]:
+        raise MigrationError("Source SQLite has a rollback journal; recover it before migration")
+    with tempfile.TemporaryDirectory(prefix=".sqlite-snapshot-", dir=scratch_root) as directory:
+        snapshot = Path(directory) / "source.sqlite"
+        shutil.copyfile(path, snapshot)
+        snapshot.chmod(0o600)
+        if before[1] is not None:
+            copied_wal = Path(str(snapshot) + "-wal")
+            shutil.copyfile(wal, copied_wal)
+            copied_wal.chmod(0o600)
+        if signature() != before:
+            raise MigrationError("Source SQLite changed while preparing its read snapshot")
+        with readonly(snapshot) as db:
+            yield db
+
+
+def connection_fingerprint(db):
     digest = hashlib.sha256()
-    with readonly(path) as db:
-        if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-            raise MigrationError("Source SQLite integrity check failed")
-        for line in db.iterdump():
-            digest.update(line.encode())
-            digest.update(b"\n")
+    if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+        raise MigrationError("Source SQLite integrity check failed")
+    for line in db.iterdump():
+        digest.update(line.encode())
+        digest.update(b"\n")
     return digest.hexdigest()
 
 
-def backup_sql(path, target):
-    before = sql_fingerprint(path)
-    if before is None:
+def sql_fingerprint(path, *, scratch_root=None):
+    if not path.exists():
         return None
-    with readonly(path) as source, sqlite3.connect(target) as destination:
-        source.backup(destination)
-    target.chmod(0o600)
+    reader = sql_snapshot(path, scratch_root) if scratch_root is not None else readonly(path)
+    with reader as db:
+        return connection_fingerprint(db)
+
+
+def backup_sql(path, target):
+    if not path.exists():
+        return None
+    with sql_snapshot(path, target.parent) as source:
+        before = connection_fingerprint(source)
+        with closing(sqlite3.connect(target)) as destination:
+            target.chmod(0o600)
+            source.backup(destination)
+            destination.execute("PRAGMA journal_mode=DELETE")
     if sql_fingerprint(target) != before:
         raise MigrationError("SQLite backup differs from source")
     return before
+
+
+def verified_sql_backups(journal, state):
+    backups = {}
+    for key, expected in journal["sql"].items():
+        # A stale file from an earlier failed preparation is never a source.
+        if expected is None:
+            backups[key] = None
+            continue
+        path = state / f"{key}.sqlite"
+        if sql_fingerprint(path) != expected:
+            raise MigrationError("Private SQLite backup differs from migration journal")
+        backups[key] = path
+    return backups
 
 
 def records(client, name, *, vectors=True):
@@ -210,7 +275,7 @@ def verify_profile(client, name, profile):
 
 
 def live_archive(path, cutoff):
-    if not path.exists():
+    if path is None or not path.exists():
         return []
     with readonly(path) as db:
         db.row_factory = sqlite3.Row
@@ -248,10 +313,10 @@ def timestamp(value):
 
 def policies(uploads, archive):
     deletions, purges = set(), {}
-    if uploads.exists():
+    if uploads is not None and uploads.exists():
         with readonly(uploads) as db:
             deletions = set(db.execute("SELECT user,file_id FROM file_deletions"))
-    if archive.exists():
+    if archive is not None and archive.exists():
         with readonly(archive) as db:
             purges = dict(db.execute("SELECT user,MAX(cutoff_at) FROM archive_user_purges GROUP BY user"))
     return deletions, purges
@@ -288,8 +353,9 @@ def dump_state(state, journal):
     atomic_json(state / "manifest.json", journal)
 
 
-def check_sources(journal, paths):
-    if {key: sql_fingerprint(path) for key, path in paths.items()} != journal["sql"]:
+def check_sources(journal, paths, *, scratch_root):
+    if {key: sql_fingerprint(path, scratch_root=scratch_root)
+            for key, path in paths.items()} != journal["sql"]:
         raise MigrationError("Source SQLite changed; do not resume an older migration")
 
 
@@ -311,7 +377,7 @@ async def migrate(client, embedder, config, *, state, uploads, archive, app_db,
             for row, entry in zip(report["collections"], journal["collections"], strict=True):
                 row["points"], row["payload_sha256"] = collection_digest(client, entry["name"])
             return report
-        check_sources(journal, paths)
+        check_sources(journal, paths, scratch_root=state)
     else:
         names = {item.name for item in client.get_collections().collections}
         global_name = config.get("kb", {}).get("text_collection", "kb_text")
@@ -350,7 +416,8 @@ async def migrate(client, embedder, config, *, state, uploads, archive, app_db,
                 entry["original_digest"] = [0, hashlib.sha256(b"").hexdigest()]
             journal["collections"].append(entry)
         dump_state(state, journal)
-    deletions, purges = policies(uploads, archive)
+    backups = verified_sql_backups(journal, state)
+    deletions, purges = policies(backups["uploads"], backups["archive"])
     cutoff = journal["retention_cutoff"]
     for ordinal, entry in enumerate(journal["collections"], 1):
         if entry["phase"] in {"staged", "cutover_started", "complete"}:
@@ -365,14 +432,14 @@ async def migrate(client, embedder, config, *, state, uploads, archive, app_db,
         create(client, stage, profile, entry["schema"], entry["kind"])
         verify_profile(client, stage, profile)
         batch = []
-        for row in source_rows(entry, state, archive, deletions, purges, cutoff):
+        for row in source_rows(entry, state, backups["archive"], deletions, purges, cutoff):
             batch.append(row)
             if len(batch) == 16:
                 await write_embedded(client, embedder, stage, entry["kind"], batch)
                 batch = []
         if batch:
             await write_embedded(client, embedder, stage, entry["kind"], batch)
-        expected = list(payload_digest(source_rows(entry, state, archive, deletions, purges, cutoff)))
+        expected = list(payload_digest(source_rows(entry, state, backups["archive"], deletions, purges, cutoff)))
         if list(collection_digest(client, stage)) != expected:
             raise MigrationError("Re-embedded payloads did not verify")
         entry.update(phase="staged", expected=expected, vector_digest=vector_digest(client, stage))
@@ -380,7 +447,7 @@ async def migrate(client, embedder, config, *, state, uploads, archive, app_db,
         progress({"event": "collection_staged", "role": entry["kind"], "ordinal": ordinal,
                   "points": expected[0]})
     # No production collection changes before every replacement has verified.
-    check_sources(journal, paths)
+    check_sources(journal, paths, scratch_root=state)
     await embedder.verify_identity()
     for entry in journal["collections"]:
         if entry["phase"] == "complete":
