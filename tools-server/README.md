@@ -24,8 +24,11 @@ matching declaration in Audrey's central capability policy.
 
 Memory search first matches a whole saved key, with spaces, underscores and
 hyphens treated as equivalent separators, then falls back to semantic search.
-History search combines exact informative-word matches from live SQLite chunks
-with cosine matches above the configured threshold. Keyword history matches
+History search combines relevance-ranked English word matches from live SQLite
+chunks with cosine matches above the configured threshold. A derived SQLite FTS5
+index handles word forms such as calculate/calculations and matches whole tokens
+before limiting results. It backfills automatically on first startup; triggers
+keep inserts, replacements, edits and deletes synchronized. Keyword history matches
 have `match_type: "keyword"` and `score: null`; semantic hits retain their cosine
 score and `match_type: "semantic"`. Both paths preserve ownership and deletion
 boundaries. An embedding failure is reported as unavailable rather than no

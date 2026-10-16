@@ -31,8 +31,9 @@ they are not ongoing task lists.
   unchanged, with private backups retained. [Phase 06](phase-06-system-one-routing.md)
   holds existing-data acceptance: memory search is user-accepted October 16.
   History's full-question lookup still failed; the deployed direct keyword
-  lookup finds the saved calculation. A request-word filter correction is built
-  for the exact failed query; targeted browser acceptance remains pending.
+  lookup finds the saved calculation. Expanded regressions found word-form,
+  ranking and substring-crowding gaps; ranked English text search fixes are built.
+  Tower SQLite support is confirmed; targeted browser acceptance remains pending.
   Semantic cutoffs stay unchanged. Finish history repair and the outstanding
   file check
   before the first IRS index; no migration or model-comparison rerun is queued. Model

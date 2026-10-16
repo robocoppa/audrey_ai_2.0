@@ -122,7 +122,8 @@ _SEARCH_FILLERS = frozenset(
     "a an and are as at be been before but by can could did do does for from "
     "had has have how i in is it its me my of on or our please previously "
     "said show tell than that the their them then there these they this those "
-    "to us was we were what when where which who why will with would you your ask asked".split()
+    "to us was we were what when where which who why will with would you your "
+    "ask asked earlier remind request requests".split()
 )
 _KEYWORD_CANDIDATE_LIMIT = 200
 
@@ -138,11 +139,9 @@ def _keyword_terms(query: str) -> tuple[str, ...]:
     return terms if len(terms) <= 12 else ()
 
 
-def _keyword_snippet(text: str, terms: tuple[str, ...], max_chars: int) -> str:
-    """Show the matching passage even when it is late in a long chunk."""
-    match = next((word for word in _SEARCH_WORDS.finditer(text.casefold())
-                  if word.group() in terms), None)
-    start = max(0, match.start() - max_chars // 3) if match is not None else 0
+def _keyword_snippet(text: str, max_chars: int, match_offset: int | None) -> str:
+    """Show the first FTS match, including stem matches late in a chunk."""
+    start = max(0, match_offset - max_chars // 3) if match_offset is not None else 0
     prefix = "…" if start else ""
     return prefix + _snippet(text[start:], max_chars - len(prefix))
 
@@ -453,6 +452,27 @@ CREATE INDEX IF NOT EXISTS idx_user_purge_pending
 """
 
 
+# This is a rebuildable search projection of archive_chunks, never its source.
+# Porter handles English word forms; unicode61 keeps matching at token boundaries.
+_KEYWORD_SCHEMA = """
+CREATE VIRTUAL TABLE IF NOT EXISTS archive_chunks_fts USING fts5(
+    text, content='archive_chunks', content_rowid='rowid', tokenize='porter unicode61'
+);
+CREATE TRIGGER IF NOT EXISTS archive_chunks_fts_insert AFTER INSERT ON archive_chunks BEGIN
+    INSERT INTO archive_chunks_fts(rowid, text) VALUES (new.rowid, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS archive_chunks_fts_delete AFTER DELETE ON archive_chunks BEGIN
+    INSERT INTO archive_chunks_fts(archive_chunks_fts, rowid, text)
+    VALUES ('delete', old.rowid, old.text);
+END;
+CREATE TRIGGER IF NOT EXISTS archive_chunks_fts_update AFTER UPDATE OF text ON archive_chunks BEGIN
+    INSERT INTO archive_chunks_fts(archive_chunks_fts, rowid, text)
+    VALUES ('delete', old.rowid, old.text);
+    INSERT INTO archive_chunks_fts(rowid, text) VALUES (new.rowid, new.text);
+END;
+"""
+
+
 # ─── Store ────────────────────────────────────────────────────────────
 
 class ChatArchiveStore:
@@ -529,12 +549,34 @@ class ChatArchiveStore:
             await self._db.executescript(_SCHEMA)
             await self._migrate_repair_schema()
             await self._db.executescript(_REPAIR_INDEXES)
+            await self._init_keyword_index()
             await self._db.commit()
         except BaseException:
             await self._db.close()
             self._db = None
             raise
         log.info("chat_archive: source ready sqlite=%s", self._sqlite_path)
+
+    async def _init_keyword_index(self) -> None:
+        """Create/backfill the derived index once and keep source writes synchronized."""
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init_source() not called")
+        # archive_turn uses INSERT OR REPLACE. SQLite only invokes its implicit
+        # delete triggers when recursive_triggers is on, preventing orphaned FTS rows.
+        await self._db.execute("PRAGMA recursive_triggers=ON")
+        cursor = await self._db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='archive_chunks_fts'",
+        )
+        exists = await cursor.fetchone() is not None
+        await cursor.close()
+        rebuild = "" if exists else (
+            "INSERT INTO archive_chunks_fts(archive_chunks_fts) VALUES ('rebuild');\n"
+        )
+        # Atomic creation/backfill: an interrupted first startup cannot leave
+        # an existing but unpopulated index that later startups would trust.
+        await self._db.executescript(
+            "BEGIN IMMEDIATE;\n" + _KEYWORD_SCHEMA + rebuild + "COMMIT;",
+        )
 
     async def init_index(self) -> None:
         """Ensure only the Qdrant search index for the archive."""
@@ -1007,13 +1049,22 @@ class ChatArchiveStore:
         date_to: str | None,
         terms: tuple[str, ...] = (),
         chunk_ids: list[str] | None = None,
-    ) -> list[tuple[str, str, str, str]]:
+    ) -> list[tuple[str, str, str, str, int | None]]:
         """Bounded authoritative rows with the same live-data gates for both searches."""
         if self._db is None:
             raise RuntimeError("ChatArchiveStore.init() not called")
         sql = """
-            SELECT c.chunk_id, c.conversation_id, c.text, c.created_at
+            SELECT c.chunk_id, c.conversation_id, c.text, c.created_at, NULL
             FROM archive_chunks AS c
+        """
+        if terms:
+            sql = """
+                SELECT c.chunk_id, c.conversation_id, c.text, c.created_at,
+                       highlight(archive_chunks_fts, 0, char(1), char(2))
+                FROM archive_chunks AS c
+                JOIN archive_chunks_fts ON archive_chunks_fts.rowid = c.rowid
+            """
+        sql += """
             WHERE c.user = ?
               AND NOT EXISTS (
                   SELECT 1 FROM archive_deletion_outbox AS d
@@ -1041,21 +1092,31 @@ class ChatArchiveStore:
                       - _dt.timedelta(days=self._retention_days)).isoformat()
             sql += " AND julianday(c.created_at) >= julianday(?)"
             params.append(cutoff)
-        for term in terms:
-            sql += " AND instr(lower(c.text), ?) > 0"
-            params.append(term)
+        if terms:
+            sql += " AND archive_chunks_fts MATCH ?"
+            # Quote every token so model/user text can never introduce an FTS
+            # operator, prefix wildcard, column selector or query expression.
+            params.append(" AND ".join('"' + term.replace('"', '""') + '"' for term in terms))
         if chunk_ids is not None:
             if not chunk_ids:
                 return []
             sql += " AND c.chunk_id IN (" + ",".join("?" for _ in chunk_ids) + ")"
             params.extend(chunk_ids)
-        sql += " ORDER BY c.created_at DESC, c.chunk_id LIMIT ?"
+        sql += " ORDER BY "
+        if terms:
+            sql += "bm25(archive_chunks_fts), "
+        sql += "c.created_at DESC, c.chunk_id LIMIT ?"
         params.append(_KEYWORD_CANDIDATE_LIMIT)
         async with self._db_lock:
             cursor = await self._db.execute(sql, params)
             rows = await cursor.fetchall()
             await cursor.close()
-        return [(str(row[0]), str(row[1]), str(row[2]), str(row[3])) for row in rows]
+        out = []
+        for row in rows:
+            offset = str(row[4]).find("\x01") if row[4] is not None else -1
+            out.append((str(row[0]), str(row[1]), str(row[2]), str(row[3]),
+                        offset if offset >= 0 else None))
+        return out
 
     async def _keyword_hits(
         self, *, user: str, query: str, limit: int, snippet_chars: int,
@@ -1068,13 +1129,11 @@ class ChatArchiveStore:
             user=user, date_from=date_from, date_to=date_to, terms=terms,
         )
         hits: list[SearchHit] = []
-        for chunk_id, conversation_id, text, created_at in rows:
-            if not set(terms).issubset(_SEARCH_WORDS.findall(text.casefold())):
-                continue
+        for chunk_id, conversation_id, text, created_at, match_offset in rows:
             hits.append(SearchHit(
                 conversation_id=conversation_id, chunk_id=chunk_id,
                 created_at=created_at,
-                snippet=_keyword_snippet(text, terms, snippet_chars),
+                snippet=_keyword_snippet(text, snippet_chars, match_offset),
                 score=None, match_type="keyword",
             ))
             if len(hits) >= limit:
@@ -1091,7 +1150,7 @@ class ChatArchiveStore:
         date_from: str | None = None,
         date_to: str | None = None,
     ) -> list[SearchHit]:
-        """Exact-keyword matches first, then thresholded semantic history hits.
+        """Ranked English-word matches first, then thresholded semantic history hits.
 
         Keyword hits come from live SQLite chunks, including those awaiting
         indexing, and have a null score. Semantic hits retain their cosine
@@ -1169,7 +1228,7 @@ class ChatArchiveStore:
             chunk_id = str((point.payload or {}).get("chunk_id", ""))
             if chunk_id in seen or chunk_id not in live_rows:
                 continue
-            _, conversation_id, text, created_at = live_rows[chunk_id]
+            _, conversation_id, text, created_at, _ = live_rows[chunk_id]
             out.append(SearchHit(
                 conversation_id=conversation_id, chunk_id=chunk_id,
                 created_at=created_at, snippet=_snippet(text, snippet_chars),

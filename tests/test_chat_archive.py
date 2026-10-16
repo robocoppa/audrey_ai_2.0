@@ -490,6 +490,7 @@ async def history_store(tmp_path, monkeypatch):
     store = chat_archive_module.ChatArchiveStore.__new__(chat_archive_module.ChatArchiveStore)
     store._db = await aiosqlite.connect(tmp_path / "history.db")
     await store._db.executescript(chat_archive_module._SCHEMA)
+    await store._init_keyword_index()
     store._db_lock = asyncio.Lock()
     store._retention_days = 0
     store._http = None
@@ -690,3 +691,175 @@ def test_history_route_keyword_match_has_null_score(post_history):
     assert response.status_code == 200
     assert response.json()["results"][0]["score"] is None
     assert response.json()["results"][0]["match_type"] == "keyword"
+
+
+@pytest.mark.parametrize("query", [
+    "what did I ask you to calculate",
+    "What did I ask you to calculate earlier?",
+    "Please remind me what I asked you to calculate.",
+    "calculation",
+    "What calculations did I ask for?",
+    "calculation requests",
+])
+async def test_history_question_variants_retrieve_actual_exchange_without_dense_support(history_store, query):
+    """The literal recovery path must find the exchange, not only a search about it."""
+    await save_history_chunk(
+        history_store, "actual-calculation",
+        "User: Calculate 1250 × 1.08 using the calculator\nAssistant: 1350",
+        created_at="2026-10-15T10:00:00+00:00", indexed_at=None,
+    )
+    await save_history_chunk(
+        history_store, "unrelated-budget",
+        "User: Our project budget is 8000 dollars.\nAssistant: I noted the project budget.",
+        created_at="2026-10-15T11:00:00+00:00",
+    )
+    await save_history_chunk(
+        history_store, "newer-query-only",
+        f"User: {query}\nAssistant: I did not find that earlier exchange.",
+        created_at="2026-10-15T12:00:00+00:00",
+    )
+
+    hits = await history_store.search(user="alice@example.com", query=query, limit=5)
+
+    assert "actual-calculation" in {hit.chunk_id for hit in hits}
+    assert "unrelated-budget" not in {hit.chunk_id for hit in hits}
+
+
+@pytest.mark.parametrize(("stored_text", "query"), [
+    ("User: Invoice INV-2048 was paid.\nAssistant: Payment recorded.", "inv_2048"),
+    ("User: Calculate 1250 × 1.08.\nAssistant: 1350", "CALCULATE: 1250 * 1.08!"),
+    ("User: Our checkpoint is 7E3A4F.\nAssistant: Checkpoint noted.", "7e3a4f"),
+])
+async def test_history_literal_identifiers_numbers_case_and_punctuation(history_store, stored_text, query):
+    await save_history_chunk(history_store, "exact-match", stored_text, indexed_at=None)
+    await save_history_chunk(
+        history_store, "nearby-number-and-id",
+        "User: Invoice INV-20480 has amount 12500 and checkpoint 7E3A4F9.\nAssistant: Noted.",
+    )
+
+    hits = await history_store.search(user="alice@example.com", query=query, limit=5)
+
+    assert [hit.chunk_id for hit in hits] == ["exact-match"]
+    assert hits[0].match_type == "keyword" and hits[0].score is None
+
+
+async def test_history_original_exchange_survives_repeated_newer_lookup_questions(history_store):
+    await save_history_chunk(
+        history_store, "actual-calculation",
+        "User: Calculate 1250 × 1.08 using the calculator\nAssistant: 1350",
+        created_at="2026-10-15T10:00:00+00:00",
+    )
+    for index in range(6):
+        await save_history_chunk(
+            history_store, f"lookup-only-{index}",
+            "User: What did I ask you to calculate?\nAssistant: I could not find the earlier calculation.",
+            created_at=f"2026-10-15T12:0{index}:00+00:00",
+        )
+
+    # The tool's normal default is five; increasing it should not be needed
+    # merely because failed lookups themselves entered the chat archive.
+    hits = await history_store.search(user="alice@example.com", query="calculate", limit=5)
+
+    assert len(hits) <= 5
+    assert "actual-calculation" in {hit.chunk_id for hit in hits}
+
+
+async def test_history_exact_word_match_is_not_hidden_by_recent_substring_candidates(history_store):
+    await save_history_chunk(
+        history_store, "actual-cat-topic", "User: My cat is named Cedar.\nAssistant: Cedar is your cat.",
+        created_at="2026-10-15T10:00:00+00:00",
+    )
+    for index in range(chat_archive_module._KEYWORD_CANDIDATE_LIMIT):
+        await save_history_chunk(
+            history_store, f"substring-only-{index}",
+            "User: Update the product category.\nAssistant: The category is updated.",
+            created_at="2026-10-15T12:00:00+00:00",
+        )
+
+    hits = await history_store.search(user="alice@example.com", query="cat", limit=5)
+
+    assert [hit.chunk_id for hit in hits] == ["actual-cat-topic"]
+
+
+async def test_history_keyword_index_backfills_existing_chunks_once_and_survives_restart(tmp_path):
+    path = tmp_path / "old-history.db"
+    store = chat_archive_module.ChatArchiveStore.__new__(chat_archive_module.ChatArchiveStore)
+    store._db = await aiosqlite.connect(path)
+    try:
+        await store._db.executescript(chat_archive_module._SCHEMA)
+        await save_history_chunk(
+            store, "legacy-calculation", "User: Calculate 1250 × 1.08\nAssistant: 1350",
+            indexed_at="2026-10-15T12:00:00+00:00",
+        )
+        before = await (await store._db.execute("SELECT * FROM archive_chunks")).fetchall()
+        await store._init_keyword_index()
+        rows = await (await store._db.execute(
+            "SELECT rowid FROM archive_chunks_fts WHERE archive_chunks_fts MATCH ?", ('"calculations"',),
+        )).fetchall()
+        assert len(rows) == 1
+        assert await (await store._db.execute("SELECT * FROM archive_chunks")).fetchall() == before
+        await store._db.close()
+        store._db = await aiosqlite.connect(path)
+        statements = []
+        await store._db.set_trace_callback(statements.append)
+        await store._init_keyword_index()
+        assert not any("'rebuild'" in statement for statement in statements)
+        assert await (await store._db.execute("SELECT * FROM archive_chunks")).fetchall() == before
+        await store._db.execute(
+            "INSERT INTO archive_chunks_fts(archive_chunks_fts, rank) VALUES ('integrity-check', 1)",
+        )
+        rows = await (await store._db.execute(
+            "SELECT rowid FROM archive_chunks_fts WHERE archive_chunks_fts MATCH ?", ('"calculation"',),
+        )).fetchall()
+        assert len(rows) == 1
+    finally:
+        await store._db.close()
+
+
+async def test_history_keyword_index_tracks_inserts_updates_replacements_and_deletes(history_store):
+    await save_history_chunk(history_store, "turn", "User: Calculate 1250 × 1.08\nAssistant: 1350")
+    assert len(await history_store.search(user="alice@example.com", query="calculation", limit=5)) == 1
+    await history_store._db.execute(
+        "UPDATE archive_chunks SET text=? WHERE chunk_id=?", ("User: Gardening plans\nAssistant: Plant roses", "turn"),
+    )
+    await history_store._db.commit()
+    assert await history_store.search(user="alice@example.com", query="calculate", limit=5) == []
+    assert len(await history_store.search(user="alice@example.com", query="gardening", limit=5)) == 1
+    await history_store._db.execute(
+        "INSERT OR REPLACE INTO archive_chunks "
+        "(chunk_id, conversation_id, user, message_ids_json, text, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        ("turn", "calculation", "alice@example.com", "message-turn", "User: Invoice paid\nAssistant: Noted",
+         chat_archive_module._now_iso()),
+    )
+    await history_store._db.commit()
+    assert await history_store.search(user="alice@example.com", query="gardening", limit=5) == []
+    assert len(await history_store.search(user="alice@example.com", query="invoice", limit=5)) == 1
+    await history_store._db.execute("DELETE FROM archive_chunks WHERE chunk_id=?", ("turn",))
+    await history_store._db.commit()
+    assert await history_store.search(user="alice@example.com", query="invoice", limit=5) == []
+    # In particular, INSERT OR REPLACE must not leave orphaned postings even
+    # when the replacement changed the source rowid.
+    await history_store._db.execute(
+        "INSERT INTO archive_chunks_fts(archive_chunks_fts, rank) VALUES ('integrity-check', 1)",
+    )
+
+
+async def test_history_stemmed_match_snippet_shows_late_original_word(history_store):
+    await save_history_chunk(
+        history_store, "late-stem", "Unrelated setup. " * 70 + "Calculate 1250 × 1.08 = 1350.",
+    )
+    hits = await history_store.search(
+        user="alice@example.com", query="calculations", limit=5, snippet_chars=100,
+    )
+    assert "Calculate 1250" in hits[0].snippet
+    assert len(hits[0].snippet) <= 100
+
+
+async def test_history_keyword_query_cannot_inject_fts_operators(history_store):
+    await save_history_chunk(history_store, "calculate-only", "User: Calculate the total\nAssistant: 1350")
+    await save_history_chunk(history_store, "invoice-only", "User: Invoice paid\nAssistant: Noted")
+    await save_history_chunk(history_store, "both-terms", "User: Calculate the invoice\nAssistant: 1350")
+    hits = await history_store.search(
+        user="alice@example.com", query='calculate* OR "invoice"', limit=5,
+    )
+    assert [hit.chunk_id for hit in hits] == ["both-terms"]

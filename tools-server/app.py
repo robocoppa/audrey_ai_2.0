@@ -963,7 +963,8 @@ class ChatHistorySearchResponse(BaseModel):
         "requires a specific prior decision. Do not call to personalize "
         "ordinary answers or to repeat back recent context. Returns short "
         "snippets and conversation ids; never returns another user's data. "
-        "Combines exact keyword matching with semantic search. Keyword matches "
+        "Combines relevance-ranked English word matching with semantic search. "
+        "Word forms such as calculate/calculations can match. Keyword matches "
         "have match_type='keyword' and score=null; semantic scores are cosine similarities."
     ),
 )

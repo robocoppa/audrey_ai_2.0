@@ -2,7 +2,7 @@
 
 **Results, strengths, and failure modes from practical tests**
 
-Updated October 15, 2026 · Measurements collected July–October 2026
+Updated October 16, 2026 · Measurements collected July–October 2026
 
 This report compares local and hosted language models for writing, coding,
 answering from supplied documents, selecting tools, and interpreting images.
@@ -700,6 +700,16 @@ deployment is not evidence of a universal quality win. Rebuild every existing
 text index with matching input formatting; unchanged vector dimensions alone
 never make embedding spaces interchangeable.
 
+**Personal-retrieval follow-up, October 16:** two real stored records were
+missed despite correct ownership: a short saved fact scored **0.516** against a
+**0.60** cutoff, and a previous arithmetic exchange scored **0.403–0.433** against
+**0.62**. This confirms that the small synthetic calibration did not adequately
+cover deployed personal recall. No matched Nomic scores were collected for
+these queries, so this is not a demonstrated model regression. Separate word
+matching and ranking defects also caused misses; improving that retrieval code
+does not establish better embedding quality. The recommendation remains strongest
+for reference documents; a universal personal-recall improvement is unproven.
+
 The full [combined comparison](results/2026-10-15-embedding-documents-combined.json.gz)
 and [completed Nomic baselines](results/2026-10-15-140040-embedding-documents-baselines.json.gz)
 retain model identities, settings, timings and per-question rankings. The
@@ -728,8 +738,9 @@ Keep these limits visible:
 ## Sources and traceability
 
 This revision analyzes the October 15 router and embedding comparisons,
-including the larger four-candidate run and retrospective source-label repairs.
-No additional model calls were made during report writing.
+including the larger four-candidate run and retrospective source-label repairs,
+plus October 16 personal-retrieval diagnostics. Those live observations are not
+a matched model comparison. No additional model calls were made during report writing.
 Findings come from saved
 answers, machine-readable test results, runtime diagnostics, and attributed
 client observations. Older test evidence without full controlled settings is

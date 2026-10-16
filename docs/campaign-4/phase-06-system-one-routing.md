@@ -7,8 +7,10 @@ The unified Tower migration and service restart completed successfully October
 15, 2026. October 16 browser acceptance exposed memory/history lookup misses:
 correctly owned records existed but fell below semantic cutoffs. Literal lookup
 fixes are built. Memory search is user-accepted October 16. History still
-failed on full-question wording; its request-word correction is built, awaiting
-browser acceptance. The existing-file check and first IRS index remain pending.
+failed on full-question wording. Expanded regressions exposed word-form,
+ranking and substring-crowding gaps; those are fixed locally with a ranked
+English text index. Tower SQLite support is confirmed; browser acceptance is
+pending. The existing-file check and first IRS index remain pending.
 Do not repeat the migration.
 
 ## Decision
@@ -104,9 +106,12 @@ private failure tracebacks stay under that state's `diagnostics/` directory.
 ### Personal retrieval behavior
 
 Memory search checks whole-key spellings with spaces, underscores or hyphens
-before semantic fallback. History search combines literal English keyword
-matches from the saved archive with semantic results, including recently saved
-chunks awaiting vector indexing. Request phrasing such as "what did I ask you
+before semantic fallback. History search combines relevance-ranked English
+word matches from the saved archive with semantic results, including recently
+saved chunks awaiting vector indexing. SQLite FTS5 handles word forms such as
+calculate/calculations and whole-token matching before result limits. The
+derived index backfills existing chunks once and stays synchronized with source
+writes; no vector reindex is required. Request phrasing such as "what did I ask you
 to calculate" reduces to the topic word "calculate". Both paths preserve
 owner, deletion, purge and date visibility. Keyword history hits identify their match type and have no
 cosine score; semantic hits keep their measured score and existing cutoff.
@@ -115,20 +120,36 @@ evidence can answer; it must not masquerade as an empty archive.
 
 ### Remaining browser acceptance
 
-After deploying the repair, open **https://ai.builtryte.xyz**, Tools **Automatic**.
-Use the same account and the existing saved records; no upload or new memory
-write is needed:
+On Tower after pull, rebuild `custom-tools` and restart `audrey`, following the
+main plan's deploy table. Existing history receives its derived word index
+automatically; no UI build, upload or vector migration is needed.
 
-Memory search is accepted: the saved migration test phrase was retrieved
-correctly. Keep that check closed.
+Open **https://ai.builtryte.xyz**, Tools **Automatic**. Use a fresh conversation
+for each lookup and confirm successful `chat_history_search` activity. Memory
+search is already user-accepted and needs no retest.
 
-1. In a new conversation ask `Use chat_history_search to tell me what I
-   asked you to calculate`. Confirm the tool finds the earlier calculation,
-   **1250 × 1.08 = 1,350**, rather than saying nothing was saved.
-2. The existing-file check remains unreported: use `kb_search` to find a known
-   fact in an existing Ready file and confirm the expected fact and source.
+1. Ask `Use chat_history_search to tell me what I asked you to calculate`.
+   Expect the original **1250 × 1.08 = 1,350** exchange.
+2. Ask `Use chat_history_search to find my earlier arithmetic request. What
+   expression did I ask you to work out, and what was the answer?` Expect the
+   same original exchange. This tests paraphrased retrieval; passing local
+   storage tests does not establish this model-quality result.
+3. Seed one disposable chat: `For a temporary chat-history test, the fictional
+   lighthouse repair budget is 286 dollars and its inspection day is Tuesday.
+   Acknowledge only; do not save this as a memory.` Wait for its answer, then in
+   a new chat ask `Use chat_history_search to find my recent lighthouse repair
+   discussion. What was the budget and inspection day?` Expect **286 dollars,
+   Tuesday** without providing those answers in the lookup question.
+4. In a new chat, once, ask `Use chat_history_search to check whether we
+   previously planned a ZKQ-7149 volcanology seminar. If there is no matching
+   plan, say so without inventing one.` Expect no fabricated prior plan.
 
-Retest only the failed or unreported surfaces. Keep a failed run for diagnosis;
-do not rerun migration or the model comparison. After acceptance, retire these
-temporary browser instructions and continue [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md)
-with the first current-catalog IRS index, then 20C.
+Optional: archive only the disposable lighthouse seed and repeat its lookup.
+Archived conversations remain searchable; deletion has a separate exclusion
+contract covered by hermetic checks. Do not delete real history for this test.
+
+The existing-file `kb_search` acceptance remains unreported. Keep any failed
+run for diagnosis and do not repeat passed memory checks, migration or model
+benchmarks. Retire these temporary instructions after acceptance, then continue
+[Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) with its
+first current-catalog IRS index and 20C.
