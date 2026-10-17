@@ -9,8 +9,9 @@ correctly owned records existed but fell below semantic cutoffs. Literal lookup
 fixes are built. Memory search is user-accepted October 16. History still
 failed on full-question wording. Expanded regressions exposed word-form,
 ranking and substring-crowding gaps; those are fixed locally with a ranked
-English text index. Tower SQLite support is confirmed; browser acceptance is
-pending. The existing-file check and first IRS index remain pending.
+English text index. Tower deployment and the original/recent/absent checks are
+accepted. Only the arithmetic paraphrase remains unresolved. The existing-file
+check and first IRS index remain pending.
 Do not repeat the migration.
 
 ## Decision
@@ -118,38 +119,32 @@ cosine score; semantic hits keep their measured score and existing cutoff.
 An unavailable embedder produces a clear search error when no literal history
 evidence can answer; it must not masquerade as an empty archive.
 
-### Remaining browser acceptance
+### Remaining acceptance — arithmetic paraphrase only
 
-On Tower after pull, rebuild `custom-tools` and restart `audrey`, following the
-main plan's deploy table. Existing history receives its derived word index
-automatically; no UI build, upload or vector migration is needed.
+User acceptance October 16 passed memory lookup, the original calculation
+question, a newly seeded topic and an absent-topic check. Keep those checks
+closed. The paraphrased arithmetic question still failed; the run made three
+successful but empty searches. Existing records and keyword retrieval work.
 
-Open **https://ai.builtryte.xyz**, Tools **Automatic**. Use a fresh conversation
-for each lookup and confirm successful `chat_history_search` activity. Memory
-search is already user-accepted and needs no retest.
+Before another model or cutoff change, use `history_embedding_probe.py` through
+the existing foreground probe runner, targeting `custom-tools`. After pull this
+diagnostic needs no rebuild, restart, upload or vector migration. It freezes the
+known calculation owner's visible source chunks in RAM, honoring deletion,
+purge and retention. It refuses ambiguous ownership, an invisible original or
+more than 200 owner chunks. It labels the original calculation turn rather than
+later search questions in the same conversation.
 
-1. Ask `Use chat_history_search to tell me what I asked you to calculate`.
-   Expect the original **1250 × 1.08 = 1,350** exchange.
-2. Ask `Use chat_history_search to find my earlier arithmetic request. What
-   expression did I ask you to work out, and what was the answer?` Expect the
-   same original exchange. This tests paraphrased retrieval; passing local
-   storage tests does not establish this model-quality result.
-3. Seed one disposable chat: `For a temporary chat-history test, the fictional
-   lighthouse repair budget is 286 dollars and its inspection day is Tuesday.
-   Acknowledge only; do not save this as a memory.` Wait for its answer, then in
-   a new chat ask `Use chat_history_search to find my recent lighthouse repair
-   discussion. What was the budget and inspection day?` Expect **286 dollars,
-   Tuesday** without providing those answers in the lookup question.
-4. In a new chat, once, ask `Use chat_history_search to check whether we
-   previously planned a ZKQ-7149 volcanology seminar. If there is no matching
-   plan, say so without inventing one.` Expect no fabricated prior plan.
+Compare the three actual failed query strings plus the literal `calculate`
+control with configured Qwen4, legacy raw Nomic and correctly prefixed Nomic.
+Output contains only ranks, scores, counts and digests; source text, identities
+and queries stay out of the log. Qwen's configured cutoff is reported separately;
+Nomic scores do not inherit that cutoff. No source or vector index is written.
+This is a diagnostic of one positive exchange, not a model promotion test.
 
-Optional: archive only the disposable lighthouse seed and repeat its lookup.
-Archived conversations remain searchable; deletion has a separate exclusion
-contract covered by hermetic checks. Do not delete real history for this test.
-
-The existing-file `kb_search` acceptance remains unreported. Keep any failed
-run for diagnosis and do not repeat passed memory checks, migration or model
-benchmarks. Retire these temporary instructions after acceptance, then continue
-[Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) with its
+After diagnosis, repeat only the failed paraphrase in a fresh browser chat with
+Tools Automatic. Expect the original **1250 × 1.08 = 1,350** exchange and an
+actual `chat_history_search` call. The existing-file `kb_search` acceptance is
+still unreported. Do not repeat accepted checks or the completed migration.
+Retire this temporary diagnostic handoff after acceptance and continue
+[Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) with the
 first current-catalog IRS index and 20C.

@@ -709,6 +709,9 @@ these queries, so this is not a demonstrated model regression. Separate word
 matching and ranking defects also caused misses; improving that retrieval code
 does not establish better embedding quality. The recommendation remains strongest
 for reference documents; a universal personal-recall improvement is unproven.
+Follow-up application checks passed exact lookup, a new topic and an absent
+topic; an arithmetic paraphrase still returned no result after three searches.
+Matched Nomic/Qwen ranks on that failure have not yet been measured.
 
 The full [combined comparison](results/2026-10-15-embedding-documents-combined.json.gz)
 and [completed Nomic baselines](results/2026-10-15-140040-embedding-documents-baselines.json.gz)

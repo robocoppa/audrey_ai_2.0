@@ -29,11 +29,11 @@ they are not ongoing task lists.
   4B now serves all text retrieval at the user's explicit request. Tower migration
   and service restart passed October 15; source SQLite and image vectors remain
   unchanged, with private backups retained. [Phase 06](phase-06-system-one-routing.md)
-  holds existing-data acceptance: memory search is user-accepted October 16.
-  History's full-question lookup still failed; the deployed direct keyword
-  lookup finds the saved calculation. Expanded regressions found word-form,
-  ranking and substring-crowding gaps; ranked English text search fixes are built.
-  Tower SQLite support is confirmed; targeted browser acceptance remains pending.
+  holds existing-data acceptance: memory search and history's original-query,
+  recent-topic and absent-topic checks are user-accepted October 16. Ranked
+  English text search is deployed. The arithmetic paraphrase still returned no
+  results across three real tool queries; a bounded, read-only Qwen/Nomic
+  comparison is prepared before changing semantic admission or the model.
   Semantic cutoffs stay unchanged. Finish history repair and the outstanding
   file check
   before the first IRS index; no migration or model-comparison rerun is queued. Model
@@ -122,9 +122,9 @@ they are not ongoing task lists.
 
 ## Remaining work
 
-1. Deploy and accept Phase 06's history-query correction using the already
-   saved calculation, plus New conversation autofocus. Memory search is passed;
-   the existing-file check remains unreported. Migration and restart are complete.
+1. Resolve Phase 06's remaining history paraphrase using the matched model
+   diagnostic; preserve all accepted browser checks. New conversation focus and
+   the existing-file check remain unreported. Migration and restart are complete.
    Then build the first current-catalog IRS
    index and accept one cited document-content search in the browser (20B.2).
    Follow with 20C enforced private processing, 20D's tax workflow and targeted
