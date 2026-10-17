@@ -1,0 +1,1132 @@
+{
+  "schema": 2,
+  "status": "measured",
+  "measurement_status": "completed",
+  "created_at": "2026-10-17T14:47:11.061104+00:00",
+  "scope": "Matched public English document layouts; reused questions/sources, not independent new evidence",
+  "provenance": {
+    "ollama_version": "0.40.4",
+    "installed_models": {
+      "qwen3-embedding:4b": {
+        "digest": "df5bd2e3c74cd8d069d21dc038f1b359fcdc9458fce1c99bd43c9eb1518ff907",
+        "bytes": 2496704041,
+        "details": {
+          "parent_model": "/Users/ollama/.ollama/models/blobs/sha256-2b0cf8f17b4c723c27303015383c27ec4bf2d8314bb677d05e920dd70bb0f16b",
+          "format": "gguf",
+          "family": "qwen3",
+          "families": [
+            "qwen3"
+          ],
+          "parameter_size": "4.0B",
+          "quantization_level": "Q4_K_M",
+          "context_length": 40960,
+          "embedding_length": 2560,
+          "runner": "ggml"
+        },
+        "capabilities": [
+          "tools",
+          "embedding"
+        ],
+        "model_info": {
+          "general.architecture": "qwen3",
+          "qwen3.context_length": 40960,
+          "qwen3.embedding_length": 2560
+        }
+      },
+      "nomic-embed-text:latest": {
+        "digest": "0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f",
+        "bytes": 274302450,
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "nomic-bert",
+          "families": [
+            "nomic-bert"
+          ],
+          "parameter_size": "137M",
+          "quantization_level": "F16",
+          "context_length": 2048,
+          "embedding_length": 768,
+          "runner": "ggml"
+        },
+        "capabilities": [
+          "embedding"
+        ],
+        "model_info": {
+          "general.architecture": "nomic-bert",
+          "nomic-bert.context_length": 2048,
+          "nomic-bert.embedding_length": 768
+        }
+      }
+    }
+  },
+  "settings": {
+    "rounds": 1,
+    "batch_size": 16,
+    "candidate_profile": "qwen3",
+    "baselines_only": false,
+    "documents_only": true,
+    "candidate_models": [
+      "qwen3-embedding:4b"
+    ],
+    "cold_samples": 0,
+    "stress_batches64": 0,
+    "estimated_embedding_requests": 581,
+    "maximum_embedding_requests": 4096,
+    "timeout_seconds": 120.0,
+    "keep_alive": "24h"
+  },
+  "embedding_calls": 581,
+  "errors": [],
+  "limitations": [
+    "Same public sources/questions reused across layouts; not independent new benchmark evidence",
+    "Exact in-memory dense/RRF ranking before per-file diversity; not native end-to-end top-k or Qdrant ANN",
+    "No cold/stress samples or explicit unloads; timing includes uncontrolled current residency",
+    "Fixed configured Qwen policy diagnostics do not calibrate Nomic's score space",
+    "No private data, production index writes, model promotion or setting changes"
+  ],
+  "configured_profiles": {
+    "text": {
+      "embedding_model": "qwen3-embedding:4b",
+      "embedding_digest": "df5bd2e3c74cd8d069d21dc038f1b359fcdc9458fce1c99bd43c9eb1518ff907",
+      "embedding_dimensions": 2560,
+      "document_prefix": "",
+      "query_prefix": "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ",
+      "embedding_truncate": false,
+      "embedding_normalization": "unit_l2_v1",
+      "embedding_identity": "254758f432bee00bb658ce9f2e40dadc07d5e8725d953beec35c09dcefb35339"
+    },
+    "history": {
+      "embedding_model": "nomic-embed-text:latest",
+      "embedding_digest": "0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f",
+      "embedding_dimensions": 768,
+      "document_prefix": "search_document: ",
+      "query_prefix": "search_query: ",
+      "embedding_truncate": false,
+      "embedding_normalization": "unit_l2_v1",
+      "embedding_identity": "fb442c3e435a4fad2b0abaf0f672c2e124a5a5c2c046d879f391fee704196793"
+    }
+  },
+  "restoration": {
+    "warm_requests_completed": [
+      "qwen3-embedding:4b",
+      "nomic-embed-text:latest"
+    ],
+    "keep_alive": "24h",
+    "explicit_unloads": 0,
+    "resident_models_after": [
+      "nomic-embed-text:latest",
+      "qwen3-embedding:4b"
+    ],
+    "both_configured_observed": true
+  },
+  "quality_recommendation": {
+    "status": "comparison_completed",
+    "quality_findings": true,
+    "automatic_promotion": false,
+    "migration_performed": false,
+    "meaning": "Compare paired ranks and per-model calibrated admission separately; configured Qwen thresholds are diagnostics, not Nomic calibration"
+  },
+  "fixtures": {
+    "public": {
+      "sha256": "dbb0740da750dfbee3f7ec22315f8683c5c8251978d67d4ee9c7e3f4c908f74a",
+      "input_sha256": "dc886546828587cc56f032ffec318ea27c6477c945ceb30564228e6a880676ac",
+      "documents": 336,
+      "queries": 80,
+      "layout": {
+        "chunk_policy": {
+          "implementation": "audrey.references.indexing.chunks",
+          "chars": 2400,
+          "overlap": 200,
+          "page_preserving": true,
+          "text_normalization": "none"
+        },
+        "label_policy": {
+          "created_before_model_measurement": false,
+          "tested_models_generated_gold": false,
+          "revision": {
+            "date": "2026-10-15",
+            "original_fixture_sha256": "c435736dcfaeeb1d484929b26384d34ada88b7e8de062610265ba0325a13c20b",
+            "retrospective": true,
+            "model_inputs_changed": false,
+            "thresholds_tuned_on_holdout": false,
+            "added_passages": 33,
+            "affected_queries": 27,
+            "limits": [
+              "The reviewed labels are not an exhaustive annotation of every one of the 336 public passages; all observed candidate top-three and admission alternatives were inspected.",
+              "This is a retrospective repair prompted by observed retrievals, so preserve the original result and distinguish rescored results from prospectively frozen-label evaluation.",
+              "No-answer admissions are related-context retrievals without the requested detail, not an observed hallucinated final answer.",
+              "A zero-admission and zero-wrong-first gate is stricter than comparative model improvement; do not silently weaken it or tune thresholds on holdout to manufacture acceptance."
+            ]
+          }
+        },
+        "scope": "Frozen official English IRS source-reading retrieval benchmark; not tax advice or return preparation acceptance"
+      }
+    },
+    "upload": {
+      "sha256": "188fb226b51fb9bcb6c25aa3d9db2f0c46033ca3ec903c1ea9ca04c25116a81c",
+      "input_sha256": "db41233ee20a880bf8fe06c845522bd262117f6fc9bed8420e71a55a7e36e905",
+      "documents": 168,
+      "queries": 80,
+      "layout": {
+        "chunk_policy": {
+          "extraction": "audrey.kb.extract.extract_text",
+          "implementation": "audrey.kb.chunk.chunk_text",
+          "tokens": 1000,
+          "overlap_tokens": 100,
+          "tokenizer": "cl100k_base",
+          "page_preserving": false,
+          "offset_basis": "character offsets in the complete production extracted document",
+          "page_span": "first/last PDF source page overlapped by the upload window"
+        },
+        "label_policy": {
+          "original_reviewed_policy": "Same reviewed policy as public fixture above",
+          "layout_labels_frozen_before_new_model_calls": true,
+          "new_independent_questions": false,
+          "new_model_calls_during_build": 0,
+          "all_original_evidence_required": true,
+          "limitation": "Existing alternative labels were retrospectively reviewed; changing chunk layout does not create an independent annotation or source holdout"
+        },
+        "derivation": {
+          "reviewed_fixture": "embedding_real_documents.json",
+          "reviewed_fixture_sha256": "dbb0740da750dfbee3f7ec22315f8683c5c8251978d67d4ee9c7e3f4c908f74a",
+          "questions_preserved": 80,
+          "required_evidence_preserved": 96,
+          "source_bytes_verified": true
+        },
+        "scope": "Production upload-layout extension of frozen public IRS source-reading cases; not independent new questions or tax advice"
+      }
+    }
+  },
+  "paired_holdout": [
+    {
+      "layout": "reference",
+      "baseline": "raw",
+      "method": "dense",
+      "positive_queries": 30,
+      "rank_wins": 16,
+      "rank_losses": 1,
+      "at_depth": {
+        "1": {
+          "wins": 14,
+          "losses": 1
+        },
+        "3": {
+          "wins": 8,
+          "losses": 0
+        },
+        "5": {
+          "wins": 6,
+          "losses": 0
+        }
+      },
+      "rank_changes": [
+        {
+          "id": "holdout-p527-32",
+          "qwen_rank": 1,
+          "baseline_rank": 5
+        },
+        {
+          "id": "holdout-p527-33",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p527-35",
+          "qwen_rank": 1,
+          "baseline_rank": 6
+        },
+        {
+          "id": "holdout-p527-36",
+          "qwen_rank": 1,
+          "baseline_rank": 15
+        },
+        {
+          "id": "holdout-p527-37",
+          "qwen_rank": 1,
+          "baseline_rank": 9
+        },
+        {
+          "id": "holdout-p527-38",
+          "qwen_rank": 1,
+          "baseline_rank": 20
+        },
+        {
+          "id": "holdout-p527-40",
+          "qwen_rank": 1,
+          "baseline_rank": 4
+        },
+        {
+          "id": "holdout-p527-44",
+          "qwen_rank": 2,
+          "baseline_rank": 6
+        },
+        {
+          "id": "holdout-p969-46",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        },
+        {
+          "id": "holdout-p969-47",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-48",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        },
+        {
+          "id": "holdout-p969-49",
+          "qwen_rank": 2,
+          "baseline_rank": 7
+        },
+        {
+          "id": "holdout-p969-51",
+          "qwen_rank": 2,
+          "baseline_rank": 1
+        },
+        {
+          "id": "holdout-p969-55",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-56",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-59",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-60",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        }
+      ]
+    },
+    {
+      "layout": "reference",
+      "baseline": "raw",
+      "method": "hybrid",
+      "positive_queries": 30,
+      "rank_wins": 13,
+      "rank_losses": 1,
+      "at_depth": {
+        "1": {
+          "wins": 10,
+          "losses": 1
+        },
+        "3": {
+          "wins": 2,
+          "losses": 0
+        },
+        "5": {
+          "wins": 0,
+          "losses": 0
+        }
+      },
+      "rank_changes": [
+        {
+          "id": "holdout-p527-32",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p527-35",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        },
+        {
+          "id": "holdout-p527-36",
+          "qwen_rank": 1,
+          "baseline_rank": 4
+        },
+        {
+          "id": "holdout-p527-37",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p527-38",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        },
+        {
+          "id": "holdout-p527-44",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-48",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-49",
+          "qwen_rank": 2,
+          "baseline_rank": 5
+        },
+        {
+          "id": "holdout-p969-56",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-58",
+          "qwen_rank": 2,
+          "baseline_rank": 1
+        },
+        {
+          "id": "holdout-p969-59",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-60",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        }
+      ]
+    },
+    {
+      "layout": "documents",
+      "baseline": "raw",
+      "method": "dense",
+      "positive_queries": 30,
+      "rank_wins": 13,
+      "rank_losses": 2,
+      "at_depth": {
+        "1": {
+          "wins": 11,
+          "losses": 1
+        },
+        "3": {
+          "wins": 7,
+          "losses": 0
+        },
+        "5": {
+          "wins": 3,
+          "losses": 1
+        }
+      },
+      "rank_changes": [
+        {
+          "id": "holdout-p527-32",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p527-36",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p527-37",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p527-38",
+          "qwen_rank": 1,
+          "baseline_rank": 5
+        },
+        {
+          "id": "holdout-p527-42",
+          "qwen_rank": 1,
+          "baseline_rank": 10
+        },
+        {
+          "id": "holdout-p527-43",
+          "qwen_rank": 1,
+          "baseline_rank": 4
+        },
+        {
+          "id": "holdout-p527-44",
+          "qwen_rank": 1,
+          "baseline_rank": 6
+        },
+        {
+          "id": "holdout-p969-46",
+          "qwen_rank": 2,
+          "baseline_rank": 9
+        },
+        {
+          "id": "holdout-p969-47",
+          "qwen_rank": 6,
+          "baseline_rank": 4
+        },
+        {
+          "id": "holdout-p969-49",
+          "qwen_rank": 1,
+          "baseline_rank": 4
+        },
+        {
+          "id": "holdout-p969-50",
+          "qwen_rank": 3,
+          "baseline_rank": 1
+        },
+        {
+          "id": "holdout-p969-53",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-58",
+          "qwen_rank": 1,
+          "baseline_rank": 4
+        },
+        {
+          "id": "holdout-p969-59",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        }
+      ]
+    },
+    {
+      "layout": "documents",
+      "baseline": "raw",
+      "method": "hybrid",
+      "positive_queries": 30,
+      "rank_wins": 8,
+      "rank_losses": 2,
+      "at_depth": {
+        "1": {
+          "wins": 7,
+          "losses": 1
+        },
+        "3": {
+          "wins": 1,
+          "losses": 1
+        },
+        "5": {
+          "wins": 0,
+          "losses": 0
+        }
+      },
+      "rank_changes": [
+        {
+          "id": "holdout-p527-32",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p527-36",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p527-42",
+          "qwen_rank": 1,
+          "baseline_rank": 4
+        },
+        {
+          "id": "holdout-p527-44",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        },
+        {
+          "id": "holdout-p969-47",
+          "qwen_rank": 4,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-49",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        },
+        {
+          "id": "holdout-p969-50",
+          "qwen_rank": 2,
+          "baseline_rank": 1
+        },
+        {
+          "id": "holdout-p969-53",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-59",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        }
+      ]
+    },
+    {
+      "layout": "reference",
+      "baseline": "prefixed",
+      "method": "dense",
+      "positive_queries": 30,
+      "rank_wins": 6,
+      "rank_losses": 1,
+      "at_depth": {
+        "1": {
+          "wins": 4,
+          "losses": 1
+        },
+        "3": {
+          "wins": 4,
+          "losses": 0
+        },
+        "5": {
+          "wins": 3,
+          "losses": 0
+        }
+      },
+      "rank_changes": [
+        {
+          "id": "holdout-p527-32",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        },
+        {
+          "id": "holdout-p527-36",
+          "qwen_rank": 1,
+          "baseline_rank": 9
+        },
+        {
+          "id": "holdout-p527-44",
+          "qwen_rank": 2,
+          "baseline_rank": 9
+        },
+        {
+          "id": "holdout-p969-46",
+          "qwen_rank": 1,
+          "baseline_rank": 4
+        },
+        {
+          "id": "holdout-p969-49",
+          "qwen_rank": 2,
+          "baseline_rank": 7
+        },
+        {
+          "id": "holdout-p969-51",
+          "qwen_rank": 2,
+          "baseline_rank": 1
+        },
+        {
+          "id": "holdout-p969-56",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        }
+      ]
+    },
+    {
+      "layout": "reference",
+      "baseline": "prefixed",
+      "method": "hybrid",
+      "positive_queries": 30,
+      "rank_wins": 6,
+      "rank_losses": 0,
+      "at_depth": {
+        "1": {
+          "wins": 3,
+          "losses": 0
+        },
+        "3": {
+          "wins": 2,
+          "losses": 0
+        },
+        "5": {
+          "wins": 0,
+          "losses": 0
+        }
+      },
+      "rank_changes": [
+        {
+          "id": "holdout-p527-36",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        },
+        {
+          "id": "holdout-p527-44",
+          "qwen_rank": 1,
+          "baseline_rank": 5
+        },
+        {
+          "id": "holdout-p969-49",
+          "qwen_rank": 2,
+          "baseline_rank": 5
+        },
+        {
+          "id": "holdout-p969-56",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        }
+      ]
+    },
+    {
+      "layout": "documents",
+      "baseline": "prefixed",
+      "method": "dense",
+      "positive_queries": 30,
+      "rank_wins": 15,
+      "rank_losses": 2,
+      "at_depth": {
+        "1": {
+          "wins": 12,
+          "losses": 1
+        },
+        "3": {
+          "wins": 7,
+          "losses": 0
+        },
+        "5": {
+          "wins": 4,
+          "losses": 1
+        }
+      },
+      "rank_changes": [
+        {
+          "id": "holdout-p527-32",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p527-34",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p527-36",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        },
+        {
+          "id": "holdout-p527-38",
+          "qwen_rank": 1,
+          "baseline_rank": 4
+        },
+        {
+          "id": "holdout-p527-40",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p527-41",
+          "qwen_rank": 2,
+          "baseline_rank": 6
+        },
+        {
+          "id": "holdout-p527-42",
+          "qwen_rank": 1,
+          "baseline_rank": 11
+        },
+        {
+          "id": "holdout-p527-43",
+          "qwen_rank": 1,
+          "baseline_rank": 4
+        },
+        {
+          "id": "holdout-p527-44",
+          "qwen_rank": 1,
+          "baseline_rank": 7
+        },
+        {
+          "id": "holdout-p969-46",
+          "qwen_rank": 2,
+          "baseline_rank": 7
+        },
+        {
+          "id": "holdout-p969-47",
+          "qwen_rank": 6,
+          "baseline_rank": 4
+        },
+        {
+          "id": "holdout-p969-49",
+          "qwen_rank": 1,
+          "baseline_rank": 4
+        },
+        {
+          "id": "holdout-p969-50",
+          "qwen_rank": 3,
+          "baseline_rank": 1
+        },
+        {
+          "id": "holdout-p969-53",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        },
+        {
+          "id": "holdout-p969-58",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        },
+        {
+          "id": "holdout-p969-59",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        }
+      ]
+    },
+    {
+      "layout": "documents",
+      "baseline": "prefixed",
+      "method": "hybrid",
+      "positive_queries": 30,
+      "rank_wins": 9,
+      "rank_losses": 2,
+      "at_depth": {
+        "1": {
+          "wins": 8,
+          "losses": 1
+        },
+        "3": {
+          "wins": 1,
+          "losses": 1
+        },
+        "5": {
+          "wins": 0,
+          "losses": 0
+        }
+      },
+      "rank_changes": [
+        {
+          "id": "holdout-p527-32",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p527-34",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p527-42",
+          "qwen_rank": 1,
+          "baseline_rank": 4
+        },
+        {
+          "id": "holdout-p527-44",
+          "qwen_rank": 1,
+          "baseline_rank": 3
+        },
+        {
+          "id": "holdout-p969-47",
+          "qwen_rank": 4,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-49",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-50",
+          "qwen_rank": 2,
+          "baseline_rank": 1
+        },
+        {
+          "id": "holdout-p969-53",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-57",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        },
+        {
+          "id": "holdout-p969-59",
+          "qwen_rank": 1,
+          "baseline_rank": 2
+        }
+      ]
+    }
+  ],
+  "paired_change_scope": "Holdout first repeat; listed IDs change top1/3/5 membership; aggregate rank wins/losses include every positive question",
+  "configured_qwen_policy_diagnostic": {
+    "not_a_cross_model_calibration": true,
+    "policies": {
+      "reference": {
+        "min_dense_score": 0.54,
+        "min_term_overlap": null
+      },
+      "documents": {
+        "min_dense_score": 0.53,
+        "min_term_overlap": 0.7
+      }
+    }
+  },
+  "results": [
+    {
+      "arm": "candidate",
+      "model": "qwen3-embedding:4b",
+      "status": "measured",
+      "comparable": true,
+      "format": {
+        "document_prefix": "",
+        "query_prefix": "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
+      },
+      "dimensions": 2560,
+      "warm_queries": {
+        "samples": 160,
+        "p50_seconds": 0.018022,
+        "p95_seconds": 0.019677
+      },
+      "holdout_layouts": [
+        {
+          "layout": "reference",
+          "documents": 162,
+          "positive_queries": 30,
+          "negative_queries": 10,
+          "ranking_before_admission": {
+            "dense": {
+              "hits_at_1": 25,
+              "hits_at_3": 30,
+              "hits_at_5": 30,
+              "mrr": 0.916667
+            },
+            "hybrid": {
+              "hits_at_1": 25,
+              "hits_at_3": 29,
+              "hits_at_5": 29,
+              "mrr": 0.902778
+            }
+          },
+          "own_calibrated_policy": {
+            "min_dense_score": 0.54,
+            "min_term_overlap": 1.01,
+            "calibration_feasible": false,
+            "supported_top3": 29,
+            "negative_admissions": 2,
+            "wrong_positive_top1": 5,
+            "wrong_positive_hits_top3": 40,
+            "positive_rejected": 1
+          },
+          "configured_qwen_policy_diagnostic": {
+            "supported_top3": 29,
+            "negative_admissions": 2,
+            "wrong_positive_top1": 5,
+            "wrong_positive_hits_top3": 40,
+            "positive_rejected": 1
+          }
+        },
+        {
+          "layout": "documents",
+          "documents": 79,
+          "positive_queries": 30,
+          "negative_queries": 10,
+          "ranking_before_admission": {
+            "dense": {
+              "hits_at_1": 25,
+              "hits_at_3": 29,
+              "hits_at_5": 29,
+              "mrr": 0.9
+            },
+            "hybrid": {
+              "hits_at_1": 26,
+              "hits_at_3": 28,
+              "hits_at_5": 29,
+              "mrr": 0.9125
+            }
+          },
+          "own_calibrated_policy": {
+            "min_dense_score": 0.48,
+            "min_term_overlap": 1.01,
+            "calibration_feasible": false,
+            "supported_top3": 27,
+            "negative_admissions": 5,
+            "wrong_positive_top1": 4,
+            "wrong_positive_hits_top3": 49,
+            "positive_rejected": 1
+          },
+          "configured_qwen_policy_diagnostic": {
+            "supported_top3": 27,
+            "negative_admissions": 2,
+            "wrong_positive_top1": 4,
+            "wrong_positive_hits_top3": 45,
+            "positive_rejected": 2
+          }
+        }
+      ]
+    },
+    {
+      "arm": "prefixed",
+      "model": "nomic-embed-text:latest",
+      "status": "measured",
+      "comparable": true,
+      "format": {
+        "document_prefix": "search_document: ",
+        "query_prefix": "search_query: "
+      },
+      "dimensions": 768,
+      "warm_queries": {
+        "samples": 160,
+        "p50_seconds": 0.033508,
+        "p95_seconds": 0.03626
+      },
+      "holdout_layouts": [
+        {
+          "layout": "reference",
+          "documents": 162,
+          "positive_queries": 30,
+          "negative_queries": 10,
+          "ranking_before_admission": {
+            "dense": {
+              "hits_at_1": 22,
+              "hits_at_3": 26,
+              "hits_at_5": 27,
+              "mrr": 0.814947
+            },
+            "hybrid": {
+              "hits_at_1": 22,
+              "hits_at_3": 27,
+              "hits_at_5": 29,
+              "mrr": 0.820972
+            }
+          },
+          "own_calibrated_policy": {
+            "min_dense_score": 0.68,
+            "min_term_overlap": 0.5,
+            "calibration_feasible": false,
+            "supported_top3": 27,
+            "negative_admissions": 6,
+            "wrong_positive_top1": 8,
+            "wrong_positive_hits_top3": 56,
+            "positive_rejected": 0
+          },
+          "configured_qwen_policy_diagnostic": {
+            "supported_top3": 27,
+            "negative_admissions": 10,
+            "wrong_positive_top1": 8,
+            "wrong_positive_hits_top3": 58,
+            "positive_rejected": 0
+          }
+        },
+        {
+          "layout": "documents",
+          "documents": 79,
+          "positive_queries": 30,
+          "negative_queries": 10,
+          "ranking_before_admission": {
+            "dense": {
+              "hits_at_1": 14,
+              "hits_at_3": 22,
+              "hits_at_5": 26,
+              "mrr": 0.629221
+            },
+            "hybrid": {
+              "hits_at_1": 19,
+              "hits_at_3": 28,
+              "hits_at_5": 29,
+              "mrr": 0.788333
+            }
+          },
+          "own_calibrated_policy": {
+            "min_dense_score": 0.72,
+            "min_term_overlap": 0.5,
+            "calibration_feasible": false,
+            "supported_top3": 28,
+            "negative_admissions": 9,
+            "wrong_positive_top1": 10,
+            "wrong_positive_hits_top3": 49,
+            "positive_rejected": 1
+          },
+          "configured_qwen_policy_diagnostic": {
+            "supported_top3": 28,
+            "negative_admissions": 10,
+            "wrong_positive_top1": 11,
+            "wrong_positive_hits_top3": 54,
+            "positive_rejected": 0
+          }
+        }
+      ]
+    },
+    {
+      "arm": "raw",
+      "model": "nomic-embed-text:latest",
+      "status": "measured",
+      "comparable": true,
+      "format": {
+        "document_prefix": "",
+        "query_prefix": ""
+      },
+      "dimensions": 768,
+      "warm_queries": {
+        "samples": 160,
+        "p50_seconds": 0.032816,
+        "p95_seconds": 0.036128
+      },
+      "holdout_layouts": [
+        {
+          "layout": "reference",
+          "documents": 162,
+          "positive_queries": 30,
+          "negative_queries": 10,
+          "ranking_before_admission": {
+            "dense": {
+              "hits_at_1": 12,
+              "hits_at_3": 22,
+              "hits_at_5": 24,
+              "mrr": 0.588466
+            },
+            "hybrid": {
+              "hits_at_1": 16,
+              "hits_at_3": 27,
+              "hits_at_5": 29,
+              "mrr": 0.711528
+            }
+          },
+          "own_calibrated_policy": {
+            "min_dense_score": 0.62,
+            "min_term_overlap": 0.5,
+            "calibration_feasible": false,
+            "supported_top3": 28,
+            "negative_admissions": 8,
+            "wrong_positive_top1": 14,
+            "wrong_positive_hits_top3": 55,
+            "positive_rejected": 0
+          },
+          "configured_qwen_policy_diagnostic": {
+            "supported_top3": 27,
+            "negative_admissions": 9,
+            "wrong_positive_top1": 14,
+            "wrong_positive_hits_top3": 58,
+            "positive_rejected": 0
+          }
+        },
+        {
+          "layout": "documents",
+          "documents": 79,
+          "positive_queries": 30,
+          "negative_queries": 10,
+          "ranking_before_admission": {
+            "dense": {
+              "hits_at_1": 15,
+              "hits_at_3": 22,
+              "hits_at_5": 27,
+              "mrr": 0.658148
+            },
+            "hybrid": {
+              "hits_at_1": 20,
+              "hits_at_3": 28,
+              "hits_at_5": 29,
+              "mrr": 0.799306
+            }
+          },
+          "own_calibrated_policy": {
+            "min_dense_score": 0.7,
+            "min_term_overlap": 0.5,
+            "calibration_feasible": false,
+            "supported_top3": 28,
+            "negative_admissions": 9,
+            "wrong_positive_top1": 9,
+            "wrong_positive_hits_top3": 48,
+            "positive_rejected": 1
+          },
+          "configured_qwen_policy_diagnostic": {
+            "supported_top3": 28,
+            "negative_admissions": 9,
+            "wrong_positive_top1": 10,
+            "wrong_positive_hits_top3": 53,
+            "positive_rejected": 0
+          }
+        }
+      ]
+    }
+  ]
+}

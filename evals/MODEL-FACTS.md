@@ -2,7 +2,7 @@
 
 **Results, strengths, and failure modes from practical tests**
 
-Updated October 16, 2026 · Measurements collected July–October 2026
+Updated October 17, 2026 · Measurements collected July–October 2026
 
 This report compares local and hosted language models for writing, coding,
 answering from supplied documents, selecting tools, and interpreting images.
@@ -22,12 +22,12 @@ conclusion. It is a small practical study, not a general leaderboard.
 - **Qwen 3.5 4B was the best fit for lightweight request classification on the
   tested hardware.** Clef classified well but required much more memory and
   loading time; the smallest Tev model frequently escalated simple requests.
-- **Qwen3 Embedding 4B gave the strongest practical reference-retrieval result.**
-  It improved on correctly prefixed Nomic; 8B added cost without improving the
-  headline counts. Nomic ranked one real conversation exchange higher on four
-  matched lookups; the document advantage did not extend to that history example.
-  Gemma's early synthetic advantage narrowed on real documents. No model reliably
-  rejected unsupported details.
+- **Qwen3 Embedding 4B ranked document evidence better than Nomic.** A matched
+  follow-up confirmed this with both page-based and upload-style chunks; 8B
+  added cost without improving earlier headline counts. Nomic ranked one real
+  conversation exchange higher on four matched lookups, supporting separate
+  choices for documents and history. Gemma's early synthetic advantage narrowed
+  on real documents. No model reliably rejected unsupported details.
 - **Evidence for current Kimi K3 and GLM 5.3 answer quality remains limited.**
   Successful function calls do not establish good writing or reasoning, and
   older Kimi/GLM results cannot be transferred to their successors.
@@ -41,7 +41,7 @@ Local tests used a host with **two RTX 3090 Ti GPUs, 24 GB each**. Runtime memor
 needs exceeding the combined 48 GB require slower main memory or cause failure.
 Even models that fit can compete with other loaded models. Hosted-model timings
 also include network and provider conditions. Earlier September–October decision
-tests used **Ollama 0.35.0–0.35.1**; the October 15 router and retrieval
+tests used **Ollama 0.35.0–0.35.1**; the October 15–17 router and retrieval
 comparisons used **0.40.4**. Ollama serves models locally and through hosted tags.
 Exact tested tags are retained because `latest` can change over time.
 Immutable weight identifiers were not consistently recorded, which limits
@@ -691,16 +691,14 @@ retrieved passages, not observed fabricated answers. A related passage may omit
 the requested year, amount or exception; filters and reading the cited evidence
 remain necessary. Completed measurement is not a passed promotion gate.
 
-**Recommendation:** Qwen 4B is the strongest reference-retrieval choice in this
-comparison. Qwen 8B's extra cost bought no improvement on the headline counts;
-Gemma remains attractive for fast warm queries but did not establish a broad
-quality upgrade. Using Qwen 4B as one common embedder is a reasonable operational
-choice when simplifying a small deployment matters, with explicit trade-offs:
-the personal fixtures are small, memory recall at the calibrated cutoff retained
-6/8 positives, indexing is slower and GPU residency is larger. A single-model
-deployment is not evidence of a universal quality win. Rebuild every existing
-text index with matching input formatting; unchanged vector dimensions alone
-never make embedding spaces interchangeable.
+**Recommendation:** Qwen 4B is the strongest document-retrieval choice in these
+tests. Qwen 8B's extra cost bought no improvement on the headline counts; Gemma
+remains attractive for fast warm queries but did not establish a broad quality
+upgrade. Personal recall needs separate evidence: the invented memory fixture
+retained only 6/8 positives at the calibrated cutoff, and the real-history
+follow-up below favors Nomic. Qwen also indexes more slowly and uses more GPU
+memory. Rebuild an index when changing its model or input format; equal vector
+dimensions do not make embedding spaces interchangeable.
 
 **Personal-retrieval follow-up, October 16:** two real stored records were
 missed despite correct ownership: a short saved fact scored **0.516** against a
@@ -737,6 +735,49 @@ different embedders for documents and conversation history rather than assuming
 a universal upgrade. It does not justify undoing Qwen's measured document gains
 or changing already accepted saved-memory behavior.
 
+### Matched document double-check, October 17
+
+A [matched comparison](results/2026-10-17-document-embedding-comparison.json)
+retested Qwen 4B against both Nomic formats in one run. It reused the four
+publications and 80 questions above, comparing **336 page-based reference
+chunks** with **168 upload-style chunks** of 1,000 tokens and 100-token overlap.
+Upload chunks can cross pages. Calibration still used different publications
+from the test set. The same 30 answerable test questions appear in each layout;
+this tests layout sensitivity, not 60 independent examples or new subject areas.
+
+Each cell gives **correct passage first / within three**, out of 30, before
+threshold filtering:
+
+| Layout and retrieval | Qwen 4B | Nomic prefixed | Nomic raw |
+|---|---:|---:|---:|
+| Page-based, dense | 25 / 30 | 22 / 26 | 12 / 22 |
+| Page-based, hybrid | 25 / 29 | 22 / 27 | 16 / 27 |
+| Upload-style, dense | 25 / 29 | 14 / 22 | 15 / 22 |
+| Upload-style, hybrid | 26 / 28 | 19 / 28 | 20 / 28 |
+
+**Keep Qwen for documents and Nomic for conversation history.** Qwen ranked
+upload evidence substantially better than correctly prefixed Nomic: 15 improved
+dense ranks versus two worse; nine improved hybrid ranks versus two worse.
+Hybrid upload retrieval tied within three, so that gain is earlier evidence,
+not higher recall at every depth. Raw Nomic also trailed on first results.
+
+**Unsupported-detail rejection remains unresolved.** No model/layout met the
+calibration target. The fallback settings prioritize retaining supported
+questions; they are not validated deployment settings. On the ten unsupported
+test questions per layout, these settings admitted related but insufficient
+material for Qwen **2/10 page-based, 5/10 upload-style**, versus prefixed Nomic
+**6/10 and 9/10**. The existing Qwen upload policy admitted **2/10**; do not
+replace it with the test's fitted lower cutoff. These are retrieval errors,
+not observed fabricated final answers.
+
+All **581 embedding requests completed without errors**. Warm query medians
+were **18 ms for Qwen and 33–34 ms for Nomic** under uncontrolled current
+residency; no new cold-load or ingestion-speed comparison was made. Both serving
+models were observed resident afterward. Ranking used exact in-memory retrieval
+before per-file diversity filtering, not a deployed vector-index or answer test.
+The reused labels retain their retrospective-review limits. No production
+settings or indexes changed; exit 1 denotes the quality findings above.
+
 The full [combined comparison](results/2026-10-15-embedding-documents-combined.json.gz)
 and [completed Nomic baselines](results/2026-10-15-140040-embedding-documents-baselines.json.gz)
 retain model identities, settings, timings and per-question rankings. The
@@ -764,12 +805,14 @@ Keep these limits visible:
 
 ## Sources and traceability
 
-This revision analyzes the October 15 router and embedding comparisons,
-including the larger four-candidate run and retrospective source-label repairs,
-plus October 16 personal-retrieval diagnostics and the matched 48-chunk history
-comparison. That follow-up covers one positive exchange and no negative-query
-gate. Its supplied report is retained without source conversation text or user
-identities. No additional model calls were made during report writing.
+This revision includes the October 15 router and embedding comparisons,
+retrospective source-label repairs, October 16 personal-retrieval diagnostics,
+and the October 17 matched document-layout comparison. The 48-chunk history
+comparison covers one positive exchange and no negative-query gate; its report
+contains no source conversation text or user identities. The document follow-up
+retains the supplied compact JSON with model identities, fixture hashes, paired
+changes and aggregate results; it is not a full per-query trace. No additional
+model calls were made during report writing.
 Findings come from saved
 answers, machine-readable test results, runtime diagnostics, and attributed
 client observations. Older test evidence without full controlled settings is

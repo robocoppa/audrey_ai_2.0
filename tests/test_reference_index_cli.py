@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import stat
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -54,12 +55,88 @@ def test_source_preflight_failure_makes_no_network_clients(cli):
     assert json.loads(report.read_text())["status"] == "setup_error"
 
 
-def test_unexpected_failure_reports_type_without_connection_credentials(cli):
+def test_unexpected_failure_keeps_traceback_private(cli, capsys):
     report, _, run = cli
     run.side_effect = RuntimeError("https://user:secret@private.example")
     assert module.main(["--report", str(report)]) == 3
-    assert json.loads(report.read_text())["error"] == "RuntimeError"
+    saved = json.loads(report.read_text())
+    assert saved["error"] == "RuntimeError"
     assert "secret" not in report.read_text()
+    assert "secret" not in capsys.readouterr().out
+    diagnostic = report.parent.parent / saved["private_diagnostic"]
+    details = diagnostic.read_text()
+    assert "Traceback (most recent call last)" in details
+    assert "RuntimeError: https://user:secret@private.example" in details
+    assert "_run" in details
+    assert stat.S_IMODE(diagnostic.stat().st_mode) == 0o600
+    assert stat.S_IMODE(diagnostic.parent.stat().st_mode) == 0o700
+
+
+
+@pytest.mark.parametrize("component", ["root", "ancestor", "diagnostics", "file"])
+def test_private_diagnostic_refuses_symlink_traversal(tmp_path, monkeypatch, component):
+    root = tmp_path / "index"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = outside / "existing.txt"
+    target.write_text("retained")
+    if component == "root":
+        root.symlink_to(outside, target_is_directory=True)
+    elif component == "ancestor":
+        ancestor = tmp_path / "linked"
+        ancestor.symlink_to(outside, target_is_directory=True)
+        root = ancestor / "index"
+    else:
+        root.mkdir()
+        if component == "diagnostics":
+            (root / "diagnostics").symlink_to(outside, target_is_directory=True)
+        else:
+            diagnostics = root / "diagnostics"
+            diagnostics.mkdir()
+            monkeypatch.setattr(module.uuid, "uuid4", lambda: SimpleNamespace(hex="known"))
+            (diagnostics / "failure-known.traceback.txt").symlink_to(target)
+    with pytest.raises(OSError):
+        module.private_diagnostic(root, RuntimeError("must stay private"))
+    assert target.read_text() == "retained"
+    assert sorted(path.name for path in outside.iterdir()) == ["existing.txt"]
+
+
+def test_diagnostic_write_failure_preserves_original_crash(cli, monkeypatch, capsys):
+    report, _, run = cli
+    run.side_effect = RuntimeError("original-secret")
+    monkeypatch.setattr(module, "private_diagnostic", Mock(side_effect=PermissionError("write-secret")))
+    assert module.main(["--report", str(report)]) == 3
+    saved = json.loads(report.read_text())
+    assert saved["error"] == "RuntimeError"
+    assert saved["status"] == "crashed"
+    assert saved["exit_code"] == 3
+    assert saved["private_diagnostic_saved"] is False
+    assert "private_diagnostic" not in saved
+    assert "secret" not in report.read_text() + capsys.readouterr().out
+
+
+def test_unexpected_source_preflight_failure_keeps_private_startup_traceback(cli):
+    report, registry, run = cli
+    registry.catalog.side_effect = RuntimeError("source-startup-secret")
+    assert module.main(["--report", str(report)]) == 3
+    run.assert_not_awaited()
+    saved = json.loads(report.read_text())
+    assert "source-startup-secret" not in report.read_text()
+    diagnostic = report.parent.parent / saved["private_diagnostic"]
+    assert "source-startup-secret" in diagnostic.read_text()
+
+
+def test_pre_config_crash_does_not_guess_a_diagnostic_root(cli, monkeypatch):
+    report, _, run = cli
+    monkeypatch.setattr(module, "get_config", Mock(side_effect=RuntimeError("config-secret")))
+    diagnostic = Mock()
+    monkeypatch.setattr(module, "private_diagnostic", diagnostic)
+    assert module.main(["--report", str(report)]) == 3
+    run.assert_not_awaited()
+    diagnostic.assert_not_called()
+    saved = json.loads(report.read_text())
+    assert saved["private_diagnostic_saved"] is False
+    assert "config-secret" not in report.read_text()
 
 
 def test_report_refuses_symlink_target(tmp_path):

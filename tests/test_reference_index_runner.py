@@ -171,6 +171,22 @@ def test_only_public_sources_and_index_state_are_mounted_and_arguments_are_prese
     assert not notifications.exists()
 
 
+def test_local_numerical_pools_cannot_exhaust_the_index_thread_budget(runner):
+    invoke, _, calls, _ = runner
+    result = invoke(OPENBLAS_NUM_THREADS="128", OMP_NUM_THREADS="128", NOTIFY="0")
+
+    assert result.returncode == 0, result.stderr
+    runs = [call for call in _read(calls) if call[0] == "run"]
+    assert len(runs) == 2
+    for call in runs:
+        settings = [call[i + 1] for i, argument in enumerate(call) if argument == "-e"]
+        assert "OPENBLAS_NUM_THREADS=1" in settings
+        assert "OMP_NUM_THREADS=1" in settings
+        assert "OPENBLAS_NUM_THREADS=128" not in settings
+        assert "OMP_NUM_THREADS=128" not in settings
+    assert runs[1][runs[1].index("--pids-limit") + 1] == "64"
+
+
 @pytest.mark.parametrize("code", [0, 1, 2, 3, 130, 143])
 def test_report_is_copied_from_owned_index_state_and_sent_on_every_exit(runner, code):
     invoke, environment, _, notifications = runner

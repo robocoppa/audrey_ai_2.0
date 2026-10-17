@@ -18,9 +18,12 @@ they are not ongoing task lists.
   outside the accessible library. Tax-year applicability is verified separately
   from catalog/revision dates. Deployed tools, page citations and historical
   refusal are user-accepted. **20B.2 built:** local scoped hybrid content search,
-  resumable bounded indexing, verified publication and page citations. Tower
-  deployment and browser acceptance remain pending. Its first IRS index uses
-  the selected Qwen3 Embedding 4B profile; no IRS index has run yet.
+  resumable bounded indexing, verified publication and page citations. The first
+  Tower attempt stopped during startup with RuntimeError; no published index is
+  confirmed. A numerical-thread limit and retained startup diagnostics are built
+  for the retry; the original sparse report does not establish the cause.
+  Rebuild the `audrey` job image after pull, then resume the current catalog with
+  Qwen3 Embedding 4B. Publication and browser acceptance remain pending.
   [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds
   the contract and remaining privacy/tax workflow. State jurisdictions remain
   unspecified; fine-tuning requires evidence.
@@ -30,16 +33,14 @@ they are not ongoing task lists.
   arithmetic paraphrase and absent-calculation checks; do not repeat them or
   either migration. Documents, files, references and memories retain Qwen4;
   history uses pinned Nomic/768 with its own readiness and formatting.
-  **Current request:** double-check document retrieval with matched Qwen/Nomic
-  measurements. The existing probe now compares the same four public PDFs in
-  reference and actual upload chunk layouts, with the same frozen English
-  questions. Ranking and threshold admission are separate; the repeated source
-  material does not establish a new independent benchmark. This test reads no
-  private files and writes no production index/config. Results and interpretation
-  are pending. [Phase 06](phase-06-system-one-routing.md) holds the contract;
-  measurements belong in MODEL-FACTS. The existing-file browser check remains
-  unreported. First IRS indexing follows this requested comparison and that
-  check. Router assessment stays closed: retain Qwen 3.5 4B.
+  **Document double-check completed October 17:** matched measurements with
+  reference and actual upload chunk layouts support retaining Qwen for documents.
+  All requests completed; unsupported-detail rejection remains a quality limit
+  for every model. No threshold or model change follows. Reused public questions
+  do not establish independent new-topic evidence. [Phase 06](phase-06-system-one-routing.md)
+  holds the contract; measurements and limits are in MODEL-FACTS. The existing-file
+  browser check remains unreported; first IRS indexing follows that check.
+  Router assessment stays closed: retain Qwen 3.5 4B.
 
 - **19 — deeper evidence tools:** complete; user accepted all five tools October 13.
   [Phase 19](phase-19-evidence-tools.md) defines calculator/conversions, CSV/XLSX
@@ -104,7 +105,7 @@ they are not ongoing task lists.
 | 03 | [Skills](phase-03-skills.md) | Explicit skills complete; native automatic selection built, acceptance pending |
 | 04 | [File downloads](phase-04-file-downloads.md) | Complete |
 | 05 | [Responses foundation](phase-05-responses-api.md) | Complete |
-| 06 | [Router candidates](phase-06-system-one-routing.md) | History restoration accepted; requested document comparison pending |
+| 06 | [Router candidates](phase-06-system-one-routing.md) | History restoration accepted; document comparison complete, retain split |
 | 07 | [Scanned PDFs](phase-07-scanned-pdf-ocr.md) | Complete |
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
@@ -122,10 +123,10 @@ they are not ongoing task lists.
 
 ## Remaining work
 
-1. Run and interpret the user's requested document comparison in Phase 06.
-   Preserve accepted history/memory checks. New conversation focus and the
-   existing-file browser check remain unreported. Then build the first
-   current-catalog IRS index and accept one cited content search in the browser
+1. Document comparison is complete; retain Qwen for documents and Nomic for
+   history. Preserve accepted history/memory checks. New conversation focus and
+   the existing-file browser check remain unreported. Resolve the first index's
+   startup failure, publish the current-catalog IRS index, then accept one cited content search in the browser
    (20B.2). Follow with 20C enforced private processing, 20D's tax workflow and
    targeted 20E evaluation. Broad archive collection and both migrations stay
    complete; no repeat is queued.

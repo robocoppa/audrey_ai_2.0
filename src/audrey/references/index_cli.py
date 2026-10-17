@@ -9,6 +9,8 @@ import json
 import os
 import signal
 import tempfile
+import traceback
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic
@@ -70,6 +72,50 @@ def write_report(path: Path, report: dict) -> None:
             temporary.unlink(missing_ok=True)
 
 
+
+def private_diagnostic(root: Path, error: BaseException) -> str:
+    """Retain traceback on Tower without traversing a diagnostic-path symlink."""
+    root = Path(root).expanduser()
+    if not root.is_absolute() or ".." in root.parts:
+        raise ValueError("Diagnostic root must be an absolute server path")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    root_fd = os.open(root.anchor, flags)
+    try:
+        # Anchor every component by descriptor: checking only the last component
+        # would still follow a symbolic link in an ancestor of the index root.
+        for component in root.parts[1:]:
+            try:
+                os.mkdir(component, mode=0o700, dir_fd=root_fd)
+            except FileExistsError:
+                pass
+            child_fd = os.open(component, flags, dir_fd=root_fd)
+            os.close(root_fd)
+            root_fd = child_fd
+        try:
+            os.mkdir("diagnostics", mode=0o700, dir_fd=root_fd)
+        except FileExistsError:
+            pass
+        directory_fd = os.open("diagnostics", flags, dir_fd=root_fd)
+        try:
+            os.fchmod(directory_fd, 0o700)
+            name = f"failure-{uuid.uuid4().hex}.traceback.txt"
+            descriptor = os.open(
+                name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600, dir_fd=directory_fd,
+            )
+            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+                os.fchmod(output.fileno(), 0o600)
+                traceback.print_exception(error, file=output)
+                output.flush()
+                os.fsync(output.fileno())
+            os.fsync(directory_fd)
+            return f"diagnostics/{name}"
+        finally:
+            os.close(directory_fd)
+    finally:
+        os.close(root_fd)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--library", default="irs-federal")
@@ -85,13 +131,15 @@ def main(argv=None) -> int:
     started = monotonic()
     report = {"schema": 1, "status": "setup_error"}
     code = 2
+    index_root = None
     try:
         cfg = get_config()
         reference_cfg = cfg.raw.get("reference_libraries", {})
+        index_root = Path(reference_cfg.get("index_root", "/data/reference-libraries"))
         registry = ReferenceLibraryRegistry(reference_cfg)
         # Source preflight occurs before opening network clients.
         registry.catalog(args.library, catalog=args.catalog, limit=1)
-        releases = ReleaseStore(Path(reference_cfg.get("index_root", "/data/reference-libraries")))
+        releases = ReleaseStore(index_root)
         if not args.report.is_absolute() or args.report.parent != releases.root / "reports":
             raise ValueError("Report must be in the public index state's reports directory")
         # An operator override of the container name cannot create two writers.
@@ -112,6 +160,12 @@ def main(argv=None) -> int:
         report["error"] = str(exc)[:300]
     except Exception as exc:  # noqa: BLE001 — do not print connection strings or credentials
         report, code = {"schema": 1, "status": "crashed", "error": type(exc).__name__}, 3
+        try:
+            if index_root is None:
+                raise ValueError("Index root is not configured")
+            report["private_diagnostic"] = private_diagnostic(index_root, exc)
+        except Exception:  # noqa: BLE001 — diagnostics must not replace the original failure
+            report["private_diagnostic_saved"] = False
     report.update(
         exit_code=code,
         created_at=datetime.now(UTC).isoformat(),

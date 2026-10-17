@@ -122,8 +122,11 @@ if docker container inspect "${INDEX_CONTAINER}" >/dev/null 2>&1; then
 fi
 # The image's unprivileged user must be able to write public index state.
 # A backend deployment creates this directory with the correct owner.
+# Embeddings run in Ollama. Local numerical libraries need no parallel pool;
+# high-core hosts can otherwise exhaust the index container's thread budget.
 docker run --rm --network none --read-only --no-healthcheck --cap-drop ALL \
     --security-opt no-new-privileges \
+    -e OPENBLAS_NUM_THREADS=1 -e OMP_NUM_THREADS=1 \
     --mount "type=bind,src=${INDEX_HOST},dst=/data/reference-libraries" \
     --entrypoint /opt/venv/bin/python "${IMAGE}" -c \
     'import importlib.util, tempfile; from pathlib import Path; spec = importlib.util.find_spec("audrey.references.index_cli"); handle = tempfile.NamedTemporaryFile(prefix=".index-preflight-", dir="/data/reference-libraries"); handle.close(); raise SystemExit(0 if spec else 2)' \
@@ -146,6 +149,7 @@ set +e
     docker run --rm --name "${INDEX_CONTAINER}" --network "${NETWORK}" \
         --read-only --no-healthcheck --cap-drop ALL \
         --security-opt no-new-privileges --pids-limit 64 --memory 2g \
+        -e OPENBLAS_NUM_THREADS=1 -e OMP_NUM_THREADS=1 \
         --tmpfs /tmp:rw,nosuid,nodev,size=128m \
         --mount "type=bind,src=${KNOWLEDGE_ROOT},dst=/datasets,readonly" \
         --mount "type=bind,src=${CONFIG_FILE},dst=/app/config.yaml,readonly" \

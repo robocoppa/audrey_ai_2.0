@@ -4,9 +4,10 @@
 text migration completed October 15. The history-only Nomic restoration and its
 paraphrase/absent-calculation browser checks are user-accepted October 17.
 Memory and prior lexical history checks stay accepted. Qwen remains for files,
-references and memory. The user requested a further matched document comparison;
-that measurement is pending. The existing-file browser check and first IRS
-index also remain pending. Do not repeat either migration or accepted checks.
+references and memory. The matched document comparison completed October 17
+and supports retaining that split; unsupported-detail rejection remains a limit
+for every model. The existing-file browser check and first IRS index remain
+pending. Do not repeat either migration or accepted checks.
 
 ## Decision
 
@@ -42,8 +43,9 @@ The model report preserves the retrospective-annotation and separate-run limits.
 
 **Use Qwen 4B for files, references and memories; Nomic for chat history.**
 The user approved this split October 16, replacing the earlier shared-model
-choice after matched history ranking favored Nomic. Qwen's clearest measured
-win is reference retrieval; 8B added cost without improving the headline counts.
+choice after matched history ranking favored Nomic. The October 17 comparison
+supports Qwen for both reference and actual upload chunk layouts; 8B added cost
+without improving earlier headline counts.
 The personal fixtures are small. The real-history comparison covers one
 positive exchange, so the split is a targeted repair rather than a universal
 quality claim.
@@ -53,7 +55,7 @@ The comparison establishes a relative retrieval improvement, not tax-answer
 accuracy or an ability to infer eligibility from similarity. Source/product/year
 scope, page reading and Phase 20E accuracy work remain necessary. Measurements
 and complete saved reports live only in [MODEL-FACTS](../../evals/MODEL-FACTS.md).
-The requested document follow-up is described below; other broad candidate studies stay closed.
+The document follow-up is complete; other broad candidate studies stay closed.
 
 ## Text embedding integration
 
@@ -142,31 +144,24 @@ checks remain closed. The matched history diagnostic is retained in
 [MODEL-FACTS](../../evals/MODEL-FACTS.md); its pre-split probe refuses to label
 Qwen's old cutoff as the current history policy.
 
-### Requested document double-check
+### Document double-check — complete
 
-Use the existing `embedding_document_probe.py` and `probe-onbox.sh` flow.
-Its document-only mode compares configured Qwen4 with raw and correctly prefixed
-Nomic on identical public source text, questions and relevance labels.
+The October 17 matched comparison completed without request errors and supports
+retaining Qwen4 for documents. The same four public English PDFs and corrected
+questions were tested in both reference and actual upload chunk layouts, with
+separate calibration publications and paired dense/hybrid rankings. This checks
+layout sensitivity, not independent new-topic generalization. It wrote no
+production data or settings; both configured models were observed resident
+afterward. Results and the supplied compact report are in
+[MODEL-FACTS](../../evals/MODEL-FACTS.md#matched-document-double-check-october-17).
 
-- The original four frozen English IRS PDFs supply the reference layout.
-  A second fixture uses the actual upload extraction and token chunking path,
-  including page-spanning chunks and every matching overlapping answer chunk.
-  Sources and corrected questions are reused: this checks reproducibility and
-  chunk-layout sensitivity, not independent new-topic generalization.
-- Dense and hybrid ranking are measured before admission. Per-model calibration
-  stays separate from explicitly labeled current-Qwen-policy diagnostics; raw
-  cosine magnitudes are not compared as quality. Unsupported-query results and
-  paired changes remain visible alongside first/three/five-result ranks.
-- The mode skips synthetic memory/history cases and prior cold-load/stress
-  measurements. It performs no explicit unloads, checks pinned identities/native
-  widths, warms both production profiles and reports observed final residency.
-- Source fixtures and tooling are copied by the existing runner after pull.
-  No rebuild, restart, upload, token or production reindex is required. Run one
-  foreground comparison while no answering/indexing job is active; shell output
-  is compact and `NOTIFY=1` retains the usual Telegram report. A completed
-  measurement can still report quality findings; it does not switch models.
+Every model/layout still failed the strict unsupported-query calibration target.
+Exit 1 represents those quality findings, not a failed measurement. Keep the
+existing thresholds; the probe's fallback fitted settings are not a validated
+deployment policy. Source scope, page reading and Phase 20E remain necessary.
+No comparison or migration rerun is queued.
 
 The existing-file `kb_search` browser check and new conversation focus remain
-unreported. After interpreting this comparison and closing the file check,
-continue [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md)
-with the first current-catalog IRS index and 20C.
+unreported. After closing the file check, continue
+[Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) with the
+first current-catalog IRS index and 20C.

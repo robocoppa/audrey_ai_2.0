@@ -1,11 +1,13 @@
 # Phase 20 — reference libraries and private tax assistance
 
 Requested October 14, 2026. The archive is sufficient; 20B.1 is deployed and
-accepted. 20B.2 is built; the user confirms the IRS index has never run.
-The Phase 06 comparison is complete: its first build uses Qwen3 Embedding 4B,
-as part of the user's approved unified text-model replacement. Phase 06's
-existing-data migration and restart passed October 15. Repair and accept its
-failed personal-retrieval checks first; the initial IRS index build and its
+accepted. 20B.2 is built; the first Tower index attempt stopped during startup
+with an unexpected RuntimeError. No published IRS content index is confirmed.
+The document comparison supports Qwen3 Embedding 4B for references; the separate
+Nomic history migration and personal-retrieval browser checks are accepted.
+The index runner now bounds local numerical-library threads, matching the
+migration runner, and unexpected startup errors retain a local traceback.
+The original sparse report does not prove the cause. Retry/publication and
 browser acceptance remain pending.
 English content and requests only. Federal coverage can begin independently;
 state jurisdiction and priority tax years await the user's answer.
@@ -214,8 +216,9 @@ The reference embedding profile pins the tested model digest, query/document
 format and native 2,560-dimensional vectors. Indexing and query use the same
 configuration; releases/collections separate incompatible profiles. Changed
 model identity or collection schema fails clearly. Keyword vectors are enabled
-independently of dense width. Inputs cannot silently truncate. The same text profile serves uploads, memories and history after Phase 06's
-existing-data rebuild. Image embeddings remain unchanged.
+independently of dense width. Inputs cannot silently truncate. The same Qwen text profile serves uploads and
+memories; chat history independently uses Nomic after Phase 06's accepted scoped
+rebuild. Image embeddings remain unchanged.
 
 The dense cutoff `0.54` comes from calibration questions; lexical matches rank
 results but cannot independently pass admission. The held-out test still admitted
@@ -275,12 +278,27 @@ The embedding comparison is complete. Build the current catalog directly with
 Qwen3 Embedding 4B; there is no existing IRS index to migrate. The user already
 downloaded this model. No further broad benchmark or IRS collection is needed.
 
-The [unified text migration](phase-06-system-one-routing.md#tower-migration--complete)
-is complete; finish its personal-retrieval acceptance before this first IRS build.
-Use the deployed Qwen4 profile without repeating migration. This index run needs
-no new upload, archive collection or personal token.
+Both [embedding migrations](phase-06-system-one-routing.md#tower-migrations)
+and the personal-retrieval browser checks are complete. Use the deployed Qwen4
+profile without repeating migration. This index run needs no new upload,
+archive collection or personal token.
 
-In the same **Tower** checkout, start the initial current-catalog index:
+For the startup fix, pull the user's committed changes on **Tower**, in
+`/mnt/user/appdata/audrey_ai_2.0`, then rebuild the disposable job's backend image:
+
+```bash
+docker compose build audrey
+```
+
+Running services do not need a restart for this index-job fix. The runner pins
+OpenBLAS/OpenMP to one local thread, preserving the existing container resource
+limits. Unexpected startup tracebacks stay under public index state in a
+restricted `diagnostics/` directory; only the relative path and exception class
+enter the Telegram report. A failed diagnostic write preserves the original
+failure result. The original attempt reported only RuntimeError; this change
+does not establish its precise cause.
+
+In the same **Tower** checkout, start or resume the current-catalog index:
 
 ```bash
 nohup bash scripts/reference/index-irs-onbox.sh > testing-out/last-reference-index.log 2>&1 &
