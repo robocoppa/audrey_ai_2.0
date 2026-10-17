@@ -54,6 +54,9 @@ from text_embedding import EmbeddingProfile, TextEmbeddingError, embed_text, val
 
 log = logging.getLogger(__name__)
 
+# Startup can absorb cold loading without spending a history-search deadline.
+_WARM_TIMEOUT_S = 120.0
+
 
 # ─── Public dataclasses ───────────────────────────────────────────────
 
@@ -342,8 +345,8 @@ async def _embed(
     if keep_alive:
         # Same reasoning as MemoryStore._embed: Ollama's 5-minute default
         # evicts the embedder between bursts, and the cold reload costs ~70x a
-        # warm call. Both stores share one embedder, so both must pin it —
-        # otherwise whichever ran last decides how long it stays.
+        # warm call. Pin the history model independently of the memory model;
+        # their configured vector spaces may differ.
         payload["keep_alive"] = keep_alive
     try:
         r = await http.post("/api/embed", json=payload)
@@ -589,6 +592,21 @@ class ChatArchiveStore:
             "chat_archive: index ready collection=%s dim=%d retention_days=%d",
             self._collection, self._embed_dim, self._retention_days,
         )
+
+    async def warm_embedder(self) -> bool:
+        """Verify and warm this archive's own model without failing other tools."""
+        try:
+            async with asyncio.timeout(_WARM_TIMEOUT_S):
+                await _embed(
+                    self._http, self._embed_model, "warm", self._embed_keep_alive,
+                    profile=getattr(self, "_embedding_profile", None),
+                    timeout_s=_WARM_TIMEOUT_S,
+                )
+        except Exception as error:  # noqa: BLE001 — startup isolates this model's failure
+            # Provider responses can contain private data; report only the type.
+            log.warning("chat archive embedding warm-up failed (%s)", type(error).__name__)
+            return False
+        return True
 
     async def _migrate_repair_schema(self) -> None:
         """Add repair metadata to databases created before Campaign 4."""

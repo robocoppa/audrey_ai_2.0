@@ -10,9 +10,11 @@ fixes are built. Memory search is user-accepted October 16. History still
 failed on full-question wording. Expanded regressions exposed word-form,
 ranking and substring-crowding gaps; those are fixed locally with a ranked
 English text index. Tower deployment and the original/recent/absent checks are
-accepted. Only the arithmetic paraphrase remains unresolved. The existing-file
-check and first IRS index remain pending.
-Do not repeat the migration.
+accepted. User approved restoring Nomic for history only October 16 after a
+matched real-history comparison. That change is built and locally verified;
+its history-only migration and browser acceptance are pending. Qwen remains for
+files, references and memory. The existing-file check and first IRS index are
+pending. Do not repeat the completed broad migration.
 
 ## Decision
 
@@ -46,12 +48,13 @@ Source-checked alternative-label corrections were applied to all models, with
 unchanged source/query inputs and calibration restricted to its original split.
 The model report preserves the retrospective-annotation and separate-run limits.
 
-**Use Qwen 4B for all text embeddings, as approved October 15.** The clearest
-measured win is reference retrieval; 8B added cost without improving the headline
-counts. The personal fixtures are small and show trade-offs rather than a
-universal improvement. The user explicitly chose one model across the small
-existing corpus and authorized reindexing it. Preserve that distinction between
-the deployment choice and the narrower quality evidence.
+**Use Qwen 4B for files, references and memories; Nomic for chat history.**
+The user approved this split October 16, replacing the earlier shared-model
+choice after matched history ranking favored Nomic. Qwen's clearest measured
+win is reference retrieval; 8B added cost without improving the headline counts.
+The personal fixtures are small. The real-history comparison covers one
+positive exchange, so the split is a targeted repair rather than a universal
+quality claim.
 
 All arms, including Nomic, failed the strict zero-unsupported-admissions target.
 The comparison establishes a relative retrieval improvement, not tax-answer
@@ -60,13 +63,20 @@ scope, page reading and Phase 20E accuracy work remain necessary. Measurements
 and complete saved reports live only in [MODEL-FACTS](../../evals/MODEL-FACTS.md).
 No further comparison run is queued.
 
-## Unified text integration
+## Text embedding integration
 
-- `text_embedding` in canonical `config.yaml` owns the tested model/digest,
-  native 2,560 dimensions, raw documents, exact Qwen query instruction, residency
-  and personal-retrieval cutoffs. Backend, reference indexer and tools sidecar
-  share profile/format/vector checks. Retired memory model/dimension environment
-  values cannot override the profile; no Tower config or `.env` edit is needed.
+- `text_embedding` in canonical `config.yaml` owns Qwen's tested model/digest,
+  native 2,560 dimensions, raw documents, exact query instruction, residency and
+  memory cutoff. `history_embedding` independently pins Nomic's tested digest,
+  768 dimensions, `search_document: ` / `search_query: ` prefixes, eight-second
+  request timeout and 24-hour residency. Backend, reference indexer and sidecar
+  reuse the same profile/format/vector checks. History requires its own valid
+  block and cannot silently inherit Qwen. Retired environment model/dimension
+  or history-score values cannot override these profiles.
+- History startup verifies its compatible collection and warms its own model;
+  discovery and the search route require `history_embedding` independently of
+  Qwen's `text_embedding`. One model's warmup failure does not mark the other
+  unavailable. Readiness retries independently.
 - Every production embedding checks model identity, refuses silent truncation
   and validates vector count, width, finite values and norm. Text collections
   carry explicit profile metadata; incompatible collections fail clearly until
@@ -84,25 +94,40 @@ No further comparison run is queued.
   payloads/counts/vectors, then copies to the original names. A journal resumes
   interrupted cutover from verified staging. Source changes invalidate an
   unfinished resume. Completed reruns do not replay old backups over newer data.
-- Reference cutoff `0.54`, memory `0.60` and history `0.62` come from calibration
+- Qwen reference cutoff `0.54` and memory `0.60` come from calibration
   questions; they did not pass the absolute quality gate. Ordinary KB starts at
-  `0.53` and retains its scoped-file behavior. Reference lexical matches rank
-  results but cannot independently pass admission. Personal recall gets an
-  eight-second inner deadline and ten-second outer deadline, plus startup warming
-  and 24-hour residency; GPU contention can still cause a clean timeout.
+  `0.53` and retains its scoped-file behavior. Nomic history restores its legacy
+  floor `0.40` in its own vector space, replacing Qwen history's `0.62`; this is
+  not a new calibrated rejection guarantee. Retrieved text must support the
+  requested exchange. Reference lexical matches cannot independently pass
+  admission. Personal recall keeps its bounded deadlines, startup warming and
+  24-hour residency; GPU contention can still cause a clean timeout.
 
-## Tower migration — complete
+## Tower migrations
 
-The completed migration verified the canonical Qwen4 profile across every
-selected collection, retained private backups, left source SQLite/images
-unchanged and restarted the application services successfully. The later
-personal-retrieval repair requires rebuilding `custom-tools` and restarting
-`audrey`; New conversation autofocus also requires rebuilding `audrey-ui`.
-No repeated migration or new upload is needed.
+The October 15 broad Qwen migration remains complete. Retain its private
+`/mnt/user/appdata/runtime/embedding-migration-qwen4/` recovery state; it cannot
+be reused for the new history profile.
 
-Retain `/mnt/user/appdata/runtime/embedding-migration-qwen4/` through acceptance.
-The recoverable maintenance implementation is `scripts/ops/reembed-onbox.sh`;
-private failure tracebacks stay under that state's `diagnostics/` directory.
+The approved history-only replacement uses the existing
+`scripts/ops/reembed-onbox.sh --scope history` runner with fresh private state at
+`/mnt/user/appdata/runtime/history-reembed-nomic/`. It backs up source history
+and the old collection, stages every live SQLite chunk with Nomic, verifies
+payloads/vectors/profile and source stability, then replaces only the history
+collection. Files, global KB, memories, images and original SQLite are not
+rewritten. Owner/deletion/purge/retention exclusions remain authoritative.
+Interrupted cutover resumes from verified staging; scope/profile/collection
+changes refuse journal reuse. The all-data CLI remains available and now honors
+both profiles rather than forcing history into Qwen.
+
+After pulling on Tower, build `audrey` and `custom-tools`, stop `audrey`,
+`custom-tools`, `media-worker` and `media-fetcher`, then run the scoped command
+in the foreground. It prints copyable safe JSON and sends the existing Telegram
+report; allow roughly one to two minutes after image builds. Success has
+`status: completed`, `scope: history`, Nomic/768 and one verified history role.
+Only verified success restarts the services; a failure leaves writers stopped
+and retains recovery data. No upload, token, UI rebuild or IRS index is needed.
+Do not run the default all-data migration for this slice.
 
 ### Personal retrieval behavior
 
@@ -112,39 +137,31 @@ word matches from the saved archive with semantic results, including recently
 saved chunks awaiting vector indexing. SQLite FTS5 handles word forms such as
 calculate/calculations and whole-token matching before result limits. The
 derived index backfills existing chunks once and stays synchronized with source
-writes; no vector reindex is required. Request phrasing such as "what did I ask you
+writes. That lexical index requires no vector reindex; the separately approved
+Nomic space change does. Request phrasing such as "what did I ask you
 to calculate" reduces to the topic word "calculate". Both paths preserve
 owner, deletion, purge and date visibility. Keyword history hits identify their match type and have no
-cosine score; semantic hits keep their measured score and existing cutoff.
+cosine score; semantic hits keep their measured score and the selected
+history profile's cutoff.
 An unavailable embedder produces a clear search error when no literal history
 evidence can answer; it must not masquerade as an empty archive.
 
-### Remaining acceptance — arithmetic paraphrase only
+### Remaining acceptance — Nomic history
 
-User acceptance October 16 passed memory lookup, the original calculation
-question, a newly seeded topic and an absent-topic check. Keep those checks
-closed. The paraphrased arithmetic question still failed; the run made three
-successful but empty searches. Existing records and keyword retrieval work.
+Memory, original calculation lookup and the newly seeded topic remain accepted.
+The completed matched diagnostic is in [MODEL-FACTS](../../evals/MODEL-FACTS.md);
+no repeat is queued. Its retired pre-split probe refuses to label Qwen's old
+cutoff as the current history policy.
 
-Before another model or cutoff change, use `history_embedding_probe.py` through
-the existing foreground probe runner, targeting `custom-tools`. After pull this
-diagnostic needs no rebuild, restart, upload or vector migration. It freezes the
-known calculation owner's visible source chunks in RAM, honoring deletion,
-purge and retention. It refuses ambiguous ownership, an invisible original or
-more than 200 owner chunks. It labels the original calculation turn rather than
-later search questions in the same conversation.
+After the scoped migration, use a fresh browser chat with Tools Automatic:
 
-Compare the three actual failed query strings plus the literal `calculate`
-control with configured Qwen4, legacy raw Nomic and correctly prefixed Nomic.
-Output contains only ranks, scores, counts and digests; source text, identities
-and queries stay out of the log. Qwen's configured cutoff is reported separately;
-Nomic scores do not inherit that cutoff. No source or vector index is written.
-This is a diagnostic of one positive exchange, not a model promotion test.
+1. Ask the failed arithmetic paraphrase. Expect the earlier
+   **1250 × 1.08 = 1,350** exchange and an actual `chat_history_search` call.
+2. Ask for a specific calculation never discussed, and verify Audrey does not
+   claim a loosely related snippet is that requested exchange. This checks the
+   changed history admission boundary; other passed checks stay closed.
 
-After diagnosis, repeat only the failed paraphrase in a fresh browser chat with
-Tools Automatic. Expect the original **1250 × 1.08 = 1,350** exchange and an
-actual `chat_history_search` call. The existing-file `kb_search` acceptance is
-still unreported. Do not repeat accepted checks or the completed migration.
-Retire this temporary diagnostic handoff after acceptance and continue
+The existing-file `kb_search` acceptance and new conversation focus remain
+unreported. After history acceptance, continue
 [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) with the
 first current-catalog IRS index and 20C.

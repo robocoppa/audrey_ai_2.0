@@ -182,6 +182,9 @@ async def run():
     settings = Settings()
     config = load_settings(settings.embedding_config_path)
     profile = profile_from_mapping(config)
+    history = load_settings(settings.embedding_config_path, role="history")
+    if profile_from_mapping(history).identity != profile.identity:
+        raise SetupError('History now has a separate profile; this pre-split diagnostic is complete')
     source = await snapshot(settings.chat_archive_db_path,
                             target_conversation=os.environ.get('TARGET_CONVERSATION_ID', ''),
                             retention_days=settings.chat_archive_retention_days)

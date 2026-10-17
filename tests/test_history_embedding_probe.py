@@ -143,3 +143,14 @@ def test_failure_output_never_prints_provider_exception_text(monkeypatch, capsys
     output = capsys.readouterr().out
     assert json.loads(output)['error_kind'] == 'ValueError'
     assert 'PRIVATE' not in output
+
+
+async def test_completed_diagnostic_cannot_mislabel_split_history_cutoff(monkeypatch):
+    monkeypatch.setenv('QUERIES', '["calculate"]')
+
+    async def unexpected_snapshot(*args, **kwargs):
+        raise AssertionError('A completed pre-split diagnostic must not read private sources')
+
+    monkeypatch.setattr(probe, 'snapshot', unexpected_snapshot)
+    with pytest.raises(probe.SetupError, match='separate profile'):
+        await probe.run()

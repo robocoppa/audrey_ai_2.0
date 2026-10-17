@@ -6,19 +6,32 @@ umask 077
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 DATA_HOST="${DATA_HOST:-/mnt/user/appdata/runtime}"
 TOOLS_HOST="${TOOLS_HOST:-/mnt/user/appdata/custom-tools}"
-STATE_HOST="${STATE_HOST:-${DATA_HOST}/embedding-migration-qwen4}"
+SCOPE="${SCOPE:-all}"
+if [[ "$#" != "0" ]]; then
+    if [[ "$#" != "2" || "$1" != "--scope" ]]; then
+        echo "SETUP ERROR: usage: reembed-onbox.sh [--scope all|history]" >&2
+        exit 2
+    fi
+    SCOPE="$2"
+fi
+case "${SCOPE}" in
+    all) state_name="embedding-migration-qwen4"; run_name="text-reembed"; migration_label="text embedding migration" ;;
+    history) state_name="history-reembed-nomic"; run_name="history-reembed"; migration_label="history embedding migration" ;;
+    *) echo "SETUP ERROR: scope must be all or history" >&2; exit 2 ;;
+esac
+STATE_HOST="${STATE_HOST:-${DATA_HOST}/${state_name}}"
 CONFIG_FILE="${CONFIG_FILE:-${REPO_ROOT}/config.yaml}"
 OUT_DIR="${OUT_DIR:-${REPO_ROOT}/testing-out/embedding-migrations}"
 IMAGE="${IMAGE:-audrey:latest}"
 NETWORK="${NETWORK:-ollama-net}"
-MIGRATION_CONTAINER="${MIGRATION_CONTAINER:-audrey-text-reembed}"
+MIGRATION_CONTAINER="${MIGRATION_CONTAINER:-audrey-${run_name}}"
 WATCHDOG_ENV="${WATCHDOG_ENV:-/mnt/user/appdata/fleet-watchdog/.env}"
 NOTIFY="${NOTIFY:-1}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-REPORT_NAME="${STAMP}-text-reembed-report.json"
+REPORT_NAME="${STAMP}-${run_name}-report.json"
 STATE_REPORT="${STATE_HOST}/reports/${REPORT_NAME}"
 REPORT="${OUT_DIR}/${REPORT_NAME}"
-LOG="${OUT_DIR}/${STAMP}-text-reembed.log"
+LOG="${OUT_DIR}/${STAMP}-${run_name}.log"
 
 notify() (
     local message="$1" document="${2:-}" api reply
@@ -70,13 +83,13 @@ finish() {
         printf '{"schema":1,"status":"runner_failure","exit_code":%d}\n' "${code}" >"${REPORT}" || true
     fi
     case "${code}" in
-        0) verdict="✅ text embedding migration and restart finished" ;;
-        1) verdict="⚠️ text embedding migration finished with findings" ;;
+        0) verdict="✅ ${migration_label} and restart finished" ;;
+        1) verdict="⚠️ ${migration_label} finished with findings" ;;
         2) verdict="❌ SETUP ERROR" ;;
         130|143) verdict="⛔ INTERRUPTED" ;;
         *) verdict="❌ CRASHED" ;;
     esac
-    notify "${verdict} Audrey text embedding migration finished (exit ${code}) → ${REPORT}" "${REPORT}" || true
+    notify "${verdict} Audrey ${migration_label} finished (exit ${code}) → ${REPORT}" "${REPORT}" || true
     exit "${code}"
 }
 migration_worker_pid=""
@@ -158,7 +171,7 @@ docker run --rm --network none --read-only --no-healthcheck --cap-drop ALL \
     'import tempfile; import audrey.kb.reembed; handle=tempfile.NamedTemporaryFile(dir="/migration"); handle.close()' \
     >/dev/null 2>&1 || die "Current migration CLI and writable private migration state are required"
 
-notify "▶ Audrey text embedding migration started. Private backups stay on Tower; only counts and digests are reported. Services restart after verified success. Report: ${REPORT}" || true
+notify "▶ Audrey ${migration_label} started. Private backups stay on Tower; only counts and digests are reported. Services restart after verified success. Report: ${REPORT}" || true
 echo "Private migration state: ${STATE_HOST}"
 echo "Safe report: ${REPORT}"
 echo "Log: ${LOG}"
@@ -178,7 +191,7 @@ set +e
         --config /app/config.yaml --uploads-db /data/uploads.sqlite \
         --archive-db /tools-data/chat_archive.db --app-db /data/audrey_app.sqlite \
         --state /migration --report "/migration/reports/${REPORT_NAME}" \
-        --maintenance-confirmed \
+        --scope "${SCOPE}" --maintenance-confirmed \
         2>&1 | tee "${LOG}"
     pipeline_codes=("${PIPESTATUS[@]}")
     code="${pipeline_codes[0]}"

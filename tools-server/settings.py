@@ -109,9 +109,9 @@ class Settings(BaseSettings):
     embed_keep_alive: str = Field(default="24h", alias="EMBED_KEEP_ALIVE")
 
     # Chat archive (per-user searchable conversation history).
-    # SQLite is the source of truth; Qdrant indexes Q+A-pair chunks for
-    # semantic search. Reuses the same embedder as durable memory so a
-    # missing Ollama only breaks one subsystem at a time.
+    # SQLite is the source of truth; Qdrant indexes Q+A-pair chunks using
+    # config.yaml's independent history_embedding profile. These legacy
+    # environment defaults cannot override the production profile or floor.
     chat_archive_collection: str = Field(default="kb_chat_archive", alias="CHAT_ARCHIVE_COLLECTION")
     chat_archive_chunk_max_chars: int = Field(default=2500, alias="CHAT_ARCHIVE_CHUNK_MAX_CHARS")
     chat_archive_chunk_overlap_chars: int = Field(default=100, alias="CHAT_ARCHIVE_CHUNK_OVERLAP_CHARS")

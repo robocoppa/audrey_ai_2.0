@@ -26,9 +26,9 @@ import yaml
 from qdrant_client import QdrantClient
 from qdrant_client import models as qm
 
-from audrey.embedding_profile import load_profile
+from audrey.embedding_profile import load_profile, load_settings
 from audrey.kb import bm25
-from audrey.kb.embed import text_embedder
+from audrey.kb.embed import TextEmbedder, text_embedder
 from audrey.models.ollama import OllamaClient
 
 PAGE = 64
@@ -361,18 +361,43 @@ def check_sources(journal, paths, *, scratch_root):
 
 async def migrate(client, embedder, config, *, state, uploads, archive, app_db,
                   memory="kb_memory", history="kb_chat_archive", retention_days=0,
-                  progress=lambda _: None):
-    profile = embedder.profile
-    paths = {"uploads": uploads, "archive": archive, "app": app_db}
+                  scope="all", history_embedder=None, progress=lambda _: None):
+    if scope not in {"all", "history"}:
+        raise MigrationError("Migration scope must be all or history")
+    if config.get("history_embedding") and history_embedder is None:
+        raise MigrationError("The configured history embedding profile must be provided")
+    role_embedders = {"text": embedder, "history": history_embedder or embedder}
+    selected_roles = ("history",) if scope == "history" else ("text", "history")
+    target_profiles = {role: role_embedders[role].profile.metadata for role in selected_roles}
+    profile = role_embedders[selected_roles[0]].profile
+    paths = {"archive": archive} if scope == "history" else {
+        "uploads": uploads, "archive": archive, "app": app_db,
+    }
+    global_name = config.get("kb", {}).get("text_collection", "kb_text")
+    image_name = config.get("kb", {}).get("image_collection", "kb_images")
+    if (history in {global_name, image_name, memory}
+            or history.startswith("kb_user_text_")):
+        raise MigrationError("History collection overlaps another data role")
     manifest = state / "manifest.json"
-    await embedder.verify_identity()
+    for role in selected_roles:
+        await role_embedders[role].verify_identity()
     if manifest.exists():
         journal = json.loads(manifest.read_text())
-        if journal["profile"] != profile.metadata:
-            raise MigrationError("Migration state belongs to another embedding profile")
+        previous_profiles = journal.get("profiles", {
+            "text": journal["profile"], "history": journal["profile"],
+        })
+        if journal.get("scope", "all") != scope or previous_profiles != target_profiles:
+            raise MigrationError("Migration state belongs to another scope or embedding profile")
+        if scope == "history" and (
+            len(journal["collections"]) != 1
+            or journal["collections"][0]["kind"] != "history"
+            or journal["collections"][0]["name"] != history
+        ):
+            raise MigrationError("History migration state does not match the requested collection")
         if journal.get("status") == "completed":
             for entry in journal["collections"]:
-                verify_profile(client, entry["name"], profile)
+                target = role_embedders["history" if entry["kind"] == "history" else "text"]
+                verify_profile(client, entry["name"], target.profile)
             report = summary(journal, profile, resumed=True)
             for row, entry in zip(report["collections"], journal["collections"], strict=True):
                 row["points"], row["payload_sha256"] = collection_digest(client, entry["name"])
@@ -380,26 +405,31 @@ async def migrate(client, embedder, config, *, state, uploads, archive, app_db,
         check_sources(journal, paths, scratch_root=state)
     else:
         names = {item.name for item in client.get_collections().collections}
-        global_name = config.get("kb", {}).get("text_collection", "kb_text")
-        selected = [(name, "user_files" if name.startswith("kb_user_text_") else "kb")
-                    for name in sorted(names) if name == global_name or name.startswith("kb_user_text_")]
-        selected += [(memory, "memory"), (history, "history")]
+        selected = [(history, "history")]
+        if scope == "all":
+            selected = [(name, "user_files" if name.startswith("kb_user_text_") else "kb")
+                        for name in sorted(names) if name == global_name or name.startswith("kb_user_text_")]
+            selected += [(memory, "memory"), (history, "history")]
+        if scope == "history" and not archive.exists():
+            raise MigrationError("Archive source is required for history migration")
         if len({name for name, _ in selected}) != len(selected):
             raise MigrationError("Text collection roles overlap")
         if any(kind == "user_files" and client.count(name, exact=True).count for name, kind in selected) and not uploads.exists():
             raise MigrationError("Upload catalog is required for private-file deletion policy")
         if any(name in names and client.count(name, exact=True).count
-               for name in (memory, history)) and not archive.exists():
+               for name, kind in selected if kind in {"memory", "history"}) and not archive.exists():
             raise MigrationError("Archive source is required for memory/history deletion policy")
-        journal = {"schema": 1, "status": "preparing", "profile": profile.metadata,
+        journal = {"schema": 1, "status": "preparing", "scope": scope,
+                   "profile": profile.metadata, "profiles": target_profiles,
                    "created_at": datetime.now(UTC).isoformat(), "sql": {}, "collections": []}
         for key, path in paths.items():
             journal["sql"][key] = backup_sql(path, state / f"{key}.sqlite")
         journal["retention_cutoff"] = ((datetime.now(UTC) - timedelta(days=retention_days)).isoformat()
                                           if retention_days else "")
         for index, (name, kind) in enumerate(selected):
+            target = role_embedders["history" if kind == "history" else "text"].profile
             exists = name in names
-            identity = hashlib.sha256((profile.identity + name).encode()).hexdigest()[:32]
+            identity = hashlib.sha256((target.identity + name).encode()).hexdigest()[:32]
             entry = {"name": name, "kind": kind, "stage": "audrey_embedding_stage_" + identity,
                      "export": f"collection-{index}.jsonl.gz", "phase": "exported",
                      "schema": schema(client, name) if exists else {"sparse": {}, "indexes": {}},
@@ -417,11 +447,13 @@ async def migrate(client, embedder, config, *, state, uploads, archive, app_db,
             journal["collections"].append(entry)
         dump_state(state, journal)
     backups = verified_sql_backups(journal, state)
-    deletions, purges = policies(backups["uploads"], backups["archive"])
+    deletions, purges = policies(backups.get("uploads"), backups["archive"])
     cutoff = journal["retention_cutoff"]
     for ordinal, entry in enumerate(journal["collections"], 1):
+        target_embedder = role_embedders["history" if entry["kind"] == "history" else "text"]
+        target = target_embedder.profile
         if entry["phase"] in {"staged", "cutover_started", "complete"}:
-            verify_profile(client, entry["stage"], profile)
+            verify_profile(client, entry["stage"], target)
             if (list(collection_digest(client, entry["stage"])) != entry["expected"]
                     or vector_digest(client, entry["stage"]) != entry["vector_digest"]):
                 raise MigrationError("Verified staging collection changed")
@@ -429,16 +461,16 @@ async def migrate(client, embedder, config, *, state, uploads, archive, app_db,
         stage = entry["stage"]
         if client.collection_exists(stage):
             client.delete_collection(stage)
-        create(client, stage, profile, entry["schema"], entry["kind"])
-        verify_profile(client, stage, profile)
+        create(client, stage, target, entry["schema"], entry["kind"])
+        verify_profile(client, stage, target)
         batch = []
         for row in source_rows(entry, state, backups["archive"], deletions, purges, cutoff):
             batch.append(row)
             if len(batch) == 16:
-                await write_embedded(client, embedder, stage, entry["kind"], batch)
+                await write_embedded(client, target_embedder, stage, entry["kind"], batch)
                 batch = []
         if batch:
-            await write_embedded(client, embedder, stage, entry["kind"], batch)
+            await write_embedded(client, target_embedder, stage, entry["kind"], batch)
         expected = list(payload_digest(source_rows(entry, state, backups["archive"], deletions, purges, cutoff)))
         if list(collection_digest(client, stage)) != expected:
             raise MigrationError("Re-embedded payloads did not verify")
@@ -448,11 +480,13 @@ async def migrate(client, embedder, config, *, state, uploads, archive, app_db,
                   "points": expected[0]})
     # No production collection changes before every replacement has verified.
     check_sources(journal, paths, scratch_root=state)
-    await embedder.verify_identity()
+    for role in selected_roles:
+        await role_embedders[role].verify_identity()
     for entry in journal["collections"]:
+        target = role_embedders["history" if entry["kind"] == "history" else "text"].profile
         if entry["phase"] == "complete":
             verify_copy(client, entry["stage"], entry["name"])
-            verify_profile(client, entry["name"], profile)
+            verify_profile(client, entry["name"], target)
             if list(collection_digest(client, entry["name"])) != entry["expected"]:
                 raise MigrationError("Completed target changed while writers were stopped")
             continue
@@ -466,7 +500,7 @@ async def migrate(client, embedder, config, *, state, uploads, archive, app_db,
             dump_state(state, journal)
         if client.collection_exists(entry["name"]):
             client.delete_collection(entry["name"])
-        create(client, entry["name"], profile, entry["schema"], entry["kind"])
+        create(client, entry["name"], target, entry["schema"], entry["kind"])
         batch = []
         for row in records(client, entry["stage"]):
             batch.append(qm.PointStruct(id=row.id, vector=row.vector, payload=row.payload))
@@ -475,7 +509,7 @@ async def migrate(client, embedder, config, *, state, uploads, archive, app_db,
                 batch = []
         if batch:
             client.upsert(entry["name"], points=batch, wait=True)
-        verify_profile(client, entry["name"], profile)
+        verify_profile(client, entry["name"], target)
         if list(collection_digest(client, entry["name"])) != entry["expected"]:
             raise MigrationError("Published text collection failed verification")
         verify_copy(client, entry["stage"], entry["name"])
@@ -502,7 +536,10 @@ async def write_embedded(client, embedder, name, kind, rows):
 
 def summary(journal, profile, *, resumed=False):
     return {"schema": 1, "status": "completed", "resumed_or_already_complete": resumed,
+            "scope": journal.get("scope", "all"),
             "embedding": {**profile.provenance, "embedding_identity": profile.identity},
+            "embeddings": {role: metadata["audrey_embedding"]
+                           for role, metadata in journal.get("profiles", {}).items()},
             "collections": [{"role": entry["kind"], "points": entry["expected"][0],
                              "payload_sha256": entry["expected"][1], "verified": True}
                             for entry in journal["collections"]],
@@ -510,11 +547,21 @@ def summary(journal, profile, *, resumed=False):
             "images_unchanged": True}
 
 
+def history_text_embedder(ollama, path):
+    settings = load_settings(path, role="history")
+    return TextEmbedder(
+        ollama, profile=load_profile(path, role="history"),
+        keep_alive=str(settings.get("keep_alive", "24h")), batch_size=16,
+        timeout_s=120, query_timeout_s=float(settings.get("timeout_s", 8)),
+    )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("config", "uploads-db", "archive-db", "app-db", "state", "report"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--maintenance-confirmed", action="store_true")
+    parser.add_argument("--scope", choices=("all", "history"), default="all")
     parser.add_argument("--memory-collection", default=os.getenv("MEMORY_COLLECTION", "kb_memory"))
     parser.add_argument("--archive-collection", default=os.getenv("CHAT_ARCHIVE_COLLECTION", "kb_chat_archive"))
     parser.add_argument("--retention-days", type=int, default=int(os.getenv("CHAT_ARCHIVE_RETENTION_DAYS", "0")))
@@ -536,7 +583,9 @@ def main(argv=None):
         report_allowed = True
         stage = "configuration"
         config = yaml.safe_load(args.config.read_text())
-        load_profile(args.config)
+        if args.scope == "all":
+            load_profile(args.config)
+        load_profile(args.config, role="history")
         with (args.state / ".lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             async def run():
@@ -551,7 +600,11 @@ def main(argv=None):
                     ollama = OllamaClient(os.getenv("OLLAMA_HOST", "http://ollama:11434"))
                     stage = "migration"
                     code = 1
-                    return await migrate(client, text_embedder(ollama, config), config,
+                    history_target = history_text_embedder(ollama, args.config)
+                    text_target = (text_embedder(ollama, config)
+                                   if args.scope == "all" else history_target)
+                    return await migrate(client, text_target, config,
+                        scope=args.scope, history_embedder=history_target,
                         state=args.state, uploads=args.uploads_db, archive=args.archive_db,
                         app_db=args.app_db, memory=args.memory_collection,
                         history=args.archive_collection, retention_days=args.retention_days,

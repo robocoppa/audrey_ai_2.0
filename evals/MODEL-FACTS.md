@@ -24,8 +24,10 @@ conclusion. It is a small practical study, not a general leaderboard.
   loading time; the smallest Tev model frequently escalated simple requests.
 - **Qwen3 Embedding 4B gave the strongest practical reference-retrieval result.**
   It improved on correctly prefixed Nomic; 8B added cost without improving the
-  headline counts. Gemma was promising on short synthetic passages, but its
-  real-document advantage narrowed. No model reliably rejected unsupported details.
+  headline counts. Nomic ranked one real conversation exchange higher on four
+  matched lookups; the document advantage did not extend to that history example.
+  Gemma's early synthetic advantage narrowed on real documents. No model reliably
+  rejected unsupported details.
 - **Evidence for current Kimi K3 and GLM 5.3 answer quality remains limited.**
   Successful function calls do not establish good writing or reasoning, and
   older Kimi/GLM results cannot be transferred to their successors.
@@ -703,15 +705,37 @@ never make embedding spaces interchangeable.
 **Personal-retrieval follow-up, October 16:** two real stored records were
 missed despite correct ownership: a short saved fact scored **0.516** against a
 **0.60** cutoff, and a previous arithmetic exchange scored **0.403–0.433** against
-**0.62**. This confirms that the small synthetic calibration did not adequately
-cover deployed personal recall. No matched Nomic scores were collected for
-these queries, so this is not a demonstrated model regression. Separate word
-matching and ranking defects also caused misses; improving that retrieval code
-does not establish better embedding quality. The recommendation remains strongest
-for reference documents; a universal personal-recall improvement is unproven.
-Follow-up application checks passed exact lookup, a new topic and an absent
-topic; an arithmetic paraphrase still returned no result after three searches.
-Matched Nomic/Qwen ranks on that failure have not yet been measured.
+**0.62**. The small synthetic calibration did not adequately cover deployed
+personal recall. Separate word-matching and ranking defects also caused misses;
+repairing those passed exact lookup, a new topic and an absent-topic check, but
+an arithmetic paraphrase still failed.
+
+A [matched follow-up](results/2026-10-16-history-embedding-comparison.json)
+embedded the same **48 visible conversation chunks** with each model, entirely
+in RAM. It labeled the original exchange rather than later questions about it.
+Three actual failed search queries and one literal control produced these ranks
+for that original exchange (lower is better):
+
+| Query | Nomic raw | Nomic prefixed | Qwen 4B |
+|---|---:|---:|---:|
+| Paraphrase 1 | 2 | 2 | 4 |
+| Paraphrase 2 | 1 | 1 | 4 |
+| Paraphrase 3 | 2 | 3 | 7 |
+| Literal control | 1 | 1 | 4 |
+
+**Nomic ranked this exchange better in all four comparisons.** Qwen's original
+scores were **0.32945, 0.37908, 0.25879 and 0.43342**, all below the then-deployed
+**0.62** cutoff. Lowering that cutoff alone would still miss the seventh-ranked
+result at a five-result limit. Nomic kept the original within three for every
+query; its raw/prefixed ranking differences do not establish a preferred format.
+Cosine scores from different models are not comparable quality measures, and no
+Nomic admission threshold or unrelated-query rejection was tested in this run.
+
+This is a demonstrated ranking regression on **one positive exchange**, not four
+independent facts or a broad personal-memory benchmark. It supports using
+different embedders for documents and conversation history rather than assuming
+a universal upgrade. It does not justify undoing Qwen's measured document gains
+or changing already accepted saved-memory behavior.
 
 The full [combined comparison](results/2026-10-15-embedding-documents-combined.json.gz)
 and [completed Nomic baselines](results/2026-10-15-140040-embedding-documents-baselines.json.gz)
@@ -742,8 +766,10 @@ Keep these limits visible:
 
 This revision analyzes the October 15 router and embedding comparisons,
 including the larger four-candidate run and retrospective source-label repairs,
-plus October 16 personal-retrieval diagnostics. Those live observations are not
-a matched model comparison. No additional model calls were made during report writing.
+plus October 16 personal-retrieval diagnostics and the matched 48-chunk history
+comparison. That follow-up covers one positive exchange and no negative-query
+gate. Its supplied report is retained without source conversation text or user
+identities. No additional model calls were made during report writing.
 Findings come from saved
 answers, machine-readable test results, runtime diagnostics, and attributed
 client observations. Older test evidence without full controlled settings is

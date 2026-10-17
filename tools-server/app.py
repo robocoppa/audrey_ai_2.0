@@ -27,8 +27,8 @@ Internal-only (hidden from /openapi.json so the model can't call them):
   POST /chat_history/prune     — apply retention policy
   GET  /chat_history/stats     — row counts for admin/debug
 
-Memory and chat archive are both Qdrant-backed and embedded with the
-pinned text model in config.yaml. On startup, a legacy `memory.db` SQLite file (from an
+Memory and chat archive are both Qdrant-backed. config.yaml pins separate
+text_embedding (memory/files) and history_embedding (conversation) profiles. On startup, a legacy `memory.db` SQLite file (from an
 earlier backend) is migrated automatically. Its deterministic point IDs make
 partial retries idempotent, and the source is renamed to `memory.db.migrated`
 only after every row has succeeded.
@@ -88,6 +88,8 @@ async def lifespan(app: FastAPI):
     embedding_settings = load_settings(settings.embedding_config_path)
     embedding_profile = profile_from_mapping(embedding_settings)
     embed_keep_alive = str(embedding_settings.get("keep_alive", "24h"))
+    history_settings = load_settings(settings.embedding_config_path, role="history")
+    history_profile = profile_from_mapping(history_settings)
     capabilities = CapabilityRegistry()
     brave = BraveClient(
         api_key=settings.brave_api_key,
@@ -117,16 +119,16 @@ async def lifespan(app: FastAPI):
         qdrant_url=settings.qdrant_url,
         ollama_url=settings.ollama_url,
         collection=settings.chat_archive_collection,
-        embed_model=embedding_profile.model,
-        embed_dim=embedding_profile.dimensions,
-        embedding_profile=embedding_profile,
-        embed_timeout_s=settings.ollama_embed_timeout_s,
+        embed_model=history_profile.model,
+        embed_dim=history_profile.dimensions,
+        embedding_profile=history_profile,
+        embed_timeout_s=float(history_settings.get("timeout_s", 8)),
         chunk_max_chars=settings.chat_archive_chunk_max_chars,
         chunk_overlap_chars=settings.chat_archive_chunk_overlap_chars,
-        search_threshold=float(embedding_settings.get("history_min_score", 0.62)),
+        search_threshold=float(history_settings.get("min_score", 0.4)),
         retention_days=settings.chat_archive_retention_days,
         max_bytes=settings.chat_archive_max_bytes,
-        embed_keep_alive=embed_keep_alive,
+        embed_keep_alive=str(history_settings.get("keep_alive", "24h")),
         repair_batch_size=settings.chat_archive_repair_batch_size,
         max_retry_attempts=settings.chat_archive_max_retry_attempts,
     )
@@ -245,7 +247,7 @@ def _archive_source() -> ChatArchiveStore:
 
 
 def _searchable_archive() -> ChatArchiveStore:
-    _require_capabilities("qdrant", "chat_archive", "text_embedding")
+    _require_capabilities("qdrant", "chat_archive", "history_embedding")
     return app.state.chat_archive
 
 

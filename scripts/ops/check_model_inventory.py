@@ -82,6 +82,7 @@ _MODEL_SECTIONS: tuple[tuple[str, ...], ...] = (
     ("passthrough", "allowed_models"),
     ("kb", "text_embedder"),  # legacy configs
     ("text_embedding", "model"),
+    ("history_embedding", "model"),
     ("kb", "video", "summarise_model"),
     ("kb", "video", "summarise_fallback_model"),
     ("vision", "model"),

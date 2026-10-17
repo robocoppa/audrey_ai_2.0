@@ -150,7 +150,7 @@ TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
         _declare(
             "chat_history_search",
             user_scope=ToolUserScope.ARGUMENT,
-            dependencies=("chat_archive", "qdrant", "text_embedding"),
+            dependencies=("chat_archive", "qdrant", "history_embedding"),
             purge_gated=True,
         ),
         _declare(

@@ -28,7 +28,9 @@ if a[:2]==['container','inspect']:
         print('MEMORY_COLLECTION=kb_memory\\nSECRET_API_TOKEN=private-marker\\nOLLAMA_HOST=http://ollama:11434')
     sys.exit(0)
 if a[0]=='run' and '-m' in a:
-    target=Path(os.environ['STATE_HOST'])/'reports'/Path(a[a.index('--report')+1]).name
+    mount=next(arg for arg in a if arg.startswith('type=bind,src=') and ',dst=/migration' in arg)
+    state=Path(mount.split('src=',1)[1].split(',dst=',1)[0])
+    target=state/'reports'/Path(a[a.index('--report')+1]).name
     target.parent.mkdir(exist_ok=True)
     target.write_text(json.dumps({'schema':1,'status':'completed' if not os.environ.get('FAIL') else 'failed'}))
     sys.exit(int(os.environ.get('FAIL','0')))
@@ -47,8 +49,8 @@ sys.exit(0)
     return env,tmp_path
 
 
-def invoke(env):
-    return subprocess.run(["bash",str(SCRIPT)],env=env,text=True,capture_output=True,timeout=10)
+def invoke(env, args=()):
+    return subprocess.run(["bash",str(SCRIPT), *args],env=env,text=True,capture_output=True,timeout=10)
 
 
 def calls(path):
@@ -95,3 +97,26 @@ def test_failed_migration_keeps_writers_stopped_and_preserves_report(runner):
     assert not any(call[0]=='compose' for call in calls(path))
     assert 'remain stopped' in result.stderr
     assert json.loads(next((path/'reports').glob('*.json')).read_text())['status']=='failed'
+
+
+def test_history_scope_uses_fresh_default_state_and_forwards_only_requested_scope(runner):
+    env, path = runner
+    env.pop("STATE_HOST")
+    state = path / "data" / "history-reembed-nomic"
+    state.mkdir(mode=0o700)
+    result = invoke(env, ("--scope", "history"))
+    assert result.returncode == 0, result.stderr
+    migration = next(call for call in calls(path) if "-m" in call)
+    assert migration[migration.index("--scope") + 1] == "history"
+    assert any(f"src={state},dst=/migration" in arg for arg in migration)
+    assert "history-reembed-report.json" in migration[migration.index("--report") + 1]
+    assert not (path / "data" / "embedding-migration-qwen4").exists()
+    assert list(state.glob("reports/*-history-reembed-report.json"))
+
+
+def test_invalid_scope_never_starts_docker_or_reopens_writers(runner):
+    env, path = runner
+    result = invoke(env, ("--scope", "files"))
+    assert result.returncode == 2
+    assert "scope must be all or history" in result.stderr
+    assert not (path / "calls").exists()

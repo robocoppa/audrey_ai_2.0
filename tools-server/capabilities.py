@@ -36,6 +36,7 @@ _RUNTIME_DEFAULTS: dict[str, bool] = {
     "qdrant": False,
     "memory": False,
     "text_embedding": False,
+    "history_embedding": False,
     "chat_archive_source": False,
     "chat_archive": False,
 }
@@ -131,6 +132,7 @@ class CapabilitySupervisor:
         self._archive_index_ready = False
         self._memory_ready = False
         self._embedding_ready = False
+        self._history_embedding_ready = False
         self._maintainer_started = False
         self._task: asyncio.Task[None] | None = None
         self._refresh_lock = asyncio.Lock()
@@ -197,6 +199,20 @@ class CapabilitySupervisor:
                 else:
                     self._archive_index_ready = True
                     self.registry.set_available("chat_archive")
+
+            # History may use a different model from memory. A warm memory
+            # embedder cannot establish readiness for history's vector space.
+            if self._archive_index_ready and not self._history_embedding_ready:
+                try:
+                    warmed = await self._archive.warm_embedder()
+                except Exception as exc:  # noqa: BLE001 — isolate the independent history model
+                    log.warning("history embedding warm-up failed (%s)", type(exc).__name__)
+                    warmed = False
+                if warmed:
+                    self._history_embedding_ready = True
+                    self.registry.set_available("history_embedding")
+                else:
+                    self.registry.set_unavailable("history_embedding", "warmup_failed")
 
     async def _ensure_archive_source(self) -> None:
         if self._archive_source_ready:

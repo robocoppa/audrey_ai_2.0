@@ -179,10 +179,11 @@ def cli(setup, monkeypatch):
     client, embedder, args, _ = setup
     config = args["state"].parent / "config.yaml"
     profile = embedder.profile
-    config.write_text(json.dumps({"text_embedding": {
+    settings = {
         "model": profile.model, "digest": profile.digest, "dimensions": profile.dimensions,
         "document_prefix": profile.document_prefix, "query_prefix": profile.query_prefix,
-    }}))
+    }
+    config.write_text(json.dumps({"text_embedding": settings, "history_embedding": settings}))
     report = args["state"] / "reports" / "result.json"
     ollama = SimpleNamespace(aclose=AsyncMock())
     closed = Mock(wraps=client.close)
@@ -199,6 +200,7 @@ def cli(setup, monkeypatch):
     monkeypatch.setattr(m, "QdrantClient", qdrant_client)
     monkeypatch.setattr(m, "OllamaClient", ollama_client)
     monkeypatch.setattr(m, "text_embedder", lambda *_: embedder)
+    monkeypatch.setattr(m, "history_text_embedder", lambda *_: embedder)
     argv = ["--config", str(config), "--uploads-db", str(args["uploads"]),
         "--archive-db", str(args["archive"]), "--app-db", str(args["app_db"]),
         "--state", str(args["state"]), "--report", str(report), "--maintenance-confirmed"]
@@ -476,3 +478,227 @@ async def test_absent_original_archive_never_replays_stale_sql_backup(setup):
     journal = json.loads((args["state"] / "manifest.json").read_text())
     assert journal["sql"]["archive"] is None
     assert m.verified_sql_backups(journal, args["state"])["archive"] is None
+
+
+def nomic_history_embedder():
+    profile = EmbeddingProfile(
+        "nomic-embed-text:latest",
+        "0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f",
+        768, "search_document: ", "search_query: ",
+    )
+    return SimpleNamespace(
+        profile=profile, verify_identity=AsyncMock(),
+        embed_many=AsyncMock(side_effect=lambda rows: [[1.] + [0.] * 767 for _ in rows]),
+    )
+
+
+def retained_collection(client, name):
+    return {
+        "schema": m.schema(client, name),
+        "rows": [row.model_dump(mode="json") for row in m.records(client, name)],
+    }
+
+
+async def test_history_scope_replaces_only_history_and_needs_no_upload_or_app_database(setup):
+    client, qwen, args, _ = setup
+    await m.migrate(client, qwen, {}, **args)
+    original_state = args["state"]
+    source_before = sqlite_source_bytes(args["archive"])
+    untouched = {name: retained_collection(client, name)
+                 for name in ("kb_text", "kb_user_text_owner", "kb_memory", "kb_images")}
+    args = {**args, "state": original_state.parent / "history-reembed-nomic",
+            "uploads": original_state.parent / "missing-uploads.sqlite",
+            "app_db": original_state.parent / "missing-app.sqlite"}
+    args["state"].mkdir()
+    history = nomic_history_embedder()
+    previous_calls = qwen.embed_many.await_count
+    previous_identity_checks = qwen.verify_identity.await_count
+
+    report = await m.migrate(client, qwen, {}, scope="history", history_embedder=history, **args)
+
+    assert report["status"] == "completed" and report["scope"] == "history"
+    assert report["embedding"]["embedding_model"] == "nomic-embed-text:latest"
+    assert report["embedding"]["embedding_dimensions"] == 768
+    assert [row["role"] for row in report["collections"]] == ["history"]
+    assert [row["points"] for row in report["collections"]] == [2]
+    assert qwen.embed_many.await_count == previous_calls
+    assert qwen.verify_identity.await_count == previous_identity_checks
+    assert history.embed_many.await_count == 1
+    assert client.get_collection("kb_chat_archive").config.metadata == history.profile.metadata
+    assert client.get_collection("kb_chat_archive").config.params.vectors.size == 768
+    assert source_before == sqlite_source_bytes(args["archive"])
+    for name, before in untouched.items():
+        assert retained_collection(client, name) == before
+    journal = json.loads((args["state"] / "manifest.json").read_text())
+    assert set(journal["sql"]) == {"archive"}
+    assert set(journal["profiles"]) == {"history"}
+    assert not (args["state"] / "uploads.sqlite").exists()
+    assert json.loads((original_state / "manifest.json").read_text())["scope"] == "all"
+
+
+async def test_all_scope_uses_each_collection_role_profile(setup):
+    client, qwen, args, _ = setup
+    history = nomic_history_embedder()
+    report = await m.migrate(client, qwen, {}, history_embedder=history, **args)
+    assert client.get_collection("kb_text").config.params.vectors.size == 3
+    assert client.get_collection("kb_memory").config.metadata == qwen.profile.metadata
+    assert client.get_collection("kb_chat_archive").config.params.vectors.size == 768
+    assert client.get_collection("kb_chat_archive").config.metadata == history.profile.metadata
+    assert set(report["embeddings"]) == {"text", "history"}
+    assert "First chat text" not in [text for call in qwen.embed_many.await_args_list for text in call.args[0]]
+    assert "First chat text" in [text for call in history.embed_many.await_args_list for text in call.args[0]]
+
+
+async def test_history_scope_resumes_cutover_without_reembedding_or_other_collection_writes(setup, monkeypatch):
+    client, qwen, args, _ = setup
+    history = nomic_history_embedder()
+    original = client.upsert
+
+    def fail_history(name, *positional, **kwargs):
+        if name == "kb_chat_archive":
+            raise RuntimeError("interrupted history cutover")
+        return original(name, *positional, **kwargs)
+
+    monkeypatch.setattr(client, "upsert", fail_history)
+    before = retained_collection(client, "kb_text")
+    with pytest.raises(RuntimeError, match="interrupted history cutover"):
+        await m.migrate(client, qwen, {}, scope="history", history_embedder=history, **args)
+    count = history.embed_many.await_count
+    monkeypatch.setattr(client, "upsert", original)
+    report = await m.migrate(client, qwen, {}, scope="history", history_embedder=history, **args)
+    assert report["status"] == "completed"
+    assert history.embed_many.await_count == count
+    assert retained_collection(client, "kb_text") == before
+    qwen.embed_many.assert_not_awaited()
+    qwen.verify_identity.assert_not_awaited()
+
+
+@pytest.mark.parametrize("legacy_journal", [False, True])
+async def test_old_unified_migration_state_refuses_split_profile_or_history_scope(setup, legacy_journal):
+    client, qwen, args, _ = setup
+    await m.migrate(client, qwen, {}, **args)
+    manifest = args["state"] / "manifest.json"
+    if legacy_journal:
+        journal = json.loads(manifest.read_text())
+        del journal["scope"]
+        del journal["profiles"]
+        manifest.write_text(json.dumps(journal))
+    before = {name: retained_collection(client, name)
+              for name in ("kb_text", "kb_user_text_owner", "kb_memory", "kb_chat_archive", "kb_images")}
+    for scope in ("all", "history"):
+        with pytest.raises(m.MigrationError, match="scope or embedding profile"):
+            await m.migrate(client, qwen, {}, scope=scope, history_embedder=nomic_history_embedder(), **args)
+    for name, expected in before.items():
+        assert retained_collection(client, name) == expected
+
+
+async def test_history_scope_preserves_purge_conversation_delete_and_retention_exclusions(setup):
+    client, qwen, args, _ = setup
+    with sqlite3.connect(args["archive"]) as db:
+        db.execute("INSERT INTO archive_user_purges VALUES('owner','2026-02-01T00:00:00+00:00')")
+        db.execute("INSERT INTO archive_conversation_deletions VALUES('owner','conversation','2026-02-02T00:00:00+00:00')")
+        db.execute("INSERT INTO archive_chunks VALUES('live','current','other','n1,n2','Live current chat',?,NULL)",
+                   (m.datetime.now(m.UTC).isoformat(),))
+    report = await m.migrate(client, qwen, {}, scope="history", retention_days=5,
+                             history_embedder=nomic_history_embedder(), **args)
+    assert report["collections"][0]["points"] == 1
+    assert next(m.records(client, "kb_chat_archive")).payload["text"] == "Live current chat"
+
+
+def test_history_cli_does_not_load_or_call_the_general_text_embedder(cli, monkeypatch):
+    history = nomic_history_embedder()
+    monkeypatch.setattr(m, "history_text_embedder", lambda *_: history)
+    text = Mock(side_effect=AssertionError("text embedder must not run for history scope"))
+    monkeypatch.setattr(m, "text_embedder", text)
+    assert m.main([*cli.argv, "--scope", "history"]) == 0
+    assert json.loads(cli.report.read_text())["scope"] == "history"
+    text.assert_not_called()
+    cli.embedder.embed_many.assert_not_awaited()
+
+
+def test_main_requires_separate_history_configuration_before_clients(cli):
+    config_path = type(cli.report)(cli.argv[cli.argv.index("--config") + 1])
+    config = json.loads(config_path.read_text())
+    del config["history_embedding"]
+    config_path.write_text(json.dumps(config))
+    assert m.main(cli.argv) == 2
+    assert json.loads(cli.report.read_text())["stage"] == "configuration"
+    cli.embedder.embed_many.assert_not_awaited()
+    cli.closed.assert_not_called()
+
+
+@pytest.mark.parametrize("collection", ["kb_text", "kb_memory", "kb_images", "kb_user_text_owner"])
+async def test_history_scope_rejects_collection_override_pointing_at_other_data(setup, collection):
+    client, qwen, args, _ = setup
+    before = retained_collection(client, collection)
+    with pytest.raises(m.MigrationError, match="overlaps another data role"):
+        await m.migrate(client, qwen, {}, scope="history", history=collection,
+                        history_embedder=nomic_history_embedder(), **args)
+    assert retained_collection(client, collection) == before
+
+
+async def test_history_migration_factory_uses_nomic_document_prefix_and_exact_native_width(tmp_path):
+    profile = nomic_history_embedder().profile
+    path = tmp_path / "config.yaml"
+    path.write_text(json.dumps({"history_embedding": {
+        "model": profile.model, "digest": profile.digest, "dimensions": profile.dimensions,
+        "document_prefix": profile.document_prefix, "query_prefix": profile.query_prefix,
+        "keep_alive": "24h", "timeout_s": 8, "min_score": .4,
+    }}))
+    ollama = SimpleNamespace(
+        tags=AsyncMock(return_value=[{"name": profile.model, "digest": profile.digest}]),
+        embed=AsyncMock(return_value=[[1.] + [0.] * 767]),
+    )
+    embedder = m.history_text_embedder(ollama, path)
+    vectors = await embedder.embed_many(["Saved arithmetic exchange"])
+    assert len(vectors[0]) == 768
+    ollama.embed.assert_awaited_once_with(
+        model=profile.model, texts=["search_document: Saved arithmetic exchange"],
+        timeout_s=120, keep_alive="24h", truncate=False,
+    )
+
+
+def test_archive_backup_preserves_external_content_fts_without_changing_source(tmp_path):
+    source = tmp_path / "archive.sqlite"
+    with sqlite3.connect(source) as db:
+        db.execute("CREATE TABLE archive_chunks(chunk_id TEXT, text TEXT)")
+        db.execute("INSERT INTO archive_chunks VALUES('saved','Calculate 1250 × 1.08')")
+        db.execute("CREATE VIRTUAL TABLE archive_chunks_fts USING fts5(text, content='archive_chunks', tokenize='porter unicode61')")
+        db.execute("INSERT INTO archive_chunks_fts(archive_chunks_fts) VALUES('rebuild')")
+    state = tmp_path / "state"
+    state.mkdir()
+    before = sqlite_source_bytes(source)
+    target = state / "archive.sqlite"
+    assert m.backup_sql(source, target) == m.sql_fingerprint(source, scratch_root=state)
+    with m.readonly(target) as db:
+        assert db.execute("SELECT text FROM archive_chunks_fts WHERE archive_chunks_fts MATCH ?",
+                          ('"calculation"',)).fetchall() == [("Calculate 1250 × 1.08",)]
+    assert sqlite_source_bytes(source) == before
+
+
+@pytest.mark.parametrize("completed", [False, True])
+async def test_history_resume_refuses_changed_requested_collection_without_mutations(setup, monkeypatch, completed):
+    client, qwen, args, _ = setup
+    history = nomic_history_embedder()
+    upsert = client.upsert
+
+    def interrupted(name, *positional, **kwargs):
+        if name == "kb_chat_archive":
+            raise RuntimeError("interrupted history cutover")
+        return upsert(name, *positional, **kwargs)
+
+    if completed:
+        await m.migrate(client, qwen, {}, scope="history", history_embedder=history, **args)
+    else:
+        monkeypatch.setattr(client, "upsert", interrupted)
+        with pytest.raises(RuntimeError, match="interrupted history cutover"):
+            await m.migrate(client, qwen, {}, scope="history", history_embedder=history, **args)
+        monkeypatch.setattr(client, "upsert", upsert)
+    before = {item.name: retained_collection(client, item.name)
+              for item in client.get_collections().collections}
+    with pytest.raises(m.MigrationError, match="requested collection"):
+        await m.migrate(client, qwen, {}, scope="history", history="another-history-collection",
+                        history_embedder=history, **args)
+    assert not client.collection_exists("another-history-collection")
+    assert {item.name: retained_collection(client, item.name)
+            for item in client.get_collections().collections} == before

@@ -1,0 +1,148 @@
+{
+  "schema": 1,
+  "status": "measured",
+  "measurement_status": "completed",
+  "scope": "One known positive exchange; matched diagnostic, not a model promotion gate",
+  "corpus": {
+    "chunks": 48,
+    "sha256": "53f21788efebcdbb835fbde22fd1a06a9265e23079414f759bbfc359eeebb75c",
+    "target_chunks": 1
+  },
+  "query_count": 4,
+  "embedding_calls": 21,
+  "arms": [
+    {
+      "arm": "nomic_raw",
+      "model": "nomic-embed-text:latest",
+      "digest": "0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f",
+      "dimensions": 768,
+      "queries": [
+        {
+          "query": 1,
+          "original_rank": 2,
+          "original_in_top_5": true,
+          "original_score": 0.61811,
+          "top_score": 0.64616,
+          "deployed_cutoff": null,
+          "original_passes_deployed_cutoff": null
+        },
+        {
+          "query": 2,
+          "original_rank": 1,
+          "original_in_top_5": true,
+          "original_score": 0.66069,
+          "top_score": 0.66069,
+          "deployed_cutoff": null,
+          "original_passes_deployed_cutoff": null
+        },
+        {
+          "query": 3,
+          "original_rank": 2,
+          "original_in_top_5": true,
+          "original_score": 0.55244,
+          "top_score": 0.6063,
+          "deployed_cutoff": null,
+          "original_passes_deployed_cutoff": null
+        },
+        {
+          "query": 4,
+          "original_rank": 1,
+          "original_in_top_5": true,
+          "original_score": 0.70907,
+          "top_score": 0.70907,
+          "deployed_cutoff": null,
+          "original_passes_deployed_cutoff": null
+        }
+      ]
+    },
+    {
+      "arm": "nomic_prefixed",
+      "model": "nomic-embed-text:latest",
+      "digest": "0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f",
+      "dimensions": 768,
+      "queries": [
+        {
+          "query": 1,
+          "original_rank": 2,
+          "original_in_top_5": true,
+          "original_score": 0.62242,
+          "top_score": 0.70062,
+          "deployed_cutoff": null,
+          "original_passes_deployed_cutoff": null
+        },
+        {
+          "query": 2,
+          "original_rank": 1,
+          "original_in_top_5": true,
+          "original_score": 0.70717,
+          "top_score": 0.70717,
+          "deployed_cutoff": null,
+          "original_passes_deployed_cutoff": null
+        },
+        {
+          "query": 3,
+          "original_rank": 3,
+          "original_in_top_5": true,
+          "original_score": 0.5788,
+          "top_score": 0.66467,
+          "deployed_cutoff": null,
+          "original_passes_deployed_cutoff": null
+        },
+        {
+          "query": 4,
+          "original_rank": 1,
+          "original_in_top_5": true,
+          "original_score": 0.73688,
+          "top_score": 0.73688,
+          "deployed_cutoff": null,
+          "original_passes_deployed_cutoff": null
+        }
+      ]
+    },
+    {
+      "arm": "configured",
+      "model": "qwen3-embedding:4b",
+      "digest": "df5bd2e3c74cd8d069d21dc038f1b359fcdc9458fce1c99bd43c9eb1518ff907",
+      "dimensions": 2560,
+      "queries": [
+        {
+          "query": 1,
+          "original_rank": 4,
+          "original_in_top_5": true,
+          "original_score": 0.32945,
+          "top_score": 0.6425,
+          "deployed_cutoff": 0.62,
+          "original_passes_deployed_cutoff": false
+        },
+        {
+          "query": 2,
+          "original_rank": 4,
+          "original_in_top_5": true,
+          "original_score": 0.37908,
+          "top_score": 0.61157,
+          "deployed_cutoff": 0.62,
+          "original_passes_deployed_cutoff": false
+        },
+        {
+          "query": 3,
+          "original_rank": 7,
+          "original_in_top_5": false,
+          "original_score": 0.25879,
+          "top_score": 0.51384,
+          "deployed_cutoff": 0.62,
+          "original_passes_deployed_cutoff": false
+        },
+        {
+          "query": 4,
+          "original_rank": 4,
+          "original_in_top_5": true,
+          "original_score": 0.43342,
+          "top_score": 0.55607,
+          "deployed_cutoff": 0.62,
+          "original_passes_deployed_cutoff": false
+        }
+      ]
+    }
+  ],
+  "planned_embedding_calls": 21
+}

@@ -41,6 +41,11 @@ class _Archive:
     def __init__(self) -> None:
         self.source_initializations = 0
         self.index_initializations = 0
+        self.warmups = 0
+
+    async def warm_embedder(self) -> bool:
+        self.warmups += 1
+        return True
 
     async def init_source(self) -> None:
         self.source_initializations += 1
@@ -96,6 +101,8 @@ async def test_qdrant_outage_leaves_stateless_and_archive_source_available():
     assert states["memory"].available is True
     assert states["text_embedding"].available is True
     assert states["chat_archive"].available is True
+    assert states["history_embedding"].available is True
+    assert archive.warmups == 1
     assert memory.initializations == 1
     assert memory.warmups == 1
     assert archive.index_initializations == 1

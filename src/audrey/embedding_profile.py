@@ -107,16 +107,30 @@ def profile_from_mapping(settings: Mapping) -> EmbeddingProfile:
     return profile
 
 
-def load_settings(path: str | Path) -> dict:
-    """Read and validate the one canonical text_embedding block."""
+def load_settings(path: str | Path, *, role: str = "text") -> dict:
+    """Read a required canonical profile; history never inherits the text space."""
+    if role not in {"text", "history"}:
+        raise ValueError("Unknown embedding role")
+    section = "text_embedding" if role == "text" else "history_embedding"
     with Path(path).open(encoding="utf-8") as stream:
         body = yaml.safe_load(stream)
-    if not isinstance(body, dict) or not isinstance(body.get("text_embedding"), dict):
-        raise ValueError("Configuration must contain text_embedding settings")
-    settings = dict(body["text_embedding"])
+    if not isinstance(body, dict) or not isinstance(body.get(section), dict):
+        raise ValueError(f"Configuration must contain {section} settings")
+    settings = dict(body[section])
     profile_from_mapping(settings)
+    if role == "history":
+        score = settings.get("min_score", 0.4)
+        timeout = settings.get("timeout_s", 8.0)
+        if (isinstance(score, bool) or not isinstance(score, (int, float))
+                or not math.isfinite(score) or not -1 <= score <= 1):
+            raise ValueError("Invalid history embedding similarity cutoff")
+        if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+                or not math.isfinite(timeout) or timeout <= 0):
+            raise ValueError("Invalid history embedding timeout")
+        if not isinstance(settings.get("keep_alive", "24h"), str):
+            raise ValueError("Invalid history embedding residency setting")
     return settings
 
 
-def load_profile(path: str | Path) -> EmbeddingProfile:
-    return profile_from_mapping(load_settings(path))
+def load_profile(path: str | Path, *, role: str = "text") -> EmbeddingProfile:
+    return profile_from_mapping(load_settings(path, role=role))
