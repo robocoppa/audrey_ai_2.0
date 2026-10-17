@@ -2,8 +2,11 @@
 """Compare public real-document retrieval and invented memory/history records.
 
 Run with the existing probe-onbox.sh wrapper; copy this probe's three fixtures
-and embedding_retrieval_probe.py alongside it. This evaluator reads no private
-collections and writes no Qdrant index, application setting or model weights.
+and embedding_retrieval_probe.py alongside it. --documents-only instead uses
+the public reference fixture and optional --upload-cases layout, with no cold
+or stress sampling and no explicit model unloads. It warms both configured
+serving profiles on completion. This evaluator reads no private collections
+and writes no Qdrant index, application setting or model weights.
 Calibration and holdout sources are disjoint. Thresholds are fitted only on
 calibration records and then frozen before holdout scoring.
 """
@@ -19,13 +22,15 @@ import math
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import yaml
 
+from audrey.embedding_profile import load_profile
 from audrey.kb.fusion import passes_evidence, reciprocal_rank_fusion
 from audrey.kb.qdrant import KBHit
 
@@ -51,9 +56,9 @@ MAX_BYTES = 1_500_000
 MAX_DOCUMENTS = 768
 MAX_QUERIES = 120
 SPLITS = {"calibration", "holdout"}
-WORKLOADS = {"reference", "memory", "history"}
-RETRIEVAL_POOLS = {"reference": 24, "regression": 40, "memory": 20, "history": 20}
-CURRENT = {"reference": (0.55, 0.5), "regression": (0.53, 0.7),
+WORKLOADS = {"reference", "documents", "memory", "history"}
+RETRIEVAL_POOLS = {"reference": 24, "documents": 40, "regression": 40, "memory": 20, "history": 20}
+CURRENT = {"reference": (0.55, 0.5), "documents": (0.53, 0.7), "regression": (0.53, 0.7),
            "memory": (0.5, None), "history": (0.4, None)}
 
 
@@ -62,6 +67,7 @@ class Settings(base.Settings):
     candidate_profile: str = "gemma"
     candidates: tuple[str, ...] = ()
     baselines_only: bool = False
+    documents_only: bool = False
 
     def selected_arms(self):
         original = super().selected_arms()
@@ -97,6 +103,7 @@ class Document:
     offset: int
     split: str
     workload: str
+    end_page: int | None = None
 
 
 @dataclass(frozen=True)
@@ -123,7 +130,10 @@ def default_path(name: str) -> Path:
     copied = Path(__file__).with_name(name)
     if copied.is_file():
         return copied
-    return Path(__file__).resolve().parents[2] / "evals/cases" / name
+    parents = Path(__file__).resolve().parents
+    # The on-box wrapper copies this script directly to /tmp. argparse still
+    # evaluates defaults for skipped fixtures; there may be no repo ancestor.
+    return parents[2] / "evals/cases" / name if len(parents) > 2 else copied
 
 
 def _text(value, label: str, maximum: int) -> str:
@@ -143,7 +153,7 @@ def fixture_inputs_sha256(body: dict) -> str:
     """Fingerprint model inputs and corpus scopes, independently of gold labels."""
     keys = {
         "sources": ("id", "url", "sha256", "split"),
-        "documents": ("id", "text", "source_id", "page", "offset", "split", "workload"),
+        "documents": ("id", "text", "source_id", "page", "end_page", "offset", "end_offset", "split", "workload"),
         "queries": ("id", "text", "group", "split", "workload", "kind"),
     }
     selected = {name: [{key: row[key] for key in fields if key in row}
@@ -207,15 +217,16 @@ def load_fixture(path: Path, *, synthetic: bool) -> tuple[list[Corpus], dict]:
             raise ProbeError("document has duplicate id or missing source")
         if split not in SPLITS or source["split"] != split:
             raise ProbeError("source leakage: document split differs from its source")
-        if workload not in WORKLOADS or (synthetic and workload == "reference"):
+        if workload not in WORKLOADS or (synthetic and workload in {"reference", "documents"}):
             raise ProbeError("document has an invalid workload")
         page = _positive_int(row.get("page"), "document page")
-        if not synthetic and page > source["pages"]:
-            raise ProbeError("document page exceeds source page count")
-        doc = Document(identity, _text(row.get("text"), "document text", 5000),
+        end_page = _positive_int(row.get("end_page", page), "document end page")
+        if end_page < page or (not synthetic and end_page > source["pages"]):
+            raise ProbeError("document page span exceeds source page count or is reversed")
+        doc = Document(identity, _text(row.get("text"), "document text", 10000),
                        row["source_id"], page,
                        _positive_int(row.get("offset"), "document offset", zero=True),
-                       split, workload)
+                       split, workload, end_page if "end_page" in row else None)
         if "text_sha256" in row and hashlib.sha256(doc.text.encode()).hexdigest() != row["text_sha256"]:
             raise ProbeError("document text checksum differs from its frozen source excerpt")
         documents.append(doc)
@@ -247,14 +258,16 @@ def load_fixture(path: Path, *, synthetic: bool) -> tuple[list[Corpus], dict]:
             if not isinstance(item, dict):
                 raise ProbeError("evidence must be an object")
             quote = " ".join(_text(item.get("quote"), "evidence quote", 5000).split())
-            if not any(doc.source_id == item.get("source_id") and doc.page == item.get("page")
+            if not any(doc.source_id == item.get("source_id")
+                       and doc.page <= _positive_int(item.get("page"), "evidence page") <= (doc.end_page or doc.page)
                        and quote in " ".join(doc.text.split())
                        for doc in (doc_map[key] for key in relevant)):
                 raise ProbeError("evidence quote does not match a labeled source/page")
         if relevant and not synthetic:
             for key in relevant:
                 doc = doc_map[key]
-                if not any(item.get("source_id") == doc.source_id and item.get("page") == doc.page
+                if not any(item.get("source_id") == doc.source_id
+                           and doc.page <= _positive_int(item.get("page"), "evidence page") <= (doc.end_page or doc.page)
                            and " ".join(item["quote"].split()) in " ".join(doc.text.split())
                            for item in evidence):
                     raise ProbeError("every relevant document requires matching source/page evidence")
@@ -283,6 +296,8 @@ def load_fixture(path: Path, *, synthetic: bool) -> tuple[list[Corpus], dict]:
                      "input_sha256": fixture_inputs_sha256(body), "schema": 2,
                      "public": True, "synthetic": synthetic, "language": "en",
                      "documents": len(documents), "queries": len(query_rows),
+                     "layout": {key: body[key] for key in
+                                ("chunking", "chunk_policy", "label_policy", "derivation", "provenance", "scope", "questions_reused_from") if key in body},
                      "sources": [{key: value for key, value in source.items()
                                   if key in {"id", "url", "sha256", "title", "split", "pages", "license"}}
                                  for source in sources]}
@@ -309,9 +324,12 @@ def call_budget(settings, corpora: list[Corpus], *, cold_samples=3, stress_batch
         raise ProbeError("each corpus requires documents and queries")
     if cold_samples != 3 or not 1 <= stress_batches <= 2:
         raise ProbeError("this evaluation requires three cold samples and one or two stress batches")
-    calls = len(arms) * (cold_samples + stress_batches
+    lifecycle = 0 if settings.documents_only else cold_samples + stress_batches
+    calls = len(arms) * (lifecycle
                         + sum(math.ceil(len(corpus.documents) / settings.batch_size)
                               + len(corpus.queries) * settings.rounds for corpus in corpora))
+    if settings.documents_only:
+        calls += 2  # Restore the configured text/history profiles with 24-hour residency.
     if calls > MAX_EMBED_CALLS:
         raise ProbeError(f"estimated embedding requests {calls} exceed maximum {MAX_EMBED_CALLS}")
     return calls
@@ -327,7 +345,7 @@ def rank_query(corpus: Corpus, query: Query, matrix: np.ndarray, vector: list[fl
     dense = [KBHit(float(scores[index]), corpus.documents[index].id, "text", 0,
                    corpus.documents[index].text, {}) for index in order]
     fused = reciprocal_rank_fusion(dense[:RETRIEVAL_POOLS[corpus.workload]], lexical, query=query.text)
-    hybrid = corpus.workload in {"reference", "regression"}
+    hybrid = corpus.workload in {"reference", "documents", "regression"}
     candidates = [{"id": entry.hit.source, "dense_cosine": entry.dense_score,
                    "lexical_overlap": entry.overlap, "lexical": "lexical" in entry.retrievers}
                   for entry in fused] if hybrid else [
@@ -416,12 +434,19 @@ def calibrate(rows: list[dict], *, hybrid: bool) -> dict:
 
 def quality_summary(rows: list[dict]) -> dict:
     positive = [row for row in rows if row["relevant"]]
-    return {method: base.ranking_metrics([row[method] for row in positive],
-                                        [tuple(row["relevant"]) for row in positive])
-            for method in ("dense", "hybrid", "lexical")}
+    result = {}
+    for method in ("dense", "hybrid", "lexical"):
+        metrics = base.ranking_metrics([row[method] for row in positive],
+                                       [tuple(row["relevant"]) for row in positive])
+        for depth in (1, 3, 5):
+            count = sum(bool(set(row[method][:depth]) & set(row["relevant"])) for row in positive)
+            metrics[f"hits_at_{depth}"] = count
+            metrics[f"hit_rate_at_{depth}"] = round(count / len(positive), 6) if positive else None
+        result[method] = metrics
+    return result
 
 
-def summarize_workloads(corpora_results: list[dict]) -> dict:
+def summarize_workloads(corpora_results: list[dict], policies: dict | None = None) -> dict:
     contexts = {row["id"]: row for row in corpora_results}
     result = {}
     for workload in sorted({row["workload"] for row in corpora_results} - {"regression"}):
@@ -429,14 +454,16 @@ def summarize_workloads(corpora_results: list[dict]) -> dict:
         holdout = contexts[f"{workload}:holdout"]["queries"]
         # First repeat only: repeated embeddings do not manufacture new labels.
         fitted = calibrate([row for row in calibration if row["repeat"] == 1],
-                           hybrid=workload == "reference")
+                           hybrid=workload in {"reference", "documents"})
         holdout_metrics = admission_metrics(
             [row for row in holdout if row["repeat"] == 1], fitted["min_dense_score"],
             fitted["min_term_overlap"], diagnostics=True)
-        current = CURRENT[workload]
+        current = policies[workload] if policies is not None else CURRENT[workload]
         result[workload] = {
             "calibrated_policy": fitted, "holdout": holdout_metrics,
-            "current_policy": {"min_dense_score": current[0], "min_term_overlap": current[1],
+            ("configured_qwen_policy_diagnostic" if policies is not None else "current_policy"):
+                              {"min_dense_score": current[0], "min_term_overlap": current[1],
+                               "not_a_cross_model_calibration": policies is not None,
                                "holdout": admission_metrics(
                                    [row for row in holdout if row["repeat"] == 1], *current,
                                    diagnostics=True)},
@@ -490,12 +517,13 @@ async def verify_unload(client, model: str, *, timeout_seconds=5.0, poll_interva
 
 async def measure_arm(client, arm, corpora: list[Corpus], lexical: dict,
                       *, stress_inputs, stress_metadata, progress: dict,
-                      cold_samples=3, stress_batches=2) -> dict:
+                      cold_samples=3, stress_batches=2, policies=None,
+                      quality_only=False) -> dict:
     progress.update(stage="cold_samples", completed_documents=0, completed_query_samples=0)
     before = await client.residency()
     cold, cold_issues = [], []
     sample_query = corpora[0].queries[0]
-    for index in range(cold_samples):
+    for index in range(0 if quality_only else cold_samples):
         unload = await verify_unload(client, arm.model)
         if not unload["verified_unloaded"]:
             cold_issues.append({"sample": index + 1, **unload})
@@ -533,9 +561,11 @@ async def measure_arm(client, arm, corpora: list[Corpus], lexical: dict,
             "positive_queries": sum(bool(query.relevant) for query in corpus.queries),
             "negative_queries": sum(not query.relevant for query in corpus.queries),
             "ranking": quality_summary(first),
-            "current_policy": {"min_dense_score": CURRENT[corpus.workload][0],
-                               "min_term_overlap": CURRENT[corpus.workload][1],
-                               **admission_metrics(first, *CURRENT[corpus.workload], diagnostics=True)},
+            ("configured_qwen_policy_diagnostic" if policies is not None else "current_policy"):
+                              {"min_dense_score": (policies or CURRENT)[corpus.workload][0],
+                               "min_term_overlap": (policies or CURRENT)[corpus.workload][1],
+                               "not_a_cross_model_calibration": policies is not None,
+                               **admission_metrics(first, *(policies or CURRENT)[corpus.workload], diagnostics=True)},
             "ingestion": {"batches": batches, "seconds": round(sum(
                 sample["wall_seconds"] for sample in batches), 6)},
             "repeat_ranking_consistent": all(
@@ -546,7 +576,7 @@ async def measure_arm(client, arm, corpora: list[Corpus], lexical: dict,
         progress["stage"] = "corpus_embeddings"
     progress["stage"] = "batch64_stress"
     stress = []
-    for _ in range(stress_batches):
+    for _ in range(0 if quality_only else stress_batches):
         _, timing = await client.embed(arm, [arm.document_prefix + text for text in stress_inputs])
         stress.append({**stress_metadata, **timing})
     after = await client.residency()
@@ -555,10 +585,10 @@ async def measure_arm(client, arm, corpora: list[Corpus], lexical: dict,
             "format": {"document_prefix": arm.document_prefix, "query_prefix": arm.query_prefix},
             "dimensions": len(vectors[0]),
             "document_vector_norms": {"min": round(min(norms), 8), "max": round(max(norms), 8)},
-            "cold_queries": {"status": "completed" if len(cold) == cold_samples else (
+            "cold_queries": {"status": "not_requested" if quality_only else "completed" if len(cold) == cold_samples else (
                                  "partial" if cold else "unavailable"),
-                             "requested_samples": cold_samples, "samples": cold,
-                             "unavailable_samples": cold_samples - len(cold), "issues": cold_issues,
+                             "requested_samples": 0 if quality_only else cold_samples, "samples": cold,
+                             "unavailable_samples": 0 if quality_only else cold_samples - len(cold), "issues": cold_issues,
                              "within_memory_4s": sum(sample["wall_seconds"] <= 4 for sample in cold),
                              "within_kb_24s": sum(sample["wall_seconds"] <= 24 for sample in cold),
                              "p50_seconds": base.percentile(
@@ -569,7 +599,7 @@ async def measure_arm(client, arm, corpora: list[Corpus], lexical: dict,
             "ingestion": {"documents": sum(len(corpus.documents) for corpus in corpora),
                           "batch_size": client.settings.batch_size,
                           "seconds": round(sum(ingest_times), 6), "batch64_stress": stress},
-            "workloads": summarize_workloads(corpus_results), "corpora": corpus_results,
+            "workloads": summarize_workloads(corpus_results, policies), "corpora": corpus_results,
             "residency": {"before": before, "after": after,
                           "displaced": sorted(base.resident_names(before) - base.resident_names(after))}}
 
@@ -611,8 +641,104 @@ def assess_candidate(measured: dict, candidate_id: str) -> dict:
             "meaning": "bounded local evidence for a migration decision; synthetic personal records are not private-corpus acceptance"}
 
 
+def document_config(path):
+    try:
+        profiles = {role: load_profile(path, role=role) for role in ("text", "history")}
+        if (not profiles["text"].model.startswith("qwen3-embedding:")
+                or profiles["history"].model != "nomic-embed-text:latest"):
+            raise ProbeError("document comparison requires configured Qwen text and Nomic history profiles")
+        body = yaml.safe_load(path.read_text())
+        reference = body["reference_libraries"]["search"]
+        kb = body["kb"]
+        policies = {
+            "reference": (reference["min_dense_score"], reference.get("min_term_overlap")),
+            "documents": (kb["min_score"], kb["hybrid"]["min_term_overlap"]),
+        }
+    except (KeyError, TypeError, yaml.YAMLError) as error:
+        raise ProbeError("document comparison configuration is incomplete or invalid") from error
+    for score, overlap in policies.values():
+        if (isinstance(score, bool) or not isinstance(score, (int, float))
+                or not math.isfinite(score) or not -1 <= score <= 1
+                or (overlap is not None and (isinstance(overlap, bool)
+                    or not isinstance(overlap, (int, float))
+                    or not math.isfinite(overlap) or not 0 <= overlap <= 1))):
+            raise ProbeError("configured document retrieval policy is invalid")
+    return profiles, policies
+
+
+def configured_arms(settings, profiles):
+    arms = settings.selected_arms()
+    if not settings.documents_only:
+        return arms
+    if profiles is None or settings.baselines_only or len(arms) != 3:
+        raise ProbeError("documents-only mode requires the configured Qwen and both Nomic formats")
+    output = []
+    for arm in arms:
+        profile = profiles["text" if arm.id == "candidate" else "history"]
+        if arm.model != profile.model or (arm.id != "raw" and (
+                arm.document_prefix != profile.document_prefix or arm.query_prefix != profile.query_prefix)):
+            raise ProbeError("comparison model or input format differs from configured embedding profile")
+        output.append(replace(arm, expected_dimensions=profile.dimensions))
+    return output
+
+
+def verify_configured_models(metadata, profiles):
+    for profile in profiles.values():
+        observed = metadata["installed_models"].get(profile.model, {})
+        if observed.get("digest") != profile.digest:
+            raise ProbeError("installed comparison weights differ from the configured pinned digest")
+
+
+def paired_document_results(results):
+    measured = {arm["arm"]: arm for arm in results if arm.get("comparable")}
+    if not {"candidate", "raw", "prefixed"} <= set(measured):
+        return []
+    pairs = []
+    for baseline in ("raw", "prefixed"):
+        for corpus in measured["candidate"]["corpora"]:
+            if corpus["split"] != "holdout":
+                continue
+            other = next(row for row in measured[baseline]["corpora"] if row["id"] == corpus["id"])
+            selected = {row["id"]: row for row in corpus["queries"] if row["repeat"] == 1 and row["relevant"]}
+            controls = {row["id"]: row for row in other["queries"] if row["repeat"] == 1 and row["relevant"]}
+            if set(selected) != set(controls):
+                raise ProbeError("paired comparison query scopes differ")
+            for method in ("dense", "hybrid"):
+                changes, wins, losses, ties = [], 0, 0, 0
+                at_depth = {str(depth): {"wins": 0, "losses": 0, "ties": 0} for depth in (1, 3, 5)}
+                for identity, row in selected.items():
+                    control = controls[identity]
+                    if row["relevant"] != control["relevant"]:
+                        raise ProbeError("paired comparison relevance labels differ")
+                    ranks = [next((index for index, item in enumerate(value[method], 1)
+                                   if item in value["relevant"]), None) for value in (row, control)]
+                    left, right = [rank if rank is not None else math.inf for rank in ranks]
+                    wins += left < right
+                    losses += left > right
+                    ties += left == right
+                    if left != right:
+                        changes.append({"id": identity, "qwen_rank": ranks[0], "baseline_rank": ranks[1]})
+                    for depth in (1, 3, 5):
+                        outcome = "wins" if left <= depth < right else "losses" if right <= depth < left else "ties"
+                        at_depth[str(depth)][outcome] += 1
+                pairs.append({"layout": corpus["workload"], "baseline": baseline, "method": method,
+                              "positive_queries": len(selected), "rank_wins": wins,
+                              "rank_losses": losses, "rank_ties": ties,
+                              "at_depth": at_depth, "rank_changes": changes})
+    return pairs
+
+
 def recommendation(report: dict) -> dict:
     measured = {row["arm"]: row for row in report["results"] if row.get("comparable")}
+    if report.get("settings", {}).get("documents_only"):
+        findings = bool(report["errors"]) or any(
+            not workload["holdout_passed"] for arm in measured.values()
+            for workload in arm["workloads"].values()
+        )
+        return {"status": "comparison_completed" if not report["errors"] else "incomplete",
+                "quality_findings": findings, "automatic_promotion": False,
+                "migration_performed": False,
+                "meaning": "Compare paired ranks and per-model calibrated admission separately; configured Qwen thresholds are diagnostics, not Nomic calibration"}
     if report.get("settings", {}).get("baselines_only") and not report["errors"] and set(measured) == {"prefixed", "raw"}:
         return {"status": "baselines_measured", "migration_performed": False,
                 "meaning": "combine these matching baselines with the retained candidate measurements"}
@@ -630,30 +756,34 @@ def recommendation(report: dict) -> dict:
 
 async def collect_report(settings, corpora: list[Corpus], fixtures: dict,
                          *, transport=None, cold_samples=3, stress_batches=2,
-                         stress_inputs=None, stress_metadata=None) -> dict:
+                         stress_inputs=None, stress_metadata=None,
+                         profiles=None, production_policies=None) -> dict:
     calls = call_budget(settings, corpora, cold_samples=cold_samples, stress_batches=stress_batches)
-    arms = settings.selected_arms()
+    arms = configured_arms(settings, profiles)
     # All lexical construction is outside embedding timings and done once.
     lexical = {(corpus.id, query.id): base.lexical_rank(
         [base.Document(doc.id, doc.text) for doc in corpus.documents], query.text,
         limit=RETRIEVAL_POOLS[corpus.workload])
         for corpus in corpora for query in corpus.queries}
-    if stress_inputs is None:
+    if stress_inputs is None and not settings.documents_only:
         raise ProbeError("frozen public stress inputs must be loaded before model requests")
     client = base.Ollama(settings, transport, max_embed_calls=MAX_EMBED_CALLS)
     report = None
     try:
         metadata = await base.preflight(client, arms)
+        if settings.documents_only:
+            verify_configured_models(metadata, profiles)
         report = {
             "schema": 2, "status": "measured", "measurement_status": "completed",
             "created_at": datetime.now(UTC).isoformat(), "provenance": metadata,
             "fixtures": fixtures, "results": [], "errors": [],
-            "scope": "public English government documents plus synthetic memory/history and regression",
+            "scope": "Matched public English document layouts; reused questions/sources, not independent new evidence" if settings.documents_only else "public English government documents plus synthetic memory/history and regression",
             "settings": {"rounds": settings.rounds, "batch_size": settings.batch_size,
                          "candidate_profile": settings.candidate_profile,
-                         "baselines_only": settings.baselines_only,
+                         "baselines_only": settings.baselines_only, "documents_only": settings.documents_only,
                          "candidate_models": [arm.model for arm in arms if arm.id.startswith("candidate")],
-                         "cold_samples": cold_samples, "stress_batches64": stress_batches,
+                         "cold_samples": 0 if settings.documents_only else cold_samples,
+                         "stress_batches64": 0 if settings.documents_only else stress_batches,
                          "estimated_embedding_requests": calls,
                          "maximum_embedding_requests": MAX_EMBED_CALLS,
                          "timeout_seconds": settings.timeout, "keep_alive": settings.keep_alive},
@@ -679,7 +809,8 @@ async def collect_report(settings, corpora: list[Corpus], fixtures: dict,
             try:
                 result = await measure_arm(client, arm, corpora, lexical, progress=progress,
                                            stress_inputs=stress_inputs, stress_metadata=stress_metadata,
-                                           cold_samples=cold_samples, stress_batches=stress_batches)
+                                           cold_samples=cold_samples, stress_batches=stress_batches,
+                                           policies=production_policies, quality_only=settings.documents_only)
                 report["results"].append(result)
             except (ProbeError, ValueError, ArithmeticError) as error:
                 report["errors"].append({"arm": arm.id, "stage": progress.get("stage"),
@@ -687,13 +818,50 @@ async def collect_report(settings, corpora: list[Corpus], fixtures: dict,
                 report["results"].append({"arm": arm.id, "model": arm.model,
                                           "status": "incomplete", "comparable": False, **progress})
             finally:
-                if arm.model != settings.incumbent:
+                if not settings.documents_only and arm.model != settings.incumbent:
                     try:
                         await client.unload(arm.model)
                     except ProbeError as error:
                         report["errors"].append({"arm": arm.id, "cleanup_error": str(error)})
+        if settings.documents_only:
+            report["limitations"] = [
+                "Same public sources/questions reused across layouts; not independent new benchmark evidence",
+                "Exact in-memory dense/RRF ranking before per-file diversity; not native end-to-end top-k or Qdrant ANN",
+                "No cold/stress samples or explicit unloads; timing includes uncontrolled current residency",
+                "Fixed configured Qwen policy diagnostics do not calibrate Nomic's score space",
+                "No private data, production index writes, model promotion or setting changes",
+            ]
+            report["configured_profiles"] = {role: profile.metadata["audrey_embedding"]
+                                             for role, profile in profiles.items()}
+            report["paired_holdout"] = paired_document_results(report["results"])
+            # Leave both existing serving profiles warm, without unloading any model.
+            previous_settings = client.settings
+            client.settings = replace(settings, keep_alive="24h")
+            restored = []
+            for role, profile in profiles.items():
+                try:
+                    arm = base.Arm(role, profile.model, profile.document_prefix,
+                                   profile.query_prefix, profile.dimensions)
+                    await client.embed(arm, [profile.query("document comparison completed")])
+                    restored.append(profile.model)
+                except ProbeError as error:
+                    report["errors"].append({"restoration_error": str(error), "role": role})
+            client.settings = previous_settings
+            report["restoration"] = {"warm_requests_completed": restored, "keep_alive": "24h",
+                                     "explicit_unloads": 0, "resident_models_after": None,
+                                     "both_configured_observed": None}
+            try:
+                verify_configured_models(await base.preflight(client, arms), profiles)
+            except ProbeError as error:
+                report["errors"].append({"identity_recheck_error": str(error)})
         try:
             report["residency_after"] = await client.residency()
+            if settings.documents_only:
+                resident = sorted(base.resident_names(report["residency_after"]))
+                report["restoration"]["resident_models_after"] = resident
+                report["restoration"]["both_configured_observed"] = all(
+                    profile.model in resident for profile in profiles.values()
+                )
         except ProbeError as error:
             report["errors"].append({"residency_error": str(error)})
         report["embedding_calls"] = client.embed_calls
@@ -705,7 +873,102 @@ async def collect_report(settings, corpora: list[Corpus], fixtures: dict,
         await client.client.aclose()
 
 
+def compact_fixture_metadata(fixtures):
+    """Keep provenance without repeating the retained per-question label transcript."""
+    def without_transcripts(value):
+        if isinstance(value, dict):
+            return {key: without_transcripts(item) for key, item in value.items() if key != "additions"}
+        if isinstance(value, list):
+            return [without_transcripts(item) for item in value]
+        return value
+
+    result = {
+        name: {key: without_transcripts(metadata[key]) for key in
+               ("sha256", "input_sha256", "documents", "queries", "layout") if key in metadata}
+        for name, metadata in fixtures.items()
+    }
+    for metadata in result.values():
+        policy = metadata.get("layout", {}).get("label_policy")
+        if isinstance(policy, dict) and "revision" in policy:
+            revision = policy["revision"]
+            metadata["layout"]["label_policy"] = {
+                key: policy[key] for key in
+                ("created_before_model_measurement", "tested_models_generated_gold") if key in policy
+            }
+            metadata["layout"]["label_policy"]["revision"] = {
+                key: revision[key] for key in (
+                    "date", "original_fixture_sha256", "retrospective", "model_inputs_changed",
+                    "thresholds_tuned_on_holdout", "added_passages", "affected_queries", "limits",
+                ) if key in revision
+            }
+    original = fixtures.get("public", {}).get("layout", {}).get("label_policy")
+    for name, metadata in result.items():
+        policy = metadata.get("layout", {}).get("label_policy")
+        if name != "public" and isinstance(policy, dict) and "original_reviewed_policy" in policy:
+            if policy["original_reviewed_policy"] == without_transcripts(original):
+                policy["original_reviewed_policy"] = "Same reviewed policy as public fixture above"
+    return result
+
+
 def compact_report(report):
+    if report.get("settings", {}).get("documents_only"):
+        result = {key: report[key] for key in (
+            "schema", "status", "measurement_status", "created_at", "scope", "provenance",
+            "settings", "embedding_calls", "errors", "limitations", "configured_profiles",
+            "restoration", "quality_recommendation",
+        ) if key in report}
+        result["fixtures"] = compact_fixture_metadata(report["fixtures"])
+        result["paired_holdout"] = []
+        for original in report["paired_holdout"]:
+            pair = {key: value for key, value in original.items() if key != "rank_ties"}
+            pair["at_depth"] = {depth: {key: value for key, value in counts.items() if key != "ties"}
+                                for depth, counts in original["at_depth"].items()}
+            pair["rank_changes"] = [change for change in original["rank_changes"] if any(
+                ((change["qwen_rank"] or math.inf) <= depth)
+                != ((change["baseline_rank"] or math.inf) <= depth) for depth in (1, 3, 5)
+            )]
+            result["paired_holdout"].append(pair)
+        result["paired_change_scope"] = "Holdout first repeat; listed IDs change top1/3/5 membership; aggregate rank wins/losses include every positive question"
+        admission_keys = (
+            "supported_top3", "negative_admissions", "wrong_positive_top1",
+            "wrong_positive_hits_top3", "positive_rejected",
+        )
+        result["configured_qwen_policy_diagnostic"] = {
+            "not_a_cross_model_calibration": True,
+            "policies": {},
+        }
+        result["results"] = []
+        for arm in report["results"]:
+            output = {key: arm[key] for key in (
+                "arm", "model", "status", "comparable", "format", "dimensions", "warm_queries",
+            ) if key in arm}
+            output["holdout_layouts"] = []
+            for corpus in arm.get("corpora", []):
+                if corpus["split"] != "holdout":
+                    continue
+                workload = arm["workloads"][corpus["workload"]]
+                fitted = workload["calibrated_policy"]
+                diagnostic = corpus["configured_qwen_policy_diagnostic"]
+                result["configured_qwen_policy_diagnostic"]["policies"][corpus["workload"]] = {
+                    key: diagnostic[key] for key in ("min_dense_score", "min_term_overlap")
+                }
+                output["holdout_layouts"].append({
+                    "layout": corpus["workload"], "documents": corpus["documents"],
+                    "positive_queries": corpus["positive_queries"], "negative_queries": corpus["negative_queries"],
+                    "ranking_before_admission": {method: {
+                        key: corpus["ranking"][method][key]
+                        for key in ("hits_at_1", "hits_at_3", "hits_at_5", "mrr")
+                    } for method in ("dense", "hybrid")},
+                    "own_calibrated_policy": {"min_dense_score": fitted["min_dense_score"],
+                        "min_term_overlap": fitted["min_term_overlap"],
+                        "calibration_feasible": fitted["calibration_feasible"],
+                        **{key: workload["holdout"][key] for key in admission_keys}},
+                    "configured_qwen_policy_diagnostic": {
+                        key: diagnostic[key] for key in admission_keys
+                    },
+                })
+            result["results"].append(output)
+        return result
     result = {key: value for key, value in report.items()
               if key not in {"results", "residency_before", "residency_after"}}
     result["results"] = []
@@ -720,6 +983,9 @@ def compact_report(report):
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--summary", action="store_true")
+    parser.add_argument("--documents-only", action="store_true", help="compare public document layouts only; no cold/stress/unload operations")
+    parser.add_argument("--config", type=Path, default=Path("/app/config.yaml"))
+    parser.add_argument("--upload-cases", type=Path)
     parser.add_argument("--baselines-only", action="store_true", help="measure only the missing Nomic arms; preserve completed candidates")
     parser.add_argument("--check", action="store_true", help="validate frozen inputs and request budget without contacting any service")
     parser.add_argument("--public-cases", type=Path, default=default_path("embedding_real_documents.json"))
@@ -728,34 +994,66 @@ def main(argv=None) -> int:
     parser.add_argument("--report", type=Path)
     args = parser.parse_args(argv)
     try:
+        profiles, policies = document_config(args.config) if args.documents_only else (None, None)
         settings = Settings(
             base_url=os.environ.get("OLLAMA", "http://ollama:11434"),
-            candidate=os.environ.get("CANDIDATE", "embeddinggemma-2:latest"),
-            incumbent=os.environ.get("INCUMBENT", "nomic-embed-text:latest"),
-            candidate_profile=os.environ.get("CANDIDATE_PROFILE", "gemma"),
-            baselines_only=args.baselines_only,
+            candidate=os.environ.get("CANDIDATE", profiles["text"].model if profiles else "embeddinggemma-2:latest"),
+            incumbent=os.environ.get("INCUMBENT", profiles["history"].model if profiles else "nomic-embed-text:latest"),
+            candidate_profile=os.environ.get("CANDIDATE_PROFILE", "qwen3" if profiles else "gemma"),
+            baselines_only=args.baselines_only, documents_only=args.documents_only,
             candidates=tuple(item.strip() for item in os.environ.get("CANDIDATES", "").split(",") if item.strip()),
-            rounds=int(os.environ.get("ROUNDS", "2")),
+            rounds=int(os.environ.get("ROUNDS", "1" if profiles else "2")),
             batch_size=int(os.environ.get("BATCH_SIZE", "16")),
             timeout=float(os.environ.get("TIMEOUT", "120")),
-            keep_alive=os.environ.get("KEEP_ALIVE", "10m"))
+            keep_alive=os.environ.get("KEEP_ALIVE", "24h" if profiles else "10m"))
         public, public_meta = load_fixture(args.public_cases, synthetic=False)
-        personal, personal_meta = load_fixture(args.personal_cases, synthetic=True)
-        regression, regression_meta = load_regression(args.regression_cases)
-        corpora = [*public, *personal, regression]
+        fixture_metadata = {"public": public_meta}
+        if args.documents_only:
+            corpora = public
+            if any(corpus.workload != "reference" for corpus in public):
+                raise ProbeError("public document layout must use the reference workload")
+            if args.upload_cases is not None:
+                uploads, upload_meta = load_fixture(args.upload_cases, synthetic=False)
+                if any(corpus.workload != "documents" for corpus in uploads):
+                    raise ProbeError("upload layout must use the documents workload")
+                original_queries = {(q.id, q.text, q.split, q.kind) for c in public for q in c.queries}
+                uploaded_queries = {(q.id, q.text, q.split, q.kind) for c in uploads for q in c.queries}
+                if original_queries != uploaded_queries:
+                    raise ProbeError("document layouts must reuse identical query inputs")
+                if {(row["url"], row["sha256"], row["split"]) for row in public_meta["sources"]} != {
+                    (row["url"], row["sha256"], row["split"]) for row in upload_meta["sources"]
+                }:
+                    raise ProbeError("document layouts must reuse identical source PDFs and splits")
+                corpora = [*public, *uploads]
+                fixture_metadata["upload"] = upload_meta
+            stress_inputs = stress_metadata = None
+            configured_arms(settings, profiles)
+        else:
+            if args.upload_cases is not None:
+                raise ProbeError("--upload-cases requires --documents-only")
+            personal, personal_meta = load_fixture(args.personal_cases, synthetic=True)
+            regression, regression_meta = load_regression(args.regression_cases)
+            corpora = [*public, *personal, regression]
+            fixture_metadata.update(personal=personal_meta, regression=regression_meta)
+            stress_inputs, stress_metadata = load_stress(args.public_cases)
         call_budget(settings, corpora)
-        stress_inputs, stress_metadata = load_stress(args.public_cases)
         if args.check:
             print(json.dumps({"schema": 2, "status": "ready", "model_calls": 0,
                 "documents": sum(len(c.documents) for c in corpora),
-                "unique_queries": sum(len(c.queries) for c in corpora),
+                "unique_queries": (len({(q.id, q.text) for c in corpora for q in c.queries})
+                                   if settings.documents_only else sum(len(c.queries) for c in corpora)),
+                "query_layout_cases": sum(len(c.queries) for c in corpora),
                 "arms": [arm.model for arm in settings.selected_arms()],
                 "estimated_embedding_requests": call_budget(settings, corpora),
+                "documents_only": settings.documents_only,
+                "fixtures": fixture_metadata,
+                "configured_profiles": {role: profile.metadata["audrey_embedding"]
+                                         for role, profile in (profiles or {}).items()},
                 "stress": stress_metadata}, indent=2))
             return 0
-        report = asyncio.run(collect_report(settings, corpora, {
-            "public": public_meta, "personal": personal_meta, "regression": regression_meta},
-            stress_inputs=stress_inputs, stress_metadata=stress_metadata))
+        report = asyncio.run(collect_report(settings, corpora, fixture_metadata,
+            stress_inputs=stress_inputs, stress_metadata=stress_metadata,
+            profiles=profiles, production_policies=policies))
     except (ProbeError, ValueError, OSError) as error:
         print(json.dumps({"schema": 2, "status": "failed", "measurement_status": "setup_failed",
                           "error": str(error)}, indent=2))
@@ -768,6 +1066,8 @@ def main(argv=None) -> int:
     print(json.dumps(compact_report(report) if args.summary else report, indent=2))
     if report["measurement_status"] != "completed":
         return 1
+    if settings.documents_only:
+        return 1 if report["quality_recommendation"]["quality_findings"] else 0
     return 0 if report["quality_recommendation"]["status"] in {"candidate", "baselines_measured"} else 1
 
 

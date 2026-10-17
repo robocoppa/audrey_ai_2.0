@@ -1,20 +1,12 @@
 # Campaign 4 Phase 06 — System One router assessment
 
-**Status:** Router assessment is closed; retain `qwen3.5:4b`. The embedding
-comparison is complete. The user approved replacing Nomic throughout text
-retrieval with Qwen3 Embedding 4B and rebuilding the existing small data set.
-The unified Tower migration and service restart completed successfully October
-15, 2026. October 16 browser acceptance exposed memory/history lookup misses:
-correctly owned records existed but fell below semantic cutoffs. Literal lookup
-fixes are built. Memory search is user-accepted October 16. History still
-failed on full-question wording. Expanded regressions exposed word-form,
-ranking and substring-crowding gaps; those are fixed locally with a ranked
-English text index. Tower deployment and the original/recent/absent checks are
-accepted. User approved restoring Nomic for history only October 16 after a
-matched real-history comparison. That change is built and locally verified;
-its history-only migration and browser acceptance are pending. Qwen remains for
-files, references and memory. The existing-file check and first IRS index are
-pending. Do not repeat the completed broad migration.
+**Status:** Router assessment is closed; retain `qwen3.5:4b`. Qwen's broad
+text migration completed October 15. The history-only Nomic restoration and its
+paraphrase/absent-calculation browser checks are user-accepted October 17.
+Memory and prior lexical history checks stay accepted. Qwen remains for files,
+references and memory. The user requested a further matched document comparison;
+that measurement is pending. The existing-file browser check and first IRS
+index also remain pending. Do not repeat either migration or accepted checks.
 
 ## Decision
 
@@ -61,7 +53,7 @@ The comparison establishes a relative retrieval improvement, not tax-answer
 accuracy or an ability to infer eligibility from similarity. Source/product/year
 scope, page reading and Phase 20E accuracy work remain necessary. Measurements
 and complete saved reports live only in [MODEL-FACTS](../../evals/MODEL-FACTS.md).
-No further comparison run is queued.
+The requested document follow-up is described below; other broad candidate studies stay closed.
 
 ## Text embedding integration
 
@@ -120,14 +112,9 @@ Interrupted cutover resumes from verified staging; scope/profile/collection
 changes refuse journal reuse. The all-data CLI remains available and now honors
 both profiles rather than forcing history into Qwen.
 
-After pulling on Tower, build `audrey` and `custom-tools`, stop `audrey`,
-`custom-tools`, `media-worker` and `media-fetcher`, then run the scoped command
-in the foreground. It prints copyable safe JSON and sends the existing Telegram
-report; allow roughly one to two minutes after image builds. Success has
-`status: completed`, `scope: history`, Nomic/768 and one verified history role.
-Only verified success restarts the services; a failure leaves writers stopped
-and retains recovery data. No upload, token, UI rebuild or IRS index is needed.
-Do not run the default all-data migration for this slice.
+The history-only migration and service restart are user-accepted October 17.
+Retain private recovery state through the remaining file acceptance; its safe
+report and diagnostics remain on Tower. No migration rerun is queued.
 
 ### Personal retrieval behavior
 
@@ -146,22 +133,40 @@ history profile's cutoff.
 An unavailable embedder produces a clear search error when no literal history
 evidence can answer; it must not masquerade as an empty archive.
 
-### Remaining acceptance — Nomic history
+### History acceptance — complete
 
-Memory, original calculation lookup and the newly seeded topic remain accepted.
-The completed matched diagnostic is in [MODEL-FACTS](../../evals/MODEL-FACTS.md);
-no repeat is queued. Its retired pre-split probe refuses to label Qwen's old
-cutoff as the current history policy.
+The user confirmed October 17 that the scoped migration and the two browser
+checks passed: the earlier arithmetic exchange was retrieved through the history
+tool, and an absent calculation was not invented. Other accepted history/memory
+checks remain closed. The matched history diagnostic is retained in
+[MODEL-FACTS](../../evals/MODEL-FACTS.md); its pre-split probe refuses to label
+Qwen's old cutoff as the current history policy.
 
-After the scoped migration, use a fresh browser chat with Tools Automatic:
+### Requested document double-check
 
-1. Ask the failed arithmetic paraphrase. Expect the earlier
-   **1250 × 1.08 = 1,350** exchange and an actual `chat_history_search` call.
-2. Ask for a specific calculation never discussed, and verify Audrey does not
-   claim a loosely related snippet is that requested exchange. This checks the
-   changed history admission boundary; other passed checks stay closed.
+Use the existing `embedding_document_probe.py` and `probe-onbox.sh` flow.
+Its document-only mode compares configured Qwen4 with raw and correctly prefixed
+Nomic on identical public source text, questions and relevance labels.
 
-The existing-file `kb_search` acceptance and new conversation focus remain
-unreported. After history acceptance, continue
-[Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) with the
-first current-catalog IRS index and 20C.
+- The original four frozen English IRS PDFs supply the reference layout.
+  A second fixture uses the actual upload extraction and token chunking path,
+  including page-spanning chunks and every matching overlapping answer chunk.
+  Sources and corrected questions are reused: this checks reproducibility and
+  chunk-layout sensitivity, not independent new-topic generalization.
+- Dense and hybrid ranking are measured before admission. Per-model calibration
+  stays separate from explicitly labeled current-Qwen-policy diagnostics; raw
+  cosine magnitudes are not compared as quality. Unsupported-query results and
+  paired changes remain visible alongside first/three/five-result ranks.
+- The mode skips synthetic memory/history cases and prior cold-load/stress
+  measurements. It performs no explicit unloads, checks pinned identities/native
+  widths, warms both production profiles and reports observed final residency.
+- Source fixtures and tooling are copied by the existing runner after pull.
+  No rebuild, restart, upload, token or production reindex is required. Run one
+  foreground comparison while no answering/indexing job is active; shell output
+  is compact and `NOTIFY=1` retains the usual Telegram report. A completed
+  measurement can still report quality findings; it does not switch models.
+
+The existing-file `kb_search` browser check and new conversation focus remain
+unreported. After interpreting this comparison and closing the file check,
+continue [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md)
+with the first current-catalog IRS index and 20C.

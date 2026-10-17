@@ -79,6 +79,7 @@ def test_real_public_source_and_evidence_provenance_validates(tmp_path):
     (lambda body: body["queries"][0].update(answerable=False), "answerable"),
     (lambda body: body.update(language="ja"), "English"),
     (lambda body: body.update(public=False), "public"),
+    (lambda body: body["documents"][0].update(workload="documents"), "invalid workload"),
     (lambda body: body["queries"].pop(1), "no-answer"),
 ])
 def test_bad_fixture_or_split_leakage_rejected(tmp_path, change, match):
@@ -471,3 +472,298 @@ def test_input_digest_changes_for_model_text_but_not_label_corrections():
     assert probe.fixture_inputs_sha256(body) == before
     body["queries"][0]["text"] += " changed input"
     assert probe.fixture_inputs_sha256(body) != before
+
+
+def document_mode_profiles():
+    return probe.document_config(ROOT / "config.yaml")
+
+
+def public_and_upload_corpora(tmp_path):
+    public = fixture_body(synthetic=False)
+    upload = json.loads(json.dumps(public))
+    upload["workload"] = "documents"
+    upload["chunk_policy"] = {"tokens": 1000, "overlap_tokens": 100}
+    upload["label_policy"] = "Existing reviewed questions; not new independent labels"
+    upload["derivation"] = {"questions_reused": True}
+    for source in upload["sources"]:
+        source["pages"] = 2
+    for doc in upload["documents"]:
+        doc["end_page"] = 2
+        doc["end_offset"] = len(doc["text"])
+    for query in upload["queries"]:
+        for evidence in query["evidence"]:
+            evidence["page"] = 2
+    first = tmp_path / "reference.json"
+    second = tmp_path / "upload.json"
+    first.write_text(json.dumps(public))
+    second.write_text(json.dumps(upload))
+    reference, reference_meta = probe.load_fixture(first, synthetic=False)
+    documents, document_meta = probe.load_fixture(second, synthetic=False)
+    return [*reference, *documents], {"public": reference_meta, "upload": document_meta}, first, second
+
+
+class DocumentModeOllama(FakeOllama):
+    """Actual configured profiles/native widths, with no production connections."""
+    def __init__(self, corpora, *, wrong_digest=False, wrong_width=False):
+        super().__init__(corpora)
+        self.profiles, _ = document_mode_profiles()
+        self.resident.update(profile.model for profile in self.profiles.values())
+        self.wire_calls = []
+        self.wrong_digest = wrong_digest
+        self.wrong_width = wrong_width
+
+    def handle(self, request):
+        body = json.loads(request.content) if request.content else {}
+        self.wire_calls.append((request.url.path, body))
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json={"models": [
+                {"name": profile.model, "digest": "f" * 64 if self.wrong_digest else profile.digest, "size": 100}
+                for profile in self.profiles.values()
+            ]})
+        if request.url.path == "/api/embed":
+            profile = next(profile for profile in self.profiles.values() if profile.model == body["model"])
+            before = set(self.resident)
+            inputs = [value.removeprefix(profile.query_prefix) for value in body["input"]]
+            response = super().handle(httpx.Request(request.method, request.url, json={**body, "input": inputs}))
+            self.resident.update(before)
+            value = response.json()
+            width = 768 if self.wrong_width else profile.dimensions
+            value["embeddings"] = [vector + [0.] * (width - len(vector)) for vector in value["embeddings"]]
+            return httpx.Response(200, json=value)
+        return super().handle(request)
+
+    def compare(self, corpora, metadata):
+        profiles, policies = document_mode_profiles()
+        settings = probe.Settings(
+            candidate=profiles["text"].model, candidate_profile="qwen3",
+            incumbent=profiles["history"].model, documents_only=True,
+            rounds=1, batch_size=16,
+        )
+        return asyncio.run(probe.collect_report(
+            settings, corpora, metadata, profiles=profiles, production_policies=policies,
+            transport=httpx.MockTransport(self.handle),
+        ))
+
+
+def test_document_mode_compares_layouts_without_unloads_stress_or_private_fixtures(tmp_path):
+    corpora, metadata, _, _ = public_and_upload_corpora(tmp_path)
+    fake = DocumentModeOllama(corpora)
+    report = fake.compare(corpora, metadata)
+    assert report["measurement_status"] == "completed"
+    assert report["errors"] == []
+    assert report["embedding_calls"] == report["settings"]["estimated_embedding_requests"] == 38
+    assert report["settings"]["cold_samples"] == report["settings"]["stress_batches64"] == 0
+    assert not any(path == "/api/generate" for path, _ in fake.wire_calls)
+    assert all(len(body["input"]) != 64 for path, body in fake.wire_calls if path == "/api/embed")
+    assert report["restoration"] == {
+        "warm_requests_completed": ["qwen3-embedding:4b", "nomic-embed-text:latest"],
+        "keep_alive": "24h", "explicit_unloads": 0,
+        "resident_models_after": ["nomic-embed-text:latest", "qwen3-embedding:4b", "unrelated-worker:latest"],
+        "both_configured_observed": True,
+    }
+    assert {"qwen3-embedding:4b", "nomic-embed-text:latest"} <= fake.resident
+    embeds = [body for path, body in fake.wire_calls if path == "/api/embed"]
+    assert {body["model"] for body in embeds[-2:]} == {"qwen3-embedding:4b", "nomic-embed-text:latest"}
+    assert all(body["keep_alive"] == "24h" for body in embeds[-2:])
+    assert [arm["dimensions"] for arm in report["results"]] == [2560, 768, 768]
+    for arm in report["results"]:
+        assert len(arm["corpora"]) == 4
+        assert arm["cold_queries"]["status"] == "not_requested"
+        assert arm["ingestion"]["batch64_stress"] == []
+        for corpus in arm["corpora"]:
+            assert corpus["ranking"]["dense"]["hits_at_5"] == 1
+            assert corpus["ranking"]["hybrid"]["mrr"] == 1
+            assert "current_policy" not in corpus
+            policy = corpus["configured_qwen_policy_diagnostic"]
+            assert policy["not_a_cross_model_calibration"]
+            assert (policy["min_dense_score"], policy["min_term_overlap"]) == (
+                (.54, None) if corpus["workload"] == "reference" else (.53, .7)
+            )
+    assert report["quality_recommendation"]["automatic_promotion"] is False
+
+
+def test_document_mode_checks_pinned_digest_before_any_embedding(tmp_path):
+    corpora, metadata, _, _ = public_and_upload_corpora(tmp_path)
+    fake = DocumentModeOllama(corpora, wrong_digest=True)
+    with pytest.raises(probe.ProbeError, match="pinned digest"):
+        fake.compare(corpora, metadata)
+    assert not any(path == "/api/embed" for path, _ in fake.wire_calls)
+
+
+def test_document_mode_rejects_wrong_native_vector_width(tmp_path):
+    corpora, metadata, _, _ = public_and_upload_corpora(tmp_path)
+    report = DocumentModeOllama(corpora, wrong_width=True).compare(corpora, metadata)
+    assert report["measurement_status"] == "incomplete"
+    assert report["results"][0]["status"] == "incomplete"
+    assert report["results"][0]["comparable"] is False
+    assert report["quality_recommendation"]["automatic_promotion"] is False
+
+
+def test_document_summary_contains_paired_metrics_without_nested_query_dumps(tmp_path):
+    corpora, metadata, _, _ = public_and_upload_corpora(tmp_path)
+    report = DocumentModeOllama(corpora).compare(corpora, metadata)
+    compact = probe.compact_report(report)
+    assert compact["fixtures"]["upload"]["layout"]["chunk_policy"] == {"tokens": 1000, "overlap_tokens": 100}
+    assert compact["fixtures"]["upload"]["layout"]["derivation"]["questions_reused"]
+    assert len(compact["paired_holdout"]) == 8
+    assert all(pair["positive_queries"] == 1 and pair["rank_wins"] == pair["rank_losses"] == 0
+               for pair in compact["paired_holdout"])
+    for arm in compact["results"]:
+        assert "corpora" not in arm and "workloads" not in arm
+        assert len(arm["holdout_layouts"]) == 2
+        for layout in arm["holdout_layouts"]:
+            assert "queries" not in layout["own_calibrated_policy"]
+            assert "queries" not in layout["configured_qwen_policy_diagnostic"]
+            assert layout["ranking_before_admission"]["dense"]["hits_at_5"] == 1
+
+
+def test_document_pairing_counts_wins_losses_at_each_depth():
+    def arm(identity, ranking):
+        row = {"id": "same-question", "repeat": 1, "relevant": ["answer"],
+               "dense": ranking, "hybrid": ranking}
+        return {"arm": identity, "comparable": True, "corpora": [{
+            "id": "reference:holdout", "workload": "reference", "split": "holdout", "queries": [row],
+        }]}
+    pairs = probe.paired_document_results([
+        arm("candidate", ["answer", "other"]),
+        arm("raw", ["other", "answer"]), arm("prefixed", ["answer", "other"]),
+    ])
+    raw = next(pair for pair in pairs if pair["baseline"] == "raw" and pair["method"] == "dense")
+    assert raw["rank_wins"] == 1 and raw["rank_losses"] == 0
+    assert raw["at_depth"]["1"] == {"wins": 1, "losses": 0, "ties": 0}
+    assert raw["at_depth"]["3"] == {"wins": 0, "losses": 0, "ties": 1}
+    assert raw["rank_changes"] == [{"id": "same-question", "qwen_rank": 1, "baseline_rank": 2}]
+
+
+def test_document_page_spans_validate_evidence_and_source_bounds(tmp_path):
+    corpora, _metadata, _, upload_path = public_and_upload_corpora(tmp_path)
+    assert next(c for c in corpora if c.workload == "documents").documents[0].end_page == 2
+    body = json.loads(upload_path.read_text())
+    body["queries"][0]["evidence"][0]["page"] = 3
+    upload_path.write_text(json.dumps(body))
+    with pytest.raises(probe.ProbeError, match="quote"):
+        probe.load_fixture(upload_path, synthetic=False)
+    body["documents"][0]["end_page"] = 0
+    upload_path.write_text(json.dumps(body))
+    with pytest.raises(probe.ProbeError, match="end page"):
+        probe.load_fixture(upload_path, synthetic=False)
+
+
+def test_document_only_check_uses_real_layouts_and_profiles_without_network(monkeypatch, capsys):
+    monkeypatch.delenv("CANDIDATES", raising=False)
+    monkeypatch.delenv("CANDIDATE", raising=False)
+    monkeypatch.delenv("CANDIDATE_PROFILE", raising=False)
+    monkeypatch.delenv("ROUNDS", raising=False)
+    monkeypatch.setattr(probe.base, "Ollama", lambda *_args, **_kwargs: pytest.fail("offline check contacted models"))
+    assert probe.main([
+        "--documents-only", "--check", "--config", str(ROOT / "config.yaml"),
+        "--upload-cases", str(ROOT / "evals/cases/embedding_upload_documents.json"),
+        "--personal-cases", "/not-needed/personal.json", "--regression-cases", "/not-needed/regression.json",
+    ]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["model_calls"] == 0 and report["documents_only"] is True
+    assert report["documents"] == 504 and report["unique_queries"] == 80
+    assert report["query_layout_cases"] == 160
+    assert report["estimated_embedding_requests"] == 581
+    assert report["stress"] is None
+    assert set(report["fixtures"]) == {"public", "upload"}
+
+
+def test_document_mode_refuses_model_override_outside_config_before_network(monkeypatch, capsys):
+    monkeypatch.setenv("CANDIDATES", "qwen3-embedding:8b")
+    monkeypatch.setattr(probe.base, "Ollama", lambda *_args, **_kwargs: pytest.fail("override should fail before models"))
+    assert probe.main(["--documents-only", "--check", "--config", str(ROOT / "config.yaml")]) == 2
+    assert "configured embedding profile" in json.loads(capsys.readouterr().out)["error"]
+
+
+def test_document_mode_preserves_quality_findings_without_automatic_promotion(tmp_path):
+    corpora, metadata, _, _ = public_and_upload_corpora(tmp_path)
+    fake = DocumentModeOllama(corpora)
+    for index, corpus in enumerate(corpora):
+        for query in corpus.queries:
+            fake.text_indices[query.text] = index
+    report = fake.compare(corpora, metadata)
+    assert report["measurement_status"] == "completed"
+    assert report["quality_recommendation"]["quality_findings"] is True
+    assert report["quality_recommendation"]["automatic_promotion"] is False
+
+
+@pytest.mark.parametrize("malformed_yaml", [False, True])
+def test_document_configuration_errors_return_setup_json_before_models(tmp_path, monkeypatch, capsys, malformed_yaml):
+    path = tmp_path / "bad-config.yaml"
+    if malformed_yaml:
+        path.write_text("text_embedding: [invalid\n")
+    else:
+        body = probe.yaml.safe_load((ROOT / "config.yaml").read_text())
+        del body["kb"]
+        path.write_text(probe.yaml.safe_dump(body))
+    monkeypatch.setattr(probe.base, "Ollama", lambda *_args, **_kwargs: pytest.fail("invalid config contacted models"))
+    assert probe.main(["--documents-only", "--check", "--config", str(path)]) == 2
+    assert json.loads(capsys.readouterr().out)["measurement_status"] == "setup_failed"
+
+
+def test_document_restoration_reports_eviction_instead_of_claiming_residency(tmp_path):
+    corpora, metadata, _, _ = public_and_upload_corpora(tmp_path)
+
+    class SingleResident(DocumentModeOllama):
+        def handle(self, request):
+            response = super().handle(request)
+            if request.url.path == "/api/embed":
+                self.resident = {json.loads(request.content)["model"]}
+            return response
+
+    report = SingleResident(corpora).compare(corpora, metadata)
+    assert report["measurement_status"] == "completed"
+    assert len(report["restoration"]["warm_requests_completed"]) == 2
+    assert report["restoration"]["both_configured_observed"] is False
+    assert probe.compact_report(report)["restoration"]["resident_models_after"] == ["nomic-embed-text:latest"]
+
+
+def test_completed_document_quality_findings_exit_one_without_claiming_measurement_failure(tmp_path, monkeypatch, capsys):
+    corpora, metadata, public_path, upload_path = public_and_upload_corpora(tmp_path)
+    fake = DocumentModeOllama(corpora)
+    for index, corpus in enumerate(corpora):
+        for query in corpus.queries:
+            fake.text_indices[query.text] = index
+    report = fake.compare(corpora, metadata)
+
+    async def measured(*_args, **_kwargs):
+        return report
+
+    monkeypatch.setattr(probe, "collect_report", measured)
+    assert probe.main([
+        "--documents-only", "--summary", "--config", str(ROOT / "config.yaml"),
+        "--public-cases", str(public_path), "--upload-cases", str(upload_path),
+    ]) == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["measurement_status"] == "completed"
+    assert output["quality_recommendation"]["quality_findings"] is True
+    assert output["quality_recommendation"]["automatic_promotion"] is False
+
+
+def test_document_fixture_summary_preserves_label_revision_limits_without_transcripts():
+    fixtures = {}
+    for name, filename in (("public", "embedding_real_documents.json"), ("upload", "embedding_upload_documents.json")):
+        _, fixtures[name] = probe.load_fixture(ROOT / "evals/cases" / filename, synthetic=False)
+    compact = probe.compact_fixture_metadata(fixtures)
+    revision = compact["public"]["layout"]["label_policy"]["revision"]
+    assert revision["added_passages"] == 33 and revision["affected_queries"] == 27
+    assert revision["retrospective"] is True
+    assert revision["model_inputs_changed"] is False
+    assert revision["thresholds_tuned_on_holdout"] is False
+    assert revision["limits"] and "additions" not in revision
+    assert compact["upload"]["layout"]["label_policy"]["original_reviewed_policy"] == "Same reviewed policy as public fixture above"
+    assert "additions" in fixtures["public"]["layout"]["label_policy"]["revision"]
+
+
+def test_document_check_survives_actual_shallow_onbox_script_location(monkeypatch, capsys):
+    monkeypatch.setattr(probe, "__file__", "/tmp/probe-DOCUMENTS-STAMP.py")  # noqa: S108 - no file is created
+    monkeypatch.setattr(probe.base, "Ollama", lambda *_args, **_kwargs: pytest.fail("offline copied check contacted models"))
+    assert probe.main([
+        "--documents-only", "--check", "--config", str(ROOT / "config.yaml"),
+        "--public-cases", str(ROOT / "evals/cases/embedding_real_documents.json"),
+        "--upload-cases", str(ROOT / "evals/cases/embedding_upload_documents.json"),
+    ]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["model_calls"] == 0 and output["unique_queries"] == 80
+    assert output["query_layout_cases"] == 160 and output["estimated_embedding_requests"] == 581

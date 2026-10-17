@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 16, 2026.** English user input only. Passed work stays closed.
+**Updated October 17, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -25,28 +25,21 @@ they are not ongoing task lists.
   the contract and remaining privacy/tax workflow. State jurisdictions remain
   unspecified; fine-tuning requires evidence.
 
-- **Embedding comparison and broad Qwen migration — complete:** the Qwen3
-  Embedding 4B migration and service restart passed October 15. Source SQLite
-  and image vectors remain
-  unchanged, with private backups retained. [Phase 06](phase-06-system-one-routing.md)
-  holds existing-data acceptance: memory search and history's original-query,
-  recent-topic and absent-topic checks are user-accepted October 16. Ranked
-  English text search is deployed. The arithmetic paraphrase still returned no
-  results across three real tool queries. The matched 48-chunk comparison is
-  complete: Nomic ranked the original higher for all four queries; Qwen rejected
-  it below the cutoff every time and ranked it seventh once. **User approved
-  Nomic for history only October 16; built, Tower deployment pending.** The
-  independent profile and readiness checks preserve Qwen for files, references
-  and memory. Use the existing migration runner with `--scope history`: it
-  rebuilds only history into Nomic's pinned 768-dimensional space, retaining
-  private recovery state separately from the completed Qwen migration. After
-  deployment, accept the failed paraphrase and one absent calculation; the
-  history floor has changed, so that rejection boundary needs a targeted check.
-  Other accepted checks stay closed. Finish history and the outstanding file
-  check before the first IRS index; no broad reindex or model rerun is queued. Model
-  measurements remain in MODEL-FACTS; the clearest quality win is reference
-  retrieval, not a proven universal personal-memory improvement. Router assessment
-  stays closed: retain Qwen 3.5 4B.
+- **Embeddings:** the broad Qwen migration and the later history-only Nomic
+  restoration are deployed and user-accepted. October 17 acceptance passed the
+  arithmetic paraphrase and absent-calculation checks; do not repeat them or
+  either migration. Documents, files, references and memories retain Qwen4;
+  history uses pinned Nomic/768 with its own readiness and formatting.
+  **Current request:** double-check document retrieval with matched Qwen/Nomic
+  measurements. The existing probe now compares the same four public PDFs in
+  reference and actual upload chunk layouts, with the same frozen English
+  questions. Ranking and threshold admission are separate; the repeated source
+  material does not establish a new independent benchmark. This test reads no
+  private files and writes no production index/config. Results and interpretation
+  are pending. [Phase 06](phase-06-system-one-routing.md) holds the contract;
+  measurements belong in MODEL-FACTS. The existing-file browser check remains
+  unreported. First IRS indexing follows this requested comparison and that
+  check. Router assessment stays closed: retain Qwen 3.5 4B.
 
 - **19 — deeper evidence tools:** complete; user accepted all five tools October 13.
   [Phase 19](phase-19-evidence-tools.md) defines calculator/conversions, CSV/XLSX
@@ -111,7 +104,7 @@ they are not ongoing task lists.
 | 03 | [Skills](phase-03-skills.md) | Explicit skills complete; native automatic selection built, acceptance pending |
 | 04 | [File downloads](phase-04-file-downloads.md) | Complete |
 | 05 | [Responses foundation](phase-05-responses-api.md) | Complete |
-| 06 | [Router candidates](phase-06-system-one-routing.md) | Qwen migration complete; history-only Nomic restoration built, deployment/acceptance pending |
+| 06 | [Router candidates](phase-06-system-one-routing.md) | History restoration accepted; requested document comparison pending |
 | 07 | [Scanned PDFs](phase-07-scanned-pdf-ocr.md) | Complete |
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
@@ -129,15 +122,13 @@ they are not ongoing task lists.
 
 ## Remaining work
 
-1. Deploy Phase 06's approved history-only Nomic profile using the scoped
-   migration. Accept the arithmetic paraphrase and a source-absent calculation;
-   preserve other accepted browser checks. New conversation focus and the
-   existing-file check remain unreported. The earlier Qwen migration stays complete.
-   Then build the first current-catalog IRS
-   index and accept one cited document-content search in the browser (20B.2).
-   Follow with 20C enforced private processing, 20D's tax workflow and targeted
-   20E evaluation. The embedding comparison and broad archive collection are
-   complete; no repetition is queued.
+1. Run and interpret the user's requested document comparison in Phase 06.
+   Preserve accepted history/memory checks. New conversation focus and the
+   existing-file browser check remain unreported. Then build the first
+   current-catalog IRS index and accept one cited content search in the browser
+   (20B.2). Follow with 20C enforced private processing, 20D's tax workflow and
+   targeted 20E evaluation. Broad archive collection and both migrations stay
+   complete; no repeat is queued.
 2. Confirm Tower deployment and close pending targeted acceptance for the
    current course-reviewed work. The local, gitignored [AUDIT](../lesson-ai/AUDIT.md)
    holds its review record; the [operations guide](../reference/box-operations.md#10-memory-backups-and-isolated-restore-verification)
