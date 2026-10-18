@@ -18,12 +18,17 @@ they are not ongoing task lists.
   outside the accessible library. Tax-year applicability is verified separately
   from catalog/revision dates. Deployed tools, page citations and historical
   refusal are user-accepted. **20B.2 built:** local scoped hybrid content search,
-  resumable bounded indexing, verified publication and page citations. The first
-  Tower attempt stopped during startup with RuntimeError; no published index is
-  confirmed. A numerical-thread limit and retained startup diagnostics are built
-  for the retry; the original sparse report does not establish the cause.
-  Rebuild the `audrey` job image after pull, then resume the current catalog with
-  Qwen3 Embedding 4B. Publication and browser acceptance remain pending.
+  resumable bounded indexing, verified publication and page citations. The full
+  Tower build saved 2,398 documents and 61,042 chunks; nine extraction failures
+  prevented publication. Repairs preserve completed checkpoints, support freely
+  readable permissions-encrypted PDFs, bound parser cache growth and report precise
+  failures. Local public-source checks cover eight failed documents. The user
+  approved Publication 5902 as an explicitly disclosed content-search gap; its
+  original remains in the catalog. Exact-document, saved-release approval is
+  implemented; unapproved failures still block publication. Search and reports
+  retain the failed count, incomplete coverage and named gap. Deploy `audrey`
+  after pull, then resume the saved release with its single approved gap.
+  Live publication and cited browser acceptance remain pending.
   [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds
   the contract and remaining privacy/tax workflow. State jurisdictions remain
   unspecified; fine-tuning requires evidence.
@@ -39,7 +44,7 @@ they are not ongoing task lists.
   for every model. No threshold or model change follows. Reused public questions
   do not establish independent new-topic evidence. [Phase 06](phase-06-system-one-routing.md)
   holds the contract; measurements and limits are in MODEL-FACTS. The existing-file
-  browser check remains unreported; first IRS indexing follows that check.
+  browser check remains unreported; IRS publication recovery is tracked above.
   Router assessment stays closed: retain Qwen 3.5 4B.
 
 - **19 — deeper evidence tools:** complete; user accepted all five tools October 13.
@@ -125,8 +130,9 @@ they are not ongoing task lists.
 
 1. Document comparison is complete; retain Qwen for documents and Nomic for
    history. Preserve accepted history/memory checks. New conversation focus and
-   the existing-file browser check remain unreported. Resolve the first index's
-   startup failure, publish the current-catalog IRS index, then accept one cited content search in the browser
+   the existing-file browser check remain unreported. Resume the saved current-
+   catalog IRS index with the approved Publication 5902 search gap, then accept
+   one cited content search in the browser
    (20B.2). Follow with 20C enforced private processing, 20D's tax workflow and
    targeted 20E evaluation. Broad archive collection and both migrations stay
    complete; no repeat is queued.

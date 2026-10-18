@@ -22,7 +22,7 @@ from audrey.models.ollama import OllamaClient
 from audrey.references.embedding import reference_embedder
 from audrey.references.indexing import build_reference_index
 from audrey.references.library import ReferenceLibraryError, ReferenceLibraryRegistry
-from audrey.references.releases import ReleaseError, ReleaseStore
+from audrey.references.releases import ReleaseError, ReleaseStore, validate_extraction_gaps
 
 
 async def _run(args, cfg, registry, releases):
@@ -45,6 +45,7 @@ async def _run(args, cfg, registry, releases):
             product_numbers=args.product_number,
             release_id=args.release_id,
             rebuild=args.rebuild,
+            allowed_extraction_gaps=args.allow_extraction_gap,
             progress=lambda event: print(json.dumps(event), flush=True),
         )
     finally:
@@ -124,6 +125,10 @@ def main(argv=None) -> int:
     parser.add_argument("--product-number", action="append", default=[])
     parser.add_argument("--release-id")
     parser.add_argument(
+        "--allow-extraction-gap", action="append", default=[], metavar="DOCUMENT_ID",
+        help="Allow one explicitly approved failed document in an existing release; repeat for exact IDs",
+    )
+    parser.add_argument(
         "--rebuild", action="store_true", help="Build a replacement even when sources are unchanged"
     )
     parser.add_argument("--report", type=Path, required=True)
@@ -133,6 +138,9 @@ def main(argv=None) -> int:
     code = 2
     index_root = None
     try:
+        args.allow_extraction_gap = validate_extraction_gaps(args.allow_extraction_gap)
+        if args.allow_extraction_gap and (args.release_id is None or args.rebuild):
+            raise ValueError("Extraction gaps require an explicit existing release ID without rebuild")
         cfg = get_config()
         reference_cfg = cfg.raw.get("reference_libraries", {})
         index_root = Path(reference_cfg.get("index_root", "/data/reference-libraries"))

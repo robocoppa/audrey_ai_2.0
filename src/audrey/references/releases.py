@@ -94,6 +94,39 @@ def _document_id(value: str) -> str:
     return value
 
 
+def validate_extraction_gaps(values: Iterable[str]) -> tuple[str, ...]:
+    """Validate a small, explicit operator approval without consuming unbounded input."""
+    if isinstance(values, (str, bytes, Mapping)):
+        raise ReleaseStateError("Reference extraction gaps must be explicit document IDs")
+    try:
+        iterator = iter(values)
+    except TypeError:
+        raise ReleaseStateError("Reference extraction gaps must be explicit document IDs") from None
+    approved: list[str] = []
+    for value in iterator:
+        if len(approved) == 20:
+            raise ReleaseStateError("Reference extraction gap approval exceeds 20 documents")
+        identifier = _document_id(value)
+        if identifier in approved:
+            raise ReleaseStateError("Reference extraction gap approvals must not contain duplicates")
+        approved.append(identifier)
+    return tuple(approved)
+
+
+def _extraction_gap_reason(error: str) -> str:
+    """Only existing safe worker messages may enter public coverage metadata."""
+    from audrey.references.extract import ERROR_MESSAGES
+
+    if error in ERROR_MESSAGES.values() or re.fullmatch(
+        r"PDF text extraction (?:exceeded its (?:CPU|[0-9]{1,5}-second) time limit|"
+        r"worker (?:stopped \(signal [0-9]{1,3}\)|failed \(exit [0-9]{1,3}\)|could not run)|"
+        r"returned invalid page data)",
+        error,
+    ):
+        return error
+    return "PDF text extraction is unavailable"
+
+
 def reference_collection_name(library_id: str, embedding_identity: str | None = None) -> str:
     """One collection per library and immutable embedding space; older releases survive."""
     name = "audrey_reference_" + _library_id(library_id)
@@ -552,18 +585,48 @@ class ReleaseStore:
                 after_document, after_index = row["document_id"], row["chunk_index"]
                 yield self._chunk_row(row)
 
-    def publish(self, release_id: str, *, verified_chunks: int) -> dict[str, Any]:
+    def publish(
+        self,
+        release_id: str,
+        *,
+        verified_chunks: int,
+        allowed_extraction_gaps: Iterable[str] = (),
+    ) -> dict[str, Any]:
         _release_id(release_id)
         _integer(verified_chunks, "verified chunk count", 0, 100000000)
+        approved = validate_extraction_gaps(allowed_extraction_gaps)
         with self._write_lock, self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             release = self._require(connection, release_id)
             if release["status"] != "building":
                 raise ReleaseStateError("Only a building reference release can be published")
             descriptor = self._describe(connection, release)
+            gaps = []
+            for document_id in sorted(approved):
+                row = connection.execute(
+                    "SELECT metadata_json,status,error FROM documents "
+                    "WHERE release_id=? AND document_id=?",
+                    (release_id, document_id),
+                ).fetchone()
+                if row is None or row["status"] != "failed":
+                    raise ReleaseStateError(
+                        "Reference extraction gap approval must name a selected failed document"
+                    )
+                metadata = json.loads(row["metadata_json"])
+                gaps.append(
+                    {
+                        "document_id": document_id,
+                        "product_number": metadata.get("product_number", ""),
+                        "title": metadata.get("title", ""),
+                        "source_url": metadata["source_url"],
+                        "revision_sha256": metadata["revision_sha256"],
+                        "reason": _extraction_gap_reason(row["error"]),
+                        "original_available": metadata.get("original_available") is True,
+                    }
+                )
             if (
-                descriptor["completed_documents"] != descriptor["expected_documents"]
-                or descriptor["failed_documents"]
+                descriptor["completed_documents"] + len(gaps) != descriptor["expected_documents"]
+                or descriptor["failed_documents"] != len(gaps)
                 or descriptor["pending_documents"]
                 or descriptor["chunk_count"] != verified_chunks
             ):
@@ -571,7 +634,9 @@ class ReleaseStore:
                     "Reference release coverage or remote chunk verification is incomplete"
                 )
             coverage = descriptor["coverage"]
-            coverage["complete_for_selected_documents"] = True
+            coverage["complete_for_selected_documents"] = not gaps
+            if gaps:
+                coverage.update({"content_search_gaps": gaps, "gap_count": len(gaps)})
             now = _now()
             connection.execute(
                 """UPDATE releases SET status='published',published_at=?,updated_at=?,

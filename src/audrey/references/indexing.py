@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -13,8 +14,14 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 from audrey.kb.qdrant import SearchScope, build_text_point
-from audrey.references.extract import MAX_OUTPUT_BYTES
+from audrey.references.extract import (
+    ERROR_MESSAGES,
+    ERROR_PREFIX,
+    MAX_OUTPUT_BYTES,
+    MAX_WALL_SECONDS,
+)
 from audrey.references.library import ReferenceReadError, ReferenceUnavailable
+from audrey.references.releases import validate_extraction_gaps
 
 _RETURN_YEAR = re.compile(r"\bFor use in preparing\s+([12]\d{3})\s+(?:tax\s+)?Returns\b", re.I)
 CHUNK_CHARS = 2400
@@ -57,28 +64,59 @@ def chunks(pages) -> Iterator[dict]:
             offset = end - CHUNK_OVERLAP
 
 
+def _extraction_failure(completed, diagnostic) -> str:
+    # Parser warnings can contain source text. Only allowlisted worker codes
+    # may leave this bounded diagnostic spool and enter an operator report.
+    diagnostic.seek(max(0, diagnostic.tell() - 4096))
+    for line in reversed(diagnostic.read(4096).decode("utf-8", errors="replace").splitlines()):
+        if line.startswith(ERROR_PREFIX):
+            try:
+                result = json.loads(line[len(ERROR_PREFIX):])
+                code = result.get("code") if isinstance(result, dict) else None
+                if isinstance(code, str) and code in ERROR_MESSAGES:
+                    return ERROR_MESSAGES[code]
+            except ValueError:
+                continue
+    if completed.returncode == -signal.SIGXCPU:
+        return "PDF text extraction exceeded its CPU time limit"
+    if completed.returncode == -signal.SIGXFSZ:
+        return ERROR_MESSAGES["output_limit"]
+    if completed.returncode < 0:
+        return f"PDF text extraction worker stopped (signal {-completed.returncode})"
+    return f"PDF text extraction worker failed (exit {completed.returncode})"
+
+
 def _extract(asset: dict):
-    """A bounded spool avoids holding a complete library or PDF set in memory."""
+    """Bound both spools; expose safe error codes without parser warnings."""
     output = tempfile.TemporaryFile()
     try:
-        completed = subprocess.run(
-            [sys.executable, "-m", "audrey.references.extract"],
-            input=json.dumps(asset).encode(),
-            stdout=output,
-            stderr=subprocess.DEVNULL,
-            timeout=90,
-            check=False,
-        )
-        if completed.returncode or output.tell() > MAX_OUTPUT_BYTES:
-            raise ReferenceReadError("PDF text extraction failed within its resource limits")
+        with tempfile.TemporaryFile() as diagnostic:
+            completed = subprocess.run(
+                [sys.executable, "-m", "audrey.references.extract"],
+                input=json.dumps(asset).encode(),
+                stdout=output,
+                stderr=diagnostic,
+                timeout=MAX_WALL_SECONDS,
+                check=False,
+            )
+            if completed.returncode:
+                raise ReferenceReadError(_extraction_failure(completed, diagnostic))
+        if output.tell() > MAX_OUTPUT_BYTES:
+            raise ReferenceReadError(ERROR_MESSAGES["output_limit"])
         output.seek(0)
         first = json.loads(output.readline())
         if first["page"] != 1:
             raise ValueError
         return output, first
-    except (subprocess.TimeoutExpired, OSError, ValueError, KeyError):
+    except subprocess.TimeoutExpired:
         output.close()
-        raise ReferenceReadError("PDF text extraction failed within its resource limits") from None
+        raise ReferenceReadError(f"PDF text extraction exceeded its {MAX_WALL_SECONDS}-second time limit") from None
+    except OSError:
+        output.close()
+        raise ReferenceReadError("PDF text extraction worker could not run") from None
+    except (ValueError, KeyError, TypeError):
+        output.close()
+        raise ReferenceReadError("PDF text extraction returned invalid page data") from None
     except BaseException:
         output.close()
         raise
@@ -116,8 +154,12 @@ async def build_reference_index(
     release_id=None,
     batch_size=16,
     rebuild=False,
+    allowed_extraction_gaps=(),
     progress: Callable[[dict], None] | None = None,
 ) -> dict[str, Any]:
+    approved_gaps = validate_extraction_gaps(allowed_extraction_gaps)
+    if approved_gaps and (release_id is None or rebuild):
+        raise ValueError("Extraction gaps require an explicit existing release ID without rebuild")
     if max_documents is not None and (isinstance(max_documents, bool) or max_documents < 1):
         raise ValueError("max_documents must be positive")
     if not 1 <= batch_size <= 32:
@@ -140,6 +182,13 @@ async def build_reference_index(
         raise ReferenceUnavailable(
             "Selected catalog includes undownloaded originals; update the archive first"
         )
+    if approved_gaps:
+        if not set(approved_gaps).issubset(item["document_id"] for item in selected):
+            raise ReferenceUnavailable("Approved extraction gaps must belong to the selected release")
+        for document_id in approved_gaps:
+            checkpoint = await asyncio.to_thread(releases.document, release_id, document_id)
+            if checkpoint is None or checkpoint["status"] != "failed":
+                raise ReferenceUnavailable("Approved extraction gaps must name existing failed documents")
     await embedder.verify_identity()
     profile = embedder.profile
     prefix = profile.document_prefix
@@ -201,12 +250,15 @@ async def build_reference_index(
                 "coverage": published["coverage"],
                 "indexed_documents": published["indexed_documents"],
                 "no_text_documents": published["no_text_documents"],
-                "failed_documents": 0,
-                "pending_documents": 0,
+                "failed_documents": published["failed_documents"],
+                "pending_documents": published["pending_documents"],
                 "chunks": published["chunk_count"],
-                "resumed_documents": published["expected_documents"],
+                "resumed_documents": published["completed_documents"],
                 "embedding": {**profile.provenance, "embedding_identity": profile.identity},
-                "failures": [],
+                "failures": [
+                    {**gap, "error": gap["reason"]}
+                    for gap in published["coverage"].get("content_search_gaps", [])
+                ],
             }
     release = await asyncio.to_thread(
         releases.begin,
@@ -262,6 +314,15 @@ async def build_reference_index(
                 )
                 if existing_count == checkpoint["chunk_count"]:
                     report["resumed_documents"] += 1
+                    emit(
+                        {
+                            "event": "document_resumed",
+                            "completed": number,
+                            "selected": len(selected),
+                            "document_id": doc_id,
+                            "chunks": existing_count,
+                        }
+                    )
                     continue
             source = f"reference:{library_id}:{identifier}:{doc_id}:{document['revision_sha256']}"
             # A prior interrupted attempt can have remote points but no checkpoint.
@@ -357,8 +418,16 @@ async def build_reference_index(
                 }
             )
         release = await asyncio.to_thread(releases.release, identifier)
-        if release["failed_documents"]:
+        failed_ids = {
+            item["document_id"] for item in await asyncio.to_thread(
+                lambda: list(releases.documents(identifier, status="failed"))
+            )
+        }
+        if failed_ids - set(approved_gaps):
             raise ReferenceUnavailable("Source extraction failures prevent publication")
+        # A repaired source no longer needs its approved gap. Do not retain an
+        # exclusion or hide its recovered text merely because it was approved.
+        remaining_gaps = tuple(identity for identity in approved_gaps if identity in failed_ids)
         # Ensure no collector/catalog update changed the selected manifest mid-build.
         _, current = await asyncio.to_thread(
             _manifest, registry, library_id, catalog, products, max_documents
@@ -391,7 +460,10 @@ async def build_reference_index(
         await embedder.verify_identity()
         if not await qdrant.collection_compatible(collection, dim=profile.dimensions, sparse=True):
             raise ReferenceUnavailable("Reference collection schema changed before publication")
-        release = await asyncio.to_thread(releases.publish, identifier, verified_chunks=count)
+        release = await asyncio.to_thread(
+            releases.publish, identifier, verified_chunks=count,
+            allowed_extraction_gaps=remaining_gaps,
+        )
         report["status"] = "published"
     except asyncio.CancelledError:
         await asyncio.to_thread(

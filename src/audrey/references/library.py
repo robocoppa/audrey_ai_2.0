@@ -490,8 +490,10 @@ def _reader_worker(payload: dict[str, Any]) -> dict[str, Any]:
             return {"error": "not_found"}
         source.seek(0)
         reader = PdfReader(source, strict=False)
-        if reader.is_encrypted:
-            return {"error": "read", "message": "Encrypted reference PDF text is unavailable"}
+        # Editing restrictions are common on freely readable official PDFs.
+        # Only the empty password is allowed; password-protected sources fail.
+        if reader.is_encrypted and not reader.decrypt(""):
+            return {"error": "read", "message": "Reference PDF requires a password"}
         total_pages = len(reader.pages)
         if total_pages > 10_000:
             return {"error": "read", "message": "Reference PDF exceeds the 10,000-page reader limit"}

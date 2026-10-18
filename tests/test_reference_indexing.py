@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from qdrant_client import QdrantClient
@@ -13,10 +13,11 @@ from test_reference_library import archive as reference_archive_fixture
 
 from audrey.embedding_profile import QWEN_QUERY_PREFIX, EmbeddingProfile
 from audrey.kb.qdrant import TEXT_DIM, QdrantKB, SearchScope
+from audrey.references import indexing
 from audrey.references.embedding import ReferenceEmbedder
 from audrey.references.indexing import applicability, build_reference_index, chunks
 from audrey.references.irs_archive import ArchiveStore
-from audrey.references.library import ReferenceUnavailable, document_id
+from audrey.references.library import ReferenceReadError, ReferenceUnavailable, document_id
 from audrey.references.releases import ReleaseStore, reference_collection_name
 from audrey.references.search import ReferenceSearchService
 
@@ -124,6 +125,80 @@ async def test_interrupted_replacement_preserves_old_release_and_resumes(
     assert resumed["release_id"] == failed["release_id"]
     assert resumed["resumed_documents"] == (0 if erase_checkpoint_vectors else 1)
     assert releases.published("irs-federal")["id"] == failed["release_id"]
+
+
+async def test_extraction_failure_resumes_only_failed_document(services, monkeypatch):
+    registry, releases, qdrant, embedder, _, _ = services
+    selected = list(registry.iter_index_documents("irs-federal"))
+    failed_id, saved_id = (item["document_id"] for item in selected)
+    original_extract = indexing._extract
+    calls = 0
+
+    def fail_first_extraction(asset):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ReferenceReadError("Temporary extraction limit")
+        return original_extract(asset)
+
+    monkeypatch.setattr(indexing, "_extract", fail_first_extraction)
+    failed = await build_reference_index(registry, releases, qdrant, embedder)
+    identifier = failed["release_id"]
+    assert failed["status"] == "failed"
+    assert failed["failed_documents"] == failed["indexed_documents"] == 1
+    assert failed["pending_documents"] == 0
+    assert releases.document(identifier, failed_id)["status"] == "failed"
+    saved_checkpoint = releases.document(identifier, saved_id)
+    assert saved_checkpoint["status"] == "indexed"
+    assert releases.published("irs-federal") is None
+    saved_points = {
+        point.id: point.model_dump()
+        for point in qdrant._client.scroll(
+            _COLLECTION, limit=100, with_payload=True, with_vectors=True
+        )[0]
+    }
+    assert len(saved_points) == saved_checkpoint["chunk_count"] > 0
+
+    # A fresh vector identifies every write during recovery, so saved vectors
+    # must remain byte-for-byte identical rather than being silently regenerated.
+    recovery_vector = [0.0, 1.0] + [0.0] * (TEXT_DIM - 2)
+    embedder.embed_many = AsyncMock(
+        side_effect=lambda texts: [recovery_vector for _ in texts]
+    )
+    extraction = Mock(wraps=original_extract)
+    monkeypatch.setattr(indexing, "_extract", extraction)
+    upsert = AsyncMock(wraps=qdrant.upsert_text)
+    monkeypatch.setattr(qdrant, "upsert_text", upsert)
+    progress = []
+    resumed = await build_reference_index(
+        registry, releases, qdrant, embedder,
+        release_id=identifier, progress=progress.append,
+    )
+    assert resumed["status"] == "published", resumed
+    assert resumed["release_id"] == identifier
+    assert resumed["indexed_documents"] == 2
+    assert resumed["failed_documents"] == resumed["pending_documents"] == 0
+    assert resumed["coverage"]["complete_for_selected_documents"]
+    assert resumed["resumed_documents"] == 1
+    assert releases.published("irs-federal")["id"] == identifier
+    extraction.assert_called_once_with(selected[0]["_asset"])
+    embedder.embed_many.assert_awaited_once()
+    assert all(
+        point.payload["document_id"] == failed_id
+        for call in upsert.await_args_list for point in call.args[0]
+    )
+    assert {
+        point.id: point.model_dump()
+        for point in qdrant._client.retrieve(
+            _COLLECTION, list(saved_points), with_payload=True, with_vectors=True
+        )
+    } == saved_points
+    assert [event for event in progress if event["event"] == "document_resumed"] == [
+        {
+            "event": "document_resumed", "completed": 2, "selected": 2,
+            "document_id": saved_id, "chunks": saved_checkpoint["chunk_count"],
+        }
+    ]
 
 
 async def test_remote_count_mismatch_cannot_publish(services):

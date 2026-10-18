@@ -18,6 +18,15 @@ from audrey.references.library import (
 from audrey.references.releases import reference_collection_name
 
 _IDENTIFIER = re.compile(r"[0-9a-f]{64}")
+_GAP_NOTICE = (
+    "Content-search coverage is incomplete: approved extraction gaps are listed in "
+    "coverage.content_search_gaps. Missing search results do not establish that "
+    "those PDFs lack relevant information."
+)
+
+
+def _coverage_notice(notice: str, coverage: dict[str, Any]) -> str:
+    return notice + " " + _GAP_NOTICE if coverage.get("content_search_gaps") else notice
 
 
 class ReferenceSearchService:
@@ -130,6 +139,7 @@ class ReferenceSearchService:
                 response["notice"] = (
                     "No permitted document matches this exact product number in the selected catalog."
                 )
+                response["notice"] = _coverage_notice(response["notice"], response["coverage"])
                 return response
             if authorized.get("has_more"):
                 # Exact products normally have one current or a few recent editions.
@@ -137,6 +147,18 @@ class ReferenceSearchService:
                 raise ReferenceQueryError(
                     "Exact product lookup has too many editions; narrow the catalog"
                 )
+            gaps = {
+                gap["document_id"]
+                for gap in response["coverage"].get("content_search_gaps", [])
+            }
+            document_ids = [identifier for identifier in document_ids if identifier not in gaps]
+            if not document_ids:
+                response["notice"] = _coverage_notice(
+                    "The requested document is an approved content-search gap: its text "
+                    "could not be extracted. No passage from it was searched or returned.",
+                    response["coverage"],
+                )
+                return response
         scope = SearchScope(
             reference_library_id=library_id,
             reference_release_id=release["id"],
@@ -211,6 +233,7 @@ class ReferenceSearchService:
                 if tax_year is not None
                 else "No matching passage was found in the permitted published scope. Other libraries and private files were not searched."
             )
+        response["notice"] = _coverage_notice(response["notice"], response["coverage"])
         return response
 
     def _validated_passage(self, entry, release, catalog, document_ids, tax_year):

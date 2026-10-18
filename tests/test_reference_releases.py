@@ -13,6 +13,7 @@ from audrey.references.releases import (
     ReleaseStateError,
     ReleaseStore,
     reference_collection_name,
+    validate_extraction_gaps,
 )
 
 
@@ -329,3 +330,161 @@ def test_empty_or_non_english_selection_is_rejected(tmp_path):
     with pytest.raises(ReleaseStateError, match="English"):
         begin(store, [doc])
     assert store.latest_build("irs-federal") is None
+
+
+
+def test_explicit_failed_document_gap_is_truthful_and_survives_reopen(tmp_path):
+    store = ReleaseStore(tmp_path)
+    good = metadata(17)
+    gap = {**metadata(5902), "original_available": True}
+    release = begin(store, [good, gap])
+    checkpoint(store, release, good)
+    reason = "PDF text contains an unsupported character mapping"
+    checkpoint(store, release, gap, status="failed", error=reason)
+
+    with pytest.raises(ReleaseStateError, match="incomplete"):
+        store.publish(release["id"], verified_chunks=1)
+    published = store.publish(
+        release["id"], verified_chunks=1, allowed_extraction_gaps=(gap["document_id"],)
+    )
+    assert published["status"] == "published"
+    assert published["expected_documents"] == 2
+    assert published["completed_documents"] == published["indexed_documents"] == 1
+    assert published["failed_documents"] == 1
+    assert published["pending_documents"] == published["no_text_documents"] == 0
+    assert published["chunk_count"] == 1
+    assert published["coverage"] == {
+        "scope": "subset",
+        "source_documents": 2407,
+        "selected_documents": 2,
+        "complete_for_selected_documents": False,
+        "gap_count": 1,
+        "content_search_gaps": [{
+            "document_id": gap["document_id"],
+            "product_number": gap["product_number"],
+            "title": gap["title"],
+            "source_url": gap["source_url"],
+            "revision_sha256": gap["revision_sha256"],
+            "reason": reason,
+            "original_available": True,
+        }],
+    }
+    reopened = ReleaseStore(tmp_path)
+    assert reopened.published("irs-federal") == published
+    document = reopened.document(release["id"], gap["document_id"])
+    assert document["status"] == "failed" and document["error"] == reason
+    assert document["metadata"]["revision_sha256"] == gap["revision_sha256"]
+    assert list(reopened.chunks(release["id"], gap["document_id"])) == []
+    assert reopened.chunk(release["id"], good["document_id"], 0)["text"]
+    with pytest.raises(ReleaseStateError, match="Only a building"):
+        reopened.publish(
+            release["id"], verified_chunks=1, allowed_extraction_gaps=(gap["document_id"],)
+        )
+    with pytest.raises(ReleaseStateError):
+        checkpoint(reopened, release, gap)
+
+
+@pytest.mark.parametrize("blocker", ["pending", "unapproved_failure", "too_few_chunks", "too_many_chunks"])
+def test_approved_gap_does_not_weaken_other_publication_guards(tmp_path, blocker):
+    store = ReleaseStore(tmp_path)
+    active = begin(store)
+    checkpoint(store, active)
+    original = store.publish(active["id"], verified_chunks=1)
+    good, gap, other = metadata(17), metadata(5902), metadata(18)
+    docs = [good, gap, other] if blocker in {"pending", "unapproved_failure"} else [good, gap]
+    release = begin(store, docs, fingerprint="b" * 64)
+    checkpoint(store, release, good)
+    checkpoint(store, release, gap, status="failed", error="PDF text extraction failed in the parser")
+    if blocker == "unapproved_failure":
+        checkpoint(store, release, other, status="failed", error="Other extraction failed")
+    count = 0 if blocker == "too_few_chunks" else 2 if blocker == "too_many_chunks" else 1
+    before = store.release(release["id"])
+    with pytest.raises(ReleaseStateError, match="incomplete"):
+        store.publish(
+            release["id"], verified_chunks=count, allowed_extraction_gaps=(gap["document_id"],)
+        )
+    assert store.published("irs-federal") == original
+    assert store.release(release["id"]) == before
+
+
+@pytest.mark.parametrize("status", ["pending", "indexed", "no_text", "missing"])
+def test_gap_approval_must_name_an_actual_selected_failed_checkpoint(tmp_path, status):
+    store = ReleaseStore(tmp_path)
+    gap = metadata(5902)
+    release = begin(store, [gap])
+    if status in {"indexed", "no_text"}:
+        checkpoint(store, release, gap, status=status)
+    approved = metadata(18)["document_id"] if status == "missing" else gap["document_id"]
+    with pytest.raises(ReleaseStateError, match="selected failed"):
+        store.publish(
+            release["id"], verified_chunks=int(status == "indexed"), allowed_extraction_gaps=(approved,)
+        )
+    assert store.published("irs-federal") is None
+    assert store.release(release["id"])["status"] == "building"
+
+
+@pytest.mark.parametrize(
+    "values",
+    [None, "a" * 64, b"a" * 64, {"a" * 64: True}, ("*",), ("A" * 64,),
+     ("a" * 63,), ("a" * 65,), (False,), ("a" * 64, "a" * 64),
+     tuple(f"{number:064x}" for number in range(21))],
+)
+def test_gap_approval_validation_rejects_ambiguous_or_unbounded_authority(tmp_path, values):
+    store = ReleaseStore(tmp_path)
+    release = begin(store)
+    checkpoint(store, release)
+    with pytest.raises(ReleaseStateError):
+        validate_extraction_gaps(values)
+    with pytest.raises(ReleaseStateError):
+        store.publish(release["id"], verified_chunks=1, allowed_extraction_gaps=values)
+    assert store.published("irs-federal") is None
+
+
+def test_gap_validator_accepts_bounded_generators_and_stops_before_unbounded_consumption():
+    identifiers = tuple(f"{number:064x}" for number in range(20))
+    assert validate_extraction_gaps(iter(identifiers)) == identifiers
+    assert validate_extraction_gaps(()) == ()
+    consumed = []
+
+    def unbounded():
+        number = 0
+        while True:
+            consumed.append(number)
+            yield f"{number:064x}"
+            number += 1
+
+    with pytest.raises(ReleaseStateError, match="20 documents"):
+        validate_extraction_gaps(unbounded())
+    assert len(consumed) == 21
+
+
+def test_public_gap_reason_never_copies_arbitrary_checkpoint_diagnostics(tmp_path):
+    store = ReleaseStore(tmp_path)
+    gap = {**metadata(5902), "original_available": False}
+    release = begin(store, [gap])
+    error = "Parser failed opening /private/reference/source.pdf; token=private-value"
+    checkpoint(store, release, gap, status="failed", error=error)
+    published = store.publish(
+        release["id"], verified_chunks=0, allowed_extraction_gaps=(gap["document_id"],)
+    )
+    listed = published["coverage"]["content_search_gaps"][0]
+    assert listed["reason"] == "PDF text extraction is unavailable"
+    assert listed["original_available"] is False
+    assert "private" not in str(published["coverage"])
+    assert store.document(release["id"], gap["document_id"])["error"] == error
+
+
+def test_multiple_approved_gaps_are_listed_once_in_deterministic_order(tmp_path):
+    store = ReleaseStore(tmp_path)
+    docs = [metadata(5902), metadata(18)]
+    release = begin(store, docs)
+    for doc in docs:
+        checkpoint(store, release, doc, status="failed", error="PDF text extraction failed in the parser")
+    published = store.publish(
+        release["id"], verified_chunks=0,
+        allowed_extraction_gaps=(doc["document_id"] for doc in reversed(docs)),
+    )
+    assert published["coverage"]["gap_count"] == published["failed_documents"] == 2
+    assert [gap["document_id"] for gap in published["coverage"]["content_search_gaps"]] == sorted(
+        doc["document_id"] for doc in docs
+    )

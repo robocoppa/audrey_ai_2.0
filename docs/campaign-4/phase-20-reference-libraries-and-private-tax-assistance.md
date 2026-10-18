@@ -1,14 +1,16 @@
 # Phase 20 — reference libraries and private tax assistance
 
 Requested October 14, 2026. The archive is sufficient; 20B.1 is deployed and
-accepted. 20B.2 is built; the first Tower index attempt stopped during startup
-with an unexpected RuntimeError. No published IRS content index is confirmed.
-The document comparison supports Qwen3 Embedding 4B for references; the separate
-Nomic history migration and personal-retrieval browser checks are accepted.
-The index runner now bounds local numerical-library threads, matching the
-migration runner, and unexpected startup errors retain a local traceback.
-The original sparse report does not prove the cause. Retry/publication and
-browser acceptance remain pending.
+accepted. 20B.2 is built; the full current-catalog build saved 2,398 documents
+and 61,042 chunks, with nine extraction failures blocking publication. Local
+repairs cover eight of those public sources; Publication 5902 has a malformed
+text layer. The user approved retaining its original in the catalog and
+publishing with this one explicitly listed content-search gap. The approval
+path is built; live recovery/publication remain pending. OCR is not required
+for this publication, and no garbled parser fallback is used.
+Qwen3 Embedding 4B remains the reference model; Nomic history and prior personal
+retrieval checks remain accepted. Same-release recovery, publication and cited
+browser acceptance are the next steps.
 English content and requests only. Federal coverage can begin independently;
 state jurisdiction and priority tax years await the user's answer.
 
@@ -192,13 +194,21 @@ uses the dedicated reference embedding profile; it does not call an answering mo
 download more PDFs or receive private uploads or API credentials.
 
 Each bounded extraction verifies the retained PDF checksum and keeps exact PDF
-page/character spans. A document checkpoint commits after its vector writes
+page/character spans. Public PDFs with editing restrictions open only if the
+empty password succeeds; nonempty-password protection remains refused in both
+indexing and cited page reads. The whole-document worker periodically reopens
+the same verified source with the same parser to release cached objects. Its
+512 MiB memory cap, page/output limits and no-partial-publication rule remain;
+offline extraction allows at most 180 CPU seconds and 210 elapsed seconds per
+PDF. Only stable failure codes enter reports. A document checkpoint commits after its vector writes
 complete. Interrupted runs resume verified checkpoints; incomplete remote
-checkpoints are rebuilt. Unchanged published releases are reused after remote
-verification. Staging points include their release identity, so a failed build
+checkpoints are rebuilt. Verified saved documents emit resume progress and do
+not repeat extraction or embeddings. Unchanged published releases are reused
+after remote verification. Staging points include their release identity, so a failed build
 cannot overwrite the previous release's vectors. Publication atomically switches
 only after every selected original is accounted for and exact remote chunk counts
-match. Extraction failures block publication; blank/scanned text layers are
+match. Unapproved extraction failures block publication; approved exact-document gaps
+remain failed checkpoints with disclosed incomplete coverage. Blank/scanned text layers are
 counted explicitly as `no_text`, without claiming OCR coverage.
 
 Results identify release, selected catalog, coverage/subset status, document
@@ -274,31 +284,41 @@ final export/report files are not prerequisites.
 
 ### 20B.2 deployment and acceptance
 
-The embedding comparison is complete. Build the current catalog directly with
-Qwen3 Embedding 4B; there is no existing IRS index to migrate. The user already
-downloaded this model. No further broad benchmark or IRS collection is needed.
+The embedding comparison is complete. Resume the retained current-catalog
+build with Qwen3 Embedding 4B and preserve its verified checkpoints. No broad
+benchmark, archive collection or embedding migration is needed.
 
 Both [embedding migrations](phase-06-system-one-routing.md#tower-migrations)
 and the personal-retrieval browser checks are complete. Use the deployed Qwen4
 profile without repeating migration. This index run needs no new upload,
 archive collection or personal token.
 
-For the startup fix, pull the user's committed changes on **Tower**, in
-`/mnt/user/appdata/audrey_ai_2.0`, then rebuild the disposable job's backend image:
+For the approved-gap recovery, pull the user's committed changes on **Tower**,
+in `/mnt/user/appdata/audrey_ai_2.0`, then deploy the backend:
 
 ```bash
-docker compose build audrey
+docker compose up -d --build audrey
 ```
 
-Running services do not need a restart for this index-job fix. The runner pins
+This refreshes both the job image and live search coverage notices. The runner pins
 OpenBLAS/OpenMP to one local thread, preserving the existing container resource
 limits. Unexpected startup tracebacks stay under public index state in a
 restricted `diagnostics/` directory; only the relative path and exception class
-enter the Telegram report. A failed diagnostic write preserves the original
-failure result. The original attempt reported only RuntimeError; this change
-does not establish its precise cause.
+enter the Telegram report. Expected per-document failures now identify password,
+identity, parser, memory, output or time limits without leaking parser warnings.
 
-In the same **Tower** checkout, start or resume the current-catalog index:
+Publication 5902 is the only approved extraction gap in this recovery.
+Use `--release-id` with the retained release and `--allow-extraction-gap` with
+its exact document ID, recorded in local PROJECT_STATE. This operator-only flag
+requires a failed checkpoint in that existing release; wildcard/duplicate IDs
+and `--rebuild` are refused. Original scope, revision and profile checks remain.
+Failed documents are retried; any that recover are indexed normally. Only
+still-failed approved IDs may publish, without relabeling them as empty text.
+The report and every search response retain incomplete coverage, `gap_count`
+and `content_search_gaps` (product, revision, official URL, safe reason and
+original availability). Exact gap searches return no passage or unrelated
+fallback; gap metadata never becomes a citation. Unapproved errors, pending
+work and vector-count mismatches still block publication. The underlying runner is:
 
 ```bash
 nohup bash scripts/reference/index-irs-onbox.sh > testing-out/last-reference-index.log 2>&1 &
@@ -315,9 +335,13 @@ embedding calls, which can share Ollama resources with chat. Progress is in
 completed/selected documents. The report and detailed log also reside in
 `testing-out/reference-indexes/`. Read the Telegram download on the laptop.
 
-Success: exit 0, `status: published`, `coverage.subset: false`,
-`coverage.complete_for_selected_documents: true`, zero failed/pending documents,
-and a nonzero chunk count. The report's embedding provenance must name
+For this approved-gap recovery, success is exit 0, `status: published`,
+`coverage.subset: false`, zero pending documents and verified nonzero chunks.
+Expect one failed document retained as `coverage.gap_count: 1`, Publication
+5902 in `coverage.content_search_gaps`, and
+`complete_for_selected_documents: false`. This deliberately discloses missing
+content coverage. Unapproved failures still prevent publication. Normal builds
+without approved gaps retain the zero-failure, complete-coverage requirement. The report's embedding provenance must name
 `qwen3-embedding:4b`, `embedding_dimensions: 2560` and the digest pinned in
 `config.yaml`. `no_text_documents` discloses originals without
 extractable text. A failed build leaves the previous publication untouched;

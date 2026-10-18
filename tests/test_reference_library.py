@@ -30,7 +30,8 @@ from audrey.references.library import (
 )
 
 
-def _pdf(text="CURRENT_REFERENCE_MARKER " * 30, *, second_page="SECOND_PAGE_MARKER"):
+def _pdf(text="CURRENT_REFERENCE_MARKER " * 30, *, second_page="SECOND_PAGE_MARKER",
+         user_password=None):
     writer = PdfWriter()
     for value in [text, second_page]:
         page = writer.add_blank_page(width=612, height=792)
@@ -50,6 +51,8 @@ def _pdf(text="CURRENT_REFERENCE_MARKER " * 30, *, second_page="SECOND_PAGE_MARK
             page[NameObject("/Contents")] = writer._add_object(stream)
     import io
 
+    if user_password is not None:
+        writer.encrypt(user_password, owner_password="reference-owner-restrictions")  # noqa: S106
     output = io.BytesIO()
     writer.write(output)
     return output.getvalue()
@@ -556,3 +559,30 @@ def test_recent_catalog_metadata_cannot_expose_old_retained_historical_body(tmp_
         with pytest.raises(ReferenceNotFound):
             operation("irs-federal", document_id(newest.source_url), catalog="prior")
     assert (root / retained["relative_path"]).is_file()
+
+
+@pytest.mark.parametrize("password", ["", "required-password"])
+def test_reader_accepts_public_permissions_but_not_required_password(archive, password):
+    root, current, *_ = archive
+    with ArchiveStore(root) as store:
+        _record(store, [current], content=_pdf("PUBLIC_REFERENCE_TEXT", user_password=password))
+    registry = _registry(root)
+    if password:
+        with pytest.raises(ReferenceReadError, match="requires a password"):
+            registry.read("irs-federal", document_id(current.source_url))
+    else:
+        result = registry.read("irs-federal", document_id(current.source_url))
+        assert result["text"].strip() == "PUBLIC_REFERENCE_TEXT"
+        assert result["total_pages"] == 2
+
+
+def test_public_permissions_pdf_retains_checksum_validation(archive):
+    root, current, *_ = archive
+    with ArchiveStore(root) as store:
+        revisions = _record(store, [current], content=_pdf(user_password=""))
+    original = root / revisions[current.source_url]["relative_path"]
+    content = bytearray(original.read_bytes())
+    content[-20] ^= 1
+    original.write_bytes(content)
+    with pytest.raises(ReferenceNotFound):
+        _registry(root).read("irs-federal", document_id(current.source_url))

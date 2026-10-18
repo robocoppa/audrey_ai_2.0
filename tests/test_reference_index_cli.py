@@ -164,9 +164,34 @@ async def test_index_job_uses_the_same_reference_factory_as_runtime(monkeypatch)
     build = AsyncMock(return_value={"status": "published"})
     monkeypatch.setattr(module, "build_reference_index", build)
     args = SimpleNamespace(library="irs-federal", catalog="current", max_documents=None,
-                           product_number=[], release_id=None, rebuild=False)
+                           product_number=[], release_id=None, rebuild=False, allow_extraction_gap=())
     assert await module._run(args, cfg, object(), object()) == {"status": "published"}
     factory.assert_called_once_with(ollama, config)
     assert build.await_args.args[3] is embedder
     ollama.aclose.assert_awaited_once()
     qdrant.close.assert_called_once()
+
+
+@pytest.mark.parametrize("flags", [
+    ["--allow-extraction-gap", "*"],
+    ["--allow-extraction-gap", "a" * 64],
+    ["--release-id", "rel_" + "b" * 32, "--rebuild", "--allow-extraction-gap", "a" * 64],
+    ["--release-id", "rel_" + "b" * 32, "--allow-extraction-gap", "a" * 64,
+     "--allow-extraction-gap", "a" * 64],
+])
+def test_gap_approvals_are_explicit_and_validated_before_execution(cli, flags):
+    report, registry, run = cli
+    assert module.main(["--report", str(report), *flags]) == 2
+    registry.catalog.assert_not_called()
+    run.assert_not_awaited()
+
+
+def test_cli_passes_exact_approved_gap_ids_to_worker(cli):
+    report, _, run = cli
+    identity = "a" * 64
+    release = "rel_" + "b" * 32
+    assert module.main(["--report", str(report), "--release-id", release,
+                        "--allow-extraction-gap", identity]) == 0
+    args = run.call_args.args[0]
+    assert args.release_id == release
+    assert args.allow_extraction_gap == (identity,)
