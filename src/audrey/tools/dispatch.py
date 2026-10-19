@@ -28,6 +28,7 @@ from typing import Any
 import httpx
 
 from audrey.metrics import tool_call_seconds, tool_calls_total
+from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
 from audrey.tools.discovery import ToolRegistry, ToolUserScope
 from audrey.user_data_visibility import remote_personal_reads_blocked
 
@@ -179,6 +180,26 @@ async def dispatch_one(
     fn = (tool_call.get("function") or {})
     name = str(fn.get("name") or "?")
     call_id = tool_call.get("id")
+    policy = current_processing_policy()
+    if policy is not None:
+        # Run before argument parsing, echoing or logging. Tool names alone
+        # cannot vouch for a remote server or an unrelated endpoint path.
+        spec = registry.get(name)
+        try:
+            if spec is None or spec.path != f"/{name}":
+                raise ProcessingPolicyError("private_tool_not_allowed")
+            if not isinstance(spec.server_url, str) or not spec.server_url:
+                raise ProcessingPolicyError("local_tool_endpoint_blocked")
+            policy.assert_tool_allowed(name, server_url=spec.server_url)
+            if client.trust_env:
+                raise ProcessingPolicyError("private_transport_not_allowed")
+        except ProcessingPolicyError as exc:
+            tool_calls_total.labels(tool="processing_policy", outcome="error").inc()
+            return ToolResult(
+                name=name, call_id=call_id,
+                content=json.dumps({"error": exc.code, "detail": str(exc)}),
+                elapsed_s=0.0, is_error=True,
+            )
     # Hold onto the raw arguments value so the JSON-parse error path can
     # always log/echo the original — even if a future edit changes the
     # order or rebinds `args` before the except branch fires.
@@ -190,11 +211,12 @@ async def dispatch_one(
         try:
             args = json.loads(args)
         except json.JSONDecodeError:
-            log.warning("dispatch: %s arguments not JSON: %r", name, raw_args[:200])
+            if policy is None:
+                log.warning("dispatch: %s arguments not JSON: %r", name, raw_args[:200])
             tool_calls_total.labels(tool=name, outcome="error").inc()
             return ToolResult(
                 name=name, call_id=call_id,
-                content=json.dumps({"error": "arguments_not_json", "raw": raw_args[:500]}),
+                content=json.dumps({"error": "arguments_not_json", **({} if policy is not None else {"raw": raw_args[:500]})}),
                 elapsed_s=0.0, is_error=True,
             )
     if args is None:
@@ -268,30 +290,42 @@ async def dispatch_one(
     start = time.monotonic()
     try:
         dispatch_timeout = spec.timeout_s if spec.timeout_s is not None else timeout_s
-        r = await client.post(url, json=args, timeout=dispatch_timeout)
+        request_options: dict[str, Any] = {"json": args, "timeout": dispatch_timeout}
+        if policy is not None:
+            request_options["follow_redirects"] = False
+        r = await client.post(url, **request_options)
     except httpx.TimeoutException as e:
         elapsed = round(time.monotonic() - start, 2)
-        log.warning("dispatch: %s timeout in %.2fs: %s", name, elapsed, e)
+        if policy is None:
+            log.warning("dispatch: %s timeout in %.2fs: %s", name, elapsed, e)
         tool_calls_total.labels(tool=name, outcome="timeout").inc()
         tool_call_seconds.labels(tool=name).observe(elapsed)
         return ToolResult(
             name=name, call_id=call_id,
-            content=json.dumps({"error": "timeout", "detail": str(e)[:300]}),
+            content=json.dumps({"error": "timeout", "detail": "Local tool timed out." if policy is not None else str(e)[:300]}),
             elapsed_s=elapsed, is_error=True,
         )
     except httpx.HTTPError as e:
         elapsed = round(time.monotonic() - start, 2)
-        log.warning("dispatch: %s network error in %.2fs: %s", name, elapsed, e)
+        if policy is None:
+            log.warning("dispatch: %s network error in %.2fs: %s", name, elapsed, e)
         tool_calls_total.labels(tool=name, outcome="error").inc()
         tool_call_seconds.labels(tool=name).observe(elapsed)
         return ToolResult(
             name=name, call_id=call_id,
-            content=json.dumps({"error": "network_error", "detail": str(e)[:300]}),
+            content=json.dumps({"error": "network_error", "detail": "Local tool is unavailable." if policy is not None else str(e)[:300]}),
             elapsed_s=elapsed, is_error=True,
         )
 
     elapsed = round(time.monotonic() - start, 2)
     tool_call_seconds.labels(tool=name).observe(elapsed)
+    if policy is not None and r.status_code >= 300:
+        tool_calls_total.labels(tool=name, outcome="error").inc()
+        return ToolResult(
+            name=name, call_id=call_id,
+            content=json.dumps({"error": "private_tool_unavailable", "detail": "Local tool request failed."}),
+            elapsed_s=elapsed, is_error=True,
+        )
     if r.status_code >= 400:
         log.warning("dispatch: %s -> %d in %.2fs: %s", name, r.status_code, elapsed, r.text[:200])
         body = {"error": f"http_{r.status_code}", "detail": r.text[:500]}

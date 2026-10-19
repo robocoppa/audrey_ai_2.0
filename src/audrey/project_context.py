@@ -15,6 +15,7 @@ from audrey.identity import Principal
 from audrey.kb.extract import is_audio_mime, is_image_mime, is_video_mime
 from audrey.kb.qdrant import KBHit
 from audrey.pipeline.complexity import count_tokens
+from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
 from audrey.routes import files as upload_routes
 from audrey.routes.kb import search_private_file_text
 
@@ -178,6 +179,10 @@ async def resolve_project_context(
     if project_snapshot is None:
         return None
     project, relations = project_snapshot
+    if (
+        conversation.private_required or project.private_required
+    ) and current_processing_policy() is None:
+        raise ProcessingPolicyError("private_processing_unavailable")
     listing = await _list_for_owner(request, principal) if relations else None
     owned = {row.file_id: row for row in listing.files} if listing is not None else {}
     files = tuple(

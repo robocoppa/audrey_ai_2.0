@@ -1,17 +1,15 @@
 # Phase 20 — reference libraries and private tax assistance
 
 Requested October 14, 2026. The archive is sufficient; 20B.1 is deployed and
-accepted. 20B.2 is built; the October 18 retry retains 2,405 PDFs and 61,483
-chunks. Publication 1304 still hit its offline memory limit; the prepared fix
-provides bounded parser headroom and adds reference filter indexes before exact
-checkpoint checks. The current public PDF completes locally with unchanged
-extracted text. Tower publication remains pending.
-Publication 5902 is the only approved gap: keep its original in the catalog,
-list missing content coverage and use no garbled fallback. No further gap or
-OCR approval is needed for this recovery.
+accepted. **20B.2 published October 18:** 2,406 current-catalog PDFs, 62,704
+verified chunks and no pending documents. Publication 1304 recovered.
+Publication 5902 is the sole approved content-search gap: its original remains
+available and incomplete coverage is explicitly disclosed. **20B retrieval is
+accepted October 18:** correct tool calls and matching cited PDF pages/year.
+Tax accuracy remains 20E work. **20C.1 is built:** shared model/tool policy guards;
+durable restrictions and propagation remain before user-facing private processing.
 Qwen3 Embedding 4B remains the reference model; Nomic history and prior personal
-retrieval checks remain accepted. Same-release recovery, publication and cited
-browser acceptance are the next steps.
+retrieval checks remain accepted.
 English content and requests only. Federal coverage can begin independently;
 state jurisdiction and priority tax years await the user's answer.
 
@@ -178,7 +176,7 @@ and elapsed-time bounds. Page and character pagination preserve precise coverage
 blank/scanned pages need a future OCR/inspection path. Actual page reads produce
 official-source citations in the existing Sources disclosure.
 
-#### 20B.2 — published content search (built October 14)
+#### 20B.2 — published content search (published and retrieval accepted October 18)
 
 `reference_search` searches PDF text using local Qwen3 Embedding 4B and the
 existing Qdrant keyword/vector fusion. It selects one published library/catalog release;
@@ -208,9 +206,8 @@ checkpoints are rebuilt. Verified saved documents emit resume progress and do
 not repeat extraction or embeddings. Before these exact counts, the job creates
 missing `document_id`, `release_id` and `source` keyword payload indexes in the
 reference collection. Compatible indexes are reused; incompatible schemas or
-service failures surface. This changes no vectors or scope filters, and no
-Tower speed claim is made before measurement. Unchanged published releases are reused
-after remote verification. Staging points include their release identity, so a failed build
+service failures surface. Payload indexes change neither vectors nor scope
+filters. Unchanged published releases are reused after remote verification. Staging points include their release identity, so a failed build
 cannot overwrite the previous release's vectors. Publication atomically switches
 only after every selected original is accounted for and exact remote chunk counts
 match. Unapproved extraction failures block publication; approved exact-document gaps
@@ -244,6 +241,22 @@ Private tax processing and the assistance workflow remain 20C/20D work.
 
 ### 20C — private processing
 
+**Explicit selection, decided October 19:** add **Private** beside the existing
+workflows in the model picker. This uses installed local models, with no new
+model download. The selection activates the policy; no sensitive-content
+detection, extra classifier or separate privacy tool selector is required.
+
+- Keep routing, answers, summaries, embeddings and supported file processing
+  local. Local-service failure reports unavailability instead of using cloud.
+- Automatically limit Tools to operations whose complete processing is local.
+  Local files, calculations and the owned reference library remain the target
+  capabilities; web search/fetch and other external operations are unavailable.
+- Persist the choice on the conversation and propagate restrictions to files
+  added through private flows and their derived content. Later reuse must not
+  silently send protected material to a cloud model.
+- General Local and direct-model choices keep their current meaning. Private
+  carries the end-to-end processing promise once it is implemented and tested.
+
 One enforceable policy covers routing, planning, workers, synthesis, fallbacks,
 OCR/vision, summaries, embeddings and tool dispatch. Cloud fallback is refused;
 external searches/fetches and remote image/file inputs are blocked for private
@@ -257,6 +270,73 @@ Private mode provides a precise statement of its scope: local processing on
 Tower is separate from browser transport and the server administrator's access.
 Verify storage/backup protection; a fully private-network browser route requires
 its own acceptance. Cloudflare access is not described as offline processing.
+
+#### 20C.1 — shared policy boundary (built; no user activation)
+
+`ProcessingPolicy` is an immutable server-owned allowlist carried in the current
+async task. Nested scopes may only tighten it; child tasks inherit it and exit
+restores the parent policy. The scope must cover full async-stream consumption.
+No request field, browser control or configuration enables protected work yet.
+
+Ollama chat, streaming and embedding calls require a trusted exact endpoint,
+disabled environment-proxy inheritance, an approved model name/digest, matching
+installed metadata and verifiable local weights. Missing/changed identities,
+remote aliases or unavailable metadata fail before request content is sent.
+Metadata is rechecked for each call. The daemon, administrator and configured
+transport are trusted; checks cannot atomically prevent a concurrent model-alias
+swap. No automatic cloud fallback can bypass the boundary while scope is active.
+
+Tool dispatch checks the actual endpoint and operation path before parsing or
+logging arguments. It refuses redirects and proxy inheritance. Only explicitly
+allowed calculator, table-analysis, catalog/page-reader and basic owned-file
+operations are eligible. Web tools, memory/history operations and tools making
+further model requests are refused until their policy propagation and reuse
+rules are implemented. Protected failure messages omit prompt/tool contents.
+Ordinary requests retain existing behavior.
+
+#### 20C.2 — durable restrictions (built; no user activation)
+
+Schema 22 adds an owner-scoped `private_required` restriction to Projects,
+conversations and each accepted run. Existing records remain ordinary. New
+conversations inherit a private Project's restriction; moves, detachment,
+archiving, model changes and Project deletion cannot clear it. Only empty
+ordinary conversations can join a private Project: previously processed content
+cannot be relabelled as having been private. SQL guards prevent weakening the
+restriction or changing a run's snapshot.
+
+Run admission rechecks the expected restriction in the message-save transaction.
+Protected server-side admission additionally requires a bound processing policy.
+Browser/API admission remains refused before model selection, file/context work
+or title generation. Private Project file linking is also refused until ingestion
+carries the restriction. Standalone Project-context reads need the active policy.
+This is stored enforcement metadata, not an exposed Private model choice.
+
+Finished and interrupted private turns do not enter ordinary chat-history
+projection. Projection delivery also excludes protected conversations; ordinary
+history behavior is preserved. Auxiliary ordinary title updates refuse protected
+rows. These safeguards do not yet supply private memory/history retrieval.
+
+**Remaining 20C work:** carry restrictions through file upload/processing,
+service calls, background jobs and derived evidence; bind policy throughout each
+request and title task; prevent memory/history reuse in ordinary/cloud requests;
+finish private logging/storage and failure behavior; then expose Private in the
+existing model picker. No sensitive-content detector or separate privacy tool
+selector is queued. Accept the complete flow with synthetic documents before
+using private taxpayer evidence.
+
+After the normal commit/push/pull workflow, deploy on **Tower**, in
+`/mnt/user/appdata/audrey_ai_2.0`:
+
+```bash
+docker compose up -d --build audrey
+```
+
+Only the backend needs rebuilding for 20C.1–2. Schema 22 applies automatically
+on startup; no sidecar/UI rebuild, manual database command, model change or
+reindex is required. Laptop checks cover upgrade/replay preservation, owner
+isolation, durable inheritance, stale admission and ordinary/private history
+separation. No upload or manual browser smoke is required for this unexposed
+slice; the Private choice will be tested after the full path is connected.
 
 ### 20D/20E — verified assistance
 
@@ -274,6 +354,12 @@ retrieval, cross-references, missing records, conflicting facts and local-servic
 failure. Compare local models on source fidelity and tax decisions separately
 from arithmetic; record supported strengths in the existing model report.
 
+The initial filing-requirements answer supplies concrete 20E cases: preserve the
+age/blindness qualifiers in dependent charts and the January-1 age convention;
+reconcile conflicting official sources before presenting definitive thresholds.
+The current Publication 4012 chart and Rev. Proc. 2025-32 section 4.14 disagree
+on the single-65+ amount. Retrieval of a cited table does not settle that conflict.
+
 ## Deployment and testing
 
 20A's collector is implemented in `audrey.references.irs_collect` with
@@ -290,85 +376,47 @@ final export/report files are not prerequisites.
 
 ### 20B.2 deployment and acceptance
 
-The embedding comparison is complete. Resume the retained current-catalog
-build with Qwen3 Embedding 4B and preserve its verified checkpoints. No broad
-benchmark, archive collection or embedding migration is needed.
+The current-catalog release is published. All 2,407 selected documents are
+accounted for: 2,406 indexed and the sole approved Publication 5902 extraction
+gap. Exact remote verification counted 62,704 chunks; zero documents are pending.
+`coverage.subset` is false. `gap_count: 1`, `content_search_gaps` and
+`complete_for_selected_documents: false` accurately disclose missing content.
+Publication succeeded under that approved contract; no further recovery run is
+needed. Both [embedding migrations](phase-06-system-one-routing.md#tower-migrations)
+and the personal-retrieval browser checks remain accepted.
 
-Both [embedding migrations](phase-06-system-one-routing.md#tower-migrations)
-and the personal-retrieval browser checks are complete. Use the deployed Qwen4
-profile without repeating migration. This index run needs no new upload,
-archive collection or personal token.
+Publication 5902's original remains available in the catalog. The report and
+every search response identify the missing content and its source revision.
+Exact gap searches return no passage or unrelated fallback; gap metadata never
+becomes a citation. The operator-only `--allow-extraction-gap DOCUMENT_ID`
+requires an exact failed checkpoint in an existing `--release-id`; wildcards,
+duplicates and `--rebuild` are refused. Failed documents are retried and indexed
+normally if repaired. Unapproved errors, pending work and vector-count mismatches
+still block publication. Normal releases without approved gaps require complete
+coverage and zero failures.
 
-For the offline memory/index recovery, pull the user's committed changes on
-**Tower**, in `/mnt/user/appdata/audrey_ai_2.0`, then rebuild the job image:
-
-```bash
-docker compose build audrey
-```
-
-The gap-disclosure backend is already deployed. No running-service restart is
-needed for this recovery; the new filter-index helper is used by the job. The runner pins
-OpenBLAS/OpenMP to one local thread, preserving the existing container resource
-limits. Unexpected startup tracebacks stay under public index state in a
-restricted `diagnostics/` directory; only the relative path and exception class
-enter the Telegram report. Expected per-document failures now identify password,
-identity, parser, memory, output or time limits without leaking parser warnings.
-
-Publication 5902 is the only approved extraction gap in this recovery.
-Use `--release-id` with the retained release and `--allow-extraction-gap` with
-its exact document ID, recorded in local PROJECT_STATE. This operator-only flag
-requires a failed checkpoint in that existing release; wildcard/duplicate IDs
-and `--rebuild` are refused. Original scope, revision and profile checks remain.
-Failed documents are retried; any that recover are indexed normally. Only
-still-failed approved IDs may publish, without relabeling them as empty text.
-The report and every search response retain incomplete coverage, `gap_count`
-and `content_search_gaps` (product, revision, official URL, safe reason and
-original availability). Exact gap searches return no passage or unrelated
-fallback; gap metadata never becomes a citation. Unapproved errors, pending
-work and vector-count mismatches still block publication. The underlying runner is:
+For future source updates, pull the user's committed changes on **Tower**, in
+`/mnt/user/appdata/audrey_ai_2.0`; rebuild `audrey` with `docker compose build audrey`
+only if the job image changed. The existing runner is:
 
 ```bash
 nohup bash scripts/reference/index-irs-onbox.sh > testing-out/last-reference-index.log 2>&1 &
 ```
 
-This resumes the retained current-catalog build and verifies completed documents;
-only failed or missing checkpoints repeat extraction/embedding. The last retry
-took about 35 minutes. The added filter indexes may shorten verification, but
-Tower performance has not been measured; do not promise a short smoke runtime. Qwen 4B trades slower batch indexing
-and more GPU residency for better reference retrieval; avoid starting another
-GPU-heavy evaluation during the build. It survives disconnects and sends the
-usual Telegram start/finish messages and stamped JSON report. It uses local
-embedding calls, which can share Ollama resources with chat. Progress is in
-`testing-out/last-reference-index.log`; the last `document_indexed` event shows
-completed/selected documents. The report and detailed log also reside in
-`testing-out/reference-indexes/`. Read the Telegram download on the laptop.
+It verifies saved checkpoints and reuses unchanged published releases. A failed
+build leaves the previous publication intact. The job survives disconnects and
+sends Telegram start/finish messages and its stamped JSON report; reports/logs
+also remain under `testing-out/reference-indexes/`. Read the downloaded report
+on the laptop. Only local embeddings are generated, sharing Ollama resources
+with chat. Expected extraction failures use safe codes; unexpected tracebacks
+stay in restricted public-index `diagnostics/`, with only class/path in reports.
+No archive collection, private upload, personal token or embedding migration is
+needed. The runner's public mounts and resource limits remain unchanged.
 
-For this approved-gap recovery, success is exit 0, `status: published`,
-`coverage.subset: false`, zero pending documents and verified nonzero chunks.
-Expect one failed document retained as `coverage.gap_count: 1`, Publication
-5902 in `coverage.content_search_gaps`, and
-`complete_for_selected_documents: false`. This deliberately discloses missing
-content coverage. Unapproved failures still prevent publication. Normal builds
-without approved gaps retain the zero-failure, complete-coverage requirement. The report's embedding provenance must name
-`qwen3-embedding:4b`, `embedding_dimensions: 2560` and the digest pinned in
-`config.yaml`. `no_text_documents` discloses originals without
-extractable text. A failed build leaves the previous publication untouched;
-rerun the same command to resume after resolving the reported cause. An unchanged
-verified publication returns `unchanged: true` without re-embedding.
-
-After publication, open **https://ai.builtryte.xyz** in the browser. Start a new
-chat with Tools set to **Automatic**, with no upload required, and ask:
-
-> Using only the owned IRS library, find the explanation of how gross income,
-> filing status and age affect whether someone must file a return. Search document
-> contents, cite the matching PDF pages and state the source document's tax year.
-
-Pass: Tools shows `reference_search`; Sources opens official IRS PDFs at the
-matching pages; the answer uses retrieved text and distinguishes a source-stated
-return year from revision/download dates. `read_reference` can open more of the
-cited page when needed. This is one answer-generation check; it does not establish
-tax advice quality or private-processing guarantees. Do not repeat the accepted
-20B.1 checks. If it fails, keep the run/conversation and report for diagnosis.
+**Retrieval acceptance is complete.** The user's cited filing-requirements
+answer used the correct tools and matching official PDF pages/year. No repeat
+browser/indexing check is required. This establishes the retrieval flow; tax
+accuracy and enforced private processing have their own acceptance below.
 
 Operator options remain bounded: `--product-number "Publication 17"` or
 `--max-documents 5` intentionally publishes a disclosed subset, not full coverage.

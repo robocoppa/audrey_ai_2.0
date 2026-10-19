@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 18, 2026.** English user input only. Passed work stays closed.
+**Updated October 19, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -17,17 +17,23 @@ they are not ongoing task lists.
   is limited to the most recent five years (2022–2026). Older originals remain
   outside the accessible library. Tax-year applicability is verified separately
   from catalog/revision dates. Deployed tools, page citations and historical
-  refusal are user-accepted. **20B.2 built:** local scoped hybrid content search,
-  resumable bounded indexing, verified publication and page citations. The full
-  October 18 retry reused all previous checkpoints and now retains 2,405 PDFs
-  and 61,483 chunks. Publication 1304 still exceeded the offline parser's memory
-  cap; a bounded 768 MiB allowance is prepared and source-verified locally.
-  Reference filter indexes are added before exact saved-document checks; no
-  re-embedding or skipped verification. Tower speed improvement is unmeasured.
-  Publication 5902 remains the only user-approved content-search gap, with its
-  original in the catalog and incomplete coverage disclosed. Rebuild the
-  `audrey` job image after pull, then resume the same release. No service restart
-  is needed for this offline recovery. Publication/browser acceptance are pending.
+  refusal are user-accepted. **20B.2 published October 18:** 2,406 current-catalog
+  PDFs and 62,704 verified chunks, with zero pending documents. Publication 1304
+  recovered. Publication 5902 is the sole approved content-search gap; its original
+  remains available and incomplete coverage is disclosed. **20B.2 browser retrieval
+  accepted October 18:** matching source pages/year and correct tool calls.
+  Answer conditions and conflicting source figures remain 20E accuracy cases.
+  **20C.1 built:** shared model/tool boundaries enforce an immutable server-owned
+  local policy with exact model identities, trusted endpoints and safe refusals.
+  It is not activated in user requests. **October 19 direction:** add a **Private**
+  workflow to the existing model picker, using installed local models. Explicit
+  selection activates local-only processing and automatically limits tools; no
+  sensitive-content detection or separate privacy tool selector. Next: persist
+  and enforce that choice across files and derived context before exposing it.
+  **20C.2 built:** durable Project/conversation restrictions, immutable run
+  snapshots and ordinary-history exclusion. Private remains unavailable to
+  browser/API requests until ingestion and background processing are wired.
+  General Local/direct-model choices keep their present meaning.
   [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds
   the contract and remaining privacy/tax workflow. State jurisdictions remain
   unspecified; fine-tuning requires evidence.
@@ -43,7 +49,7 @@ they are not ongoing task lists.
   for every model. No threshold or model change follows. Reused public questions
   do not establish independent new-topic evidence. [Phase 06](phase-06-system-one-routing.md)
   holds the contract; measurements and limits are in MODEL-FACTS. The existing-file
-  browser check remains unreported; IRS publication recovery is tracked above.
+  browser check remains unreported; IRS retrieval acceptance stays closed.
   Router assessment stays closed: retain Qwen 3.5 4B.
 
 - **19 — deeper evidence tools:** complete; user accepted all five tools October 13.
@@ -123,17 +129,20 @@ they are not ongoing task lists.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A/20B.1 accepted; 20B.2 built, indexing/browser acceptance pending |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A/20B accepted; 20C.1–2 built, private propagation in progress |
 
 ## Remaining work
 
 1. Document comparison is complete; retain Qwen for documents and Nomic for
    history. Preserve accepted history/memory checks. New conversation focus and
-   the existing-file browser check remain unreported. Resume the saved current-
-   catalog IRS index with the approved Publication 5902 search gap, then accept
-   one cited content search in the browser
-   (20B.2). Follow with 20C enforced private processing, 20D's tax workflow and
-   targeted 20E evaluation. Broad archive collection and both migrations stay
+   the existing-file browser check remain unreported. The current-catalog IRS
+   index and cited-search browser check are accepted, with the approved
+   Publication 5902 search gap. Finish 20C enforced private processing: persist
+   the explicit Private selection and propagate its restrictions across uploads
+   and derived context, then expose it in the model picker with automatically
+   limited tools. No sensitive-content detection is queued. Follow with 20D's
+   tax workflow and targeted 20E evaluation,
+   including source conditions and conflicting figures. Broad collection and both migrations stay
    complete; no repeat is queued.
 2. Confirm Tower deployment and close pending targeted acceptance for the
    current course-reviewed work. The local, gitignored [AUDIT](../lesson-ai/AUDIT.md)

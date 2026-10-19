@@ -60,6 +60,7 @@ from audrey.pipeline.run_events import (
     UsageReportedEvent,
     dump_run_event,
 )
+from audrey.processing_policy import ProcessingPolicyError
 from audrey.project_context import (
     ProjectContextUnavailableError,
     resolve_project_context,
@@ -1040,6 +1041,11 @@ async def create_run(
     )
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
+    if conversation.private_required:
+        error = ProcessingPolicyError("private_processing_unavailable")
+        raise HTTPException(
+            status_code=409, detail={"error": error.code, "message": str(error)}
+        )
     requested_model_id = payload.model_id or payload.mode or conversation.default_model_id
     selected_model = await resolve_model(
         request.app.state.cfg,
@@ -1108,6 +1114,10 @@ async def create_run(
             conversation=conversation,
             query=payload.content,
         )
+    except ProcessingPolicyError as exc:
+        raise HTTPException(
+            status_code=409, detail={"error": exc.code, "message": str(exc)}
+        ) from exc
     except ProjectContextUnavailableError as exc:
         raise HTTPException(
             status_code=503,

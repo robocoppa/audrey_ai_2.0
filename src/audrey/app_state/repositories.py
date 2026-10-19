@@ -29,6 +29,7 @@ from audrey.app_state.records import (
     UserPreferences,
 )
 from audrey.app_state.titles import fallback_conversation_title
+from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
 
 _ALLOWED_MODES = frozenset(
     {"auto", "fast", "deep", "research", "local", "cloud", "video", "direct"}
@@ -152,6 +153,7 @@ class ConversationsRepository:
         default_mode: str = "auto",
         default_model_id: str | None = None,
         project_id: str | None = None,
+        private_required: bool = False,
     ) -> ConversationRecord:
         return await asyncio.to_thread(
             self._create_sync,
@@ -160,6 +162,7 @@ class ConversationsRepository:
             default_mode,
             default_model_id,
             project_id,
+            private_required,
         )
 
     def _create_sync(
@@ -169,12 +172,15 @@ class ConversationsRepository:
         default_mode: str,
         default_model_id: str | None,
         project_id: str | None,
+        private_required: bool,
     ) -> ConversationRecord:
         user_id = _required(user_id, "user id")
         title = _normalize_title(title)
         default_mode = _normalize_mode(default_mode)
         default_model_id = _normalize_model_id(default_model_id or default_mode)
         project_id = _required(project_id, "project id") if project_id is not None else None
+        if type(private_required) is not bool:
+            raise InvalidApplicationStateError("private requirement must be a boolean")
         conversation_id = _new_id("con")
         now = _utc_now()
 
@@ -187,16 +193,20 @@ class ConversationsRepository:
                 ).fetchone()
                 if owner is None:
                     raise InvalidApplicationStateError("conversation owner does not exist")
-                if project_id is not None and self._conn.execute(
-                    "SELECT 1 FROM app_projects WHERE user_id = ? AND project_id = ?",
-                    (user_id, project_id),
-                ).fetchone() is None:
-                    raise ProjectNotFoundError("project not found")
+                if project_id is not None:
+                    project = self._conn.execute(
+                        "SELECT private_required FROM app_projects "
+                        "WHERE user_id = ? AND project_id = ?",
+                        (user_id, project_id),
+                    ).fetchone()
+                    if project is None:
+                        raise ProjectNotFoundError("project not found")
+                    private_required = private_required or bool(project["private_required"])
                 self._conn.execute(
                     "INSERT INTO app_conversations "
                     "(conversation_id, user_id, title, default_mode, default_model_id, "
-                    "created_at, updated_at, last_message_at, archived_at, project_id) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
+                    "created_at, updated_at, last_message_at, archived_at, project_id, "
+                    "private_required) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
                     (
                         conversation_id,
                         user_id,
@@ -206,6 +216,7 @@ class ConversationsRepository:
                         now,
                         now,
                         project_id,
+                        int(private_required),
                     ),
                 )
                 row = self._conversation_row_locked(user_id, conversation_id)
@@ -276,6 +287,7 @@ class ConversationsRepository:
                     "UPDATE app_conversations SET title = ?, updated_at = ? "
                     "WHERE user_id = ? AND conversation_id = ? "
                     "AND title = ? AND updated_at = ? AND archived_at IS NULL "
+                    "AND private_required = 0 "
                     "AND EXISTS (SELECT 1 FROM app_users "
                     "WHERE app_users.user_id = app_conversations.user_id "
                     "AND app_users.status = 'active')",
@@ -355,7 +367,7 @@ class ConversationsRepository:
             rows = self._conn.execute(
                 "SELECT conversation_id, user_id, title, default_mode, "
                 "default_model_id, created_at, "
-                "updated_at, last_message_at, archived_at, project_id "
+                "updated_at, last_message_at, archived_at, project_id, private_required "
                 "FROM app_conversations WHERE user_id = ? "
                 "AND (? IS NULL OR project_id = ?) "
                 "AND ((? = 1 AND archived_at IS NOT NULL) "
@@ -446,11 +458,33 @@ class ConversationsRepository:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
-                if update_project and normalized_project_id is not None and self._conn.execute(
-                    "SELECT 1 FROM app_projects WHERE user_id = ? AND project_id = ?",
-                    (user_id, normalized_project_id),
-                ).fetchone() is None:
-                    raise ProjectNotFoundError("project not found")
+                existing = self._conversation_row_locked(user_id, conversation_id)
+                if existing is None:
+                    self._conn.rollback()
+                    return None
+                private_required = bool(existing["private_required"])
+                if update_project and normalized_project_id is not None:
+                    project = self._conn.execute(
+                        "SELECT private_required FROM app_projects "
+                        "WHERE user_id = ? AND project_id = ?",
+                        (user_id, normalized_project_id),
+                    ).fetchone()
+                    if project is None:
+                        raise ProjectNotFoundError("project not found")
+                    if bool(project["private_required"]) and not private_required:
+                        if self._has_active_run_locked(user_id, conversation_id):
+                            raise ConversationHasActiveRunError(
+                                "conversation cannot become private while a run is active"
+                            )
+                        if self._conn.execute(
+                            "SELECT 1 FROM app_messages WHERE user_id = ? "
+                            "AND conversation_id = ? LIMIT 1",
+                            (user_id, conversation_id),
+                        ).fetchone() is not None:
+                            raise InvalidApplicationStateError(
+                                "start a new conversation in the private project"
+                            )
+                        private_required = True
                 if archived is True and self._has_active_run_locked(user_id, conversation_id):
                     raise ConversationHasActiveRunError(
                         "conversation cannot be archived while a run is active"
@@ -463,7 +497,7 @@ class ConversationsRepository:
                     "ELSE default_model_id END, "
                     "archived_at = CASE WHEN ? = 1 THEN ? ELSE archived_at END, "
                     "project_id = CASE WHEN ? = 1 THEN ? ELSE project_id END, "
-                    "updated_at = ? "
+                    "private_required = ?, updated_at = ? "
                     "WHERE user_id = ? AND conversation_id = ?",
                     (
                         int(title is not None),
@@ -476,6 +510,7 @@ class ConversationsRepository:
                         now if archived else None,
                         int(update_project),
                         normalized_project_id,
+                        int(private_required),
                         now,
                         user_id,
                         conversation_id,
@@ -554,7 +589,7 @@ class ConversationsRepository:
             rows = self._conn.execute(
                 "SELECT conversation_id, user_id, title, default_mode, "
                 "default_model_id, created_at, "
-                "updated_at, last_message_at, archived_at, project_id "
+                "updated_at, last_message_at, archived_at, project_id, private_required "
                 "FROM app_conversations "
                 "WHERE user_id = ? ORDER BY COALESCE(last_message_at, created_at) DESC, "
                 "conversation_id DESC LIMIT ?",
@@ -657,6 +692,7 @@ class ConversationsRepository:
         skill_reason: str = "",
         expected_project_id: str | None = None,
         enforce_project_id: bool = False,
+        expected_private_required: bool = False,
     ) -> StartedRun | None:
         """Create run plus user/assistant messages in one write transaction."""
 
@@ -675,6 +711,7 @@ class ConversationsRepository:
             skill_reason,
             expected_project_id,
             enforce_project_id,
+            expected_private_required,
         )
 
     def _begin_run_sync(
@@ -692,6 +729,7 @@ class ConversationsRepository:
         skill_reason: str,
         expected_project_id: str | None,
         enforce_project_id: bool,
+        expected_private_required: bool,
     ) -> StartedRun | None:
         user_id = _required(user_id, "user id")
         conversation_id = _required(conversation_id, "conversation id")
@@ -699,6 +737,8 @@ class ConversationsRepository:
         if len(user_content) > 1_000_000:
             raise InvalidApplicationStateError("user content is too large")
         attachments = _normalize_attachments(attachments)
+        if type(expected_private_required) is not bool:
+            raise InvalidApplicationStateError("private requirement must be a boolean")
         now = _utc_now()
         run_id = _new_id("run")
         user_message_id = _new_id("msg")
@@ -711,6 +751,13 @@ class ConversationsRepository:
                 if conversation_row is None:
                     self._conn.rollback()
                     return None
+                private_required = bool(conversation_row["private_required"])
+                if private_required != expected_private_required:
+                    raise InvalidApplicationStateError(
+                        "conversation processing requirement changed while the run was starting"
+                    )
+                if private_required and current_processing_policy() is None:
+                    raise ProcessingPolicyError("private_processing_unavailable")
                 actual_project_id = (
                     str(conversation_row["project_id"])
                     if conversation_row["project_id"] is not None
@@ -763,10 +810,11 @@ class ConversationsRepository:
                     "status, started_at, "
                     "completed_at, finish_reason, error_code, virtual_model, "
                     "concrete_model, prompt_tokens, completion_tokens, skill_id, "
-                    "skill_version, skill_digest, skill_reason) "
-                    "VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, '', '', '', '', 0, 0, ?, ?, ?, ?)",
+                    "skill_version, skill_digest, skill_reason, private_required) "
+                    "VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, '', '', '', '', 0, 0, ?, ?, ?, ?, ?)",
                     (run_id, conversation_id, user_id, selected_mode, selected_model_id,
-                     now, skill_id, skill_version, skill_digest, skill_reason),
+                     now, skill_id, skill_version, skill_digest, skill_reason,
+                     int(private_required)),
                 )
                 self._conn.execute(
                     "INSERT INTO app_messages "
@@ -1170,7 +1218,10 @@ class ConversationsRepository:
             JOIN app_messages AS assistant_message
               ON assistant_message.run_id = r.run_id
              AND assistant_message.role = 'assistant'
+            JOIN app_conversations AS c
+              ON c.conversation_id = r.conversation_id AND c.user_id = r.user_id
             WHERE r.run_id = ? AND r.status != 'running'
+              AND r.private_required = 0 AND c.private_required = 0
             """,
             (run_id,),
         )
@@ -1183,7 +1234,7 @@ class ConversationsRepository:
         return self._conn.execute(
             "SELECT conversation_id, user_id, title, default_mode, "
             "default_model_id, created_at, "
-            "updated_at, last_message_at, archived_at, project_id "
+            "updated_at, last_message_at, archived_at, project_id, private_required "
             "FROM app_conversations "
             "WHERE user_id = ? AND conversation_id = ?",
             (user_id, conversation_id),
@@ -1195,7 +1246,7 @@ class ConversationsRepository:
             "status, started_at, "
             "completed_at, finish_reason, error_code, virtual_model, concrete_model, "
             "prompt_tokens, completion_tokens, skill_id, skill_version, "
-            "skill_digest, skill_reason FROM app_runs "
+            "skill_digest, skill_reason, private_required FROM app_runs "
             "WHERE user_id = ? AND run_id = ?",
             (user_id, run_id),
         ).fetchone()
@@ -1235,11 +1286,14 @@ class ChatProjectionsRepository:
                        p.created_at, p.attempts
                 FROM app_chat_projections AS p
                 JOIN app_users AS u ON u.user_id = p.user_id
+                JOIN app_conversations AS c
+                  ON c.conversation_id = p.conversation_id AND c.user_id = p.user_id
                 LEFT JOIN app_messages AS user_message
                   ON user_message.message_id = p.user_message_id
                 LEFT JOIN app_messages AS assistant_message
                   ON assistant_message.message_id = p.assistant_message_id
                 WHERE p.enqueued_at IS NULL AND p.next_attempt_at <= ?
+                  AND c.private_required = 0
                 ORDER BY p.next_attempt_at, p.created_at, p.projection_id
                 LIMIT ?
                 """,
@@ -1665,6 +1719,7 @@ def _conversation_from_row(row: sqlite3.Row) -> ConversationRecord:
         last_message_at=str(row["last_message_at"]) if row["last_message_at"] else None,
         archived_at=str(row["archived_at"]) if row["archived_at"] else None,
         project_id=str(row["project_id"]) if row["project_id"] else None,
+        private_required=bool(row["private_required"]),
     )
 
 
@@ -1851,6 +1906,7 @@ def _run_from_row(row: sqlite3.Row) -> RunRecord:
         skill_version=int(row["skill_version"]),
         skill_digest=str(row["skill_digest"]),
         skill_reason=str(row["skill_reason"]),
+        private_required=bool(row["private_required"]),
     )
 
 

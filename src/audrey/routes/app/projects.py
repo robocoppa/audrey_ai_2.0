@@ -22,6 +22,7 @@ from audrey.app_state import (
 )
 from audrey.auth import require_scope
 from audrey.identity import Principal
+from audrey.processing_policy import ProcessingPolicyError
 from audrey.routes.app import files as native_files
 from audrey.routes.app.conversations import (
     ConversationListResponse,
@@ -335,6 +336,10 @@ async def add_project_file(
         )
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found.") from exc
+    except ProcessingPolicyError as exc:
+        raise HTTPException(
+            status_code=409, detail={"error": exc.code, "message": str(exc)}
+        ) from exc
     except ProjectFileConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ProjectFileLimitError as exc:

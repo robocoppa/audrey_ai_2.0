@@ -21,6 +21,10 @@ from typing import Any
 import httpx
 
 from audrey.metrics import model_seconds, model_tokens_total, model_usage_observations_total
+from audrey.processing_policy import (
+    ProcessingPolicyError,
+    current_processing_policy,
+)
 
 log = logging.getLogger(__name__)
 
@@ -277,6 +281,7 @@ class OllamaClient:
         *,
         default_timeout_s: float = 120.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        trust_env: bool = True,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(
@@ -284,6 +289,7 @@ class OllamaClient:
             timeout=httpx.Timeout(default_timeout_s),
             headers={"Accept": "application/json"},
             transport=transport,
+            trust_env=trust_env,
         )
         #: model -> declares `thinking`. See `thinking_flag`. Never negatively
         #: cached on failure, so a probe during an Ollama blip is retried
@@ -301,6 +307,8 @@ class OllamaClient:
         try:
             r = await self._client.get("/api/tags", timeout=_TAGS_TIMEOUT_S)
         except httpx.HTTPError as e:
+            if current_processing_policy() is not None:
+                raise ProcessingPolicyError("private_model_unavailable") from None
             raise OllamaError(f"GET /api/tags transport error: {type(e).__name__}: {e}") from e
         self._raise_for_status(r, "/api/tags")
         body = self._json_object(r, "/api/tags")
@@ -339,6 +347,8 @@ class OllamaClient:
                 "/api/show", json={"model": model}, timeout=_SHOW_TIMEOUT_S,
             )
         except httpx.HTTPError as e:
+            if current_processing_policy() is not None:
+                raise ProcessingPolicyError("private_model_unavailable") from None
             raise OllamaError(f"POST /api/show transport error: {type(e).__name__}: {e}") from e
         self._raise_for_status(r, "/api/show")
         return self._json_object(r, "/api/show")
@@ -418,6 +428,30 @@ class OllamaClient:
             self._thinking_caps[model] = cached
         return want if cached else None
 
+    async def _check_processing_policy(self, model: str) -> None:
+        """Refuse unverified providers/models before sending request content.
+
+        Metadata reads carry only an already-allowlisted model name. They are
+        deliberately uncached: an installed alias may have changed since the
+        previous call. Ordinary requests make no additional metadata requests.
+        """
+        policy = current_processing_policy()
+        if policy is None:
+            return
+        policy.assert_ollama_endpoint(self._base_url)
+        if self._client.trust_env:
+            raise ProcessingPolicyError("private_transport_not_allowed")
+        policy.assert_model_allowed(model)
+        try:
+            installed = await self.tags()
+            metadata = await self.show(model)
+        except OllamaError:
+            # Provider error bodies are not a safe private-mode diagnostic.
+            raise ProcessingPolicyError("private_model_unavailable") from None
+        policy.assert_local_model_metadata(
+            model, installed_models=installed, metadata=metadata,
+        )
+
     # ─── Chat ───────────────────────────────────────────────────────────
 
     async def chat(
@@ -459,6 +493,7 @@ class OllamaClient:
         ~4 that prose runs at, so roughly two thirds of the generation was
         reasoning that was then discarded.
         """
+        await self._check_processing_policy(model)
         _report_model_call(model)
         payload: dict[str, Any] = {
             "model": model,
@@ -482,10 +517,14 @@ class OllamaClient:
                     timeout=httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT,
                 )
             except httpx.HTTPError as e:
+                if current_processing_policy() is not None:
+                    raise ProcessingPolicyError("private_model_unavailable") from None
                 # Preserve the exception boundary used by router fallbacks.
                 raise OllamaError(f"POST /api/chat transport error: {type(e).__name__}: {e}") from e
             self._raise_for_status(r, "/api/chat")
             body = self._json_object(r, "/api/chat")
+            if current_processing_policy() is not None and body.get("error"):
+                raise ProcessingPolicyError("private_model_unavailable")
             confirmed = body.get("done") is True
             outcome = "ok" if confirmed and not body.get("error") else "error"
             observation.finish(outcome, body if confirmed else None)
@@ -529,6 +568,7 @@ class OllamaClient:
         file. Keep the two signatures in step; `test_ollama_think_parity.py`
         now fails if they drift.
         """
+        await self._check_processing_policy(model)
         _report_model_call(model)
         payload: dict[str, Any] = {
             "model": model,
@@ -547,8 +587,12 @@ class OllamaClient:
         observation = _GenerationObservation(model)
         try:
             async with self._client.stream("POST", "/api/chat", json=payload, timeout=timeout) as r:
-                if r.status_code >= 400:
+                if r.status_code >= 400 or (
+                    current_processing_policy() is not None and r.status_code >= 300
+                ):
                     observation.finish("error")
+                    if current_processing_policy() is not None:
+                        raise ProcessingPolicyError("private_model_unavailable")
                     body = await r.aread()
                     raise OllamaError(f"POST /api/chat -> {r.status_code}: {body.decode('utf-8', 'replace')}")
                 async for line in r.aiter_lines():
@@ -557,8 +601,14 @@ class OllamaClient:
                     try:
                         chunk = json.loads(line)
                     except json.JSONDecodeError:
+                        if current_processing_policy() is not None:
+                            raise ProcessingPolicyError("private_model_unavailable") from None
                         log.warning("Ollama returned non-JSON line: %r", line[:120])
                         continue
+                    if current_processing_policy() is not None and (
+                        not isinstance(chunk, dict) or chunk.get("error")
+                    ):
+                        raise ProcessingPolicyError("private_model_unavailable")
                     if isinstance(chunk, dict):
                         if chunk.get("error"):
                             observation.finish("error", chunk if chunk.get("done") is True else None)
@@ -574,6 +624,8 @@ class OllamaClient:
             observation.finish("cancelled")
             raise
         except httpx.HTTPError as e:
+            if current_processing_policy() is not None:
+                raise ProcessingPolicyError("private_model_unavailable") from None
             raise OllamaError(f"POST /api/chat (stream) transport error: {type(e).__name__}: {e}") from e
         finally:
             # EOF without a terminal, transport failure, or an unhandled
@@ -606,6 +658,7 @@ class OllamaClient:
         """
         if not texts:
             return []
+        await self._check_processing_policy(model)
         payload: dict[str, Any] = {"model": model, "input": texts}
         if truncate is not None:
             payload["truncate"] = truncate
@@ -618,6 +671,8 @@ class OllamaClient:
                 timeout=httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT,
             )
         except httpx.HTTPError as e:
+            if current_processing_policy() is not None:
+                raise ProcessingPolicyError("private_model_unavailable") from None
             raise OllamaError(f"POST /api/embed transport error: {type(e).__name__}: {e}") from e
         self._raise_for_status(r, "/api/embed")
         body = self._json_object(r, "/api/embed")
@@ -638,6 +693,8 @@ class OllamaClient:
 
     @staticmethod
     def _raise_for_status(r: httpx.Response, op: str) -> None:
+        if r.status_code >= 300 and current_processing_policy() is not None:
+            raise ProcessingPolicyError("private_model_unavailable")
         if r.status_code >= 400:
             raise OllamaError(f"{op} -> {r.status_code}: {r.text}")
 
@@ -646,6 +703,8 @@ class OllamaClient:
         try:
             body = r.json()
         except ValueError as e:
+            if current_processing_policy() is not None:
+                raise ProcessingPolicyError("private_model_unavailable") from None
             raise OllamaError(f"{op}: invalid JSON response: {e}") from e
         if not isinstance(body, dict):
             raise OllamaError(f"{op}: expected JSON object, got {type(body).__name__}")

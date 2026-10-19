@@ -2,6 +2,33 @@
 
 from __future__ import annotations
 
+PRIVATE_PROCESSING_GUARDS_SQL: tuple[str, ...] = (
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_app_conversations_private_no_downgrade
+    BEFORE UPDATE OF private_required ON app_conversations
+    WHEN OLD.private_required = 1 AND NEW.private_required != 1
+    BEGIN
+    SELECT RAISE(ABORT, 'private conversation restriction cannot be weakened');
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_app_projects_private_no_downgrade
+    BEFORE UPDATE OF private_required ON app_projects
+    WHEN OLD.private_required = 1 AND NEW.private_required != 1
+    BEGIN
+    SELECT RAISE(ABORT, 'private project restriction cannot be weakened');
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS trg_app_runs_private_snapshot_immutable
+    BEFORE UPDATE OF private_required ON app_runs
+    WHEN OLD.private_required != NEW.private_required
+    BEGIN
+    SELECT RAISE(ABORT, 'run processing restriction is immutable');
+    END;
+    """,
+)
+
 MIGRATIONS: tuple[tuple[int, str], ...] = (
     (
         1,
@@ -975,6 +1002,17 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON app_responses(expires_at);
         """,
     ),
+    (
+        22,
+        """
+        ALTER TABLE app_conversations ADD COLUMN private_required INTEGER NOT NULL
+          DEFAULT 0 CHECK (typeof(private_required) = 'integer' AND private_required IN (0, 1));
+        ALTER TABLE app_projects ADD COLUMN private_required INTEGER NOT NULL
+          DEFAULT 0 CHECK (typeof(private_required) = 'integer' AND private_required IN (0, 1));
+        ALTER TABLE app_runs ADD COLUMN private_required INTEGER NOT NULL
+          DEFAULT 0 CHECK (typeof(private_required) = 'integer' AND private_required IN (0, 1));
+        """ + "\n".join(PRIVATE_PROCESSING_GUARDS_SQL),
+    ),
 )
 
-__all__ = ["MIGRATIONS"]
+__all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL"]

@@ -265,3 +265,40 @@ async def test_private_project_search_keeps_exact_owner_scope_and_bounds_long_qu
     assert user == "alice@example.com"
     assert min_score == 0.0
     assert scope.file_ids == ["file_alpha", "file_beta"]
+
+
+@pytest.mark.asyncio
+async def test_protected_project_context_refuses_before_file_or_embedding_calls(
+    tmp_path, monkeypatch,
+):
+    from dataclasses import replace
+
+    from audrey.processing_policy import ProcessingPolicyError
+
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner = await _principal(store)
+    project = await store.projects.create(
+        user_id=owner.user_id, name="Private", private_required=True,
+        instructions="Synthetic protected instructions",
+    )
+    conversation = await store.conversations.create(
+        user_id=owner.user_id, project_id=project.project_id,
+    )
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Protected context must refuse before listing or embedding files")
+
+    monkeypatch.setattr(project_context, "_list_for_owner", forbidden)
+    monkeypatch.setattr(project_context, "search_private_file_text", forbidden)
+    # Also check a stale caller snapshot: the authoritative project's flag wins.
+    try:
+        for record in (conversation, replace(conversation, private_required=False)):
+            with pytest.raises(ProcessingPolicyError) as error:
+                await project_context.resolve_project_context(
+                    SimpleNamespace(), store=store, principal=owner,
+                    conversation=record, query="Synthetic private query",
+                )
+            assert error.value.code == "private_processing_unavailable"
+            assert "Synthetic" not in str(error.value)
+    finally:
+        store.close()

@@ -9,6 +9,7 @@ import threading
 import uuid
 
 from audrey.app_state.records import ProjectFileRecord, ProjectRecord
+from audrey.processing_policy import ProcessingPolicyError
 
 PROJECT_NAME_MAX_CHARS = 100
 PROJECT_INSTRUCTIONS_MAX_CHARS = 4_000
@@ -44,13 +45,20 @@ class ProjectsRepository:
         user_id: str,
         name: str,
         instructions: str = "",
+        private_required: bool = False,
     ) -> ProjectRecord:
-        return await asyncio.to_thread(self._create_sync, user_id, name, instructions)
+        return await asyncio.to_thread(
+            self._create_sync, user_id, name, instructions, private_required,
+        )
 
-    def _create_sync(self, user_id: str, name: str, instructions: str) -> ProjectRecord:
+    def _create_sync(
+        self, user_id: str, name: str, instructions: str, private_required: bool,
+    ) -> ProjectRecord:
         user_id = _required(user_id, "user id")
         name = _normalize_name(name)
         instructions = _normalize_instructions(instructions)
+        if type(private_required) is not bool:
+            raise InvalidProjectStateError("private restriction must be a boolean")
         project_id = _new_id("proj")
         now = _utc_now()
         with self._lock:
@@ -64,9 +72,9 @@ class ProjectsRepository:
                     raise InvalidProjectStateError("project owner does not exist")
                 self._conn.execute(
                     "INSERT INTO app_projects "
-                    "(project_id, user_id, name, instructions, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (project_id, user_id, name, instructions, now, now),
+                    "(project_id, user_id, name, instructions, created_at, updated_at, "
+                    "private_required) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (project_id, user_id, name, instructions, now, now, int(private_required)),
                 )
                 row = self._project_row_locked(user_id, project_id)
                 assert row is not None
@@ -111,7 +119,7 @@ class ProjectsRepository:
         with self._lock:
             project_row = self._conn.execute(
                 "SELECT p.project_id, p.user_id, p.name, p.instructions, "
-                "p.created_at, p.updated_at FROM app_conversations AS c "
+                "p.created_at, p.updated_at, p.private_required FROM app_conversations AS c "
                 "JOIN app_projects AS p ON p.project_id = c.project_id "
                 "WHERE c.user_id = ? AND c.conversation_id = ? AND p.user_id = ?",
                 (user_id, conversation_id, user_id),
@@ -158,7 +166,8 @@ class ProjectsRepository:
             raise InvalidProjectStateError("project cursor is incomplete")
         with self._lock:
             rows = self._conn.execute(
-                "SELECT project_id, user_id, name, instructions, created_at, updated_at "
+                "SELECT project_id, user_id, name, instructions, created_at, updated_at, "
+                "private_required "
                 "FROM app_projects WHERE user_id = ? "
                 "AND (? IS NULL OR updated_at < ? "
                 "OR (updated_at = ? AND project_id < ?)) "
@@ -246,9 +255,17 @@ class ProjectsRepository:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
-                if self._project_row_locked(user_id, project_id) is None:
+                project = self._project_row_locked(user_id, project_id)
+                if project is None:
                     self._conn.rollback()
                     return False
+                # Detaching cannot discard a restriction inherited from this project.
+                if bool(project["private_required"]):
+                    self._conn.execute(
+                        "UPDATE app_conversations SET private_required = 1 "
+                        "WHERE user_id = ? AND project_id = ?",
+                        (user_id, project_id),
+                    )
                 self._conn.execute(
                     "UPDATE app_conversations SET project_id = NULL, updated_at = ? "
                     "WHERE user_id = ? AND project_id = ?",
@@ -316,8 +333,11 @@ class ProjectsRepository:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
-                if self._project_row_locked(user_id, project_id) is None:
+                project = self._project_row_locked(user_id, project_id)
+                if project is None:
                     raise ProjectNotFoundError("project not found")
+                if bool(project["private_required"]):
+                    raise ProcessingPolicyError("private_processing_unavailable")
                 duplicate = self._conn.execute(
                     "SELECT 1 FROM app_project_files WHERE project_id = ? AND file_id = ?",
                     (project_id, file_id),
@@ -448,8 +468,8 @@ class ProjectsRepository:
         project_id: str,
     ) -> sqlite3.Row | None:
         return self._conn.execute(
-            "SELECT project_id, user_id, name, instructions, created_at, updated_at "
-            "FROM app_projects WHERE user_id = ? AND project_id = ?",
+            "SELECT project_id, user_id, name, instructions, created_at, updated_at, "
+            "private_required FROM app_projects WHERE user_id = ? AND project_id = ?",
             (user_id, project_id),
         ).fetchone()
 
@@ -462,6 +482,7 @@ def _project_from_row(row: sqlite3.Row) -> ProjectRecord:
         instructions=str(row["instructions"]),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+        private_required=bool(row["private_required"]),
     )
 
 

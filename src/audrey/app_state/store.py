@@ -23,7 +23,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from audrey.app_state.history_import import HistoryImportRepository
-from audrey.app_state.migrations import MIGRATIONS
+from audrey.app_state.migrations import MIGRATIONS, PRIVATE_PROCESSING_GUARDS_SQL
 from audrey.app_state.projects import ProjectsRepository
 from audrey.app_state.records import (
     AccessRoleRecord,
@@ -60,6 +60,11 @@ _ADDITIVE_COLUMN_MIGRATIONS = {
             "skill_digest",
             "skill_reason",
         ),
+    },
+    22: {
+        "app_conversations": ("private_required",),
+        "app_projects": ("private_required",),
+        "app_runs": ("private_required",),
     },
 }
 
@@ -182,14 +187,22 @@ class ApplicationStore:
                 for column in columns:
                     if column in existing:
                         continue
-                    definition = (
-                        "INTEGER NOT NULL DEFAULT 0"
-                        if column == "skill_version"
-                        else "TEXT NOT NULL DEFAULT " + repr("")
-                    )
+                    if column == "private_required":
+                        definition = (
+                            "INTEGER NOT NULL DEFAULT 0 CHECK "
+                            "(typeof(private_required) = 'integer' "
+                            "AND private_required IN (0, 1))"
+                        )
+                    elif column == "skill_version":
+                        definition = "INTEGER NOT NULL DEFAULT 0"
+                    else:
+                        definition = "TEXT NOT NULL DEFAULT " + repr("")
                     self._conn.execute(
                         f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
                     )
+            if version == 22:
+                for guard_sql in PRIVATE_PROCESSING_GUARDS_SQL:
+                    self._conn.execute(guard_sql)
             self._conn.execute(
                 "INSERT INTO app_schema_migrations(version, applied_at) VALUES (?, ?)",
                 (version, stamp),

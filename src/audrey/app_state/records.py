@@ -72,6 +72,7 @@ class ConversationRecord:
     last_message_at: str | None
     archived_at: str | None
     project_id: str | None
+    private_required: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +85,7 @@ class ProjectRecord:
     instructions: str
     created_at: str
     updated_at: str
+    private_required: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +139,7 @@ class RunRecord:
     skill_version: int = 0
     skill_digest: str = ""
     skill_reason: str = ""
+    private_required: bool = False
 
 
 @dataclass(frozen=True, slots=True)

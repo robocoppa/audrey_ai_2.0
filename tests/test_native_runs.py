@@ -2006,3 +2006,55 @@ async def test_shutdown_drains_title_database_write_before_store_close(tmp_path,
         release.set()
         await manager.stop()
         store.close()
+
+
+@pytest.mark.parametrize("transport", ["native", "agui"])
+def test_unfinished_private_workflow_refuses_before_context_or_model_work(
+    tmp_path, monkeypatch, transport,
+):
+    app, store, owner, manager = _native_app(tmp_path)
+    conversation = asyncio.run(store.conversations.create(
+        user_id=owner.user_id, private_required=True,
+    ))
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Protected admission must refuse before preparing or sending content")
+
+    for name in (
+        "resolve_model", "resolve_owned_attachments", "resolve_project_context",
+        "resolve_native_auto_skill", "_image_parts_for_run",
+    ):
+        monkeypatch.setattr(app_runs, name, forbidden)
+    try:
+        with TestClient(app) as client:
+            if transport == "native":
+                response = client.post(
+                    f"/api/conversations/{conversation.conversation_id}/runs",
+                    json={"content": "Synthetic private prompt", "model_id": "cloud"},
+                )
+            else:
+                response = client.post("/api/agent", json={
+                    "threadId": conversation.conversation_id,
+                    "runId": "client-private-attempt",
+                    "messages": [{
+                        "id": "user-private-attempt", "role": "user",
+                        "content": "Synthetic private prompt",
+                    }],
+                })
+            assert response.status_code == 409
+            assert response.json()["detail"]["error"] == "private_processing_unavailable"
+            assert "Synthetic private prompt" not in response.text
+            assert asyncio.run(store.conversations.list_messages(
+                user_id=owner.user_id, conversation_id=conversation.conversation_id,
+            )) == ()
+            assert asyncio.run(store.chat_projections.due()) == ()
+            foreign = _principal_sync(store, subject="foreign-private", email="other@example.com")
+            app.dependency_overrides[require_principal] = lambda: foreign
+            response = client.post(
+                f"/api/conversations/{conversation.conversation_id}/runs",
+                json={"content": "Foreign attempt"},
+            )
+            assert response.status_code == 404
+    finally:
+        asyncio.run(manager.stop())
+        store.close()
