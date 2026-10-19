@@ -34,8 +34,11 @@ they are not ongoing task lists.
   restrictions, immutable run snapshots and ordinary-history exclusion.
   **20C.3 accepted October 19:** file restrictions survive upload reservations/sessions and
   commits; existing workers and ordinary model readers cannot process protected
-  files. Owner previews/downloads remain available. Next connect the verified
-  local processing path and request/background policy before exposing Private.
+  files. Owner previews/downloads remain available. **20C.4 built:** verified
+  runtime binds local model/tool transports through native streams, cancellation
+  cleanup and later title tasks without replacing ordinary shared clients.
+  Private remains unexposed. Next carry policy through protected ingestion and
+  service/background work, then finish derived context and logging/storage.
   General Local/direct-model choices keep their present meaning.
   [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds
   the contract and remaining privacy/tax workflow. State jurisdictions remain
@@ -57,9 +60,11 @@ they are not ongoing task lists.
 
 - **11 — file upload presentation:** built; browser acceptance pending. My Files
   puts the wider video-link form on the left and compact device upload on the
-  right, with aligned actions and a stacked mobile layout. My Files, chat and
+  right, with matching field heights, a plus chooser and captions below the
+  fields. Actions align; mobile stacks the forms. My Files, chat and
   Project uploads show transfer completion followed by explicit Processing
-  status while awaiting the server. Rebuild `audrey-ui` only. Phase 11 holds the
+  status while awaiting the server. The UI portion needs `audrey-ui`; 20C.4
+  also needs `audrey`. Phase 11 holds the
   interaction contract; the Private processing queue remains unchanged.
 
 - **19 — deeper evidence tools:** complete; user accepted all five tools October 13.
@@ -139,7 +144,7 @@ they are not ongoing task lists.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A/20B accepted; 20C.1–3 accepted/deployed |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A/20B accepted; 20C.1–3 accepted/deployed; 20C.4 built |
 
 ## Remaining work
 
@@ -147,9 +152,9 @@ they are not ongoing task lists.
    history. Preserve accepted history/memory checks. New conversation focus and
    the existing-file browser check remain unreported. The current-catalog IRS
    index and cited-search browser check are accepted, with the approved
-   Publication 5902 search gap. Finish 20C enforced private processing: persist
-   the explicit Private selection and bind local policy across requests,
-   ingestion, background jobs and derived context, then expose it in the model
+   Publication 5902 search gap. Finish 20C enforced private processing: protect
+   ingestion, background jobs and derived context using the verified
+   native runtime; finish logging/storage, then expose Private in the model
    picker with automatically limited tools. No sensitive-content detection is queued. Follow with 20D's
    tax workflow and targeted 20E evaluation,
    including source conditions and conflicting figures. Broad collection and both migrations stay

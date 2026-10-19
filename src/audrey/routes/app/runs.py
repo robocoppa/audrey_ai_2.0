@@ -8,6 +8,7 @@ import json
 import logging
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal
 
@@ -60,7 +61,12 @@ from audrey.pipeline.run_events import (
     UsageReportedEvent,
     dump_run_event,
 )
-from audrey.processing_policy import ProcessingPolicyError
+from audrey.private_processing import PrivateProcessingRuntime
+from audrey.processing_policy import (
+    ProcessingPolicyError,
+    current_processing_policy,
+    processing_scope,
+)
 from audrey.project_context import (
     ProjectContextUnavailableError,
     resolve_project_context,
@@ -223,6 +229,7 @@ class _LiveRun:
     pending_model_events: list[str] = field(default_factory=list)
     pending_source_events: list[SourceSnapshot] = field(default_factory=list)
     observed_model_call_count: int = 0
+    processing_runtime: PrivateProcessingRuntime | None = None
 
     def observe_model_call(self, raw_model: str) -> None:
         model = str(raw_model).strip()[:200]
@@ -354,7 +361,7 @@ async def _stream_via_selected_model(
     """Dispatch native workflows normally and direct entries straight to Ollama."""
 
     if not payload.model.startswith("audrey_passthrough/"):
-        async for frame in _stream_via_pipeline(
+        async with aclosing(_stream_via_pipeline(
             app,
             payload,
             messages,
@@ -367,8 +374,9 @@ async def _stream_via_selected_model(
             skill_instruction=skill_instruction,
             resolved_skill=resolved_skill,
             model_tools=model_tools,
-        ):
-            yield frame
+        )) as frames:
+            async for frame in frames:
+                yield frame
         return
 
     selected = selected_model
@@ -465,7 +473,10 @@ async def _stream_via_selected_model(
     except asyncio.CancelledError:
         raise
     except Exception:
-        log.exception("native direct model failed model=%s", selected.id)
+        if current_processing_policy() is not None:
+            log.warning("private direct model unavailable")
+        else:
+            log.exception("native direct model failed model=%s", selected.id)
         session.set_concrete_model(selected.concrete_model)
         session.terminal.finish(StreamOutcome.ERROR, finish_reason="error")
         yield session.terminal_frame()
@@ -516,7 +527,21 @@ class NativeRunManager:
         model_tools: ToolRegistry | None = None,
         initial_sources: tuple[SourceSnapshot, ...] = (),
         generate_title: bool = False,
+        processing_runtime: PrivateProcessingRuntime | None = None,
     ) -> None:
+        # A task must carry its own durable restriction and exact policy. An
+        # ambient request ContextVar alone is not authority for a later run.
+        protected = started.run.private_required
+        if protected != started.conversation.private_required:
+            raise ProcessingPolicyError("private_processing_unavailable")
+        if protected:
+            if not isinstance(processing_runtime, PrivateProcessingRuntime):
+                raise ProcessingPolicyError("private_processing_unavailable")
+            # Also refuse a runtime that would weaken an enclosing scope.
+            with processing_scope(processing_runtime.policy):
+                pass
+        elif processing_runtime is not None or current_processing_policy() is not None:
+            raise ProcessingPolicyError("private_processing_unavailable")
         live: _LiveRun
         live = _LiveRun(
             owner_user_id=principal.user_id,
@@ -534,6 +559,7 @@ class NativeRunManager:
             settled=asyncio.Event(),
             observed_sources=list(initial_sources),
             pending_source_events=list(initial_sources),
+            processing_runtime=processing_runtime,
         )
         live.emitter.set_sink(live.publish)
         async with self._lock:
@@ -564,6 +590,15 @@ class NativeRunManager:
         task = self._title_tasks.get(run_id)
         return task is not None and not task.done()
 
+    @asynccontextmanager
+    async def _execution_scope(self, live: _LiveRun) -> AsyncIterator[Any]:
+        if live.processing_runtime is None:
+            with processing_scope(None):
+                yield self._app
+        else:
+            async with live.processing_runtime.scope(self._app) as execution_app:
+                yield execution_app
+
     async def _generate_title_after_run(self, live: _LiveRun) -> None:
         """Auxiliary GPU work starts only after the answer releases its resources."""
 
@@ -574,33 +609,38 @@ class NativeRunManager:
                 return
             if live.terminal_event.status != "succeeded":
                 return
-            generator = getattr(self._app.state, "conversation_titles", None)
-            if generator is None:
-                return
-            conversation = live.started.conversation
-            current = await self._store.conversations.get(
-                user_id=live.owner_user_id,
-                conversation_id=conversation.conversation_id,
-            )
-            if current is None or current.updated_at != conversation.updated_at:
-                return
-            title = await generator.generate(
-                user_id=live.storage_namespace,
-                user_content=live.started.user_message.content,
-            )
-            await self._store.conversations.apply_generated_title(
-                user_id=live.owner_user_id,
-                conversation_id=conversation.conversation_id,
-                expected_title=conversation.title,
-                expected_updated_at=conversation.updated_at,
-                title=title,
-            )
+            async with self._execution_scope(live) as execution_app:
+                generator = getattr(execution_app.state, "conversation_titles", None)
+                if generator is None:
+                    return
+                conversation = live.started.conversation
+                current = await self._store.conversations.get(
+                    user_id=live.owner_user_id,
+                    conversation_id=conversation.conversation_id,
+                )
+                if current is None or current.updated_at != conversation.updated_at:
+                    return
+                title = await generator.generate(
+                    user_id=live.storage_namespace,
+                    user_content=live.started.user_message.content,
+                )
+                await self._store.conversations.apply_generated_title(
+                    user_id=live.owner_user_id,
+                    conversation_id=conversation.conversation_id,
+                    expected_title=conversation.title,
+                    expected_updated_at=conversation.updated_at,
+                    title=title,
+                    expected_private_required=live.started.run.private_required,
+                )
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.exception(
-                "conversation title update failed run_id=%s", live.started.run.run_id,
-            )
+            if live.started.run.private_required:
+                log.warning("private title update unavailable run_id=%s", live.started.run.run_id)
+            else:
+                log.exception(
+                    "conversation title update failed run_id=%s", live.started.run.run_id,
+                )
         finally:
             self._title_tasks.pop(live.started.run.run_id, None)
 
@@ -625,30 +665,36 @@ class NativeRunManager:
             emitter=live.emitter,
         )
         try:
-            with observe_model_calls(live.observe_model_call):
-                async for _frame in self._stream_factory(
-                    self._app,
-                    payload,
-                    messages,
-                    options,
-                    user_id=live.storage_namespace,
-                    conversation_id=live.started.conversation.conversation_id,
-                    user_turn_text=live.started.user_message.content,
-                    event_context=context,
-                    routing_messages=routing_messages,
-                    selected_model=selected_model,
-                    skill_instruction=skill_instruction,
-                    resolved_skill=resolved_skill,
-                    model_tools=model_tools,
-                ):
-                    live.flush_pending_model_events()
-                    live.flush_pending_source_events()
-                    # A pipeline can have post-answer cleanup after its terminal
-                    # frame. Persist the canonical answer before that cleanup so a
-                    # reloaded browser does not keep seeing a running row while
-                    # the model has visibly finished.
-                    if live.emitter.is_finished:
-                        await self._settle_terminal(live)
+            async with self._execution_scope(live) as execution_app:
+                with observe_model_calls(live.observe_model_call):
+                    async with aclosing(self._stream_factory(
+                        execution_app,
+                        payload,
+                        messages,
+                        options,
+                        user_id=live.storage_namespace,
+                        conversation_id=live.started.conversation.conversation_id,
+                        user_turn_text=live.started.user_message.content,
+                        event_context=context,
+                        routing_messages=routing_messages,
+                        selected_model=selected_model,
+                        skill_instruction=skill_instruction,
+                        resolved_skill=resolved_skill,
+                        model_tools=(
+                            model_tools.restrict(live.processing_runtime.policy.allowed_tools)
+                            if model_tools is not None and live.processing_runtime is not None
+                            else model_tools
+                        ),
+                    )) as frames:
+                        async for _frame in frames:
+                            live.flush_pending_model_events()
+                            live.flush_pending_source_events()
+                            # A pipeline can have post-answer cleanup after its terminal
+                            # frame. Persist the canonical answer before that cleanup so a
+                            # reloaded browser does not keep seeing a running row while
+                            # the model has visibly finished.
+                            if live.emitter.is_finished:
+                                await self._settle_terminal(live)
         except asyncio.CancelledError:
             if not live.emitter.is_finished:
                 live.emitter.terminate_incomplete(
@@ -656,13 +702,20 @@ class NativeRunManager:
                     finish_reason="cancelled",
                     error_code=live.cancel_error_code,
                 )
-        except Exception:
-            log.exception("native run failed run_id=%s", live.started.run.run_id)
+        except Exception as exc:
+            if live.started.run.private_required:
+                # Exception text/tracebacks may contain private prompts or tool
+                # output. Only stable codes and the server run ID leave here.
+                code = exc.code if isinstance(exc, ProcessingPolicyError) else "private_processing_unavailable"
+                log.warning("private run unavailable run_id=%s code=%s", live.started.run.run_id, code)
+            else:
+                code = "pipeline_error"
+                log.exception("native run failed run_id=%s", live.started.run.run_id)
             if not live.emitter.is_finished:
                 live.emitter.terminate_incomplete(
                     status="failed",
                     finish_reason="error",
-                    error_code="pipeline_error",
+                    error_code=code,
                 )
         finally:
             try:

@@ -18,7 +18,9 @@ while waiting for the server. A transfer cannot display 100% before completion.
 Queued processing retains its existing status and Ready polling.
 
 My Files' Add files panel uses a wider video-link form on the left and a compact
-device-upload form on the right. Both actions share height and a baseline;
+device-upload form on the right. Link and file fields share height and styling;
+a compact plus button opens device selection beside the filename or No file
+chosen. Captions sit outside both fields. Both actions share height and a baseline;
 progress/results sit below both forms so they cannot misalign the buttons.
 Long links stay inside their field. Narrow screens stack link then upload.
 File types and size limits are available in a separate compact disclosure.

@@ -555,6 +555,15 @@ async def _stream_via_pipeline(
                     yield fast_stream.terminal_frame()
                     yield fast_stream.done_frame()
                     return
+                finally:
+                    # The graph belongs to this stream. Join cancellation
+                    # cleanup before the caller closes its request clients or
+                    # leaves a protected processing scope. Provider failures
+                    # are still observed by graph_task.result() above.
+                    if graph_task is not None:
+                        if not graph_task.done():
+                            graph_task.cancel()
+                        await asyncio.gather(graph_task, return_exceptions=True)
                 # Drain the closing ✅\n that PhaseTicker pushed on exit.
                 async for frame in _drain_q_now(
                     banner_q,

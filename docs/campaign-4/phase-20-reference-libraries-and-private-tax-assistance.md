@@ -6,8 +6,10 @@ verified chunks and no pending documents. Publication 1304 recovered.
 Publication 5902 is the sole approved content-search gap: its original remains
 available and incomplete coverage is explicitly disclosed. **20B retrieval is
 accepted October 18:** correct tool calls and matching cited PDF pages/year.
-Tax accuracy remains 20E work. **20C.1 is built:** shared model/tool policy guards;
-durable restrictions and propagation remain before user-facing private processing.
+Tax accuracy remains 20E work. **20C.1–3 accepted/deployed:** shared model/tool
+policy and durable restrictions. **20C.4 built:** verified native runtime and
+title-task binding. Ingestion and derived-context propagation remain before
+user-facing private processing.
 Qwen3 Embedding 4B remains the reference model; Nomic history and prior personal
 retrieval checks remain accepted.
 English content and requests only. Federal coverage can begin independently;
@@ -340,30 +342,48 @@ metadata. Exact newest protected filename matches refuse rather than substitute
 an older ordinary file. Direct history reads also exclude protected conversations,
 including imported IDs. Owner browser previews and downloads remain available.
 
-**Remaining 20C work:** construct and bind the verified local policy for each
-request and title task; carry it into supported file ingestion, service calls and
-background jobs; preserve restrictions on derived evidence and memory/history;
-finish private logging/storage and failure behavior; then expose Private in the
-existing model picker. No sensitive-content detector or separate privacy tool
-selector is queued. Accept the complete flow with synthetic documents before
-using private taxpayer evidence.
+#### 20C.4 — verified native runtime (built; no user activation)
 
-After the normal commit/push/pull workflow, deploy 20C.3 on **Tower**, in
-`/mnt/user/appdata/audrey_ai_2.0`:
+A metadata-only factory verifies the server-selected local model roster and
+snapshots exact installed digests, including any configured pins. Each execution
+rechecks all identities before work, owns proxy-disabled model/tool clients and
+compiles the existing graph against a restricted registry. An isolated app-state
+view shares gates and ordinary services without replacing global clients.
+
+Native tasks require a runtime matching their durable private restriction.
+The policy spans full stream consumption, child-task cancellation, explicit
+stream closure and client teardown. Optional titles run afterward in their own
+verified scope; an unapproved title model leaves the fallback title. Title writes
+require a bound policy and an unchanged owner/revision/private restriction.
+Private failures at the manager boundary report safe codes without exception
+contents. Private turns remain excluded from ordinary history delivery.
+
+The public create-run refusal remains. This internal runtime does not select a
+production Private roster or finish protected uploads, service propagation,
+derived memory/history, pipeline logging and storage protection. Ordinary Local
+and direct-model choices retain their existing behavior. No browser Private
+option or complete privacy guarantee is enabled.
+
+**Remaining 20C work:** use this runtime for supported protected ingestion,
+service calls and background jobs; preserve restrictions on derived evidence and
+memory/history; finish private logging/storage and failure behavior; then expose
+the explicit Private selection in the existing model picker. No sensitive-content
+detector or separate privacy tool selector is queued. Accept the complete flow
+with synthetic documents before using private taxpayer evidence.
+
+After normal commit/push/pull on **Tower**, in
+`/mnt/user/appdata/audrey_ai_2.0`, deploy this runtime and the paired file-chooser
+presentation adjustment:
 
 ```bash
-docker compose up -d --build audrey
+docker compose up -d --build audrey audrey-ui
 ```
 
-Only the backend needs rebuilding. The uploads database adds its columns and
-guards automatically; the application schema remains 22. No sidecar, media-worker
-or UI rebuild, manual migration, model change or reindex is required. Hermetic
-checks cover file-state upgrades/retries, worker refusal, retrieval isolation,
-owner viewing and ordinary upload controls; no live model calls were made.
-
-The user accepted the ordinary PDF upload/view/chat check October 19. Keep it
-closed; full Private processing remains unexposed and unaccepted. The next work
-is the policy binding and activation described above.
+No configuration/schema migration, sidecar/media-worker rebuild, model change or
+reindex is needed. Hermetic checks cover metadata preflight, transport/tool
+isolation, native stream/title lifetime, cancellation and ordinary chat/state
+controls. Browser acceptance is the changed Add files layout and plus chooser;
+no upload is required for layout alone. Keep accepted IRS/20C.3 tests closed.
 
 ### 20D/20E — verified assistance
 

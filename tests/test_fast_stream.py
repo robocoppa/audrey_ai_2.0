@@ -990,6 +990,97 @@ async def test_compatibility_tool_route_does_not_create_native_observer(monkeypa
     assert frames[-1] == "data: [DONE]\n\n"
 
 
+async def test_cancelled_tool_stream_joins_graph_cleanup_before_returning(monkeypatch):
+    cfg = _Cfg(("a", 100, "local"))
+    cfg.raw["fast_path"]["tool_capable_models"] = ["a"]
+    app = _route_app(cfg, _ScriptedOllama({}), _RecordingArchive())
+    app.state.tools = _context_tools()
+    graph_started = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    cleanup_finished = asyncio.Event()
+    graph_tasks = []
+
+    class Graph:
+        async def ainvoke(self, state):
+            graph_tasks.append(asyncio.current_task())
+            graph_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleanup_started.set()
+                await release_cleanup.wait()
+                cleanup_finished.set()
+
+    app.state.graph = Graph()
+
+    async def classify(*args, **kwargs):
+        return "general", "test", 1.0
+
+    monkeypatch.setattr(route_pipeline, "classify_with_registry", classify)
+    messages = [{"role": "user", "content": "hello"}]
+    stream = _stream_via_pipeline(
+        app, ChatCompletionRequest(model="audrey_fast", messages=messages, stream=True),
+        messages, {}, user_id="owner@example.com", conversation_id="", user_turn_text="hello",
+    )
+
+    async def consume():
+        return [frame async for frame in stream]
+
+    consumer = asyncio.create_task(consume())
+    try:
+        await asyncio.wait_for(graph_started.wait(), timeout=1)
+        consumer.cancel()
+        await asyncio.wait_for(cleanup_started.wait(), timeout=1)
+        assert not consumer.done()
+        assert not cleanup_finished.is_set()
+        release_cleanup.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(consumer, timeout=1)
+        assert cleanup_finished.is_set()
+        assert graph_tasks[0].cancelled()
+    finally:
+        release_cleanup.set()
+        if not consumer.done():
+            consumer.cancel()
+        for task in graph_tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(consumer, *graph_tasks, return_exceptions=True)
+        await stream.aclose()
+
+
+@pytest.mark.parametrize("provider_error", [OllamaError("provider failed"), RuntimeError("provider failed")])
+async def test_tool_stream_cleanup_preserves_provider_failure(monkeypatch, provider_error):
+    cfg = _Cfg(("a", 100, "local"))
+    cfg.raw["fast_path"]["tool_capable_models"] = ["a"]
+    app = _route_app(cfg, _ScriptedOllama({}), _RecordingArchive())
+    app.state.tools = _context_tools()
+
+    class Graph:
+        async def ainvoke(self, state):
+            raise provider_error
+
+    app.state.graph = Graph()
+
+    async def classify(*args, **kwargs):
+        return "general", "test", 1.0
+
+    monkeypatch.setattr(route_pipeline, "classify_with_registry", classify)
+    messages = [{"role": "user", "content": "hello"}]
+    stream = _stream_via_pipeline(
+        app, ChatCompletionRequest(model="audrey_fast", messages=messages, stream=True),
+        messages, {}, user_id="owner@example.com", conversation_id="", user_turn_text="hello",
+    )
+    if isinstance(provider_error, OllamaError):
+        frames = [frame async for frame in stream]
+        assert "[ollama error: provider failed]" in "".join(frames)
+        assert frames[-1] == "data: [DONE]\n\n"
+    else:
+        with pytest.raises(RuntimeError, match="provider failed"):
+            _ = [frame async for frame in stream]
+
+
 async def test_nonstream_owui_utility_turn_is_not_archived():
     archive = _RecordingArchive()
     cfg = _Cfg(("a", 100, "local"))

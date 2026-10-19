@@ -48,6 +48,7 @@ from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.prompts import REACT_FINAL_ANSWER_USER, prompt_from_config
 from audrey.pipeline.run_observations import RunEventToolObserver
+from audrey.processing_policy import current_processing_policy
 from audrey.tools.discovery import ToolRegistry
 from audrey.tools.dispatch import ToolResult, dispatch_one, to_tool_message
 
@@ -609,7 +610,9 @@ async def run_react(
     web_search_chars = 0  # chars of successful web_search bodies reaching context
     guard_used = False    # the catalogue guard fires at most once per turn
 
-    async with httpx.AsyncClient() as http:
+    # Protected dispatch must not inherit HTTP(S)_PROXY from the environment.
+    # Ordinary requests retain their existing transport configuration.
+    async with httpx.AsyncClient(trust_env=current_processing_policy() is None) as http:
         for round_idx in range(max_rounds):
             if round_idx >= compress_after_round:
                 convo = _compress_history(convo, keep_last_round=compress_keep_last)

@@ -359,32 +359,54 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                   <p>Documents, images, audio or video.</p>
                 </div>
               </header>
-              <div
-                className={draggingFiles ? "file-drop-zone dragging" : "file-drop-zone"}
-                role="region"
-                aria-label="Drop files to upload"
-                onDragOver={(event) => event.preventDefault()}
-                onDragEnter={(event) => {
-                  event.preventDefault();
-                  if (!uploading && !fetchingUrl && event.dataTransfer.types.includes("Files")) setDraggingFiles(true);
-                }}
-                onDragLeave={() => setDraggingFiles(false)}
-                onDrop={dropFiles}
-              >
-                <input
-                  ref={inputRef}
-                  type="file"
-                  aria-label="Choose files"
-                  multiple
-                  accept={accept}
-                  disabled={uploading || fetchingUrl}
-                  onChange={(event) => selectFiles(event.target.files ?? [])}
-                />
-                <small className="file-upload-selection">
+              <div className="file-add-fields">
+                <div
+                  className={draggingFiles ? "file-drop-zone dragging" : "file-drop-zone"}
+                  role="region"
+                  aria-label="Drop files to upload"
+                  onDragOver={(event) => event.preventDefault()}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    if (!uploading && !fetchingUrl && event.dataTransfer.types.includes("Files")) setDraggingFiles(true);
+                  }}
+                  onDragLeave={() => setDraggingFiles(false)}
+                  onDrop={dropFiles}
+                >
+                  <input
+                    ref={inputRef}
+                    type="file"
+                    aria-label="Choose files"
+                    aria-describedby="file-device-help"
+                    hidden
+                    multiple
+                    accept={accept}
+                    disabled={uploading || fetchingUrl}
+                    onChange={(event) => selectFiles(event.target.files ?? [])}
+                  />
+                  <button
+                    className="file-picker-button"
+                    type="button"
+                    aria-label="Browse device files"
+                    aria-describedby="file-device-help"
+                    title="Browse device files"
+                    disabled={uploading || fetchingUrl}
+                    onClick={() => inputRef.current?.click()}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                  </button>
+                  <span className="file-picker-name" title={selectedFiles.map((file) => file.name).join(", ")} aria-live="polite">
+                    {selectedFiles.length === 1
+                      ? selectedFiles[0].name
+                      : selectedFiles.length > 1 ? selectedFiles.length + " files chosen" : "No file chosen"}
+                  </span>
+                </div>
+                <p className="file-add-help" id="file-device-help">
                   {selectedFiles.length > 0
                     ? selectedFiles.length + " selected · " + formatBytes(selectedFiles.reduce((total, file) => total + file.size, 0))
-                    : "Choose files above, or drop them here."}
-                </small>
+                    : "Choose files with +, or drop them here."}
+                </p>
               </div>
               <button className="file-add-action" type="submit" disabled={!selectedFiles.length || !listing || uploading || fetchingUrl}>
                 {uploading

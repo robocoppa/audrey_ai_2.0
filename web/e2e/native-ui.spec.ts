@@ -3421,6 +3421,17 @@ test("browses files by name, source link, kind, status, and sort order", async (
   const deviceBounds = (await deviceForm.boundingBox())!;
   expect(linkBounds.x).toBeLessThan(deviceBounds.x);
   expect(linkBounds.width).toBeGreaterThan(deviceBounds.width * 1.3);
+  const linkField = (await dialog.getByLabel("Paste a video link").boundingBox())!;
+  const deviceField = (await deviceForm.getByRole("region", { name: "Drop files to upload" }).boundingBox())!;
+  expect(Math.abs(linkField.height - deviceField.height)).toBeLessThan(1);
+  expect(Math.abs(linkField.y - deviceField.y)).toBeLessThan(1);
+  const deviceCaption = (await deviceForm.locator("#file-device-help").boundingBox())!;
+  expect(deviceCaption.y).toBeGreaterThan(deviceField.y + deviceField.height);
+  await expect(deviceForm.getByText("No file chosen", { exact: true })).toBeVisible();
+  const chooserOpened = page.waitForEvent("filechooser");
+  await deviceForm.getByRole("button", { name: "Browse device files" }).click();
+  await (await chooserOpened).setFiles({ name: "a-very-long-file-name-to-check-the-compact-field.txt", mimeType: "text/plain", buffer: Buffer.from("note") });
+  await expect(deviceForm.locator(".file-picker-name")).toHaveText("a-very-long-file-name-to-check-the-compact-field.txt");
   const addVideo = (await linkForm.getByRole("button", { name: "Add video" }).boundingBox())!;
   const upload = (await deviceForm.getByRole("button", { name: "Upload", exact: true }).boundingBox())!;
   expect(Math.abs(addVideo.y - upload.y)).toBeLessThan(1);
@@ -3458,6 +3469,9 @@ test("browses files by name, source link, kind, status, and sort order", async (
   const phoneDeviceBounds = (await deviceForm.boundingBox())!;
   expect(phoneLinkBounds.y + phoneLinkBounds.height).toBeLessThanOrEqual(phoneDeviceBounds.y + 1);
   expect(Math.abs(phoneLinkBounds.width - phoneDeviceBounds.width)).toBeLessThan(1);
+  const phoneLinkField = (await dialog.getByLabel("Paste a video link").boundingBox())!;
+  const phoneDeviceField = (await deviceForm.getByRole("region", { name: "Drop files to upload" }).boundingBox())!;
+  expect(Math.abs(phoneLinkField.height - phoneDeviceField.height)).toBeLessThan(1);
   expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   await dialog.screenshot({ path: "/tmp/audrey-file-add-mobile.png" });
   await dialog.getByText("Broken.pdf").scrollIntoViewIfNeeded();

@@ -254,12 +254,20 @@ class ConversationsRepository:
         expected_title: str,
         expected_updated_at: str,
         title: str,
+        expected_private_required: bool = False,
     ) -> bool:
         """Replace the first-turn fallback only while its revision is unchanged."""
 
+        if type(expected_private_required) is not bool:
+            raise InvalidApplicationStateError("private requirement must be a boolean")
+        if expected_private_required and current_processing_policy() is None:
+            raise ProcessingPolicyError("private_processing_unavailable")
+        if not expected_private_required and current_processing_policy() is not None:
+            raise ProcessingPolicyError("private_processing_unavailable")
         write = asyncio.create_task(asyncio.to_thread(
             self._apply_generated_title_sync,
             user_id, conversation_id, expected_title, expected_updated_at, title,
+            expected_private_required,
         ))
         try:
             return await asyncio.shield(write)
@@ -275,6 +283,7 @@ class ConversationsRepository:
         expected_title: str,
         expected_updated_at: str,
         title: str,
+        expected_private_required: bool,
     ) -> bool:
         user_id = _required(user_id, "user id")
         conversation_id = _required(conversation_id, "conversation id")
@@ -287,13 +296,13 @@ class ConversationsRepository:
                     "UPDATE app_conversations SET title = ?, updated_at = ? "
                     "WHERE user_id = ? AND conversation_id = ? "
                     "AND title = ? AND updated_at = ? AND archived_at IS NULL "
-                    "AND private_required = 0 "
+                    "AND private_required = ? "
                     "AND EXISTS (SELECT 1 FROM app_users "
                     "WHERE app_users.user_id = app_conversations.user_id "
                     "AND app_users.status = 'active')",
                     (
                         title, _utc_now(), user_id, conversation_id,
-                        expected_title, expected_updated_at,
+                        expected_title, expected_updated_at, int(expected_private_required),
                     ),
                 )
                 self._conn.commit()
