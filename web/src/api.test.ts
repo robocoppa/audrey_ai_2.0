@@ -70,8 +70,9 @@ describe("native file uploads", () => {
     expect((fetchMock.mock.calls[0][1] as RequestInit).headers).not.toHaveProperty("Authorization");
   });
 
-  it("reports byte progress for multipart files within the single-request limit", async () => {
+  it("reports transfer completion while a multipart file is still processing", async () => {
     let progressListener: ((event: ProgressEvent) => void) | undefined;
+    let uploadLoadListener: (() => void) | undefined;
     let loadListener: (() => void) | undefined;
     const request = {
       status: 200,
@@ -87,6 +88,7 @@ describe("native file uploads", () => {
       upload: {
         addEventListener: vi.fn((name: string, listener: (event: ProgressEvent) => void) => {
           if (name === "progress") progressListener = listener;
+          if (name === "load") uploadLoadListener = () => listener({} as ProgressEvent);
         }),
       },
       open: vi.fn(),
@@ -97,7 +99,6 @@ describe("native file uploads", () => {
       send: vi.fn((body: FormData) => {
         expect(body).toBeInstanceOf(FormData);
         progressListener?.({ lengthComputable: true, loaded: 2, total: 4 } as ProgressEvent);
-        loadListener?.();
       }),
       withCredentials: false,
     };
@@ -105,22 +106,37 @@ describe("native file uploads", () => {
     vi.stubGlobal("XMLHttpRequest", xhr);
     const progress: number[] = [];
 
-    const result = await uploadFile(
+    let settled = false;
+    const pending = uploadFile(
       new File(["tiny"], "small.txt", { type: "text/plain" }),
       LIMITS,
       (value) => progress.push(value),
-    );
+    ).then((result) => {
+      settled = true;
+      return result;
+    });
 
+    expect(progress).toEqual([0, 0.5]);
+    // No final byte-progress event: upload load must still expose processing.
+    uploadLoadListener?.();
+    await Promise.resolve();
+    expect(progress).toEqual([0, 0.5, 1]);
+    expect(settled).toBe(false);
+
+    loadListener?.();
+    const result = await pending;
     expect(result.id).toBe("file_small");
     expect(xhr).toHaveBeenCalledOnce();
     expect(request.open).toHaveBeenCalledWith("POST", "/api/files");
     expect(request.withCredentials).toBe(true);
     expect(request.setRequestHeader).toHaveBeenCalledWith("Accept", "application/json");
-    expect(progress).toEqual([0, 0.5, 1]);
+    expect(progress).toEqual([0, 0.5, 1, 1]);
   });
 
-  it("uploads larger files as bounded sequential parts", async () => {
+  it("reports all chunked bytes transferred before server processing finishes", async () => {
     const partSizes: number[] = [];
+    let finishProcessing: ((response: Response) => void) | undefined;
+    const processingResponse = new Promise<Response>((resolve) => { finishProcessing = resolve; });
     const fetchMock = vi.fn().mockImplementation(
       async (path: string, request?: RequestInit) => {
         if (path === "/api/files/upload-sessions") {
@@ -135,26 +151,32 @@ describe("native file uploads", () => {
           partSizes.push((request?.body as Blob).size);
           return jsonResponse({ ok: true });
         }
-        return jsonResponse({
-          id: "file_large",
-          filename: "large.txt",
-          mime: "text/plain",
-          bytes: 10,
-          kind: "text",
-          chunks: 1,
-          status: "ready",
-        });
+        return processingResponse;
       },
     );
     vi.stubGlobal("fetch", fetchMock);
     const progress: number[] = [];
 
-    const result = await uploadFile(
+    let settled = false;
+    const pending = uploadFile(
       new File(["0123456789"], "large.txt", { type: "text/plain" }),
       LIMITS,
       (value) => progress.push(value),
-    );
+    ).then((result) => {
+      settled = true;
+      return result;
+    });
 
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/files/upload-sessions/upload_123/complete", expect.anything(),
+    ));
+    expect(progress).toEqual([0, 1 / 3, 2 / 3, 1]);
+    expect(settled).toBe(false);
+    finishProcessing?.(jsonResponse({
+      id: "file_large", filename: "large.txt", mime: "text/plain",
+      bytes: 10, kind: "text", chunks: 1, status: "ready",
+    }));
+    const result = await pending;
     expect(result.id).toBe("file_large");
     expect(partSizes).toEqual([4, 4, 2]);
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([

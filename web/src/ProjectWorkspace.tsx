@@ -18,6 +18,8 @@ import {
   type ProjectLimits,
 } from "./api";
 
+import { UploadProgress } from "./UploadProgress";
+
 type ProjectFileKind = "all" | AudreyFile["kind"];
 
 const PROJECT_FILE_FOLDERS: ReadonlyArray<{
@@ -430,13 +432,15 @@ export function ProjectHome({
               disabled={uploadingFiles || files.length >= limits.max_files}
             >
               <span aria-hidden="true">＋</span>
-              {uploadingFiles ? `Uploading ${uploadingName} · ${Math.max(1, Math.round(uploadProgress * 100))}%` : "Upload file to project"}
+              {uploadingFiles ? (uploadProgress >= 1 ? "Processing…" : "Uploading…") : "Upload file to project"}
             </button>
             <button className="project-manage-files" type="button" onClick={() => setFilesOpen(true)} disabled={uploadingFiles}>
               Choose from My Files
             </button>
           </div>
-          {uploadingFiles ? <progress className="project-upload-progress" value={uploadProgress} max={1} aria-label="Project file upload progress" /> : null}
+          {uploadingFiles ? (
+            <UploadProgress filename={uploadingName} progress={uploadProgress} ariaLabel="Project file upload progress" />
+          ) : null}
           {uploadNotice ? <p className="project-upload-notice" role="status">{uploadNotice}</p> : null}
           {filesLoading ? <p className="project-empty" role="status">Loading project files…</p> : null}
           {!filesLoading && files.length === 0 ? (

@@ -43,6 +43,7 @@ import localPortrait from "./assets/models/localModel.png";
 import { AudreyLoader } from "./AudreyLoader";
 import { ScrollToLatest } from "./ScrollToLatest";
 import { SwipeConversationRow } from "./SwipeConversationRow";
+import { UploadProgress } from "./UploadProgress";
 import {
   cancelRun,
   createConversation,
@@ -2289,13 +2290,7 @@ function AudreyThread({
                   </div>
                 ) : null}
                 {uploadingFile ? (
-                  <p className="attachment-status" role="status">
-                    {uploadProgress <= 0
-                      ? `Preparing ${uploadingFile}…`
-                      : uploadProgress >= 1
-                        ? `Finishing ${uploadingFile}…`
-                        : `Uploading ${uploadingFile} · ${Math.max(1, Math.round(uploadProgress * 100))}%`}
-                  </p>
+                  <UploadProgress filename={uploadingFile} progress={uploadProgress} />
                 ) : null}
                 {pendingAttachment ? (
                   <p className="attachment-status" role="status">

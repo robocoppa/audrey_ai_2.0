@@ -52,6 +52,8 @@ presentation changes and existing project behavior are accepted.
 New uploads join immediately; Pending/Processing membership survives refresh/restart. Only Ready files become grounding evidence. Visible active states refresh every five seconds; failed rows remain visible for explicit removal, while missing references are pruned.
 
 My Files has a clearer **Add files** action and styled **Choose files** control.
+Chat and Project uploads share Phase 11's Preparing/Uploading/Processing status;
+completed transfer is distinct from the file becoming Ready.
 
 ## Grounding and snapshots
 

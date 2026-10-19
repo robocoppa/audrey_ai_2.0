@@ -1036,6 +1036,9 @@ function uploadMultipart<T>(
         onProgress(Math.min(1, event.loaded / event.total));
       }
     });
+    // Transfer completion can arrive without a computable final progress event.
+    // Report it before the server finishes extracting or indexing the file.
+    request.upload.addEventListener("load", () => onProgress(1));
     request.addEventListener("load", () => {
       let payload: unknown;
       try {

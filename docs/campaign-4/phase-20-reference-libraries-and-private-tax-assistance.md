@@ -316,7 +316,7 @@ projection. Projection delivery also excludes protected conversations; ordinary
 history behavior is preserved. Auxiliary ordinary title updates refuse protected
 rows. These safeguards do not yet supply private memory/history retrieval.
 
-#### 20C.3 — file restrictions and reuse boundaries (built)
+#### 20C.3 — file restrictions and reuse boundaries (accepted October 19)
 
 The uploads database stores an immutable `private_required` flag on files,
 chunked sessions and single-upload reservations. Existing records remain
@@ -361,13 +361,9 @@ or UI rebuild, manual migration, model change or reindex is required. Hermetic
 checks cover file-state upgrades/retries, worker refusal, retrieval isolation,
 owner viewing and ordinary upload controls; no live model calls were made.
 
-For the changed ordinary upload/viewing path, use the browser at
-`https://ai.builtryte.xyz`: upload a small nonsensitive PDF in My Files, wait for
-Ready, open its summary/text, then attach it to a new chat and ask about one
-clear fact. Pass means the file becomes Ready, its text/summary are readable and
-the chat answers from the document. This does generate the normal local indexing
-and model calls; it does not test an exposed Private workflow. Private remains
-hidden until its complete processing path is implemented.
+The user accepted the ordinary PDF upload/view/chat check October 19. Keep it
+closed; full Private processing remains unexposed and unaccepted. The next work
+is the policy binding and activation described above.
 
 ### 20D/20E — verified assistance
 

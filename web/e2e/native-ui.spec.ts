@@ -3282,6 +3282,10 @@ test("manages owner-bound files without a browser bearer token", async ({ page }
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/skills") {
+      await json(route, { enabled: true, status: "ready", items: browserSkills() });
+      return;
+    }
     authorizationHeaders.push(request.headers().authorization);
     if (url.pathname === "/api/me/preferences") {
       await json(route, browserPreferences());
@@ -3362,6 +3366,10 @@ test("browses files by name, source link, kind, status, and sort order", async (
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/skills") {
+      await json(route, { enabled: true, status: "ready", items: browserSkills() });
+      return;
+    }
     if (url.pathname === "/api/me/preferences") {
       await json(route, browserPreferences());
       return;
@@ -3406,8 +3414,22 @@ test("browses files by name, source link, kind, status, and sort order", async (
   await expect(dialog.getByText("Downloading · 2m 03s elapsed")).toBeVisible();
   await dialog.locator(".file-add-panel > summary").click();
   await expect(dialog.locator(".file-upload-hint")).toContainText("Up to 2.0 GB per file.");
-  await expect(dialog.locator(".file-upload-hint")).toContainText("Files over 50 MB upload in parts.");
   await expect(dialog.locator(".file-upload-hint")).toContainText("Supported: .txt.");
+  const linkForm = dialog.locator(".file-url-form");
+  const deviceForm = dialog.locator(".file-upload");
+  const linkBounds = (await linkForm.boundingBox())!;
+  const deviceBounds = (await deviceForm.boundingBox())!;
+  expect(linkBounds.x).toBeLessThan(deviceBounds.x);
+  expect(linkBounds.width).toBeGreaterThan(deviceBounds.width * 1.3);
+  const addVideo = (await linkForm.getByRole("button", { name: "Add video" }).boundingBox())!;
+  const upload = (await deviceForm.getByRole("button", { name: "Upload", exact: true }).boundingBox())!;
+  expect(Math.abs(addVideo.y - upload.y)).toBeLessThan(1);
+  expect(Math.abs(addVideo.height - upload.height)).toBeLessThan(1);
+  await dialog.getByLabel("Paste a video link").fill(
+    "https://www.youtube.com/watch?v=clip42&list=" + "long-video-playlist".repeat(12),
+  );
+  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await dialog.screenshot({ path: "/tmp/audrey-file-add-desktop.png" });
   const photoRow = dialog.locator(".file-list li").filter({ hasText: "photo.png" });
   await expect(photoRow.locator(".file-row-meta")).toContainText("Image · 20 B · 1 chunk");
   await expect(photoRow.locator("time")).toHaveAttribute("title", "2026-09-03T00:00:00Z");
@@ -3432,6 +3454,12 @@ test("browses files by name, source link, kind, status, and sort order", async (
   await expect(names).toHaveText(["Broken.pdf"]);
 
   await page.setViewportSize({ width: 390, height: 667 });
+  const phoneLinkBounds = (await linkForm.boundingBox())!;
+  const phoneDeviceBounds = (await deviceForm.boundingBox())!;
+  expect(phoneLinkBounds.y + phoneLinkBounds.height).toBeLessThanOrEqual(phoneDeviceBounds.y + 1);
+  expect(Math.abs(phoneLinkBounds.width - phoneDeviceBounds.width)).toBeLessThan(1);
+  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await dialog.screenshot({ path: "/tmp/audrey-file-add-mobile.png" });
   await dialog.getByText("Broken.pdf").scrollIntoViewIfNeeded();
   const visibleOnPhone = await dialog.getByText("Broken.pdf").evaluate((element) => {
     const bounds = element.getBoundingClientRect();
@@ -3448,6 +3476,10 @@ test("uploads dropped and picked batches while isolating per-file failures", asy
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/skills") {
+      await json(route, { enabled: true, status: "ready", items: browserSkills() });
+      return;
+    }
     authorizationHeaders.push(request.headers().authorization);
     if (url.pathname === "/api/me/preferences") {
       await json(route, browserPreferences());
@@ -3698,6 +3730,10 @@ test("queues a video link through native files and follows its summary", async (
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/skills") {
+      await json(route, { enabled: true, status: "ready", items: browserSkills() });
+      return;
+    }
     authorizationHeaders.push(request.headers().authorization);
     if (url.pathname === "/api/me/preferences") {
       await json(route, browserPreferences());
@@ -3765,9 +3801,9 @@ test("queues a video link through native files and follows its summary", async (
   const dialog = page.getByRole("dialog", { name: "Your files" });
   await dialog.locator(".file-add-panel > summary").click();
   await dialog.getByLabel("Paste a video link").fill("  " + sourceUrl + "  ");
-  await dialog.getByRole("button", { name: "Fetch video" }).click();
+  await dialog.getByRole("button", { name: "Add video" }).click();
 
-  await expect(dialog.getByText("Queued. Watch the file below for download and summarization progress.")).toBeVisible();
+  await expect(dialog.getByText("Video added. Follow download and processing progress in the list below.")).toBeVisible();
   await expect(dialog.getByText(/Downloading 50%/)).toBeVisible();
   await expect(dialog.getByRole("link", { name: "Source" })).toHaveAttribute("href", sourceUrl);
   expect(submitted).toEqual({ url: sourceUrl });

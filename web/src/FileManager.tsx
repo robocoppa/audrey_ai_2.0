@@ -18,6 +18,8 @@ import {
   type AudreyFileList,
 } from "./api";
 
+import { UploadProgress } from "./UploadProgress";
+
 type FileKindFilter = "all" | AudreyFile["kind"];
 type FileStatusFilter = "all" | "ready" | "active" | "failed";
 type FileSort = "newest" | "oldest" | "name-asc" | "name-desc";
@@ -131,6 +133,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
         setProgress(0);
         try {
           const result = await uploadFile(file, listing.limits, setProgress);
+          setActiveUpload("");
           uploaded = true;
           setUploadResults((results) => [...results, file.name + ": " + (result.status === "ready" ? "uploaded" : "stored; processing")]);
         } catch (reason) {
@@ -298,85 +301,116 @@ export function FileManager({ onClose }: { onClose: () => void }) {
             <span className="file-add-symbol" aria-hidden="true">＋</span>
             <span>
               <strong>Add files</strong>
-              <small>Upload from your device or fetch a video link</small>
+              <small>Paste a video link or upload from your device</small>
             </span>
             <span className="file-add-chevron" aria-hidden="true">⌄</span>
           </summary>
           <div className="file-add-content">
-        <form className="file-upload" onSubmit={(event) => void submitUpload(event)}>
-          <div
-            className={draggingFiles ? "file-drop-zone dragging" : "file-drop-zone"}
-            role="region"
-            aria-label="Drop files to upload"
-            onDragOver={(event) => event.preventDefault()}
-            onDragEnter={(event) => {
-              event.preventDefault();
-              if (!uploading && !fetchingUrl && event.dataTransfer.types.includes("Files")) setDraggingFiles(true);
-            }}
-            onDragLeave={() => setDraggingFiles(false)}
-            onDrop={dropFiles}
-          >Drop files here, or choose several below.</div>
-          {listing ? (
-            <p className="file-upload-hint">
-              Up to {formatBytes(listing.limits.chunked_max_bytes || listing.limits.max_upload_bytes)} per file.
-              {listing.limits.chunked_max_bytes > listing.limits.max_upload_bytes
-                ? " Files over " + formatBytes(listing.limits.max_upload_bytes) + " upload in parts."
-                : ""}
-              {" Supported: " + listing.limits.allowed_extensions.join(", ") + "."}
-              {" Scanned PDFs, audio, and videos become searchable after processing."}
-            </p>
-          ) : null}
-          <label>
-            <span>Choose files</span>
-            <input
-              ref={inputRef}
-              type="file"
-              multiple
-              accept={accept}
-              disabled={uploading || fetchingUrl}
-              onChange={(event) => selectFiles(event.target.files ?? [])}
-            />
-          </label>
-          <button type="submit" disabled={!selectedFiles.length || !listing || uploading || fetchingUrl}>
-            {uploading ? "Uploading " + activeUpload + " · " + Math.round(progress * 100) + "%" : selectedFiles.length > 1 ? "Upload " + selectedFiles.length + " files" : "Upload"}
-          </button>
-          {uploading ? (
-            <progress value={progress} max={1} aria-label="Upload progress" />
-          ) : null}
-          {selectedFiles.length > 0 ? (
-            <small>
-              {selectedFiles.length} selected · {formatBytes(selectedFiles.reduce((total, file) => total + file.size, 0))}
-            </small>
-          ) : null}
-          {uploadResults.length ? (
-            <ul className="file-upload-results" aria-label="Upload results" aria-live="polite">
-              {uploadResults.map((result, index) => <li key={index}>{result}</li>)}
-            </ul>
-          ) : null}
-        </form>
+            <form className="file-url-form file-add-card" onSubmit={(event) => void submitVideoUrl(event)}>
+              <header className="file-add-heading">
+                <span className="file-add-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10 13a5 5 0 0 0 7 .1l3-3a5 5 0 0 0-7.1-7.1l-1.7 1.7M14 11a5 5 0 0 0-7-.1l-3 3a5 5 0 0 0 7.1 7.1l1.7-1.7" />
+                  </svg>
+                </span>
+                <div>
+                  <h3 id="file-video-url-label">Paste a video link</h3>
+                  <p>Save a video to My Files, ready to ask Audrey about.</p>
+                </div>
+              </header>
+              <div className="file-add-fields">
+                <input
+                  id="file-video-url"
+                  aria-labelledby="file-video-url-label"
+                  aria-describedby="file-video-url-help"
+                  type="url"
+                  inputMode="url"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={videoUrl}
+                  onChange={(event) => {
+                    setVideoUrl(event.target.value);
+                    setQueuedUrl(false);
+                  }}
+                  placeholder={fetchHosts.length ? "https://www.youtube.com/watch?v=…" : "Video links are unavailable"}
+                  disabled={!listing || fetchHosts.length === 0 || fetchingUrl || uploading}
+                  required
+                />
+                <p className="file-add-help" id="file-video-url-help">
+                  {fetchHosts.length
+                    ? "Supported sites: " + fetchHosts.join(", ") + ". Audrey prepares the summary and transcript."
+                    : "Video links are not available right now. You can upload a file instead."}
+                </p>
+              </div>
+              <button className="file-add-action" type="submit" disabled={!videoUrl.trim() || fetchingUrl || uploading || fetchHosts.length === 0}>
+                {fetchingUrl ? "Adding video…" : "Add video"}
+              </button>
+            </form>
 
-        <form className="file-url-form" onSubmit={(event) => void submitVideoUrl(event)}>
-          <label htmlFor="file-video-url">Paste a video link</label>
-          <div>
-            <input
-              id="file-video-url"
-              type="url"
-              value={videoUrl}
-              onChange={(event) => {
-                setVideoUrl(event.target.value);
-                setQueuedUrl(false);
-              }}
-              placeholder={fetchHosts.length ? "Allowed: " + fetchHosts.join(", ") : "Video links are unavailable"}
-              disabled={!listing || fetchHosts.length === 0 || fetchingUrl || uploading}
-              required
-            />
-            <button type="submit" disabled={!videoUrl.trim() || fetchingUrl || uploading || fetchHosts.length === 0}>
-              {fetchingUrl ? "Queueing…" : "Fetch video"}
-            </button>
+            <form className="file-upload file-add-card" onSubmit={(event) => void submitUpload(event)}>
+              <header className="file-add-heading">
+                <span className="file-add-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 15V3m-4 4 4-4 4 4M4 14v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" />
+                  </svg>
+                </span>
+                <div>
+                  <h3>Upload from your device</h3>
+                  <p>Documents, images, audio or video.</p>
+                </div>
+              </header>
+              <div
+                className={draggingFiles ? "file-drop-zone dragging" : "file-drop-zone"}
+                role="region"
+                aria-label="Drop files to upload"
+                onDragOver={(event) => event.preventDefault()}
+                onDragEnter={(event) => {
+                  event.preventDefault();
+                  if (!uploading && !fetchingUrl && event.dataTransfer.types.includes("Files")) setDraggingFiles(true);
+                }}
+                onDragLeave={() => setDraggingFiles(false)}
+                onDrop={dropFiles}
+              >
+                <input
+                  ref={inputRef}
+                  type="file"
+                  aria-label="Choose files"
+                  multiple
+                  accept={accept}
+                  disabled={uploading || fetchingUrl}
+                  onChange={(event) => selectFiles(event.target.files ?? [])}
+                />
+                <small className="file-upload-selection">
+                  {selectedFiles.length > 0
+                    ? selectedFiles.length + " selected · " + formatBytes(selectedFiles.reduce((total, file) => total + file.size, 0))
+                    : "Choose files above, or drop them here."}
+                </small>
+              </div>
+              <button className="file-add-action" type="submit" disabled={!selectedFiles.length || !listing || uploading || fetchingUrl}>
+                {uploading
+                  ? activeUpload ? progress >= 1 ? "Processing…" : "Uploading…" : "Updating files…"
+                  : selectedFiles.length > 1 ? "Upload " + selectedFiles.length + " files" : "Upload"}
+              </button>
+            </form>
           </div>
-          <small>Audrey downloads the video and prepares its summary for your private files.</small>
-          {queuedUrl ? <p role="status">Queued. Watch the file below for download and summarization progress.</p> : null}
-        </form>
+          <div className="file-add-feedback">
+            {uploading && activeUpload ? <UploadProgress filename={activeUpload} progress={progress} /> : null}
+            {queuedUrl ? <p className="file-add-success" role="status">Video added. Follow download and processing progress in the list below.</p> : null}
+            {uploadResults.length ? (
+              <ul className="file-upload-results" aria-label="Upload results" aria-live="polite">
+                {uploadResults.map((result, index) => <li key={index}>{result}</li>)}
+              </ul>
+            ) : null}
+            {listing ? (
+              <details className="file-upload-limits">
+                <summary>File types and size limits</summary>
+                <p className="file-upload-hint">
+                  Up to {formatBytes(listing.limits.chunked_max_bytes || listing.limits.max_upload_bytes)} per file.
+                  {" Supported: " + listing.limits.allowed_extensions.join(", ") + "."}
+                  {" Scanned PDFs, audio, and videos become searchable after processing."}
+                </p>
+              </details>
+            ) : null}
           </div>
         </details>
 

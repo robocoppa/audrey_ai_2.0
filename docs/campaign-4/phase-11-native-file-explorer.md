@@ -1,6 +1,6 @@
 # Campaign 4 Phase 11 — native file explorer
 
-**Status:** Complete and accepted.
+**Status:** Explorer accepted. Upload presentation followup built; browser acceptance pending.
 
 ## Library model
 
@@ -12,7 +12,23 @@ My Files uses dense rows, a folder pane, search/status/sort controls, processing
 
 ## Interaction contracts
 
-Single-request uploads show Preparing, measured browser transfer percentage, then Finishing while waiting for the server. Chunked uploads retain part-based progress.
+Uploads in My Files, chat and Projects show Preparing, transfer percentage,
+then **Upload complete. Processing your file…** with an indeterminate indicator
+while waiting for the server. A transfer cannot display 100% before completion.
+Queued processing retains its existing status and Ready polling.
+
+My Files' Add files panel uses a wider video-link form on the left and a compact
+device-upload form on the right. Both actions share height and a baseline;
+progress/results sit below both forms so they cannot misalign the buttons.
+Long links stay inside their field. Narrow screens stack link then upload.
+File types and size limits are available in a separate compact disclosure.
+
+Deploy after the normal commit/push/pull on Tower in
+`/mnt/user/appdata/audrey_ai_2.0`: `docker compose up -d --build audrey-ui`.
+No backend rebuild or data/index change. In the browser, open My Files > Add files,
+paste a long video link and check the layout; upload a PDF and check that transfer
+completion changes to Processing before Ready. The upload is required for that
+status check. Existing file ingestion/reuse acceptance remains closed.
 
 Sources, Models, and Tool calls form one controlled popover group: opening one closes the others; outside click or Escape closes the current popover. Live activity and saved answers follow the same behavior.
 

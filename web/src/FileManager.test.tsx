@@ -1,10 +1,12 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { FileManager } from "./FileManager";
+import * as api from "./api";
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -306,4 +308,53 @@ it("shows a PDF summary first and its extracted text under Transcript", async ()
     credentials: "same-origin",
     headers: { Accept: "application/json" },
   }));
+});
+
+
+it("shows processing after upload bytes finish while the server response is pending", async () => {
+  const file: api.AudreyFile = {
+    id: "file_ready", filename: "notes.txt", mime: "text/plain", bytes: 4,
+    uploaded_at: "2026-10-19T00:00:00+00:00", kind: "text", chunks: 1,
+    status: "ready", failure_reason: "", duration_s: 0, summary: "A short note.",
+    source_freed_at: "", leased_at: "", source_url: "", transcript_source: "",
+    fetch_downloaded_bytes: 0, fetch_total_bytes: 0,
+  };
+  const listing: api.AudreyFileList = {
+    items: [], total_bytes: 0, server_time: "2026-10-19T00:01:00+00:00",
+    limits: {
+      max_upload_bytes: 50_000_000, max_user_bytes: 1_000_000_000,
+      allowed_extensions: [".txt"], chunked_max_bytes: 2_000_000_000,
+      part_size: 8_000_000, fetch_hosts: [], max_images_per_turn: 4,
+    },
+  };
+  vi.spyOn(api, "listFiles")
+    .mockResolvedValueOnce(listing)
+    .mockResolvedValue({ ...listing, items: [file], total_bytes: file.bytes });
+  let finishUpload: ((result: api.AudreyFileUpload) => void) | undefined;
+  const pending = new Promise<api.AudreyFileUpload>((resolve) => { finishUpload = resolve; });
+  vi.spyOn(api, "uploadFile").mockImplementation((_file, _limits, onProgress) => {
+    onProgress?.(1);
+    return pending;
+  });
+
+  render(<FileManager onClose={() => undefined} />);
+  await screen.findByText("No files yet. Upload a document, image, audio recording, or video for Audrey to use.");
+  fireEvent.click(screen.getByText("Add files"));
+  fireEvent.change(screen.getByLabelText("Choose files"), {
+    target: { files: [new File(["tiny"], "notes.txt", { type: "text/plain" })] },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Upload$/ }));
+
+  expect(await screen.findByText("Upload complete. Processing your file…")).toBeVisible();
+  expect(screen.getByText("notes.txt", { selector: ".upload-status-filename" })).toBeVisible();
+  expect(screen.getByRole("progressbar", { name: "Upload progress" })).not.toHaveAttribute("value");
+  expect(screen.queryByText(/100%/)).not.toBeInTheDocument();
+
+  await act(async () => {
+    finishUpload?.(file);
+    await pending;
+  });
+  expect(await screen.findByText("notes.txt: uploaded")).toBeVisible();
+  await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument());
+  expect(await screen.findByRole("link", { name: "Download original notes.txt" })).toBeVisible();
 });

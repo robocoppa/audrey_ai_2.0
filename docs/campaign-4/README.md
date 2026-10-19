@@ -32,7 +32,7 @@ they are not ongoing task lists.
   and enforce that choice across files and derived context before exposing it.
   **20C.2 deployed October 19 (user confirmed):** durable Project/conversation
   restrictions, immutable run snapshots and ordinary-history exclusion.
-  **20C.3 built:** file restrictions survive upload reservations/sessions and
+  **20C.3 accepted October 19:** file restrictions survive upload reservations/sessions and
   commits; existing workers and ordinary model readers cannot process protected
   files. Owner previews/downloads remain available. Next connect the verified
   local processing path and request/background policy before exposing Private.
@@ -54,6 +54,13 @@ they are not ongoing task lists.
   holds the contract; measurements and limits are in MODEL-FACTS. The existing-file
   browser check remains unreported; IRS retrieval acceptance stays closed.
   Router assessment stays closed: retain Qwen 3.5 4B.
+
+- **11 — file upload presentation:** built; browser acceptance pending. My Files
+  puts the wider video-link form on the left and compact device upload on the
+  right, with aligned actions and a stacked mobile layout. My Files, chat and
+  Project uploads show transfer completion followed by explicit Processing
+  status while awaiting the server. Rebuild `audrey-ui` only. Phase 11 holds the
+  interaction contract; the Private processing queue remains unchanged.
 
 - **19 — deeper evidence tools:** complete; user accepted all five tools October 13.
   [Phase 19](phase-19-evidence-tools.md) defines calculator/conversions, CSV/XLSX
@@ -123,7 +130,7 @@ they are not ongoing task lists.
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
 | 10 | [Answer provenance](phase-10-ordinary-answer-provenance.md) | Complete; immediate answer summaries await acceptance |
-| 11 | [File explorer](phase-11-native-file-explorer.md) | Complete |
+| 11 | [File explorer](phase-11-native-file-explorer.md) | Complete; upload presentation followup built |
 | 12 | [Navigation](phase-12-sidebar-navigation.md) | Desktop/mobile followup built; browser acceptance pending |
 | 13 | [Responses extensions](phase-13-responses-multimodal-input.md) | Complete |
 | 14 | [Bots and tokens](phase-14-bot-accounts-and-token-lifetimes.md) | Complete |
@@ -132,7 +139,7 @@ they are not ongoing task lists.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A/20B accepted; 20C.1–2 deployed, 20C.3 built |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A/20B accepted; 20C.1–3 accepted/deployed |
 
 ## Remaining work
 
