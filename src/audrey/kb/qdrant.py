@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -564,6 +565,32 @@ class QdrantKB:
             points_selector=qmodels.FilterSelector(filter=flt),
             wait=True,
         )
+
+    async def ensure_reference_payload_indexes(self, collection: str) -> None:
+        """Index exact reference filters without changing vectors or checkpoints."""
+        if not isinstance(collection, str) or not re.fullmatch(
+            r"audrey_reference_[a-z][a-z0-9-]{0,63}(?:_[0-9a-f]{64})?", collection,
+        ):
+            raise ValueError("Reference payload indexes require a reference collection")
+        await asyncio.to_thread(self._ensure_reference_indexes_sync, collection)
+
+    def _ensure_reference_indexes_sync(self, collection: str) -> None:
+        fields = ("document_id", "release_id", "source")
+        schema = self._client.get_collection(collection).payload_schema
+        # Refuse incompatible indexes before creating any missing ones. These
+        # indexes accelerate exact filters; they never relax the filters.
+        for field in fields:
+            existing = schema.get(field)
+            if existing is not None and existing.data_type != qmodels.PayloadSchemaType.KEYWORD:
+                raise ValueError("Reference payload index schema is incompatible")
+        for field in fields:
+            if field not in schema:
+                self._client.create_payload_index(
+                    collection_name=collection,
+                    field_name=field,
+                    field_schema=qmodels.PayloadSchemaType.KEYWORD,
+                    wait=True,
+                )
 
     async def ensure_user_payload_indexes(self, collection: str) -> None:
         """Create `user`, `file_id` and `artifact` keyword indexes.

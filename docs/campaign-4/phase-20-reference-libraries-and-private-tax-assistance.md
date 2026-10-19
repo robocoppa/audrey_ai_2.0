@@ -1,13 +1,14 @@
 # Phase 20 — reference libraries and private tax assistance
 
 Requested October 14, 2026. The archive is sufficient; 20B.1 is deployed and
-accepted. 20B.2 is built; the full current-catalog build saved 2,398 documents
-and 61,042 chunks, with nine extraction failures blocking publication. Local
-repairs cover eight of those public sources; Publication 5902 has a malformed
-text layer. The user approved retaining its original in the catalog and
-publishing with this one explicitly listed content-search gap. The approval
-path is built; live recovery/publication remain pending. OCR is not required
-for this publication, and no garbled parser fallback is used.
+accepted. 20B.2 is built; the October 18 retry retains 2,405 PDFs and 61,483
+chunks. Publication 1304 still hit its offline memory limit; the prepared fix
+provides bounded parser headroom and adds reference filter indexes before exact
+checkpoint checks. The current public PDF completes locally with unchanged
+extracted text. Tower publication remains pending.
+Publication 5902 is the only approved gap: keep its original in the catalog,
+list missing content coverage and use no garbled fallback. No further gap or
+OCR approval is needed for this recovery.
 Qwen3 Embedding 4B remains the reference model; Nomic history and prior personal
 retrieval checks remain accepted. Same-release recovery, publication and cited
 browser acceptance are the next steps.
@@ -198,12 +199,17 @@ page/character spans. Public PDFs with editing restrictions open only if the
 empty password succeeds; nonempty-password protection remains refused in both
 indexing and cited page reads. The whole-document worker periodically reopens
 the same verified source with the same parser to release cached objects. Its
-512 MiB memory cap, page/output limits and no-partial-publication rule remain;
+768 MiB address-space cap stays within the 2 GiB job container; the one-page
+reader retains its separate 512 MiB cap. Page/output limits remain enforced;
 offline extraction allows at most 180 CPU seconds and 210 elapsed seconds per
 PDF. Only stable failure codes enter reports. A document checkpoint commits after its vector writes
 complete. Interrupted runs resume verified checkpoints; incomplete remote
 checkpoints are rebuilt. Verified saved documents emit resume progress and do
-not repeat extraction or embeddings. Unchanged published releases are reused
+not repeat extraction or embeddings. Before these exact counts, the job creates
+missing `document_id`, `release_id` and `source` keyword payload indexes in the
+reference collection. Compatible indexes are reused; incompatible schemas or
+service failures surface. This changes no vectors or scope filters, and no
+Tower speed claim is made before measurement. Unchanged published releases are reused
 after remote verification. Staging points include their release identity, so a failed build
 cannot overwrite the previous release's vectors. Publication atomically switches
 only after every selected original is accounted for and exact remote chunk counts
@@ -293,14 +299,15 @@ and the personal-retrieval browser checks are complete. Use the deployed Qwen4
 profile without repeating migration. This index run needs no new upload,
 archive collection or personal token.
 
-For the approved-gap recovery, pull the user's committed changes on **Tower**,
-in `/mnt/user/appdata/audrey_ai_2.0`, then deploy the backend:
+For the offline memory/index recovery, pull the user's committed changes on
+**Tower**, in `/mnt/user/appdata/audrey_ai_2.0`, then rebuild the job image:
 
 ```bash
-docker compose up -d --build audrey
+docker compose build audrey
 ```
 
-This refreshes both the job image and live search coverage notices. The runner pins
+The gap-disclosure backend is already deployed. No running-service restart is
+needed for this recovery; the new filter-index helper is used by the job. The runner pins
 OpenBLAS/OpenMP to one local thread, preserving the existing container resource
 limits. Unexpected startup tracebacks stay under public index state in a
 restricted `diagnostics/` directory; only the relative path and exception class
@@ -324,9 +331,10 @@ work and vector-count mismatches still block publication. The underlying runner 
 nohup bash scripts/reference/index-irs-onbox.sh > testing-out/last-reference-index.log 2>&1 &
 ```
 
-This is a long first build over the retained current catalog, not all historical
-PDFs. Its duration depends on PDF size and local embedding throughput; it is not
-expected to finish as a short smoke check. Qwen 4B trades slower batch indexing
+This resumes the retained current-catalog build and verifies completed documents;
+only failed or missing checkpoints repeat extraction/embedding. The last retry
+took about 35 minutes. The added filter indexes may shorten verification, but
+Tower performance has not been measured; do not promise a short smoke runtime. Qwen 4B trades slower batch indexing
 and more GPU residency for better reference retrieval; avoid starting another
 GPU-heavy evaluation during the build. It survives disconnects and sends the
 usual Telegram start/finish messages and stamped JSON report. It uses local

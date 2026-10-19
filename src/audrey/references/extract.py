@@ -13,6 +13,9 @@ from pathlib import Path
 from audrey.references.library import MAX_PAGE_CHARS, MAX_PDF_BYTES, _safe_path
 
 MAX_OUTPUT_BYTES = 32 * 1024 * 1024
+# Offline whole-PDF parsing needs headroom beyond the one-page reader.
+# Keep its independent cap below the index job container memory budget.
+MAX_MEMORY_BYTES = 768 * 1024 * 1024
 MAX_CPU_SECONDS = 180
 MAX_WALL_SECONDS = 210
 READER_BATCH_PAGES = 16
@@ -85,7 +88,7 @@ def extract(payload: dict) -> None:
 
 
 def main() -> int:
-    resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024,) * 2)
+    resource.setrlimit(resource.RLIMIT_AS, (MAX_MEMORY_BYTES,) * 2)
     resource.setrlimit(resource.RLIMIT_CPU, (MAX_CPU_SECONDS,) * 2)
     resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_OUTPUT_BYTES,) * 2)
     try:

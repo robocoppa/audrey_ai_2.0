@@ -30,6 +30,24 @@ def _worker(payload):
     )
 
 
+def test_worker_applies_independent_resource_caps_before_reading_or_parsing(monkeypatch):
+    limits = {}
+
+    def read_request(_):
+        assert limits == {
+            module.resource.RLIMIT_AS: (module.MAX_MEMORY_BYTES,) * 2,
+            module.resource.RLIMIT_CPU: (module.MAX_CPU_SECONDS,) * 2,
+            module.resource.RLIMIT_FSIZE: (module.MAX_OUTPUT_BYTES,) * 2,
+        }
+        assert 0 < module.MAX_MEMORY_BYTES < 1024 * 1024 * 1024
+        return b'{}'
+
+    monkeypatch.setattr(module.resource, "setrlimit", lambda kind, bound: limits.update({kind: bound}))
+    monkeypatch.setattr(module.sys, "stdin", SimpleNamespace(buffer=SimpleNamespace(read=read_request)))
+    monkeypatch.setattr(module, "extract", lambda payload: None)
+    assert module.main() == 0
+
+
 @pytest.mark.parametrize("password", ["", "required-password"])
 def test_bounded_worker_opens_only_blank_password_pdf(tmp_path, password):
     result = _worker(_payload(tmp_path, _pdf("PUBLIC_PDF_TEXT", user_password=password)))

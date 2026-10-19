@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 17, 2026.** English user input only. Passed work stays closed.
+**Updated October 18, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -19,16 +19,15 @@ they are not ongoing task lists.
   from catalog/revision dates. Deployed tools, page citations and historical
   refusal are user-accepted. **20B.2 built:** local scoped hybrid content search,
   resumable bounded indexing, verified publication and page citations. The full
-  Tower build saved 2,398 documents and 61,042 chunks; nine extraction failures
-  prevented publication. Repairs preserve completed checkpoints, support freely
-  readable permissions-encrypted PDFs, bound parser cache growth and report precise
-  failures. Local public-source checks cover eight failed documents. The user
-  approved Publication 5902 as an explicitly disclosed content-search gap; its
-  original remains in the catalog. Exact-document, saved-release approval is
-  implemented; unapproved failures still block publication. Search and reports
-  retain the failed count, incomplete coverage and named gap. Deploy `audrey`
-  after pull, then resume the saved release with its single approved gap.
-  Live publication and cited browser acceptance remain pending.
+  October 18 retry reused all previous checkpoints and now retains 2,405 PDFs
+  and 61,483 chunks. Publication 1304 still exceeded the offline parser's memory
+  cap; a bounded 768 MiB allowance is prepared and source-verified locally.
+  Reference filter indexes are added before exact saved-document checks; no
+  re-embedding or skipped verification. Tower speed improvement is unmeasured.
+  Publication 5902 remains the only user-approved content-search gap, with its
+  original in the catalog and incomplete coverage disclosed. Rebuild the
+  `audrey` job image after pull, then resume the same release. No service restart
+  is needed for this offline recovery. Publication/browser acceptance are pending.
   [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds
   the contract and remaining privacy/tax workflow. State jurisdictions remain
   unspecified; fine-tuning requires evidence.

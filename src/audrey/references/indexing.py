@@ -293,6 +293,7 @@ async def build_reference_index(
             await qdrant.ensure_collection(collection, dim=profile.dimensions, sparse=True)
         except ValueError as exc:
             raise ReferenceUnavailable("Reference collection schema is incompatible with configured embeddings") from exc
+        await qdrant.ensure_reference_payload_indexes(collection)
         if not await qdrant.has_sparse(collection):
             raise ReferenceUnavailable(
                 "Reference collection must support keyword and vector search"
