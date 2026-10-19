@@ -138,6 +138,10 @@ class TestSearchScope:
 
 async def test_private_search_adds_authenticated_users_deletion_tombstones():
     class _DeletionIndex:
+        async def private_file_ids(self, user: str) -> set[str]:
+            assert user == "user-1"
+            return set()
+
         async def file_deletion_ids(self, user: str) -> set[str]:
             assert user == "user-1"
             return {"deleted-2", "deleted-1"}

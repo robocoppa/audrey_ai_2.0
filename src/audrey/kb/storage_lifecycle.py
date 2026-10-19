@@ -21,6 +21,7 @@ class StorageReservation:
     user: str
     kind: ReservationKind
     reserved_bytes: int
+    private_required: bool = False
 
 
 class QuotaExceededError(Exception):
@@ -61,6 +62,7 @@ class StorageLifecycle:
         max_user_bytes: int,
         now: str,
         expired_before: str,
+        private_required: bool = False,
     ) -> StorageReservation:
         decision = await self._db.reserve_single_upload(
             reservation_id=reservation_id,
@@ -69,9 +71,10 @@ class StorageLifecycle:
             max_user_bytes=max_user_bytes,
             now=now,
             expired_before=expired_before,
+            private_required=private_required,
         )
         self._require(decision)
-        return StorageReservation(reservation_id, user, "single_shot", bytes_)
+        return StorageReservation(reservation_id, user, "single_shot", bytes_, private_required)
 
     async def open_chunk_session(
         self,
@@ -85,6 +88,7 @@ class StorageLifecycle:
         max_user_bytes: int,
         now: str,
         expired_before: str,
+        private_required: bool = False,
     ) -> StorageReservation:
         decision = await self._db.reserve_upload_session(
             upload_id=upload_id,
@@ -96,9 +100,10 @@ class StorageLifecycle:
             max_user_bytes=max_user_bytes,
             now=now,
             expired_before=expired_before,
+            private_required=private_required,
         )
         self._require(decision)
-        return StorageReservation(upload_id, user, "chunked", total_bytes)
+        return StorageReservation(upload_id, user, "chunked", total_bytes, private_required)
 
     async def record_chunk_part(
         self,
@@ -169,6 +174,14 @@ class StorageLifecycle:
     ) -> UrlReservationRecovery:
         return await self._db.restore_url_fetch_reservations(
             ceiling_bytes=ceiling_bytes,
+        )
+
+    async def reservation_private_required(self, reservation: StorageReservation) -> bool:
+        """Read the owner-bound durable restriction before any content processing."""
+        return await self._db.reservation_private_required(
+            reservation_id=reservation.reservation_id,
+            reservation_kind=reservation.kind,
+            user=reservation.user,
         )
 
     async def commit_upload(

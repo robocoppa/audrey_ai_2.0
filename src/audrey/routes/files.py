@@ -114,10 +114,20 @@ from audrey.kb.user_store import (
     user_text_collection,
 )
 from audrey.pipeline.summarise import summarise_document, summarise_video
+from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/files", tags=["files"])
+
+
+def _refuse_unavailable_private_processing(row: dict | None = None) -> None:
+    """Keep unfinished ingestion/worker paths closed to protected content."""
+    if current_processing_policy() is not None or (row and row.get("private_required", False)):
+        error = ProcessingPolicyError("private_processing_unavailable")
+        raise HTTPException(
+            status_code=409, detail={"error": error.code, "message": str(error)}
+        )
 
 
 class FileRow(BaseModel):
@@ -174,6 +184,7 @@ class FileRow(BaseModel):
     # percentage of a number nobody knows.
     fetch_downloaded_bytes: int = 0
     fetch_total_bytes: int = 0
+    private_required: bool = False
 
 
 class UploadResponse(BaseModel):
@@ -528,6 +539,7 @@ async def upload_file(
     file: UploadFile = File(...),
 ) -> UploadResponse:
     """Accept one file, validate, extract, ingest into the caller's user collections."""
+    _refuse_unavailable_private_processing()
     user = me.email
 
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
@@ -693,6 +705,9 @@ async def _store_document_summary(
     text_embedder,
 ) -> tuple[str, int]:
     """Create and index a fail-soft PDF summary beside its complete text."""
+    _refuse_unavailable_private_processing()
+    row = await _get_uploads_db(request).get_upload(file_id)
+    _refuse_unavailable_private_processing(row)
     try:
         summary = await summarise_document(
             text,
@@ -749,9 +764,17 @@ async def _validate_and_ingest(
     """Sniff and ingest landed bytes, then atomically commit their reservation.
 
     Shared by the single-shot route and the chunked-session `/complete`, so
-    the two transports cannot drift on validation. `dest` is unlinked on
-    every failure path — the caller owns nothing once this is entered.
+    the two transports cannot drift on validation. Protected reservations are
+    left untouched while their processing path is unavailable; ordinary
+    validation failures remove the uncommitted destination.
     """
+    _refuse_unavailable_private_processing()
+    try:
+        protected = await storage.reservation_private_required(reservation)
+    except ValueError:
+        _safe_unlink(dest)
+        raise HTTPException(status_code=409, detail="Upload reservation is no longer available.") from None
+    _refuse_unavailable_private_processing({"private_required": protected})
     # Mime gate. Trust the sniffed bytes, not the client-declared type.
     mime = await anyio.to_thread.run_sync(sniff_mime, dest)
     if mime not in ALLOWED_MIMES:
@@ -1038,6 +1061,7 @@ async def open_upload_session(
     me: AuthedUser = Depends(require_user),
 ) -> SessionOpenResponse:
     """Reserve an upload id and tell the client how to slice the file."""
+    _refuse_unavailable_private_processing()
     user = me.email
     storage = _get_storage_lifecycle(request)
 
@@ -1095,6 +1119,7 @@ async def upload_part(
     me: AuthedUser = Depends(require_user),
 ) -> PartResponse:
     """Stream one part to disk. Idempotent — a retried part overwrites."""
+    _refuse_unavailable_private_processing()
     user = me.email
     db = _get_uploads_db(request)
     storage = _get_storage_lifecycle(request)
@@ -1102,6 +1127,7 @@ async def upload_part(
     session = await db.get_session(upload_id, user=user)
     if session is None:
         raise HTTPException(status_code=404, detail="No such upload session.")
+    _refuse_unavailable_private_processing(session)
     if not (0 <= part_no < int(session["parts_total"])):
         raise HTTPException(
             status_code=422,
@@ -1194,6 +1220,7 @@ async def complete_upload_session(
     me: AuthedUser = Depends(require_user),
 ) -> UploadResponse:
     """Assemble the parts and hand the result to the shared ingest path."""
+    _refuse_unavailable_private_processing()
     user = me.email
     db = _get_uploads_db(request)
     storage = _get_storage_lifecycle(request)
@@ -1207,6 +1234,7 @@ async def complete_upload_session(
     session = await db.get_session(upload_id, user=user)
     if session is None:
         raise HTTPException(status_code=404, detail="No such upload session.")
+    _refuse_unavailable_private_processing(session)
 
     parts_total = int(session["parts_total"])
     received = await db.received_part_numbers(upload_id)
@@ -1535,6 +1563,7 @@ async def ingest_from_url(
          real size is not knowable yet. `fetch-result` verifies the actual bytes
          fit that hold and converts it to stored usage.
     """
+    _refuse_unavailable_private_processing()
     user = me.email
     db = _get_uploads_db(request)
     storage = _get_storage_lifecycle(request)
@@ -1762,6 +1791,10 @@ async def fetch_progress(
     could reconstruct afterwards.
     """
     db = _get_uploads_db(request)
+    row = await db.get_upload(file_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such file.")
+    _refuse_unavailable_private_processing(row)
     if not await db.record_fetch_progress(
         file_id=file_id, lease_id=body.lease_id, title=body.title.strip()[:255],
         downloaded_bytes=max(0, body.downloaded_bytes),
@@ -1812,6 +1845,7 @@ async def fetch_result(
     row = await db.get_upload(file_id)
     if row is None:
         raise HTTPException(status_code=404, detail="No such file.")
+    _refuse_unavailable_private_processing(row)
     if row["lease_id"] != body.lease_id or row["status"] != "fetching":
         raise HTTPException(
             status_code=409,
@@ -1941,6 +1975,7 @@ async def fetch_failed(
     row = await db.get_upload(file_id)
     if row is None:
         raise HTTPException(status_code=404, detail="No such file.")
+    _refuse_unavailable_private_processing(row)
     if not await db.fail_job(
         file_id=file_id, lease_id=body.lease_id, reason=body.reason, stage="fetching",
     ):
@@ -2318,6 +2353,7 @@ async def ocr_result(
     row = await db.get_upload(file_id)
     if row is None:
         raise HTTPException(status_code=404, detail="No such file.")
+    _refuse_unavailable_private_processing(row)
     if row["lease_id"] != body.lease_id or row["status"] != "processing":
         raise HTTPException(
             status_code=409,
@@ -2428,6 +2464,7 @@ async def ingest_result(
     row = await db.get_upload(file_id)
     if row is None:
         raise HTTPException(status_code=404, detail="No such file.")
+    _refuse_unavailable_private_processing(row)
     if row["lease_id"] != body.lease_id or row["status"] != "processing":
         # Refuse before ingesting, not after. A stale worker's transcript must
         # not reach Qdrant at all — writing it and then declining to update the
@@ -2632,6 +2669,7 @@ async def ingest_failed(
     row = await db.get_upload(file_id)
     if row is None:
         raise HTTPException(status_code=404, detail="No such file.")
+    _refuse_unavailable_private_processing(row)
     if not await db.fail_job(
         file_id=file_id, lease_id=body.lease_id, reason=body.reason,
     ):
@@ -2678,6 +2716,7 @@ async def requeue_job(
     row = await db.get_upload(file_id)
     if row is None:
         raise HTTPException(status_code=404, detail="No such file.")
+    _refuse_unavailable_private_processing(row)
 
     if row["status"] == "processing" and not force:
         # Refuse before touching Qdrant, so a refused call changes nothing at
@@ -2882,7 +2921,7 @@ async def list_files_for_user(
         raise HTTPException(status_code=422, detail="user is required.")
 
     db = _get_uploads_db(request)
-    rows = await db.list_user(user)
+    rows = [row for row in await db.list_user(user) if not row.get("private_required", False)]
     now = _dt.datetime.now(_dt.UTC)
     user_dir = _upload_root(request) / sanitize_user(user)
     # One thread for the whole listing rather than per row: this is three
@@ -2999,7 +3038,8 @@ async def read_artifact(
         # `_unknown_file_notice` does for a scoped search. A model that
         # mistyped a filename can correct itself in one turn; one told only
         # "not found" reports the file as missing.
-        names = sorted({str(r["filename"]) for r in await db.list_user(user)})
+        names = sorted({str(r["filename"]) for r in await db.list_user(user)
+                        if not r.get("private_required", False)})
         raise HTTPException(
             status_code=404,
             detail=(
@@ -3013,6 +3053,8 @@ async def read_artifact(
     # in `note`, because silently picking one of two identically named files is
     # how a confident answer comes from the wrong source.
     row = rows[0]
+    _refuse_unavailable_private_processing(row)
+    rows = [row for row in rows if not row.get("private_required", False)]
     artifact = requested_artifact
     if artifact == "auto":
         artifact = "document" if str(row["kind"]) == "text" else "transcript"

@@ -21,6 +21,9 @@ SECRET = "ocr-test-service-token"  # noqa: S105
 
 
 class _Storage:
+    async def reservation_private_required(self, reservation):
+        return False
+
     def __init__(self) -> None:
         self.commits: list[dict] = []
 

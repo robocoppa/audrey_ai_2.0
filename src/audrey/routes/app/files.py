@@ -28,6 +28,7 @@ from audrey.kb.extract import (
 )
 from audrey.pipeline.summarise import brief_video_summary
 from audrey.pipeline.vision import vision_cfg
+from audrey.processing_policy import ProcessingPolicyError
 from audrey.routes import files as upload_routes
 
 router = APIRouter(tags=["application-files"])
@@ -253,6 +254,20 @@ def _image_preview(path: Path) -> bytes:
         return output.getvalue()
 
 
+def _assert_model_reuse_allowed(row: upload_routes.FileRow) -> None:
+    """Refuse protected file context until its entire local reuse path is wired.
+
+    Owner browser reads use the viewer helpers below. A model caller cannot
+    opt into those reads through a request field or an ambient policy scope.
+    """
+
+    if row.private_required:
+        error = ProcessingPolicyError("private_processing_unavailable")
+        raise HTTPException(
+            status_code=409, detail={"error": error.code, "message": str(error)},
+        )
+
+
 async def resolve_owned_attachments(
     request: Request,
     principal: Principal,
@@ -275,6 +290,9 @@ async def resolve_owned_attachments(
             status_code=422,
             detail="Attachments must name at most 10 distinct ready files owned by you.",
         )
+    for row in selected:
+        if row is not None:
+            _assert_model_reuse_allowed(row)
     return tuple(
         AttachmentSnapshot(
             file_id=row.file_id,
@@ -358,7 +376,8 @@ async def get_file_text(
 ) -> NativeFileTextResponse:
     """Page through the same extracted document text used by ingestion."""
 
-    document = await read_owned_document_text(request, principal, file_id)
+    row = await _owned_row(request, principal, file_id)
+    document = await _read_document_text(request, principal, row)
     content = document.text
 
     start = min(offset, len(content))
@@ -390,9 +409,26 @@ async def read_owned_document_text(
     max_source_bytes: int | None = None,
     max_text_chars: int | None = None,
 ) -> OwnedDocumentText:
-    """Reuse the native document reader, optionally enforcing API input bounds."""
+    """Read evidence for a model only when its durable restriction allows it."""
 
     row = await _owned_row(request, principal, file_id)
+    _assert_model_reuse_allowed(row)
+    return await _read_document_text(
+        request, principal, row,
+        max_source_bytes=max_source_bytes, max_text_chars=max_text_chars,
+    )
+
+
+async def _read_document_text(
+    request: Request,
+    principal: Principal,
+    row: upload_routes.FileRow,
+    *,
+    max_source_bytes: int | None = None,
+    max_text_chars: int | None = None,
+) -> OwnedDocumentText:
+    """Read an owned document for its browser viewer or an admitted model."""
+
     if not is_text_mime(row.mime) or row.status != "ready":
         raise HTTPException(status_code=422, detail="Text is available for ready documents only.")
     path = _source_path(request, principal, row)
@@ -422,9 +458,20 @@ async def read_owned_image_preview(
     principal: Principal,
     file_id: str,
 ) -> bytes:
-    """Read bounded JPEG bytes after rechecking current owner and file state."""
+    """Read model image evidence only when its durable restriction allows it."""
 
     row = await _owned_row(request, principal, file_id)
+    _assert_model_reuse_allowed(row)
+    return await _read_image_preview(request, principal, row)
+
+
+async def _read_image_preview(
+    request: Request,
+    principal: Principal,
+    row: upload_routes.FileRow,
+) -> bytes:
+    """Read an owned preview for its browser viewer or an admitted model."""
+
     if _kind(row.mime) != "image" or row.status != "ready":
         raise HTTPException(status_code=422, detail="Preview is available for ready images only.")
     path = _source_path(request, principal, row)
@@ -444,7 +491,8 @@ async def get_file_image(
 ) -> Response:
     """Return a resized, metadata-free preview of an owned image."""
 
-    preview = await read_owned_image_preview(request, principal, file_id)
+    row = await _owned_row(request, principal, file_id)
+    preview = await _read_image_preview(request, principal, row)
     return Response(
         content=preview,
         media_type="image/jpeg",

@@ -116,7 +116,7 @@ def _read_page(
         user_id = str(owner["user_id"])
         conversation = connection.execute(
             "SELECT conversation_id, title, created_at FROM app_conversations "
-            "WHERE user_id = ? AND conversation_id = ?",
+            "WHERE user_id = ? AND conversation_id = ? AND private_required = 0",
             (user_id, body.conversation_id),
         ).fetchone()
         if conversation is None:
@@ -126,7 +126,7 @@ def _read_page(
                 "JOIN app_conversations c ON c.conversation_id = i.conversation_id "
                 "AND c.user_id = i.user_id "
                 "WHERE i.user_id = ? AND i.source = 'audrey_archive_v1' "
-                "AND i.source_conversation_id = ?",
+                "AND i.source_conversation_id = ? AND c.private_required = 0",
                 (user_id, body.conversation_id),
             ).fetchone()
         if conversation is None:

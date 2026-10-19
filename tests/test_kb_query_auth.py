@@ -17,6 +17,7 @@ user, and OWUI is stubbed where the bearer arm is exercised. No network.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -191,6 +192,10 @@ def _build_app(monkeypatch, service_token: str = SECRET):
     app.state.qdrant = object()
     app.state.text_embedder = _FakeTextEmbedder()
     app.state.image_embedder = _FakeImageEmbedder()
+    app.state.uploads_db = SimpleNamespace(
+        private_file_ids=AsyncMock(return_value=set()),
+        file_deletion_ids=AsyncMock(return_value=set()),
+    )
     app.state.cfg = SimpleNamespace(
         env=SimpleNamespace(kb_service_token=service_token, owui_url="http://owui"),
         raw={},

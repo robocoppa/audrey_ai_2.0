@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -241,6 +242,10 @@ async def test_private_project_search_keeps_exact_owner_scope_and_bounds_long_qu
         return [hit], True
 
     state = SimpleNamespace(
+        uploads_db=SimpleNamespace(
+            private_file_ids=AsyncMock(return_value=set()),
+            file_deletion_ids=AsyncMock(return_value=set()),
+        ),
         qdrant=object(),
         text_embedder=Embedder(),
         cfg=SimpleNamespace(raw={"kb": {"hybrid": {"enabled": False}}}),
@@ -300,5 +305,40 @@ async def test_protected_project_context_refuses_before_file_or_embedding_calls(
                 )
             assert error.value.code == "private_processing_unavailable"
             assert "Synthetic" not in str(error.value)
+    finally:
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_protected_project_file_cannot_leak_through_a_manifest_only_image(
+    tmp_path, monkeypatch,
+):
+    from audrey.processing_policy import ProcessingPolicyError
+
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner = await _principal(store)
+    project = await store.projects.create(user_id=owner.user_id, name="Ordinary")
+    conversation = await store.conversations.create(
+        user_id=owner.user_id, project_id=project.project_id,
+    )
+    # Exercise a pre-existing/internal relation as well as the public link guard.
+    await store.projects.add_file(
+        user_id=owner.user_id, project_id=project.project_id, file_id="private-image",
+    )
+    image = _file("private-image", "private-image.png", mime="image/png").model_copy(
+        update={"private_required": True},
+    )
+    listing = AsyncMock(return_value=_listing([image]))
+    search = AsyncMock()
+    monkeypatch.setattr(project_context, "_list_for_owner", listing)
+    monkeypatch.setattr(project_context, "search_private_file_text", search)
+    try:
+        with pytest.raises(ProcessingPolicyError) as error:
+            await project_context.resolve_project_context(
+                SimpleNamespace(), store=store, principal=owner,
+                conversation=conversation, query="Describe the project files",
+            )
+        assert error.value.code == "private_processing_unavailable"
+        search.assert_not_called()
     finally:
         store.close()

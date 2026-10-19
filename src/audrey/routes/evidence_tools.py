@@ -61,6 +61,11 @@ async def _owned_source(body: Any, request: Request) -> tuple[dict, Path, str]:
     ]
     if not matches:
         raise HTTPException(status_code=404, detail="File not found.")
+    if matches[0].get("private_required", 0):
+        # HTTP callers cannot establish an enforced private processing scope
+        # yet. Refuse before reading bytes, rendering or selecting vision.
+        raise HTTPException(status_code=409, detail="private_processing_unavailable")
+    matches = [row for row in matches if not row.get("private_required", 0)]
     row = {**dict(matches[0]), "user": body.user.strip()}
     if row["status"] != "ready":
         raise HTTPException(status_code=409, detail="File is not Ready for inspection.")

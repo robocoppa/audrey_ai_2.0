@@ -140,7 +140,11 @@ CREATE TABLE IF NOT EXISTS uploads (
   fetch_total_bytes      INTEGER NOT NULL DEFAULT 0,
   -- Capacity held while a URL is waiting for or actively being downloaded.
   -- The real size replaces this ceiling atomically in `complete_fetch`.
-  quota_reserved_bytes   INTEGER NOT NULL DEFAULT 0
+  quota_reserved_bytes   INTEGER NOT NULL DEFAULT 0,
+  -- Fixed when bytes are accepted, before processing. Existing ordinary rows
+  -- cannot be relabelled to promise privacy after their content was processed.
+  private_required INTEGER NOT NULL DEFAULT 0
+    CHECK (typeof(private_required) = 'integer' AND private_required IN (0, 1))
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads(user);
 CREATE TABLE IF NOT EXISTS file_deletions (
@@ -172,7 +176,9 @@ CREATE TABLE IF NOT EXISTS upload_sessions (
   part_size    INTEGER NOT NULL,
   parts_total  INTEGER NOT NULL,
   created_at   TEXT NOT NULL,
-  updated_at   TEXT NOT NULL
+  updated_at   TEXT NOT NULL,
+  private_required INTEGER NOT NULL DEFAULT 0
+    CHECK (typeof(private_required) = 'integer' AND private_required IN (0, 1))
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON upload_sessions(user);
 
@@ -196,7 +202,9 @@ CREATE TABLE IF NOT EXISTS storage_reservations (
   kind           TEXT NOT NULL,
   bytes          INTEGER NOT NULL CHECK (bytes >= 0),
   created_at     TEXT NOT NULL,
-  updated_at     TEXT NOT NULL
+  updated_at     TEXT NOT NULL,
+  private_required INTEGER NOT NULL DEFAULT 0
+    CHECK (typeof(private_required) = 'integer' AND private_required IN (0, 1))
 );
 CREATE INDEX IF NOT EXISTS idx_storage_reservations_user ON storage_reservations(user);
 CREATE INDEX IF NOT EXISTS idx_storage_reservations_updated ON storage_reservations(updated_at);
@@ -263,7 +271,23 @@ _UPLOADS_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("fetch_downloaded_bytes", "INTEGER NOT NULL DEFAULT 0"),
     ("fetch_total_bytes", "INTEGER NOT NULL DEFAULT 0"),
     ("quota_reserved_bytes", "INTEGER NOT NULL DEFAULT 0"),
+    ("private_required", "INTEGER NOT NULL DEFAULT 0 CHECK "
+     "(typeof(private_required) = 'integer' AND private_required IN (0, 1))"),
 )
+
+
+_PRIVATE_TABLES = ("uploads", "upload_sessions", "storage_reservations")
+_PRIVATE_COLUMN_DDL = (
+    "INTEGER NOT NULL DEFAULT 0 CHECK "
+    "(typeof(private_required) = 'integer' AND private_required IN (0, 1))"
+)
+
+
+def _private_flag(value: bool) -> int:
+    """Internal callers must supply a real selection, never truthy input."""
+    if type(value) is not bool:
+        raise ValueError("private_required must be a boolean")
+    return int(value)
 
 
 @dataclass(frozen=True)
@@ -370,6 +394,26 @@ class UploadsDB:
                     continue
                 self._conn.execute(f"ALTER TABLE uploads ADD COLUMN {name} {ddl}")
                 log.info("uploads_db: migrated uploads table — added `%s`", name)
+            for table in _PRIVATE_TABLES:
+                privacy_columns = {
+                    row["name"] for row in self._conn.execute(
+                        f"PRAGMA table_info({table})",
+                    )
+                }
+                if "private_required" not in privacy_columns:
+                    self._conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN private_required "
+                        f"{_PRIVATE_COLUMN_DDL}",
+                    )
+                # A file's accepted processing contract is immutable, even if
+                # a stale completion or reservation retry supplies a default.
+                self._conn.execute(
+                    f"CREATE TRIGGER IF NOT EXISTS trg_{table}_private_immutable "
+                    f"BEFORE UPDATE OF private_required ON {table} "
+                    "WHEN OLD.private_required != NEW.private_required "
+                    "BEGIN SELECT RAISE(ABORT, "
+                    "'file processing restriction is immutable'); END",
+                )
             # Only now that the column certainly exists. The claim query filters
             # on status and orders by uploaded_at, and a worker polls it.
             self._conn.execute(
@@ -448,20 +492,27 @@ class UploadsDB:
     def _record_locked(
         self, file_id: str, user: str, filename: str, mime: str,
         bytes_: int, kind: str, collection: str, chunks: int, uploaded_at: str,
-        status: str,
+        status: str, private_required: bool = False,
     ) -> None:
+        existing = self._conn.execute(
+            "SELECT user, private_required FROM uploads WHERE file_id = ?",
+            (file_id,),
+        ).fetchone()
+        if existing is not None and existing["private_required"]:
+            raise ValueError("ordinary handover cannot overwrite a private file")
         self._conn.execute(
             "INSERT INTO uploads "
             "(file_id, user, filename, mime, bytes, kind, collection, "
-            " chunks, uploaded_at, status) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            " chunks, uploaded_at, status, private_required) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(file_id) DO UPDATE SET "
             "  user = excluded.user, filename = excluded.filename, "
             "  mime = excluded.mime, bytes = excluded.bytes, "
             "  kind = excluded.kind, collection = excluded.collection, "
-            "  chunks = excluded.chunks, uploaded_at = excluded.uploaded_at",
+            "  chunks = excluded.chunks, uploaded_at = excluded.uploaded_at "
+            "WHERE uploads.private_required = 0",
             (file_id, user, filename, mime, bytes_, kind, collection,
-             chunks, uploaded_at, status),
+             chunks, uploaded_at, status, _private_flag(private_required)),
         )
 
     async def backfill_upload(self, row: dict, *, user: str, collection: str) -> bool:
@@ -486,7 +537,7 @@ class UploadsDB:
             self._conn.execute(
                 "UPDATE uploads SET kind = CASE "
                 "WHEN mime LIKE 'video/%' THEN 'video' ELSE 'audio' END "
-                "WHERE file_id = ? AND user = ? "
+                "WHERE file_id = ? AND user = ? AND private_required = 0 "
                 "AND (mime LIKE 'video/%' OR mime LIKE 'audio/%')",
                 (row["file_id"], user),
             )
@@ -558,7 +609,7 @@ class UploadsDB:
 
             if reservation_kind == "single_shot":
                 row = self._conn.execute(
-                    "SELECT user, bytes FROM storage_reservations "
+                    "SELECT user, bytes, private_required FROM storage_reservations "
                     "WHERE reservation_id = ? AND kind = 'single_shot'",
                     (reservation_id,),
                 ).fetchone()
@@ -567,7 +618,8 @@ class UploadsDB:
                 reserved_bytes = int(row["bytes"])
             elif reservation_kind == "chunked":
                 row = self._conn.execute(
-                    "SELECT s.user, s.total_bytes, COALESCE(SUM(p.bytes), 0) AS parts "
+                    "SELECT s.user, s.total_bytes, s.private_required, "
+                    "COALESCE(SUM(p.bytes), 0) AS parts "
                     "FROM upload_sessions s LEFT JOIN upload_parts p USING (upload_id) "
                     "WHERE s.upload_id = ? GROUP BY s.upload_id",
                     (reservation_id,),
@@ -593,6 +645,7 @@ class UploadsDB:
                 chunks,
                 uploaded_at,
                 status,
+                private_required=bool(row["private_required"]),
             )
             if summary:
                 self._conn.execute(
@@ -1580,12 +1633,58 @@ class UploadsDB:
                 "       chunks, uploaded_at, status, failure_reason, duration_s, "
                 "       summary, source_freed_at, leased_at, source_url, "
                 "       transcript_source, fetch_downloaded_bytes, "
-                "       fetch_total_bytes "
+                "       fetch_total_bytes, private_required "
                 "FROM uploads WHERE user = ? AND status != 'deleting' "
                 "ORDER BY uploaded_at DESC",
                 (user,),
             )
             return [dict(r) for r in cur.fetchall()]
+
+    async def private_file_ids(self, user: str) -> set[str]:
+        """Catalog-owned exclusions, including files awaiting deletion."""
+        return await asyncio.to_thread(self._private_file_ids_sync, user)
+
+    def _private_file_ids_sync(self, user: str) -> set[str]:
+        with self._lock:
+            return {row["file_id"] for row in self._conn.execute(
+                "SELECT file_id FROM uploads WHERE user = ? AND private_required = 1",
+                (user,),
+            )}
+
+    async def reservation_private_required(
+        self, *, reservation_id: str, reservation_kind: str, user: str,
+    ) -> bool:
+        """Read the accepted contract before extraction or model processing.
+
+        The caller's request or worker result cannot override this record. The
+        same owner and lifecycle checks are repeated atomically when committing.
+        """
+        return await asyncio.to_thread(
+            self._reservation_private_required_sync,
+            reservation_id, reservation_kind, user,
+        )
+
+    def _reservation_private_required_sync(
+        self, reservation_id: str, reservation_kind: str, user: str,
+    ) -> bool:
+        with self._lock:
+            if reservation_kind == "single_shot":
+                row = self._conn.execute(
+                    "SELECT private_required FROM storage_reservations "
+                    "WHERE reservation_id = ? AND user = ? AND kind = 'single_shot'",
+                    (reservation_id, user),
+                ).fetchone()
+            elif reservation_kind == "chunked":
+                row = self._conn.execute(
+                    "SELECT private_required FROM upload_sessions "
+                    "WHERE upload_id = ? AND user = ?",
+                    (reservation_id, user),
+                ).fetchone()
+            else:
+                raise ValueError("unknown reservation kind")
+            if row is None:
+                raise ValueError("reservation is missing or not owned")
+            return bool(row["private_required"])
 
     async def user_total_bytes(self, user: str) -> int:
         return await asyncio.to_thread(self._user_total_sync, user)
@@ -1656,6 +1755,7 @@ class UploadsDB:
         max_user_bytes: int,
         now: str,
         expired_before: str,
+        private_required: bool = False,
     ) -> QuotaDecision:
         return await asyncio.to_thread(
             self._reserve_single_sync,
@@ -1665,6 +1765,7 @@ class UploadsDB:
             max_user_bytes,
             now,
             expired_before,
+            private_required,
         )
 
     def _reserve_single_sync(
@@ -1675,9 +1776,11 @@ class UploadsDB:
         max_user_bytes: int,
         now: str,
         expired_before: str,
+        private_required: bool,
     ) -> QuotaDecision:
         if bytes_ < 0:
             raise ValueError("reservation bytes must be non-negative")
+        private_value = _private_flag(private_required)
         with self._lock, self._transaction_locked():
             self._conn.execute(
                 "DELETE FROM storage_reservations "
@@ -1685,7 +1788,7 @@ class UploadsDB:
                 (expired_before,),
             )
             existing = self._conn.execute(
-                "SELECT user, kind, bytes FROM storage_reservations "
+                "SELECT user, kind, bytes, private_required FROM storage_reservations "
                 "WHERE reservation_id = ?",
                 (reservation_id,),
             ).fetchone()
@@ -1693,17 +1796,19 @@ class UploadsDB:
                 existing["user"] != user or existing["kind"] != "single_shot"
             ):
                 raise ValueError("reservation id belongs to another lifecycle")
+            if existing is not None and existing["private_required"] != private_value:
+                raise ValueError("reservation processing restriction is immutable")
             usage = self._quota_usage_locked(user)
             old_bytes = int(existing["bytes"]) if existing is not None else 0
             if usage.total_bytes - old_bytes + bytes_ > max_user_bytes:
                 return QuotaDecision(False, usage, bytes_, max_user_bytes)
             self._conn.execute(
                 "INSERT INTO storage_reservations "
-                "(reservation_id, user, kind, bytes, created_at, updated_at) "
-                "VALUES (?, ?, 'single_shot', ?, ?, ?) "
+                "(reservation_id, user, kind, bytes, created_at, updated_at, private_required) "
+                "VALUES (?, ?, 'single_shot', ?, ?, ?, ?) "
                 "ON CONFLICT(reservation_id) DO UPDATE SET "
                 "bytes = excluded.bytes, updated_at = excluded.updated_at",
-                (reservation_id, user, bytes_, now, now),
+                (reservation_id, user, bytes_, now, now, private_value),
             )
             return QuotaDecision(
                 True, self._quota_usage_locked(user), bytes_, max_user_bytes,
@@ -1737,6 +1842,7 @@ class UploadsDB:
         max_user_bytes: int,
         now: str,
         expired_before: str,
+        private_required: bool = False,
     ) -> QuotaDecision:
         return await asyncio.to_thread(
             self._reserve_session_sync,
@@ -1749,6 +1855,7 @@ class UploadsDB:
             max_user_bytes,
             now,
             expired_before,
+            private_required,
         )
 
     def _reserve_session_sync(
@@ -1762,7 +1869,9 @@ class UploadsDB:
         max_user_bytes: int,
         now: str,
         expired_before: str,
+        private_required: bool,
     ) -> QuotaDecision:
+        private_value = _private_flag(private_required)
         with self._lock, self._transaction_locked():
             self._conn.execute(
                 "DELETE FROM storage_reservations "
@@ -1770,12 +1879,15 @@ class UploadsDB:
                 (expired_before,),
             )
             existing = self._conn.execute(
-                "SELECT user, total_bytes FROM upload_sessions WHERE upload_id = ?",
+                "SELECT user, total_bytes, private_required FROM upload_sessions "
+                "WHERE upload_id = ?",
                 (upload_id,),
             ).fetchone()
             if existing is not None:
                 if existing["user"] != user:
                     raise ValueError("upload session belongs to another user")
+                if existing["private_required"] != private_value:
+                    raise ValueError("session processing restriction is immutable")
                 usage = self._quota_usage_locked(user)
                 return QuotaDecision(True, usage, total_bytes, max_user_bytes)
             usage = self._quota_usage_locked(user)
@@ -1784,8 +1896,8 @@ class UploadsDB:
             self._conn.execute(
                 "INSERT INTO upload_sessions "
                 "(upload_id, user, filename, total_bytes, part_size, "
-                " parts_total, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                " parts_total, created_at, updated_at, private_required) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     upload_id,
                     user,
@@ -1795,6 +1907,7 @@ class UploadsDB:
                     parts_total,
                     now,
                     now,
+                    private_value,
                 ),
             )
             return QuotaDecision(
@@ -1898,12 +2011,14 @@ class UploadsDB:
                 (expired_before,),
             )
             existing = self._conn.execute(
-                "SELECT user, source_url FROM uploads WHERE file_id = ?",
+                "SELECT user, source_url, private_required FROM uploads WHERE file_id = ?",
                 (file_id,),
             ).fetchone()
             if existing is not None:
                 if existing["user"] != user or existing["source_url"] != source_url:
                     raise ValueError("file id belongs to another upload lifecycle")
+                if existing["private_required"]:
+                    raise ValueError("private URL fetching is unavailable")
                 usage = self._quota_usage_locked(user)
                 return QuotaDecision(True, usage, ceiling_bytes, max_user_bytes)
             usage = self._quota_usage_locked(user)
@@ -1988,12 +2103,15 @@ class UploadsDB:
                 (expired_before,),
             )
             row = self._conn.execute(
-                "SELECT user, source_url, source_freed_at, quota_reserved_bytes "
+                "SELECT user, source_url, source_freed_at, quota_reserved_bytes, "
+                "private_required "
                 "FROM uploads WHERE file_id = ?",
                 (file_id,),
             ).fetchone()
             if row is None or row["user"] != user:
                 raise ValueError("no such user-owned URL fetch")
+            if row["private_required"]:
+                raise ValueError("private URL fetching is unavailable")
             if not row["source_url"] or not row["source_freed_at"]:
                 raise ValueError("row is not a reclaimable URL fetch")
             usage = self._quota_usage_locked(user)
@@ -2049,6 +2167,11 @@ class UploadsDB:
         uploaded_at: str,
     ) -> None:
         with self._lock:
+            existing = self._conn.execute(
+                "SELECT private_required FROM uploads WHERE file_id = ?", (file_id,),
+            ).fetchone()
+            if existing is not None and existing["private_required"]:
+                raise ValueError("private URL fetching is unavailable")
             # `kind` is 'video' from the start rather than being decided when
             # the bytes land, because the host allowlist is a video-site
             # allowlist — there is no other kind this path can produce. The
@@ -2089,7 +2212,7 @@ class UploadsDB:
             return dict(row) if row else None
 
     async def claim_fetch(self, *, lease_id: str, now: str) -> dict | None:
-        """Lease the oldest row awaiting download, or None when none is."""
+        """Lease ordinary fetch work; private remote fetching is unsupported."""
         return await asyncio.to_thread(self._claim_fetch_sync, lease_id, now)
 
     def _claim_fetch_sync(self, lease_id: str, now: str) -> dict | None:
@@ -2099,6 +2222,7 @@ class UploadsDB:
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM uploads WHERE status = 'fetch_pending' "
+                "AND private_required = 0 "
                 "ORDER BY uploaded_at ASC LIMIT 1",
             ).fetchone()
             if row is None:
@@ -2186,6 +2310,11 @@ class UploadsDB:
         transcript: str,
     ) -> bool:
         with self._lock:
+            existing = self._conn.execute(
+                "SELECT private_required FROM uploads WHERE file_id = ?", (file_id,),
+            ).fetchone()
+            if existing is not None and existing["private_required"]:
+                raise ValueError("private URL fetching is unavailable")
             cur = self._conn.execute(
                 # The two progress columns zero out here: the download is over,
                 # `bytes` is now the real number, and a stale "247 MB of 288 MB"
@@ -2288,7 +2417,7 @@ class UploadsDB:
             return dict(row) if row else None
 
     async def claim_job(self, *, lease_id: str, now: str) -> dict | None:
-        """Lease the oldest pending row, or None when nothing is waiting."""
+        """Lease ordinary work; legacy workers cannot process private rows."""
         return await asyncio.to_thread(self._claim_job_sync, lease_id, now)
 
     def _claim_job_sync(self, lease_id: str, now: str) -> dict | None:
@@ -2300,6 +2429,7 @@ class UploadsDB:
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM uploads WHERE status = 'pending' "
+                "AND private_required = 0 "
                 "ORDER BY uploaded_at ASC LIMIT 1",
             ).fetchone()
             if row is None:
@@ -2350,7 +2480,8 @@ class UploadsDB:
                 "       lease_id = '', leased_at = '', failure_reason = '', "
                 "       duration_s = ?, summary = ?, completed_at = ?, "
                 "       transcript_source = ?, fetched_transcript = '' "
-                "WHERE file_id = ? AND lease_id = ? AND status = 'processing'",
+                "WHERE file_id = ? AND lease_id = ? AND status = 'processing' "
+                "AND private_required = 0",
                 (collection, chunks, duration_s, summary, completed_at,
                  transcript_source, file_id, lease_id),
             )
@@ -2536,7 +2667,7 @@ class UploadsDB:
         with self._lock:
             cur = self._conn.execute(
                 "SELECT file_id, user, filename, bytes, source_url FROM uploads "  # noqa: S608
-                "WHERE status = 'ready' AND kind = 'video' "
+                "WHERE status = 'ready' AND kind = 'video' AND private_required = 0 "
                 "  AND source_freed_at = '' "
                 "  AND completed_at != '' AND completed_at < ? "
                 f"{source_clause}"
@@ -2635,24 +2766,27 @@ class UploadsDB:
     async def open_session(
         self, *, upload_id: str, user: str, filename: str,
         total_bytes: int, part_size: int, parts_total: int, now: str,
+        private_required: bool = False,
     ) -> None:
         await asyncio.to_thread(
             self._open_session_sync, upload_id, user, filename,
-            total_bytes, part_size, parts_total, now,
+            total_bytes, part_size, parts_total, now, private_required,
         )
 
     def _open_session_sync(
         self, upload_id: str, user: str, filename: str,
         total_bytes: int, part_size: int, parts_total: int, now: str,
+        private_required: bool = False,
     ) -> None:
+        private_value = _private_flag(private_required)
         with self._lock:
             self._conn.execute(
                 "INSERT INTO upload_sessions "
                 "(upload_id, user, filename, total_bytes, part_size, "
-                " parts_total, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                " parts_total, created_at, updated_at, private_required) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (upload_id, user, filename, total_bytes, part_size,
-                 parts_total, now, now),
+                 parts_total, now, now, private_value),
             )
 
     async def get_session(self, upload_id: str, *, user: str) -> dict | None:

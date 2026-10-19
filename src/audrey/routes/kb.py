@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 import time
 from collections import Counter
 from collections.abc import Sequence
@@ -405,10 +406,24 @@ async def _resolve_filename(
     a miss name the alternatives instead of just denying the request.
     """
     db = getattr(request.app.state, "uploads_db", None)
-    if db is None or not user:
+    if not user:
         return [], []
+    if db is None:
+        raise HTTPException(status_code=503, detail="private_processing_unavailable")
     wanted = filename.strip().casefold()
-    rows = await db.list_user(user)
+    try:
+        rows = await db.list_user(user)
+    except (sqlite3.Error, OSError, RuntimeError, AttributeError, TypeError):
+        raise HTTPException(status_code=503, detail="private_processing_unavailable") from None
+    newest_match = next(
+        (row for row in rows if str(row["filename"]).strip().casefold() == wanted), None,
+    )
+    if newest_match is not None and newest_match.get("private_required", 0):
+        # A name shared with protected content must not silently resolve to
+        # an older ordinary upload. No request-local context authenticates a
+        # private policy across the sidecar HTTP boundary yet.
+        raise HTTPException(status_code=409, detail="private_processing_unavailable")
+    rows = [row for row in rows if not row.get("private_required", 0)]
     matched = [
         str(r["file_id"]) for r in rows
         if str(r["filename"]).strip().casefold() == wanted
@@ -547,11 +562,28 @@ async def _exclude_deleted_private_files(
     user: str | None,
     scope: SearchScope | None,
 ) -> SearchScope | None:
-    """Attach durable tombstones to private collection reads."""
-    db = getattr(request.app.state, "uploads_db", None)
-    if db is None or not user:
+    """Exclude deleted and protected files before all user collection reads.
+
+    Protected content cannot enter ordinary retrieval while policy propagation
+    remains unavailable. Uploads SQLite, rather than editable vector payloads,
+    is authoritative; an unavailable restriction lookup must not widen a read.
+    """
+    if not user:
         return scope
-    excluded = sorted(await db.file_deletion_ids(user))
+    db = getattr(request.app.state, "uploads_db", None)
+    if db is None:
+        raise HTTPException(status_code=503, detail="private_processing_unavailable")
+    try:
+        protected = await db.private_file_ids(user)
+        existing = set(scope.excluded_file_ids or ()) if scope is not None else set()
+        excluded = sorted(existing | await db.file_deletion_ids(user) | protected)
+    except (sqlite3.Error, OSError, RuntimeError, AttributeError, TypeError):
+        raise HTTPException(status_code=503, detail="private_processing_unavailable") from None
+    if scope is not None and scope.file_ids and set(scope.file_ids) & set(excluded):
+        # Selected files must never broaden to a global search or silently
+        # become only the remaining files of an explicitly selected group.
+        if set(scope.file_ids) & protected:
+            raise HTTPException(status_code=409, detail="private_processing_unavailable")
     if not excluded:
         return scope
     if scope is None:
@@ -803,6 +835,12 @@ async def kb_query_image(
             status_code=422,
             detail="One of query, image_url, or image_b64 is required.",
         )
+    effective_user = req.user if caller.is_service else caller.email
+    scope = await _exclude_deleted_private_files(
+        request,
+        user=effective_user,
+        scope=None,
+    )
     t0 = time.perf_counter()
     try:
         if req.image_url:
@@ -813,12 +851,6 @@ async def kb_query_image(
             vec = await embedder.embed_text(req.query or "")
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"image embed failed: {e}") from e
-    effective_user = req.user if caller.is_service else caller.email
-    scope = await _exclude_deleted_private_files(
-        request,
-        user=effective_user,
-        scope=None,
-    )
     hits, had_user = await _search_images_merged(
         qdrant,
         vec,

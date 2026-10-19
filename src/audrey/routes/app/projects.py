@@ -323,6 +323,7 @@ async def add_project_file(
     principal: Principal = Depends(_project_access),
 ) -> ProjectFileResponse:
     row = await native_files._owned_row(request, principal, payload.file_id)
+    native_files._assert_model_reuse_allowed(row)
     if row.status not in {"ready", "pending", "processing"}:
         raise HTTPException(
             status_code=422,

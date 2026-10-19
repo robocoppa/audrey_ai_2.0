@@ -30,9 +30,12 @@ they are not ongoing task lists.
   selection activates local-only processing and automatically limits tools; no
   sensitive-content detection or separate privacy tool selector. Next: persist
   and enforce that choice across files and derived context before exposing it.
-  **20C.2 built:** durable Project/conversation restrictions, immutable run
-  snapshots and ordinary-history exclusion. Private remains unavailable to
-  browser/API requests until ingestion and background processing are wired.
+  **20C.2 deployed October 19 (user confirmed):** durable Project/conversation
+  restrictions, immutable run snapshots and ordinary-history exclusion.
+  **20C.3 built:** file restrictions survive upload reservations/sessions and
+  commits; existing workers and ordinary model readers cannot process protected
+  files. Owner previews/downloads remain available. Next connect the verified
+  local processing path and request/background policy before exposing Private.
   General Local/direct-model choices keep their present meaning.
   [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds
   the contract and remaining privacy/tax workflow. State jurisdictions remain
@@ -129,7 +132,7 @@ they are not ongoing task lists.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A/20B accepted; 20C.1–2 built, private propagation in progress |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A/20B accepted; 20C.1–2 deployed, 20C.3 built |
 
 ## Remaining work
 
@@ -138,9 +141,9 @@ they are not ongoing task lists.
    the existing-file browser check remain unreported. The current-catalog IRS
    index and cited-search browser check are accepted, with the approved
    Publication 5902 search gap. Finish 20C enforced private processing: persist
-   the explicit Private selection and propagate its restrictions across uploads
-   and derived context, then expose it in the model picker with automatically
-   limited tools. No sensitive-content detection is queued. Follow with 20D's
+   the explicit Private selection and bind local policy across requests,
+   ingestion, background jobs and derived context, then expose it in the model
+   picker with automatically limited tools. No sensitive-content detection is queued. Follow with 20D's
    tax workflow and targeted 20E evaluation,
    including source conditions and conflicting figures. Broad collection and both migrations stay
    complete; no repeat is queued.

@@ -185,6 +185,11 @@ async def resolve_project_context(
         raise ProcessingPolicyError("private_processing_unavailable")
     listing = await _list_for_owner(request, principal) if relations else None
     owned = {row.file_id: row for row in listing.files} if listing is not None else {}
+    if any(
+        owned[relation.file_id].private_required
+        for relation in relations if relation.file_id in owned
+    ):
+        raise ProcessingPolicyError("private_processing_unavailable")
     files = tuple(
         ProjectFileSnapshot(
             file_id=relation.file_id,

@@ -294,7 +294,7 @@ further model requests are refused until their policy propagation and reuse
 rules are implemented. Protected failure messages omit prompt/tool contents.
 Ordinary requests retain existing behavior.
 
-#### 20C.2 — durable restrictions (built; no user activation)
+#### 20C.2 — durable restrictions (deployed October 19; no user activation)
 
 Schema 22 adds an owner-scoped `private_required` restriction to Projects,
 conversations and each accepted run. Existing records remain ordinary. New
@@ -316,27 +316,58 @@ projection. Projection delivery also excludes protected conversations; ordinary
 history behavior is preserved. Auxiliary ordinary title updates refuse protected
 rows. These safeguards do not yet supply private memory/history retrieval.
 
-**Remaining 20C work:** carry restrictions through file upload/processing,
-service calls, background jobs and derived evidence; bind policy throughout each
-request and title task; prevent memory/history reuse in ordinary/cloud requests;
+#### 20C.3 — file restrictions and reuse boundaries (built)
+
+The uploads database stores an immutable `private_required` flag on files,
+chunked sessions and single-upload reservations. Existing records remain
+ordinary. The file's accepted restriction comes from its owned reservation in
+one commit transaction, never a worker result, caller object or vector payload.
+Retries cannot relabel it; startup/backfill preserves protected metadata.
+Authoritative checks happen before extraction, embeddings or summarization.
+
+Until the complete local path is connected, protected uploads are held out of
+ordinary processing: current workers cannot claim/complete them or reclaim their
+originals. OCR/media/fetch callbacks and requeue refuse before content writes or
+model calls. Public upload entry points cannot shed an active private policy.
+No protected file processing or new Private upload control is enabled yet.
+
+Ordinary model reads refuse protected files, including native attachments,
+Responses file/image inputs, Project links/manifests, file artifacts, table
+analysis and page/frame inspection. Dense, keyword and image retrieval exclude
+protected IDs using the owned uploads database; unavailable authority reports an
+error before embedding. Tool file lists and filename suggestions omit protected
+metadata. Exact newest protected filename matches refuse rather than substitute
+an older ordinary file. Direct history reads also exclude protected conversations,
+including imported IDs. Owner browser previews and downloads remain available.
+
+**Remaining 20C work:** construct and bind the verified local policy for each
+request and title task; carry it into supported file ingestion, service calls and
+background jobs; preserve restrictions on derived evidence and memory/history;
 finish private logging/storage and failure behavior; then expose Private in the
 existing model picker. No sensitive-content detector or separate privacy tool
 selector is queued. Accept the complete flow with synthetic documents before
 using private taxpayer evidence.
 
-After the normal commit/push/pull workflow, deploy on **Tower**, in
+After the normal commit/push/pull workflow, deploy 20C.3 on **Tower**, in
 `/mnt/user/appdata/audrey_ai_2.0`:
 
 ```bash
 docker compose up -d --build audrey
 ```
 
-Only the backend needs rebuilding for 20C.1–2. Schema 22 applies automatically
-on startup; no sidecar/UI rebuild, manual database command, model change or
-reindex is required. Laptop checks cover upgrade/replay preservation, owner
-isolation, durable inheritance, stale admission and ordinary/private history
-separation. No upload or manual browser smoke is required for this unexposed
-slice; the Private choice will be tested after the full path is connected.
+Only the backend needs rebuilding. The uploads database adds its columns and
+guards automatically; the application schema remains 22. No sidecar, media-worker
+or UI rebuild, manual migration, model change or reindex is required. Hermetic
+checks cover file-state upgrades/retries, worker refusal, retrieval isolation,
+owner viewing and ordinary upload controls; no live model calls were made.
+
+For the changed ordinary upload/viewing path, use the browser at
+`https://ai.builtryte.xyz`: upload a small nonsensitive PDF in My Files, wait for
+Ready, open its summary/text, then attach it to a new chat and ask about one
+clear fact. Pass means the file becomes Ready, its text/summary are readable and
+the chat answers from the document. This does generate the normal local indexing
+and model calls; it does not test an exposed Private workflow. Private remains
+hidden until its complete processing path is implemented.
 
 ### 20D/20E — verified assistance
 
