@@ -39,6 +39,7 @@ import researchPortrait from "./assets/models/audrey8.png";
 import videoPortrait from "./assets/models/audrey9.png";
 import cloudPortrait from "./assets/models/cloudModel.png";
 import localPortrait from "./assets/models/localModel.png";
+import privatePortrait from "./assets/models/audrey5.png";
 
 import { AudreyLoader } from "./AudreyLoader";
 import { ScrollToLatest } from "./ScrollToLatest";
@@ -80,6 +81,7 @@ import {
   type UserPreferences,
 } from "./api";
 import { latestActionFetch } from "./agentTransport";
+import { upsertConversation } from "./conversationHistory";
 import { NewProjectDialog, ProjectHome } from "./ProjectWorkspace";
 
 const PRIVATE_MODEL: AudreyModel = {
@@ -3529,18 +3531,6 @@ function formatBytes(bytes: number): string {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${unit}`;
 }
 
-function upsertConversation(
-  conversations: Conversation[],
-  updated: Conversation,
-): Conversation[] {
-  const index = conversations.findIndex(({ id }) => id === updated.id);
-  if (index < 0) return [...conversations, updated];
-  if (conversations[index] === updated) return conversations;
-  return conversations.map((conversation) =>
-    conversation.id === updated.id ? updated : conversation,
-  );
-}
-
 function modelLabel(models: AudreyModel[], conversation: Conversation): string {
   if (conversation.private_required || conversation.default_model_id === "private") return "Private";
   if (conversation.default_model_id === "local") return "Local";
@@ -3553,7 +3543,7 @@ function modelDetails(models: AudreyModel[], modelId: string) {
   const model = models.find(({ id }) => id === modelId) ?? models[0];
   return {
     ...model,
-    portrait: model.id === "private" ? localPortrait
+    portrait: model.id === "private" ? privatePortrait
       : model.portrait_url || MODEL_PORTRAITS[model.presentation] || autoPortrait,
   };
 }

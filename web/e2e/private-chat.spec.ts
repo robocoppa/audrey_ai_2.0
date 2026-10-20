@@ -17,7 +17,7 @@ function file(id: string, filename: string, privateRequired: boolean, kind = "te
 }
 
 async function mockPrivateApi(page: Page, options: {
-  initialPrivate?: boolean; omitPrivate?: boolean; rejectUpgrade?: boolean; saved?: boolean; older?: boolean; conflictingPortrait?: boolean;
+  initialPrivate?: boolean; omitPrivate?: boolean; rejectUpgrade?: boolean; saved?: boolean; older?: boolean; conflictingPortrait?: boolean; recency?: boolean;
 } = {}) {
   let conversation = {
     id: ID, title: "Private browser check", private_required: Boolean(options.initialPrivate),
@@ -29,6 +29,8 @@ async function mockPrivateApi(page: Page, options: {
   const retiredIds = new Set<string>();
   const staleReads: string[] = [];
   const older = { ...conversation, id: "con_older", title: "An older chat", private_required: false, default_model_id: "auto", default_mode: "auto", last_message_at: DATE };
+  const recent = { ...older, id: "con_recent", title: "More recent ordinary chat",
+    created_at: "2026-10-20T11:00:00Z", last_message_at: "2026-10-20T12:00:00Z" };
   const uploads: string[] = [];
   const agents: Array<{ model: string | null; skill: string | null; body: Record<string, unknown> }> = [];
   const uploaded = file("file_private_uploaded", "private.txt", true);
@@ -60,22 +62,28 @@ async function mockPrivateApi(page: Page, options: {
     if (url.pathname === "/api/projects") return json(route, { items: [], next_cursor: null });
     if (url.pathname === "/api/conversations") {
       if (request.method() === "POST") {
-        conversation = { ...conversation, id: "con_new_browser", title: "New conversation", private_required: false, default_model_id: "auto", default_mode: "auto", last_message_at: null };
+        conversation = { ...conversation, id: "con_new_browser", title: "New conversation", private_required: false, default_model_id: "auto", default_mode: "auto", last_message_at: null, created_at: options.recency ? "2026-10-20T12:30:00Z" : DATE };
         deleted = false;
         return json(route, conversation, 201);
       }
-      return json(route, { items: [...(deleted ? [] : [conversation]), ...(options.older ? [older] : [])], next_cursor: null });
+      const items = [...(deleted ? [] : [conversation]), ...(options.older ? [older] : []), ...(options.recency ? [recent] : [])]
+        .sort((a, b) => Date.parse(b.last_message_at ?? b.created_at) - Date.parse(a.last_message_at ?? a.created_at));
+      return json(route, { items, next_cursor: null });
     }
     const id = url.pathname.split("/")[3];
     if (retiredIds.has(id) && request.method() === "GET") {
       staleReads.push(url.pathname);
       return json(route, { detail: "Conversation not found." }, 404);
     }
-    if (url.pathname.endsWith("/messages")) return json(route, { items: (options.saved && id === ID) || id === older.id ? [
+    if (url.pathname.endsWith("/messages")) return json(route, { items: agents.length && id === conversation.id ? [
+      { id: "msg_recency_user", run_id: null, sequence: 1, role: "user", status: "completed", content: "Continue privately.", created_at: DATE, updated_at: DATE, attachments: [] },
+      { id: "msg_recency_answer", run_id: null, sequence: 2, role: "assistant", status: "completed", content: "Private document answer.", created_at: DATE, updated_at: DATE, attachments: [] },
+    ] : (options.saved && id === ID) || id === older.id || id === recent.id ? [
       { id: "msg_saved_user_" + id, run_id: null, sequence: 1, role: "user", status: "completed", content: "Saved question.", created_at: DATE, updated_at: DATE, attachments: [] },
       { id: "msg_saved_answer_" + id, run_id: null, sequence: 2, role: "assistant", status: "completed", content: "Saved answer.", created_at: DATE, updated_at: DATE, attachments: [] },
     ] : [], next_cursor: null });
     if (id === older.id) return json(route, older);
+    if (id === recent.id) return json(route, recent);
     if (url.pathname === `/api/conversations/${conversation.id}`) {
       if (request.method() === "PATCH") {
         if (options.rejectUpgrade) return json(route, { detail: "Start a new conversation to use Private." }, 409);
@@ -110,6 +118,7 @@ async function mockPrivateApi(page: Page, options: {
     if (url.pathname === `/api/files/${uploaded.id}`) return json(route, uploaded);
     if (url.pathname === "/api/agent") {
       agents.push({ model: url.searchParams.get("model"), skill: url.searchParams.get("skill"), body: request.postDataJSON() });
+      if (options.recency) conversation = { ...conversation, last_message_at: "2026-10-20T07:00:00-06:00" };
       const events = [
         { type: "RUN_STARTED", threadId: conversation.id, runId: "run_private" },
         { type: "TEXT_MESSAGE_START", messageId: "msg_private" },
@@ -216,7 +225,7 @@ test("a refused Private upgrade preserves the ordinary conversation and explains
 test("an empty Private draft can change models without leaking attachments or losing unsent text", async ({ page }) => {
   const observed = await mockPrivateApi(page, { initialPrivate: true, conflictingPortrait: true });
   await page.goto("./");
-  await expect(page.locator(".composer-model-picker img")).toHaveAttribute("src", /localModel/u);
+  await expect(page.locator(".composer-model-picker img")).toHaveAttribute("src", /audrey5/u);
   await page.getByRole("button", { name: "Add files", exact: true }).click();
   await page.getByRole("region", { name: "Choose attachments" }).getByText("protected.txt", { exact: true }).click();
   const composer = page.getByRole("textbox", { name: "Ask Audrey" });
@@ -292,3 +301,33 @@ test("navigation wins if deleting a Private conversation is still creating its n
   await expect(composer).toHaveValue("Keep the newly selected chat.");
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
+
+
+for (const saved of [false, true]) {
+  test(`${saved ? "resumed" : "new"} Private conversation rises above older history after a message and stays there on reload`, async ({ page }) => {
+    await mockPrivateApi(page, { initialPrivate: saved, saved, recency: true });
+    await page.goto("./");
+    const history = page.getByRole("navigation", { name: "Conversation history" });
+    const rows = history.locator("button.conversation");
+    await expect(rows.first()).toContainText("More recent ordinary chat");
+    if (saved) {
+      await history.getByRole("button", { name: /^Private browser check/u }).click();
+      await expect(rows.first()).toContainText("More recent ordinary chat");
+    } else {
+      await page.getByRole("button", { name: "New conversation", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "New conversation", exact: true })).toBeVisible();
+      await choosePrivate(page);
+      await expect(rows).toHaveCount(1);
+    }
+    const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+    await composer.fill("Continue privately.");
+    await composer.press("Enter");
+    await expect(page.getByText("Private document answer.")).toBeVisible();
+    await expect(rows.first()).toHaveAttribute("data-private", "true");
+    await expect(rows.nth(1)).toContainText("More recent ordinary chat");
+    await page.reload();
+    await expect(page.getByText("Private document answer.")).toBeVisible();
+    await expect(rows.first()).toHaveAttribute("data-private", "true");
+    await expect(rows.nth(1)).toContainText("More recent ordinary chat");
+  });
+}

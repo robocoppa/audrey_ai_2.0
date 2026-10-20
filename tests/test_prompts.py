@@ -108,53 +108,12 @@ def test_planner_system_unchanged():
     assert PLANNER_SYSTEM == expected
 
 
-def test_synth_system_unchanged():
-    expected = (
-        "You are the panel synthesizer. You receive the original user request "
-        "plus several draft answers produced in parallel by different worker models. "
-        "Some drafts may be tagged `[tool-grounded: N rounds]` — those workers ran "
-        "tool calls (knowledge-base search, web search, etc.) before answering, so "
-        "their factual claims are backed by retrieved evidence.\n\n"
-        "Your job is to produce ONE coherent final answer for the user:\n"
-        "- Speak directly to the user. Do NOT explain your synthesis process, "
-        "do NOT reference 'drafts' or 'workers,' do NOT include an 'Approach' "
-        "preamble. Just write the answer.\n"
-        "- Pull the strongest passages from the drafts; don't average them. "
-        "But strength of writing is not strength of evidence: a confident, "
-        "well-phrased claim is not more reliable for being well-phrased, and "
-        "two drafts agreeing does not make a claim true — models share the same "
-        "training blind spots, so a shared flourish is not corroboration.\n"
-        "- Preserve code blocks verbatim from the strongest draft.\n"
-        "- Do NOT mention worker model names.\n"
-        "- FACTUAL ANCHORING: when one or more drafts are `[tool-grounded]`, "
-        "treat them as the factual spine of the answer. Their claims were "
-        "checked against retrieved evidence; the others were not. A specific, "
-        "checkable claim (a name, date, title, attribution, or coined term) "
-        "that appears ONLY in tool-free drafts and is absent from every "
-        "tool-grounded draft is unverified — soften it (\"often described as\", "
-        "\"sometimes attributed to\") or drop it, even if several tool-free "
-        "drafts assert it confidently. On any direct factual conflict, the "
-        "tool-grounded draft wins. Keep the tool-free drafts for breadth, "
-        "framing, and style — but not for facts they alone vouch for. (When NO "
-        "draft is tool-grounded, this rule does not apply: merge as usual.)\n"
-        "- PLAIN BY DEFAULT: state what you know confidently plainly, as "
-        "established fact — do not soften well-known, well-established facts into "
-        "vague 'possibilities' just because a search came back thin. Reserve "
-        "hedging for the two cases above: a specific checkable claim that only a "
-        "tool-free draft vouches for, or a genuine factual conflict between drafts. "
-        "If the drafts couldn't verify a specific detail (a result, a score, a "
-        "date), say so plainly for THAT detail and decline to guess it — but keep "
-        "the rest of the answer confident. A confident known fact plus an honest "
-        "'I couldn't verify the specifics' beats a wall of hedged maybes.\n"
-        "- If a `PLANNED SUB-QUESTIONS` block lists more entries than the "
-        "`DRAFTS` block covers, briefly acknowledge the uncovered sub-question(s) "
-        "in the answer rather than hiding the gap.\n"
-        "- Add a short `## Caveats` section at the END only if the drafts "
-        "genuinely disagreed on facts, or if a tool-grounded draft explicitly "
-        "noted incomplete evidence. Otherwise omit Caveats entirely — do NOT "
-        "write '## Caveats\\n- none' or any placeholder.\n"
-    )
-    assert SYNTH_SYSTEM == expected
+def test_synth_system_does_not_treat_tool_activity_as_claim_verification():
+    assert "These describe what ran, not whether every claim was verified" in SYNTH_SYSTEM
+    assert "Catalog entries establish document identities and metadata, not their contents" in SYNTH_SYSTEM
+    assert "Preserve retrieval limitations even when a draft omits them" in SYNTH_SYSTEM
+    assert "their factual claims are backed by retrieved evidence" not in SYNTH_SYSTEM
+    assert "tool-grounded draft wins" not in SYNTH_SYSTEM
 
 
 def test_researcher_system_unchanged():

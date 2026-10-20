@@ -129,9 +129,10 @@ DEEP_WORKER_SYSTEM = (
 SYNTH_SYSTEM = (
     "You are the panel synthesizer. You receive the original user request "
     "plus several draft answers produced in parallel by different worker models. "
-    "Some drafts may be tagged `[tool-grounded: N rounds]` — those workers ran "
-    "tool calls (knowledge-base search, web search, etc.) before answering, so "
-    "their factual claims are backed by retrieved evidence.\n\n"
+    "Each draft may include observed tool activity and a count of recorded public "
+    "source identities. These describe what ran, not whether every claim was "
+    "verified: successful calls can return only catalog metadata or no results, "
+    "and a retrieved source need not support every statement in the draft.\n\n"
     "Your job is to produce ONE coherent final answer for the user:\n"
     "- Speak directly to the user. Do NOT explain your synthesis process, "
     "do NOT reference 'drafts' or 'workers,' do NOT include an 'Approach' "
@@ -140,37 +141,55 @@ SYNTH_SYSTEM = (
     "But strength of writing is not strength of evidence: a confident, "
     "well-phrased claim is not more reliable for being well-phrased, and "
     "two drafts agreeing does not make a claim true — models share the same "
-    "training blind spots, so a shared flourish is not corroboration.\n"
+    "training blind spots, so agreement is not corroboration.\n"
     "- Preserve code blocks verbatim from the strongest draft.\n"
     "- Do NOT mention worker model names.\n"
-    "- FACTUAL ANCHORING: when one or more drafts are `[tool-grounded]`, "
-    "treat them as the factual spine of the answer. Their claims were "
-    "checked against retrieved evidence; the others were not. A specific, "
-    "checkable claim (a name, date, title, attribution, or coined term) "
-    "that appears ONLY in tool-free drafts and is absent from every "
-    "tool-grounded draft is unverified — soften it (\"often described as\", "
-    "\"sometimes attributed to\") or drop it, even if several tool-free "
-    "drafts assert it confidently. On any direct factual conflict, the "
-    "tool-grounded draft wins. Keep the tool-free drafts for breadth, "
-    "framing, and style — but not for facts they alone vouch for. (When NO "
-    "draft is tool-grounded, this rule does not apply: merge as usual.)\n"
-    "- PLAIN BY DEFAULT: state what you know confidently plainly, as "
-    "established fact — do not soften well-known, well-established facts into "
-    "vague 'possibilities' just because a search came back thin. Reserve "
-    "hedging for the two cases above: a specific checkable claim that only a "
-    "tool-free draft vouches for, or a genuine factual conflict between drafts. "
-    "If the drafts couldn't verify a specific detail (a result, a score, a "
-    "date), say so plainly for THAT detail and decline to guess it — but keep "
-    "the rest of the answer confident. A confident known fact plus an honest "
-    "'I couldn't verify the specifics' beats a wall of hedged maybes.\n"
+    "- FACTUAL ANCHORING: prefer claims tied to relevant retrieved passages "
+    "or actual tool results over unsupported assertions. Tool-call counts, "
+    "successful status, source counts and confident prose do not establish "
+    "claim support. Catalog entries establish document identities and metadata, "
+    "not their contents. A failed search establishes no substantive facts. "
+    "On a factual conflict, prefer the relevant evidence described in the "
+    "drafts; do not choose a claim merely because its worker called more tools.\n"
+    "- State established facts plainly. If the available drafts could not "
+    "verify a requested specific, say what could not be verified and decline "
+    "to guess it. In particular, do not supply exact current rules, amounts "
+    "or year-to-year changes from catalog metadata or failed retrieval. "
+    "Keep supported parts of the answer; do not turn a specific gap into a "
+    "refusal to answer everything.\n"
+    "- Preserve retrieval limitations even when a draft omits them. If a "
+    "requested source-based conclusion has only catalog lookups or failed "
+    "retrieval behind it, clearly state that its document contents were not "
+    "verified. Never describe unsupported conclusions as source-verified.\n"
     "- If a `PLANNED SUB-QUESTIONS` block lists more entries than the "
     "`DRAFTS` block covers, briefly acknowledge the uncovered sub-question(s) "
     "in the answer rather than hiding the gap.\n"
-    "- Add a short `## Caveats` section at the END only if the drafts "
-    "genuinely disagreed on facts, or if a tool-grounded draft explicitly "
-    "noted incomplete evidence. Otherwise omit Caveats entirely — do NOT "
-    "write '## Caveats\\n- none' or any placeholder.\n"
+    "- Add a short `## Caveats` section at the END only for a material factual "
+    "disagreement or incomplete evidence that affects the answer. Otherwise "
+    "omit Caveats entirely; do not add an empty placeholder.\n"
 )
+
+
+def reference_tool_guidance(tool_names: set[str]) -> str | None:
+    """Guide page reads only when the exact reference tools are offered."""
+    if not {"reference_lookup", "read_reference"}.issubset(tool_names):
+        return None
+    search_guidance = (
+        " If reference_search fails or returns no relevant passages, use known "
+        "document IDs from reference_lookup with read_reference when useful."
+        if "reference_search" in tool_names else ""
+    )
+    return (
+        "Owned reference evidence: reference_lookup returns catalog metadata, "
+        "not document contents. For claims about a document's rules or wording, "
+        "read relevant pages with read_reference and preserve edition/page "
+        "citations; catalog dates alone do not establish applicability."
+        + search_guidance +
+        " A failed search or successful catalog lookup does not verify "
+        "substantive claims. If the needed passages remain unavailable, state "
+        "the specific limitation and do not invent rules, amounts or changes. "
+        "For a metadata-only question, the catalog itself may be sufficient."
+    )
 
 # ─── audrey_research role prompts ─────────────────────────────────────
 # The staged research pipeline (Stage 1 research fan-out → Verify → Write)
@@ -796,6 +815,7 @@ __all__ = [
     "VIDEO_SPECIALIST_SYSTEM",
     "prompt_from_config",
     "compose_system_messages",
+    "reference_tool_guidance",
     "task_role_for",
     "with_task_role",
     "without_task_role",

@@ -2,7 +2,7 @@
 
 The synthesizer writes the user's answer directly in its own voice. A
 short `## Caveats` section is appended ONLY when drafts genuinely disagreed
-on facts or a tool-grounded draft explicitly noted incomplete evidence —
+on facts or the observed tool activity exposes incomplete evidence —
 it's not a required section.
 
 The original conversation's system messages (datetime, memory recall,
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import Counter
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -61,10 +62,32 @@ def _format_drafts_for_synth(
             parts.append(f"\n--- draft {i} (model={d.get('model')}) — empty ({err or 'no content'})")
             continue
         shown += 1
-        tool_rounds = int(d.get("tool_rounds", 0) or 0)
-        tool_tag = f" [tool-grounded: {tool_rounds} rounds]" if tool_rounds > 0 else ""
         parts.append(f"\n--- draft {i} (model={d.get('model')}, "
-                     f"elapsed={d.get('elapsed_s', 0)}s){tool_tag} ---\n{content}")
+                     f"elapsed={d.get('elapsed_s', 0)}s) ---")
+        tool_calls = d.get("tool_calls") or []
+        if tool_calls or d.get("tool_rounds"):
+            successful = Counter(r["name"] for r in tool_calls if not r.get("is_error"))
+            failed = Counter(r["name"] for r in tool_calls if r.get("is_error"))
+            parts.append("OBSERVED TOOL ACTIVITY (not claim verification):")
+            for label, counts in (("Successful calls", successful), ("Failed calls", failed)):
+                names = ", ".join(f"{name} × {count}" for name, count in counts.items())
+                parts.append(f"{label}: {names or 'none recorded'}")
+            retrieved = d.get("retrieved") or []
+            parts.append(f"Recorded public source identities: {len(retrieved)} "
+                         "(does not describe private file or other tool results).")
+            reference_tools = {"reference_lookup", "reference_search", "read_reference"}
+            if reference_tools.intersection(successful.keys() | failed.keys()):
+                reference_sources = [
+                    row for row in retrieved
+                    if row.get("tool") in {"reference_search", "read_reference"}
+                ]
+                if not reference_sources:
+                    parts.append(
+                        "OWNED-REFERENCE LIMITATION: no retrieved reference passage or page "
+                        "is recorded. Catalog metadata does not establish document contents; "
+                        "substantive rules, amounts and changes remain unverified."
+                    )
+        parts.append(content)
     if shown == 0:
         parts.append("\n[no drafts produced usable output]")
     # Phase-12 instrumentation: emit a parseable line so

@@ -405,7 +405,8 @@ weakens the protected row or any uploaded file. Unsent text is preserved; existi
 attachments are removed from the replacement with a visible notice. After the
 first message/run, Private remains locked through reload. A Private Project keeps
 its protection; explicitly leave that Project before changing processing mode.
-Private uses the same portrait asset as the legacy Local workflow. UI/API permit
+Private uses the previously unused Audrey portrait with the dark hat and
+sunglasses (`audrey5.png`); legacy Local keeps its existing asset. UI/API permit
 assignment only to an owned matching Private Project. Uploads automatically use protected
 processing; its picker offers only ready Private documents. Ordinary chat pickers
 exclude those documents, and backend read guards enforce the same restriction.
@@ -453,8 +454,16 @@ Admin model ordering/role grants and `/v1`/Hermes behavior remain unchanged.
 No tax-specific Project fields, schema migration or new model is introduced.
 
 Private Project upload/context/reopen/file-isolation acceptance is complete.
-The followup changes only draft selection, deletion navigation, portrait and
-cloud configuration. No Project/IRS upload, reindex or migration needs repeating.
+Draft selection, deletion navigation and the MiniMax cloud addition are accepted.
+The portrait/history followup does not require repeating Project uploads,
+indexing or migration. Tool activity and catalog metadata must not be presented
+to synthesis as proof that factual claims were verified. Synthesis now receives
+successful/failed tool counts and an explicit limitation when reference calls
+returned no passage/page evidence. Reference guidance recommends page reads
+only when those tools are actually available; it adds no forced call or new
+model. The reported failed-search conversation was deleted, so its failure
+cause is unavailable. Only current-catalog search is published; lookup/read
+access to retained earlier editions does not imply a prior search index.
 The main plan owns the remaining queue; no temporary smoke document is retained.
 
 ### Tax review and longer Private task contracts (planned)
@@ -567,6 +576,18 @@ age/blindness qualifiers and the January-1 age convention; investigate the owned
 Publication 4012 / Rev. Proc. 2025-32 section 4.14 discrepancy before presenting
 a definitive threshold. A retrieved table alone does not resolve conflicting
 sources. Longer review must demonstrate improvements against these known gaps.
+
+The reported 2025-versus-2024 comparison is another known-answer case: failed
+content searches plus successful catalog lookups did not support its claims.
+Check the actual cited sections for each year. Personal exemptions were not
+restored; the 2025 basic standard deduction is $15,750 single / $31,500 joint;
+qualified tips/overtime deductions have limits and conditions; and the maximum
+2025 EITC for three or more qualifying children is $8,046, without the claimed
+per-child bonuses. These expectations come from
+[Publication 1321 (2025), PDF page 4](https://www.irs.gov/pub/irs-access/p1321_accessible.pdf),
+[IRS 2025 deduction guidance](https://www.irs.gov/forms-pubs/how-to-update-withholding-to-account-for-tax-law-changes-for-2025)
+and [IRS EITC tables](https://www.irs.gov/credits-deductions/individuals/earned-income-tax-credit/earned-income-and-earned-income-tax-credit-eitc-tables).
+A prompt or plumbing fix alone does not close this accuracy case.
 
 Official design references: [IRS document-gathering guidance](https://www.irs.gov/filing/gather-your-documents)
 for the inventory/interview, [Publication 17 overview](https://www.irs.gov/forms-pubs/about-publication-17)

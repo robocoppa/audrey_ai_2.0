@@ -14,7 +14,11 @@ Deleting an unselected sidebar chat preserves the currently open conversation.
 
 The desktop sidebar starts with one full-width **New conversation** action.
 Workspace, the sidebar username, and the old Files/+ New pair are removed.
-Conversation history scrolls independently below the primary action.
+Conversation history scrolls independently below the primary action. Rows use
+last-message time (creation time for an empty draft), newest first, matching
+the server list. New and resumed chats rise immediately after message activity;
+selection and metadata-only changes do not promote an older chat. Stale title
+or detail responses cannot erase a newer known message timestamp.
 Private conversation rows use a subtle red background, with stronger hover and
 selected states, in desktop history and the mobile drawer, including Archived.
 

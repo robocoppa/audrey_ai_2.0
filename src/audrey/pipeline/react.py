@@ -46,7 +46,12 @@ import httpx
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.pipeline.fair_gate import FairLocalGate
-from audrey.pipeline.prompts import REACT_FINAL_ANSWER_USER, prompt_from_config
+from audrey.pipeline.prompts import (
+    REACT_FINAL_ANSWER_USER,
+    prompt_from_config,
+    reference_tool_guidance,
+    with_task_role,
+)
 from audrey.pipeline.run_observations import RunEventToolObserver
 from audrey.processing_policy import current_processing_policy
 from audrey.tools.discovery import ToolRegistry
@@ -602,7 +607,11 @@ async def run_react(
     memory) are free/local and never capped.
     """
     tools = registry.to_ollama_tools() if registry.by_name else None
-    convo: list[dict[str, Any]] = list(messages)
+    # Added after routing so reference guidance does not alter complexity gates.
+    # Keep all system messages before conversation turns for model templates.
+    convo: list[dict[str, Any]] = list(with_task_role(
+        messages, reference_tool_guidance(set(registry.by_name)),
+    ))
     all_results: list[ToolResult] = []
     rounds_used = 0
     last_resp: dict[str, Any] = {}
