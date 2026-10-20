@@ -10,6 +10,8 @@ import {
   removeProjectFile,
   updateProject,
   uploadFile,
+  uploadPrivateProjectFile,
+  PRIVATE_DOCUMENT_EXTENSIONS,
   uploadPrecheck,
   type AudreyFile,
   type AudreyProject,
@@ -36,14 +38,17 @@ const PROJECT_FILE_FOLDERS: ReadonlyArray<{
 
 export function NewProjectDialog({
   limits,
+  privateAvailable,
   onClose,
   onCreated,
 }: {
   limits: ProjectLimits;
+  privateAvailable: boolean;
   onClose: () => void;
   onCreated: (project: AudreyProject) => void;
 }) {
   const [name, setName] = useState("");
+  const [modelId, setModelId] = useState<"auto" | "private">("auto");
   const [instructions, setInstructions] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -70,7 +75,7 @@ export function NewProjectDialog({
     setSaving(true);
     setError("");
     try {
-      onCreated(await createProject(projectName, instructions.trim()));
+      onCreated(await createProject(projectName, instructions.trim(), modelId));
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
@@ -110,6 +115,20 @@ export function NewProjectDialog({
               required
             />
           </label>
+          {privateAvailable ? (
+            <fieldset className="project-processing-choice">
+              <legend>Processing</legend>
+              <div>
+                <button type="button" aria-pressed={modelId === "auto"} onClick={() => setModelId("auto")} disabled={saving}>
+                  <strong>Auto</strong><span>Available local and cloud models</span>
+                </button>
+                <button type="button" aria-pressed={modelId === "private"} onClick={() => setModelId("private")} disabled={saving}>
+                  <strong>Private</strong><span>Local models and document tools</span>
+                </button>
+              </div>
+              <p>This choice applies to every conversation and file in the project and cannot be changed later.</p>
+            </fieldset>
+          ) : null}
           <label>
             <span>Project instructions <small>Optional</small></span>
             <textarea
@@ -173,6 +192,7 @@ export function ProjectHome({
   const [uploadNotice, setUploadNotice] = useState("");
   const [error, setError] = useState("");
   const projectUploadRef = useRef<HTMLInputElement>(null);
+  const isPrivate = project.private_required === true;
 
   useEffect(() => {
     setName(project.name);
@@ -237,7 +257,7 @@ export function ProjectHome({
     setCreatingConversation(true);
     setError("");
     try {
-      onConversationCreated(await createProjectConversation(project.id, defaultModelId));
+      onConversationCreated(await createProjectConversation(project.id, isPrivate ? "private" : defaultModelId));
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
@@ -292,14 +312,19 @@ export function ProjectHome({
     try {
       const library = await listFiles();
       for (const file of chosen) {
-        const precheck = uploadPrecheck(file, library.limits);
+        const precheck = uploadPrecheck(file, library.limits, isPrivate);
         if (precheck) throw new Error(`${file.name}: ${precheck}`);
         setUploadingName(file.name);
         setUploadProgress(0);
-        const uploaded = await uploadFile(file, library.limits, setUploadProgress);
-        const relation = await addProjectFile(project.id, uploaded.id);
-        if (relation.status !== "ready") processing += 1;
-        nextFiles = [relation, ...nextFiles];
+        if (isPrivate) {
+          await uploadPrivateProjectFile(project.id, file, library.limits, setUploadProgress);
+          nextFiles = (await listProjectFiles(project.id)).items;
+        } else {
+          const uploaded = await uploadFile(file, library.limits, setUploadProgress);
+          const relation = await addProjectFile(project.id, uploaded.id);
+          if (relation.status !== "ready") processing += 1;
+          nextFiles = [relation, ...nextFiles];
+        }
         onFilesChange(nextFiles);
       }
       setUploadNotice(
@@ -318,10 +343,10 @@ export function ProjectHome({
   }
 
   return (
-    <div className="project-home">
+    <div className="project-home" data-private={isPrivate ? "true" : undefined}>
       <header className="project-home-header">
         <div>
-          <span>Project</span>
+          <span>{isPrivate ? "Private project" : "Project"}</span>
           <h1>{project.name}</h1>
           <p>{project.instructions || "No project instructions yet."}</p>
         </div>
@@ -390,6 +415,7 @@ export function ProjectHome({
                 <li className="conversation-row" key={conversation.id}>
                   <button
                     className="conversation project-home-conversation"
+                    data-private={conversation.private_required ? "true" : undefined}
                     type="button"
                     onClick={() => onConversationSelected(conversation)}
                     title={conversation.title || "New conversation"}
@@ -414,12 +440,15 @@ export function ProjectHome({
             <small>{files.length}/{limits.max_files}</small>
           </header>
           <p className="project-panel-copy">
-            Upload here or select Ready files already in My Files. Processing uploads become shared context when Ready.
+            {isPrivate
+              ? "Local models use this project's instructions and ready Private documents. Upload a text document or choose from your Private files."
+              : "Upload here or select Ready files already in My Files. Processing uploads become shared context when Ready."}
           </p>
           <div className="project-file-actions">
             <input
               ref={projectUploadRef}
               type="file"
+              accept={isPrivate ? PRIVATE_DOCUMENT_EXTENSIONS.join(",") : undefined}
               multiple
               hidden
               disabled={uploadingFiles || files.length >= limits.max_files}
@@ -473,7 +502,7 @@ export function ProjectHome({
       <section className="project-danger-zone" aria-labelledby="delete-project-title">
         <div>
           <h2 id="delete-project-title">Delete project</h2>
-          <p>Conversations and files will be kept. Conversations return to ordinary history.</p>
+          <p>Conversations and files will be kept. Conversations return to your chat history with their processing setting unchanged.</p>
         </div>
         {confirmingDelete ? (
           <div className="project-delete-confirmation" role="alert">
@@ -534,7 +563,9 @@ function ProjectFilePicker({
     let active = true;
     listFiles()
       .then((listing) => {
-        if (active) setFiles(listing.items.filter(({ status }) => status === "ready"));
+        if (active) setFiles(listing.items.filter((file) => file.status === "ready"
+          && Boolean(file.private_required) === Boolean(project.private_required)
+          && (!project.private_required || file.kind === "text")));
       })
       .catch((reason: unknown) => {
         if (active) setError(messageOf(reason));
@@ -543,7 +574,7 @@ function ProjectFilePicker({
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, []);
+  }, [project.private_required]);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -597,7 +628,7 @@ function ProjectFilePicker({
           <button className="file-manager-close" type="button" onClick={onClose} disabled={mutatingId !== null} aria-label="Close project files">×</button>
         </header>
         <p className="project-file-picker-copy">
-          Select Ready files from My Files. {selected.length} of {limits.max_files} selected.
+          Select Ready {project.private_required ? "Private documents" : "files"} from My Files. {selected.length} of {limits.max_files} selected.
         </p>
         {error ? <p className="file-manager-error" role="alert">{error}</p> : null}
         {loading ? <p className="file-manager-status" role="status">Loading ready files…</p> : null}
@@ -605,7 +636,7 @@ function ProjectFilePicker({
           <div className="file-explorer">
             <aside className="file-explorer-sidebar" aria-label="Project file folders">
               <span>My Files</span>
-              {PROJECT_FILE_FOLDERS.map((folder) => {
+              {PROJECT_FILE_FOLDERS.filter((folder) => !project.private_required || ["all", "text"].includes(folder.kind)).map((folder) => {
                 const count = folder.kind === "all"
                   ? files.length
                   : files.filter(({ kind: fileKind }) => fileKind === folder.kind).length;

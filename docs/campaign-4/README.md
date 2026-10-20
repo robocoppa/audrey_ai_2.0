@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 19, 2026.** English user input only. Passed work stays closed.
+**Updated October 20, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -9,116 +9,21 @@ they are not ongoing task lists.
 
 ## Current work
 
-- **20 — reference libraries and private tax assistance:** public collection
-  is sufficient to proceed: logs confirm 26,706 downloaded/verified PDFs; the
-  only known source failure is the corrupt 1976 Form 940. No further broad run.
-  **20B.1 accepted October 14:** named IRS catalog, exact lookup and bounded page reading.
-  Models see current official editions by default; explicit historical access
-  is limited to the most recent five years (2022–2026). Older originals remain
-  outside the accessible library. Tax-year applicability is verified separately
-  from catalog/revision dates. Deployed tools, page citations and historical
-  refusal are user-accepted. **20B.2 published October 18:** 2,406 current-catalog
-  PDFs and 62,704 verified chunks, with zero pending documents. Publication 1304
-  recovered. Publication 5902 is the sole approved content-search gap; its original
-  remains available and incomplete coverage is disclosed. **20B.2 browser retrieval
-  accepted October 18:** matching source pages/year and correct tool calls.
-  Answer conditions and conflicting source figures remain 20E accuracy cases.
-  **20C.1–3 accepted/deployed:** immutable model/tool policy and durable
-  conversation/file restrictions. **20C.4–6 built; document/calculator step passed:**
-  verified native runtime, protected document ingestion and the **Private**
-  model-picker workflow. The Private IRS failure exposed an optional-planner
-  unavailability fallback defect; its fix awaits the targeted retry. Refresh/
-  reopen and ordinary-chat file isolation still await confirmation. Private
-  sidebar chats now have a subtle red tint. Local model calls, summaries,
-  embeddings and tools stay in the protected path. Private files use isolated collections; ordinary
-  chats cannot reuse them. Canonical history stays local, shared memory is off,
-  and protected logs/tracing omit contents. Explicit selection before the first
-  message establishes the durable restriction; no detector or extra tool picker.
-  The first release supports text documents, calculations/tables and owned IRS
-  retrieval. Projects, visual/media processing, URL imports and OCR remain
-  refused until their protected paths exist. Next, Private replaces Local for
-  new native choices once protected Projects are ready; legacy Local
-  conversations/API and Hermes keep their meaning. Cloudflare handles browser transport.
-  [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds
-  the contract and remaining privacy/tax workflow. State jurisdictions remain
-  unspecified; fine-tuning requires evidence.
+**20D.1 — Private Projects and native model choices:** built; browser acceptance
+is next. Project uploads/context stay protected, conversations inherit Private,
+and new native choices use Private in place of Local. Existing Local history and
+working compatibility APIs keep their meaning. [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md)
+contains the implementation contract; the build queue below is the only todo list.
 
-- **Embeddings:** the broad Qwen migration and the later history-only Nomic
-  restoration are deployed and user-accepted. October 17 acceptance passed the
-  arithmetic paraphrase and absent-calculation checks; do not repeat them or
-  either migration. Documents, files, references and memories retain Qwen4;
-  history uses pinned Nomic/768 with its own readiness and formatting.
-  **Document double-check completed October 17:** matched measurements with
-  reference and actual upload chunk layouts support retaining Qwen for documents.
-  All requests completed; unsupported-detail rejection remains a quality limit
-  for every model. No threshold or model change follows. Reused public questions
-  do not establish independent new-topic evidence. [Phase 06](phase-06-system-one-routing.md)
-  holds the contract; measurements and limits are in MODEL-FACTS. The existing-file
-  browser check remains unreported; IRS retrieval acceptance stays closed.
-  Router assessment stays closed: retain Qwen 3.5 4B.
+**Accepted:** Private document summary/calculator and the October 20 IRS retry
+(owned lookup/read, cited Publication 17 page 1, tax year 2025). The optional
+planner fallback is deployed and that failed IRS case is closed. The next Project
+browser check also covers the unreported refresh and ordinary-file-isolation steps.
+Do not repeat the accepted IRS prompt, collector, index or embedding migrations.
 
-- **11 — file upload presentation:** built; browser acceptance pending. My Files
-  puts the wider video-link form on the left and compact device upload on the
-  right, with matching field heights, a plus chooser and captions below the
-  fields. Actions align; mobile stacks the forms. My Files, chat and
-  Project uploads show transfer completion followed by explicit Processing
-  status while awaiting the server. The chooser alone needs `audrey-ui`; the current Private
-  release rebuilds `audrey`, `custom-tools` and `audrey-ui`. Phase 11 holds the
-  interaction contract; the Private processing queue remains unchanged.
-
-- **19 — deeper evidence tools:** complete; user accepted all five tools October 13.
-  [Phase 19](phase-19-evidence-tools.md) defines calculator/conversions, CSV/XLSX
-  analysis, PDF-page inspection, previous-conversation reading and video-frame
-  inspection. Existing chat disclosures show their activity.
-
-- **12 — compact/mobile navigation:** unified left drawer built; browser
-  acceptance pending. Header: Menu, builtryte logo, New chat. Drawer: Username -
-  My chats, search, Active/Archived, and history. The uniform bottom group holds
-  collapsible My projects with a plus button and separators, My Files, Admin Panel,
-  then Log out; expanded projects scroll independently. Right swipe archives/restores; left reveals
-  Delete/Cancel. Project sits beside Model; empty/short chats have no jump arrow. Loading periods
-  animate, profile avoids field autofocus, and pull-to-refresh requires a
-  deliberate downward pull followed by release. Desktop Archive/Delete and
-  composer controls are larger; Model focus highlights only the outer control.
-  Async history actions preserve a chat selected while the request is pending.
-  Latest polish: Cloudflare bootstrap shows **Processing Cloudflare Authentication**
-  / **Please wait...**. Its portrait rim fills/erases in 60-second passes;
-  ordinary loading uses two-second passes. The small orb is partly hidden
-  by the photo, with backlight against its edge. Main portrait hover adds that
-  close glow without brightening the photo. Projects uses a shared layers icon; the desktop divider
-  follows the sidebar edge with balanced logo spacing and **AUDREY** in spaced
-  capitals, with a larger initial A and a softer slate color.
-  These UI changes rebuild `audrey-ui`; laptop verification passed, latest Tower
-  deployment and browser acceptance are unconfirmed.
-- **Course review:** the platform and system-map reviews are recorded in
-  the local, gitignored [AUDIT](../lesson-ai/AUDIT.md). The current checkout
-  requires rebuilding `audrey`, `custom-tools`, and `audrey-ui` after pull;
-  deployment remains pending. Memory backup operation and verification are in
-  the [backup guide](../reference/box-operations.md#10-memory-backups-and-isolated-restore-verification).
-- **3D.6 — native automatic English skill selection:** built; deployed
-  document/video selection and successful video file reads are confirmed.
-  `skills.auto_select: true` is now the repository default at the user's request,
-  matching Tower's enabled setting. Deterministic rules use ready owned attachment
-  and Project metadata; explicit choices win and unclear targets abstain.
-  Remaining browser acceptance is pending.
-- **Composer/provenance followup:** built, awaiting browser acceptance. All four
-  composer pickers use matching dark overlays directly above their controls,
-  overlapping the message field without shifting the composer or portrait.
-  Model aligns left, Tools right, Files/Project centered, with viewport clamping. Sources, Models,
-  and Tool calls stay
-  beside each completed answer immediately, even with progress display off.
-  Kimi K3 is included in the tool capability gate used by native panel workers.
-- **18A — admin controls and project presentation:** accepted October 7.
-- **Closed by the user October 7:** old domain cleanup and the model/runtime
-  evidence and traffic-analysis followups. These require no further campaign
-  work or testing; do not manufacture new measurements for the model ledger.
-- Existing native features, 13A–13F, accounts/tokens, Projects, telemetry, and
-  the Grafana model dashboard remain accepted. 17B reasoning controls are built;
-  their live API acceptance and benefit to the existing Hermes adapter remain
-  unverified, with no further bot integration work queued.
-- **Deferred by the user:** password login, Tailscale repair, and 17D Responses
-  tool contracts / catalog expansion. Keep current Cloudflare sign-in and the
-  working Hermes adapter and settings.
+**Model/storage decisions remain settled:** Qwen3 Embedding 4B serves documents,
+files, references and memory; pinned Nomic serves history. Router remains Qwen3.5
+4B. Evidence and limits live in the phase contracts/model ledger, not this queue.
 
 ## Phases
 
@@ -143,40 +48,36 @@ they are not ongoing task lists.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A/20B accepted; 20C.1–3 accepted/deployed; 20C.4–6 built; document/calculator passed, remaining browser checks pending |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Private document/calculator + IRS accepted; Private Projects/chooser built; tax review next |
 
-## Remaining work
+## Build queue
 
-1. Document comparison is complete; retain Qwen for documents and Nomic for
-   history. Preserve accepted history/memory checks. New conversation focus and
-   the existing-file browser check remain unreported. The current-catalog IRS
-   index and cited-search browser check are accepted, with the approved
-   Publication 5902 search gap. Accept the first native Private chat/document
-   flow after the planner fix. Then enable protected Projects and consolidate
-   new native Local choices into Private; add the dedicated tax_review tool/case
-   checklist; establish a foreground review baseline; add durable resumable
-   Private tasks and bounded evidence-check/repair loops; compare their accuracy
-   in 20E before extending defaults. Phase 20 owns the slice contracts. OCR/media
-   support waits for an actual case; no detector or broad worker build is queued.
-   Broad collection and both migrations stay complete; no repeat is queued.
-2. Confirm Tower deployment and close pending targeted acceptance for the
-   current course-reviewed work. The local, gitignored [AUDIT](../lesson-ai/AUDIT.md)
-   holds its review record; the [operations guide](../reference/box-operations.md#10-memory-backups-and-isolated-restore-verification)
-   holds the backup check. Reuse passed checks instead of restarting the suites.
-3. Accept the latest branding and compact/mobile layout: stylistic **AUDREY** label,
-   balanced desktop divider, Cloudflare loading message, distinct Projects icon,
-   left menu/footer, chat swipes, New chat, Project beside Model, empty-screen fit,
-   profile keyboard behavior, normal scrolling, and deliberate pull-to-refresh.
-   No upload or scripted live eval is required for these UI checks.
-4. Accept the shared composer overlays and immediate per-answer tool summaries in
-   the browser, reusing the existing Ready video. Recorded video reads are passed;
-   the remaining defect was their display, not missing tool execution.
-5. Close remaining 3D.6 browser acceptance. Activation is already approved and
-   recorded in config. Passed work remains closed.
+- [x] **20A–20B:** owned IRS library, published search and cited retrieval.
+- [x] **20C:** Private document/calculator flow and successful IRS retry; planner
+  fallback and consistent durable admission are in place.
+- [ ] **20D.1 — current browser gate:** Private Projects, direct protected upload,
+  project evidence, refresh/isolation and Local-to-Private new-choice consolidation.
+- [ ] **20D.2:** dedicated `tax_review` tool with saved facts, evidence, missing
+  items and a deterministic case checklist.
+- [ ] **20D.3:** one complete foreground tax review and a known-answer baseline.
+- [ ] **20D.4:** durable Private tasks, checkpoints, progress, cancel and resume.
+- [ ] **20D.5:** bounded local evidence verification and targeted repair loops.
+- [ ] **20E:** compare single-pass and extended accuracy before extending defaults.
 
-Domain cleanup and operational evidence/traffic followups are closed by user
-confirmation. Password login, Tailscale, 17D, and further Hermes changes stay deferred. 17C is
-only a future diagnostic note for an actual reported failure.
+Tax year/jurisdiction and reference release belong to the case record; 20D.1 does
+not add premature tax-specific Project fields. OCR/media, fine-tuning and state
+source adapters wait for a concrete supported case. English-only scope remains.
+
+Older unreported browser polish is grouped in the existing phase contracts:
+[Files](phase-11-native-file-explorer.md), [navigation](phase-12-sidebar-navigation.md),
+[composer](phase-15-composer-and-projects.md), [provenance](phase-10-ordinary-answer-provenance.md)
+and [skills](phase-03-skills.md). Observe them during normal use; they do not reopen
+passed ingestion, retrieval or model checks. The existing-file browser check and
+memory-backup operation remain unreported in their owning references. No extra
+smoke document or separate todo file is needed.
+
+Domain cleanup is closed. Password login, Tailscale, 17D and further Hermes work
+remain deferred. 17C is a future diagnostic note for an actual reported failure.
 
 ## Standing decisions
 

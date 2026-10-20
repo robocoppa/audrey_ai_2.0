@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -22,7 +22,9 @@ from audrey.app_state import (
 )
 from audrey.auth import require_scope
 from audrey.identity import Principal
-from audrey.processing_policy import ProcessingPolicyError
+from audrey.kb.private_documents import private_text_collection
+from audrey.private_processing import prepare_native_private_runtime
+from audrey.processing_policy import ProcessingPolicyError, processing_scope
 from audrey.routes.app import files as native_files
 from audrey.routes.app.conversations import (
     ConversationListResponse,
@@ -49,6 +51,7 @@ class ProjectCreateRequest(BaseModel):
 
     name: str = Field(min_length=1, max_length=PROJECT_NAME_MAX_CHARS)
     instructions: str = Field(default="", max_length=PROJECT_INSTRUCTIONS_MAX_CHARS)
+    model_id: Literal["auto", "private"] = "auto"
 
 
 class ProjectPatchRequest(BaseModel):
@@ -70,6 +73,7 @@ class ProjectPatchRequest(BaseModel):
 
 
 class ProjectResponse(BaseModel):
+    private_required: bool = False
     id: str
     name: str
     instructions: str
@@ -132,6 +136,7 @@ def _store(request: Request) -> ApplicationStore:
 def _project_response(record: ProjectRecord) -> ProjectResponse:
     return ProjectResponse(
         id=record.project_id,
+        private_required=record.private_required,
         name=record.name,
         instructions=record.instructions,
         created_at=record.created_at,
@@ -179,11 +184,14 @@ async def create_project(
     request: Request,
     principal: Principal = Depends(_project_access),
 ) -> ProjectResponse:
+    if payload.model_id == "private":
+        await _selected_model(request, principal, "private")
     try:
         record = await _store(request).projects.create(
             user_id=principal.user_id,
             name=payload.name,
             instructions=payload.instructions,
+            private_required=payload.model_id == "private",
         )
     except InvalidProjectStateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -322,30 +330,70 @@ async def add_project_file(
     request: Request,
     principal: Principal = Depends(_project_access),
 ) -> ProjectFileResponse:
-    row = await native_files._owned_row(request, principal, payload.file_id)
-    native_files._assert_model_reuse_allowed(row)
-    if row.status not in {"ready", "pending", "processing"}:
-        raise HTTPException(
-            status_code=422,
-            detail="Project files must be ready or processing.",
-        )
+    project = await _owned_project(request, principal, project_id)
+    runtime = None
+    if project.private_required:
+        await _selected_model(request, principal, "private")
+        try:
+            runtime = await prepare_native_private_runtime(request.app)
+        except ProcessingPolicyError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
     try:
-        relation = await _store(request).projects.add_file(
-            user_id=principal.user_id,
-            project_id=project_id,
-            file_id=payload.file_id,
-        )
+        if runtime is None:
+            row = await native_files._owned_row(request, principal, payload.file_id)
+            native_files._assert_model_reuse_allowed(row)
+            if row.status not in {"ready", "pending", "processing"}:
+                raise HTTPException(status_code=422, detail="Project files must be ready or processing.")
+            relation = await _store(request).projects.add_file(
+                user_id=principal.user_id, project_id=project_id, file_id=payload.file_id,
+            )
+        else:
+            with processing_scope(runtime.policy):
+                async with request.app.state.file_operation_locks.hold(payload.file_id):
+                    row = await native_files._owned_row(request, principal, payload.file_id)
+                    await _validate_private_project_file(request, principal, row)
+                    relation = await native_files.upload_routes._settle_private_persistence(
+                        _store(request).projects.add_file(
+                            user_id=principal.user_id, project_id=project_id,
+                            file_id=payload.file_id, file_is_private=True,
+                        )
+                    )
+                    # Deletion marks its tombstone before waiting on this lock.
+                    # Never leave a new link to a source concurrently removed.
+                    try:
+                        await _validate_private_project_file(request, principal, row)
+                    except HTTPException:
+                        await _store(request).projects.prune_file(
+                            user_id=principal.user_id, project_id=project_id,
+                            file_id=payload.file_id,
+                        )
+                        raise
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found.") from exc
     except ProcessingPolicyError as exc:
         raise HTTPException(
             status_code=409, detail={"error": exc.code, "message": str(exc)}
         ) from exc
-    except ProjectFileConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except ProjectFileLimitError as exc:
+    except (ProjectFileConflictError, ProjectFileLimitError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _project_file_response(relation, row)
+
+
+async def _validate_private_project_file(
+    request: Request, principal: Principal, row: native_files.upload_routes.FileRow,
+) -> None:
+    """Read authoritative upload metadata inside the shared per-file lock."""
+    owned = await request.app.state.uploads_db.get_upload(row.file_id)
+    if not owned or owned.get("user") != principal.storage_namespace:
+        raise HTTPException(status_code=404, detail="File not found.")
+    if (
+        not owned.get("private_required") or owned.get("kind") != "text"
+        or owned.get("collection") != private_text_collection(principal.storage_namespace)
+        or owned.get("status") != "ready" or owned.get("source_freed_at")
+    ):
+        raise HTTPException(
+            status_code=409, detail="Private Projects require ready Private text documents.",
+        )
 
 
 @router.delete("/{project_id}/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -377,13 +425,18 @@ async def create_project_conversation(
     request: Request,
     principal: Principal = Depends(_project_access),
 ) -> ConversationResponse:
-    await _owned_project(request, principal, project_id)
+    project = await _owned_project(request, principal, project_id)
     requested_model = (
         payload.default_mode if "default_mode" in payload.model_fields_set else payload.model_id
     )
+    explicit = bool({"model_id", "default_mode"} & payload.model_fields_set)
+    if project.private_required:
+        if explicit and requested_model != "private":
+            raise HTTPException(status_code=409, detail="This Project requires Private conversations.")
+        requested_model = "private"
+    elif requested_model == "private":
+        raise HTTPException(status_code=409, detail="Start a Private Project for Private conversations.")
     model = await _selected_model(request, principal, requested_model or "auto")
-    if model.id == "private":
-        raise HTTPException(status_code=409, detail="Private Project conversations are not available yet.")
     try:
         record = await _store(request).conversations.create(
             user_id=principal.user_id,
@@ -391,6 +444,7 @@ async def create_project_conversation(
             default_mode=model.mode,
             default_model_id=model.id,
             project_id=project_id,
+            private_required=project.private_required,
         )
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found.") from exc

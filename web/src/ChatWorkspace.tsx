@@ -88,6 +88,10 @@ const PRIVATE_MODEL: AudreyModel = {
   enabled: true, audience: "users", visibility: "public", roles: ["users"], portrait_url: "",
 };
 
+const LEGACY_LOCAL_MODEL: AudreyModel = {
+  ...PRIVATE_MODEL, id: "local", label: "Local", description: "Local model workflow.",
+};
+
 const MODEL_PORTRAITS: Readonly<Record<string, string>> = {
   auto: autoPortrait,
   fast: fastPortrait,
@@ -847,6 +851,7 @@ export function ChatWorkspace({
                         >
                           <button
                             className={conversation.id === selectedId ? "project-conversation active" : "project-conversation"}
+                            data-private={conversation.private_required ? "true" : undefined}
                             type="button"
                             onClick={() => openConversation(conversation)}
                             aria-current={conversation.id === selectedId ? "page" : undefined}
@@ -924,6 +929,7 @@ export function ChatWorkspace({
       {newProjectOpen ? (
         <NewProjectDialog
           limits={projectLimits}
+          privateAvailable={models.some(({ id }) => id === "private")}
           onClose={closeNewProject}
           onCreated={projectCreated}
         />
@@ -1179,9 +1185,11 @@ function ConversationThread({
 }) {
   const [thread, setThread] = useState<ThreadState>({ status: "idle" });
   const privateRequired = conversation.private_required === true || conversation.default_model_id === "private";
-  const conversationModels = privateRequired ? [models.find(({ id }) => id === "private") ?? PRIVATE_MODEL] : models;
+  const conversationModels = privateRequired ? [models.find(({ id }) => id === "private") ?? PRIVATE_MODEL]
+    : conversation.default_model_id === "local" && !models.some(({ id }) => id === "local")
+      ? [...models, LEGACY_LOCAL_MODEL] : models;
   const [modelId, setModelId] = useState(
-    models.some(({ id }) => id === conversation.default_model_id)
+    conversationModels.some(({ id }) => id === conversation.default_model_id)
       ? conversation.default_model_id
       : (models.find(({ id }) => id === "auto") ?? models[0]).id,
   );
@@ -1200,7 +1208,7 @@ function ConversationThread({
   const onConversationChangeRef = useRef(onConversationChange);
   useEffect(() => { onConversationChangeRef.current = onConversationChange; }, [onConversationChange]);
   const archived = conversation.archived_at !== null;
-  const selectedModelId = privateRequired ? "private" : models.some(({ id }) => id === modelId)
+  const selectedModelId = privateRequired ? "private" : conversationModels.some(({ id }) => id === modelId)
     ? modelId
     : (models.find(({ id }) => id === "auto") ?? models[0]).id;
   const conversationProject = projects.find(({ id }) => id === conversation.project_id) ?? null;
@@ -1524,11 +1532,10 @@ function ConversationThread({
   );
   const projectPicker = (
     <ComposerProjectPicker
-      projects={projects}
+      projects={projects.filter((project) => Boolean(project.private_required) === privateRequired)}
       projectId={conversation.project_id ?? null}
       projectName={conversationProject?.name}
-      disabled={runActive || mutation !== null || privateRequired}
-      disabledReason={privateRequired ? "Projects are not available in Private yet." : undefined}
+      disabled={runActive || mutation !== null}
       onChange={moveToProject}
     />
   );
@@ -2411,7 +2418,7 @@ function AudreyThread({
                   </div>
                 </ComposerPrimitive.Root>
                 {isPrivate ? <p className="attachment-status">
-                  Private uses local models and tools. Documents only; web, saved memory and projects are unavailable.
+                  Private uses local models and tools. Documents and Private projects only; web, saved memory and media are unavailable.
                 </p> : null}
                 {attachmentPickerOpen ? (
                   <ComposerPickerPanel
@@ -3182,7 +3189,9 @@ function ComposerModelPicker({
   const selected = modelDetails(models, modelId);
   const { activePicker, setActivePicker } = useContext(ComposerPickerContext);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const workflowModels = models.filter(({ kind }) => kind === "workflow");
+  const hasPrivate = models.some(({ id }) => id === "private");
+  const workflowModels = models.filter(({ kind, id }) => kind === "workflow"
+    && (id !== "local" || !hasPrivate || modelId === "local"));
   const directModels = canBrowseDirectModels ? models.filter(({ kind }) => kind === "direct") : [];
   const open = !disabled && ["model", "other-models"].includes(activePicker ?? "");
   const direct = activePicker === "other-models";
@@ -3445,7 +3454,8 @@ function upsertConversation(
 }
 
 function modelLabel(models: AudreyModel[], conversation: Conversation): string {
-  if (conversation.private_required) return "Private";
+  if (conversation.private_required || conversation.default_model_id === "private") return "Private";
+  if (conversation.default_model_id === "local") return "Local";
   return models.find(({ id }) => id === conversation.default_model_id)?.label
     ?? models[0]?.label
     ?? conversation.default_mode;

@@ -113,7 +113,7 @@ test(`Private keeps local controls, protected documents and upload routing throu
   await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toBeInViewport();
   await expect(page.getByRole("button", { name: "Tools and skills: Local only" })).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
-  await expect(page.getByRole("button", { name: "Move conversation to project" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Move conversation to project" })).toBeEnabled();
   await page.getByRole("button", { name: "Audrey model", exact: true }).click();
   const models = page.getByRole("dialog", { name: "Choose an Audrey model" });
   await expect(models.getByRole("button", { name: "Private", exact: true })).toBeVisible();

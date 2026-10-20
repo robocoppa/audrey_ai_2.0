@@ -9,7 +9,7 @@ import threading
 import uuid
 
 from audrey.app_state.records import ProjectFileRecord, ProjectRecord
-from audrey.processing_policy import ProcessingPolicyError
+from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
 
 PROJECT_NAME_MAX_CHARS = 100
 PROJECT_INSTRUCTIONS_MAX_CHARS = 4_000
@@ -317,15 +317,21 @@ class ProjectsRepository:
         user_id: str,
         project_id: str,
         file_id: str,
+        file_is_private: bool = False,
     ) -> ProjectFileRecord:
-        return await asyncio.to_thread(self._add_file_sync, user_id, project_id, file_id)
+        return await asyncio.to_thread(
+            self._add_file_sync, user_id, project_id, file_id, file_is_private,
+        )
 
     def _add_file_sync(
         self,
         user_id: str,
         project_id: str,
         file_id: str,
+        file_is_private: bool,
     ) -> ProjectFileRecord:
+        if type(file_is_private) is not bool:
+            raise InvalidProjectStateError("file restriction must be a boolean")
         user_id = _required(user_id, "user id")
         project_id = _required(project_id, "project id")
         file_id = _required(file_id, "file id")
@@ -336,7 +342,10 @@ class ProjectsRepository:
                 project = self._project_row_locked(user_id, project_id)
                 if project is None:
                     raise ProjectNotFoundError("project not found")
-                if bool(project["private_required"]):
+                project_is_private = bool(project["private_required"])
+                if project_is_private != file_is_private or (
+                    project_is_private and current_processing_policy() is None
+                ):
                     raise ProcessingPolicyError("private_processing_unavailable")
                 duplicate = self._conn.execute(
                     "SELECT 1 FROM app_project_files WHERE project_id = ? AND file_id = ?",
@@ -454,6 +463,15 @@ class ProjectsRepository:
                 if project_id is not None:
                     query += " AND project_id = ?"
                     params = (*params, _required(project_id, "project id"))
+                touch_query = (
+                    "UPDATE app_projects SET updated_at = ? WHERE user_id = ? "
+                    "AND project_id IN (SELECT project_id FROM app_project_files WHERE file_id = ?)"
+                )
+                touch_params: tuple[str, ...] = (_utc_now(), user_id, file_id)
+                if project_id is not None:
+                    touch_query += " AND project_id = ?"
+                    touch_params = (*touch_params, _required(project_id, "project id"))
+                self._conn.execute(touch_query, touch_params)
                 cursor = self._conn.execute(query, params)
                 self._conn.commit()
             except BaseException:

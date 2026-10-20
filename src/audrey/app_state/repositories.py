@@ -201,7 +201,12 @@ class ConversationsRepository:
                     ).fetchone()
                     if project is None:
                         raise ProjectNotFoundError("project not found")
-                    private_required = private_required or bool(project["private_required"])
+                    project_is_private = bool(project["private_required"])
+                    if private_required and not project_is_private:
+                        raise InvalidApplicationStateError("Private conversations require a Private project.")
+                    private_required = private_required or project_is_private
+                if private_required:
+                    default_mode, default_model_id = "local", "private"
                 self._conn.execute(
                     "INSERT INTO app_conversations "
                     "(conversation_id, user_id, title, default_mode, default_model_id, "
@@ -477,7 +482,20 @@ class ConversationsRepository:
                     self._conn.rollback()
                     return None
                 private_required = bool(existing["private_required"])
-                if require_private and not private_required:
+                target_project_id = (
+                    normalized_project_id if update_project else existing["project_id"]
+                )
+                project_is_private = False
+                if target_project_id is not None:
+                    project = self._conn.execute(
+                        "SELECT private_required FROM app_projects "
+                        "WHERE user_id = ? AND project_id = ?",
+                        (user_id, target_project_id),
+                    ).fetchone()
+                    if project is None:
+                        raise ProjectNotFoundError("project not found")
+                    project_is_private = bool(project["private_required"])
+                if (require_private or project_is_private) and not private_required:
                     if self._has_active_run_locked(user_id, conversation_id):
                         raise ConversationHasActiveRunError("conversation has an active run")
                     if self._conn.execute(
@@ -485,31 +503,11 @@ class ConversationsRepository:
                         (user_id, conversation_id),
                     ).fetchone() is not None:
                         raise InvalidApplicationStateError("Start a new conversation to use Private processing.")
-                    if existing["project_id"] is not None or (update_project and normalized_project_id is not None):
-                        raise InvalidApplicationStateError("Private Project conversations are not available yet.")
                     private_required = True
-                if update_project and normalized_project_id is not None:
-                    project = self._conn.execute(
-                        "SELECT private_required FROM app_projects "
-                        "WHERE user_id = ? AND project_id = ?",
-                        (user_id, normalized_project_id),
-                    ).fetchone()
-                    if project is None:
-                        raise ProjectNotFoundError("project not found")
-                    if bool(project["private_required"]) and not private_required:
-                        if self._has_active_run_locked(user_id, conversation_id):
-                            raise ConversationHasActiveRunError(
-                                "conversation cannot become private while a run is active"
-                            )
-                        if self._conn.execute(
-                            "SELECT 1 FROM app_messages WHERE user_id = ? "
-                            "AND conversation_id = ? LIMIT 1",
-                            (user_id, conversation_id),
-                        ).fetchone() is not None:
-                            raise InvalidApplicationStateError(
-                                "start a new conversation in the private project"
-                            )
-                        private_required = True
+                    default_mode, normalized_mode = "local", "local"
+                    default_model_id, normalized_model_id = "private", "private"
+                if private_required and target_project_id is not None and not project_is_private:
+                    raise InvalidApplicationStateError("Private conversations require a Private project.")
                 if archived is True and self._has_active_run_locked(user_id, conversation_id):
                     raise ConversationHasActiveRunError(
                         "conversation cannot be archived while a run is active"
@@ -718,6 +716,7 @@ class ConversationsRepository:
         expected_project_id: str | None = None,
         enforce_project_id: bool = False,
         expected_private_required: bool = False,
+        expected_project_updated_at: str | None = None,
     ) -> StartedRun | None:
         """Create run plus user/assistant messages in one write transaction."""
 
@@ -737,6 +736,7 @@ class ConversationsRepository:
             expected_project_id,
             enforce_project_id,
             expected_private_required,
+            expected_project_updated_at,
         )
 
     def _begin_run_sync(
@@ -755,6 +755,7 @@ class ConversationsRepository:
         expected_project_id: str | None,
         enforce_project_id: bool,
         expected_private_required: bool,
+        expected_project_updated_at: str | None,
     ) -> StartedRun | None:
         user_id = _required(user_id, "user id")
         conversation_id = _required(conversation_id, "conversation id")
@@ -792,6 +793,20 @@ class ConversationsRepository:
                     raise ConversationProjectChangedError(
                         "conversation project changed while the run was starting"
                     )
+                if expected_project_updated_at is not None:
+                    project = self._conn.execute(
+                        "SELECT updated_at, private_required FROM app_projects "
+                        "WHERE user_id = ? AND project_id = ?",
+                        (user_id, actual_project_id),
+                    ).fetchone()
+                    if (
+                        project is None
+                        or str(project["updated_at"]) != expected_project_updated_at
+                        or bool(project["private_required"]) != private_required
+                    ):
+                        raise ConversationProjectChangedError(
+                            "project context changed while the run was starting"
+                        )
                 active_owner = self._conn.execute(
                     "SELECT 1 FROM app_users WHERE user_id = ? AND status = 'active'",
                     (user_id,),

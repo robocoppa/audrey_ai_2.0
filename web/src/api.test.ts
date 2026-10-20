@@ -16,6 +16,7 @@ import {
   updateConversation,
   updateConversationModel,
   uploadFile,
+  uploadPrivateProjectFile,
   type AudreyFileLimits,
 } from "./api";
 
@@ -206,6 +207,23 @@ describe("native file uploads", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("uploads a protected project document through its encoded project endpoint", async () => {
+    let onLoad: (() => void) | undefined;
+    const request = {
+      status: 200, responseText: JSON.stringify({ id: "private_file", status: "ready" }),
+      upload: { addEventListener: vi.fn() }, open: vi.fn(), setRequestHeader: vi.fn(),
+      addEventListener: vi.fn((name: string, listener: () => void) => { if (name === "load") onLoad = listener; }),
+      send: vi.fn(() => queueMicrotask(() => onLoad?.())), withCredentials: false,
+    };
+    vi.stubGlobal("XMLHttpRequest", vi.fn(function () { return request; }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await uploadPrivateProjectFile("proj / private", new File(["one"], "private.txt"), LIMITS);
+    expect(request.open).toHaveBeenCalledWith("POST", "/api/projects/proj%20%2F%20private/uploads");
+    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(uploadPrivateProjectFile("proj_private", new File(["one"], "bad.png"), LIMITS)).rejects.toThrow("Private accepts documents only");
+  });
+
   it.each([
     ["large.txt", "too large"], ["image.png", "one"], ["empty.txt", ""],
   ])("refuses unsupported Private upload %s without using any transport", async (name, content) => {
@@ -235,6 +253,15 @@ describe("owner-scoped project requests", () => {
     vi.unstubAllGlobals();
   });
 
+  it("creates a Private project with its immutable processing choice", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: "proj_private", private_required: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    await createProject("Private taxes", "Use original documents.", "private");
+    expect(fetchMock).toHaveBeenCalledWith("/api/projects", expect.objectContaining({
+      body: JSON.stringify({ name: "Private taxes", instructions: "Use original documents.", model_id: "private" }),
+    }));
+  });
+
   it("encodes project resources and sends explicit membership changes", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({})));
     vi.stubGlobal("fetch", fetchMock);
@@ -257,7 +284,7 @@ describe("owner-scoped project requests", () => {
       "/api/projects",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ name: "Launch", instructions: "Keep answers concise." }),
+        body: JSON.stringify({ name: "Launch", instructions: "Keep answers concise.", model_id: "auto" }),
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(

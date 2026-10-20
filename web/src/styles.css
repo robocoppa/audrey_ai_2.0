@@ -306,21 +306,25 @@ button:disabled {
   box-shadow: inset 0.18rem 0 0 var(--accent), var(--shadow-sm);
 }
 
-.conversation[data-private="true"] {
+.conversation[data-private="true"],
+.project-conversation[data-private="true"] {
   background: rgb(220 88 100 / 8%);
 }
 
-.conversation[data-private="true"]:hover {
+.conversation[data-private="true"]:hover,
+.project-conversation[data-private="true"]:hover {
   background: rgb(220 88 100 / 13%);
 }
 
-.conversation[data-private="true"].active {
+.conversation[data-private="true"].active,
+.project-conversation[data-private="true"].active {
   border-color: rgb(220 120 130 / 16%);
   background: rgb(220 88 100 / 17%);
   box-shadow: inset 0.18rem 0 0 rgb(220 120 130 / 75%), var(--shadow-sm);
 }
 
-.conversation[data-private="true"].active:hover {
+.conversation[data-private="true"].active:hover,
+.project-conversation[data-private="true"].active:hover {
   background: rgb(220 88 100 / 21%);
 }
 
@@ -5058,6 +5062,60 @@ a:focus-visible {
 .project-move-control select:focus-visible {
   border-color: var(--border-strong);
   box-shadow: var(--focus-glow);
+}
+
+.project-processing-choice {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.project-processing-choice legend {
+  margin-bottom: 0.5rem;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+}
+
+.project-processing-choice > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.project-processing-choice button {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  text-align: left;
+}
+
+.project-processing-choice button[aria-pressed="true"] {
+  border-color: var(--border-strong);
+  background: rgb(76 142 198 / 12%);
+  color: var(--text);
+}
+
+.project-processing-choice button:hover,
+.project-processing-choice button:focus-visible {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: var(--focus-glow);
+}
+
+.project-processing-choice button span,
+.project-processing-choice p {
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.project-processing-choice p {
+  margin: 0.55rem 0 0;
 }
 
 .project-dialog-actions,

@@ -7,10 +7,10 @@ Publication 5902 is the sole approved content-search gap: its original remains
 available and incomplete coverage is explicitly disclosed. **20B retrieval is
 accepted October 18:** correct tool calls and matching cited PDF pages/year.
 Tax accuracy remains 20E work. **20C.1–3 accepted/deployed:** shared model/tool
-policy and durable restrictions. **20C.4–6 built; browser acceptance in progress:**
+policy and durable restrictions. **20C document/calculator and IRS retry accepted October 20:**
 verified native runtime, protected document processing and Private in the model
-picker. The supported text/document path is enforced; Projects, OCR and media
-remain unavailable until their own protected processing exists.
+picker. **20D.1 built; browser gate next:** protected Projects and native Local
+choice consolidation. OCR and media remain unavailable pending a supported case.
 Qwen3 Embedding 4B remains the reference model; Nomic history and prior personal
 retrieval checks remain accepted.
 English content and requests only. Federal coverage can begin independently;
@@ -107,21 +107,13 @@ Revision date and download date never substitute for tax-year applicability.
 Unknown applicability stays explicit until established from the source.
 Chunks retain document identity and page/section; tables retain headers and units.
 
-## Build slices
+## Component contracts
 
-| Slice | Deliverable | Acceptance |
-|---|---|---|
-| 20A | Broad official IRS archive collector | Enumerate current/prior catalogs; resumable downloads; preserved revisions and checksums; clear coverage, failed/skipped items and bytes |
-| 20B | Named local reference libraries | Register IRS Federal; exact document lookup and scoped hybrid search/read; year/status filtering and page/section citations; originals accessible |
-| 20C | Enforced private processing | Local calls throughout, external content egress blocked, private reuse restrictions and sensitive logging handled; unavailable local resources fail clearly |
-| 20D | Tax Project and assistance workflow | Explicit years/jurisdictions/library release, fact interview, verified extraction, financial normalization/reconciliation and cited worksheet |
-| 20E | Tax accuracy and retrieval evaluation | Known-answer English cases prove amounts, applicable editions, eligibility/missing-fact behavior and privacy boundaries; compare local models on these tasks |
-
-20A can collect public information before private processing is ready.
-20B and 20C establish retrieval/privacy prerequisites. General Tax assistance
-availability also requires 20D and targeted 20E acceptance.
-State source adapters follow the selected jurisdiction; unsupported state
-coverage is shown explicitly and never inferred from federal references.
+The [main build queue](README.md#build-queue) owns order and status. The sections
+below define the archive, retrieval, privacy and assistance contracts. General
+Tax review availability requires its workflow and targeted accuracy acceptance.
+State adapters follow the selected jurisdiction; unsupported state coverage is
+shown explicitly and never inferred from federal references.
 
 ### 20A — archive collection
 
@@ -315,9 +307,9 @@ restriction or changing a run's snapshot.
 Run admission rechecks the expected restriction in the message-save transaction.
 Protected server-side admission additionally requires a bound processing policy.
 Ordinary admission refuses protected work before model selection, file/context
-work or title generation. The supported native Private entrypoint below supplies
-the bound policy. Private Project file linking remains refused, and standalone
-Project-context reads need the active policy. The stored restriction is derived
+work or title generation. The native Private entrypoint supplies the bound policy.
+Protected Project linking and context reads require that verified policy and
+matching durable restrictions. The stored restriction is derived
 by the server, never accepted as a caller-supplied privacy flag.
 
 Finished and interrupted private turns do not enter ordinary chat-history
@@ -398,7 +390,7 @@ before formatting; child tasks and worker threads retain the boundary. Graph
 tracing is disabled task-locally. Model/tool/data clients disable environment
 proxies and redirects; failures do not select a cloud fallback.
 
-#### 20C.6 — native Private chats (built; manual acceptance pending)
+#### 20C.6 — native Private chats (document/calculator and IRS accepted)
 
 The deployment's canonical `private_processing.enabled` exposes **Private** in
 the existing picker. It uses the installed Local panel plus verified router/title,
@@ -407,60 +399,77 @@ isolated from ordinary requests. Local and direct-model choices are unchanged.
 No sensitive-content detector or separate privacy tool selector is added.
 
 Only a new/empty conversation can become Private. Its restriction persists
-through reload and cannot be cleared by selecting another model. UI/API refuse
-Project assignment for this first release. Uploads automatically use protected
+through reload and cannot be cleared by selecting another model. UI/API permit
+assignment only to an owned matching Private Project. Uploads automatically use protected
 processing; its picker offers only ready Private documents. Ordinary chat pickers
 exclude those documents, and backend read guards enforce the same restriction.
 This is local **server processing**: browser traffic still follows the configured
 Cloudflare route, and the server administrator remains trusted. It does not claim
 an offline connection or verified tax-preparation accuracy.
 
-After normal commit/push/pull, run on **Tower**, in
-`/mnt/user/appdata/audrey_ai_2.0`:
-
-```bash
-docker compose up -d --build --force-recreate audrey custom-tools audrey-ui
-```
-
-Recreate applies canonical configuration. The sidecar rebuild uses the shared
-calculator core. No model pull, schema migration, reindex, collector or media
-worker rebuild is required. Existing accepted IRS/migration checks stay closed.
-
 Optional planning now skips protected provider unavailability and continues
 the original question through the same verified Local panel. Model, digest
 and transport-policy refusals still abort. A timed-out optional planner
-reproduced the Private IRS failure; the narrow fallback fix awaits retry.
+reproduced the Private IRS failure; the October 20 retry passed with lookup,
+page reading and the correct 2025 return year.
 Private run admission requires the durable restriction even when a caller
-submits the Private model ID directly; unsupported Project creation refuses
-it before work. Every admitted Private turn must use the bound runtime.
+submits the Private model ID directly; Project creation derives the same
+restriction from the selected workflow. Every admitted Private turn must use the bound runtime.
 
-**Browser acceptance at `https://ai.builtryte.xyz`:** the uploaded-document
-summary and calculator step passed with local model/tool disclosure. Reuse that
-conversation for the remaining checks: refresh/reopen and confirm the final
-answer and retained Private choice; use owned IRS tools to identify Publication
-17's stated tax year from PDF page 1; open an ordinary new chat and verify the
-Private document is absent from its attachment picker. No repeat upload is
-required. These checks do not establish general document or tax-answer accuracy.
+**Accepted:** the uploaded-document summary/calculator and the Private IRS
+retry. These prove those flows, not general tax-answer accuracy. Refresh and
+ordinary-picker isolation are included in the new Project gate below.
 
-After this acceptance, follow the ordered slices below. Protected Projects and
-tax-document work come first; OCR and media stay deferred until a case needs them.
+### 20D.1 — Private Projects and native model choices (built)
 
-### 20C.7–20E — tax review and longer Private tasks (planned October 20)
+Project creation offers Auto or Private and derives an immutable restriction on
+the server. Responses expose it read-only. Private Project conversations inherit
+the Private workflow; explicit ordinary/cloud choices refuse. Existing private
+conversations can attach/detach matching Projects and retain protection after
+Project deletion. Previously processed ordinary chats/files are never relabelled.
 
-**Scope:** build a dedicated tax-review tool and a reusable Private task runner,
-with tax assistance as the first workflow. Existing Private text/document and
-IRS checks must pass before extending them. This section is the implementation
-plan; the tax tool, protected Projects and resumable runner are not built yet.
+Dedicated Project uploads use verified local ingestion and link protected files
+into shared context. Uploads from a chat stay attached to that chat; they do not
+silently become shared Project files. File pickers and server-side linking require
+matching privacy, ownership and Ready text documents. A completed upload survives
+a subsequent Project-link failure safely in My Files.
 
-| Slice | Deliverable | Acceptance |
-|---|---|---|
-| 20C.7 | Finish the current Private IRS/refresh/isolation gate and entrypoint consistency fixes. Preserve the accepted document/calculator result. | The failed IRS prompt now reaches local tools; every Private admission requires its durable restriction. |
-| 20D.1 | Enable protected Projects and replace Local in new native picker choices with Private. Uploads/context/retrieval use the protected path. Preserve legacy Local IDs/history, role policy and `/v1` behavior; existing content is never relabelled Private. Store the case's explicit return year, jurisdictions and reference release. | A multi-document Private Project answers from owned evidence after refresh; legacy Local chats reopen accurately, and protected content cannot move to ordinary/cloud work. |
-| 20D.2 | Add one native **Tax review** capability backed by a typed **`tax_review`** tool and durable case record. Its checklist covers document inventory, missing facts, source verification, reconciliation and unresolved questions. | The tool produces a useful plan even when the optional small-model planner is unavailable; model proposals cannot silently become user-confirmed facts. |
-| 20D.3 | Deliver one complete foreground review: read evidence, retrieve/open applicable official guidance, calculate, verify and return a worksheet with questions. Capture this as the single-pass baseline. | Known-answer/redacted cases have correct fields, years, source locations and calculations; missing facts and conflicts remain visible. |
-| 20D.4 | Add durable Private tasks with leases/checkpoints, saved progress, Cancel and Resume. Reuse native conversations/disclosures for presentation; keep execution independent of the browser connection. | Close the browser, restart Audrey and resume from a committed step without duplicate results or loss of privacy restrictions. |
-| 20D.5 | Add a bounded investigate → verify → repair loop. Revisit only claims with missing evidence, contradictory inputs or failed calculations, using installed local models sequentially. | Additional work resolves identified gaps or stops with a specific unresolved item; repeated model agreement cannot mark an unsupported claim verified. |
-| 20E | Compare single-pass and extended review on matched cases; enable longer defaults only where measured accuracy justifies the extra time. | Field extraction, applicability, citations, arithmetic and unsupported-claim handling improve without owner/privacy regressions. |
+Preparation reads canonical protected sources and searches the isolated owner
+collection through the pinned local embedder. Settings, file membership and
+privacy are rechecked against a Project revision in the message-save transaction.
+Edits, file removal/pruning or membership changes during preparation require a
+retry before saving the question. Retrieved passages remain bounded untrusted
+evidence; initial source disclosures identify inspected Project files.
+
+New native choices show Private in place of Local when available. Saved Local
+conversations retain their actual model ID/label, including catalog omissions.
+Admin model ordering/role grants and `/v1`/Hermes behavior remain unchanged.
+No tax-specific Project fields, schema migration or new model is introduced.
+
+**Deploy on Tower after normal commit/push/pull**, in
+`/mnt/user/appdata/audrey_ai_2.0`:
+
+```bash
+docker compose up -d --build audrey audrey-ui
+```
+
+No sidecar rebuild, reindex, collector or migration is required. **Browser gate
+at `https://ai.builtryte.xyz`:** create a Private Project, upload one small
+non-sensitive TXT or selectable-text PDF directly from its screen, then start a
+conversation there. Ask a question answered by that document without attaching
+it again. Verify correct evidence, local Models/Tools/Sources and the Private
+choice. Refresh/reopen and verify the answer/Project remain. An ordinary chat's
+picker must omit the protected document. New choices show Private instead of
+Local; an existing Local conversation, if present, still shows Local. A new
+upload is required to exercise direct Project upload. The accepted IRS question
+does not need another run.
+
+### Tax review and longer Private task contracts (planned)
+
+The [main build queue](README.md#build-queue) owns status and order. The contracts
+below cover the dedicated tax-review tool and reusable Private task runner,
+with tax assistance as the first workflow. These parts are not built yet.
+OCR/media remain deferred until a case requires them.
 
 #### Tax review tool and case record
 

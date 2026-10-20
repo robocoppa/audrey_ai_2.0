@@ -191,31 +191,76 @@ async def test_private_project_inheritance_is_owner_bound_and_survives_restart(t
         reopened.close()
 
 
-async def test_private_restriction_survives_moves_detach_archive_and_model_changes(tmp_path):
+async def test_private_restriction_survives_allowed_moves_and_refuses_public_downgrades(tmp_path):
+    from types import SimpleNamespace
+
+    import httpx
+    from fastapi import FastAPI
+
+    from audrey.auth import require_principal
+    from audrey.routes.app.conversations import router
+
     store = ApplicationStore(tmp_path / "app.sqlite")
     try:
         owner = await _owner(store)
         protected = await store.projects.create(
             user_id=owner.user_id, name="Protected", private_required=True,
         )
+        second_protected = await store.projects.create(
+            user_id=owner.user_id, name="Another protected project", private_required=True,
+        )
         ordinary = await store.projects.create(user_id=owner.user_id, name="Ordinary")
         conversation = await store.conversations.create(
             user_id=owner.user_id, project_id=protected.project_id,
         )
-        for patch in (
-            {"project_id": ordinary.project_id, "update_project": True},
-            {"project_id": None, "update_project": True},
-            {"archived": True},
-            {"archived": False},
-            {"default_model_id": "cloud", "default_mode": "cloud"},
-            {"title": "Renamed"},
-        ):
-            changed = await store.conversations.update(
-                user_id=owner.user_id,
-                conversation_id=conversation.conversation_id,
-                **patch,
+        assert conversation.default_model_id == "private"
+        with pytest.raises(InvalidApplicationStateError):
+            await store.conversations.update(
+                user_id=owner.user_id, conversation_id=conversation.conversation_id,
+                project_id=ordinary.project_id, update_project=True,
             )
-            assert changed is not None and changed.private_required is True
+        retained = await store.conversations.get(
+            user_id=owner.user_id, conversation_id=conversation.conversation_id,
+        )
+        assert retained == conversation
+
+        app = FastAPI()
+        app.state.application_store = store
+        app.state.cfg = SimpleNamespace(raw={"private_processing": {"enabled": True}})
+        app.include_router(router, prefix="/api")
+        app.dependency_overrides[require_principal] = lambda: owner
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test",
+        ) as client:
+            path = f"/api/conversations/{conversation.conversation_id}"
+            for forbidden in (
+                {"project_id": ordinary.project_id},
+                {"model_id": "cloud"},
+            ):
+                refused = await client.patch(path, json=forbidden)
+                assert refused.status_code == 409, refused.text
+                unchanged = await store.conversations.get(
+                    user_id=owner.user_id, conversation_id=conversation.conversation_id,
+                )
+                assert unchanged == conversation
+            for patch in (
+                {"project_id": second_protected.project_id},
+                {"project_id": None},
+                {"archived": True},
+                {"archived": False},
+                {"title": "Renamed"},
+            ):
+                changed = await client.patch(path, json=patch)
+                assert changed.status_code == 200, changed.text
+                current = changed.json()
+                assert current["private_required"] is True
+                assert current["default_model_id"] == "private"
+                if "project_id" in patch:
+                    assert current["project_id"] == patch["project_id"]
+                if "archived" in patch:
+                    assert (current["archived_at"] is not None) is patch["archived"]
+                if "title" in patch:
+                    assert current["title"] == patch["title"]
         edited_project = await store.projects.update(
             user_id=owner.user_id, project_id=protected.project_id, name="Renamed project",
         )

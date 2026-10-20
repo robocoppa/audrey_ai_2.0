@@ -161,6 +161,15 @@ async def _selected_model(
     return model
 
 
+async def _owned_project_private(
+    request: Request, principal: Principal, project_id: str,
+) -> bool:
+    record = await _store(request).projects.get(user_id=principal.user_id, project_id=project_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    return record.private_required
+
+
 def _conversation_response(record: ConversationRecord) -> ConversationResponse:
     return ConversationResponse(
         id=record.conversation_id,
@@ -248,9 +257,17 @@ async def create_conversation(
         if "default_mode" in payload.model_fields_set
         else payload.model_id
     )
+    project_private = (
+        await _owned_project_private(request, principal, payload.project_id)
+        if payload.project_id is not None else False
+    )
+    if project_private:
+        if {"model_id", "default_mode"} & payload.model_fields_set and requested_model != "private":
+            raise HTTPException(status_code=409, detail="This Project requires Private processing.")
+        requested_model = "private"
     model = await _selected_model(request, principal, requested_model or "auto")
-    if model.id == "private" and payload.project_id is not None:
-        raise HTTPException(status_code=409, detail="Private Project conversations are not available yet.")
+    if model.id == "private" and payload.project_id is not None and not project_private:
+        raise HTTPException(status_code=409, detail="Private conversations require a Private project.")
     try:
         record = await _store(request).conversations.create(
             user_id=principal.user_id,
@@ -356,8 +373,18 @@ async def update_conversation(
         raise HTTPException(status_code=404, detail="Conversation not found.")
     if current.private_required and selected is not None and selected.id != "private":
         raise HTTPException(status_code=409, detail="This conversation stays Private. Start a new conversation to use another workflow.")
-    if (current.private_required or (selected is not None and selected.id == "private")) and payload.project_id is not None:
-        raise HTTPException(status_code=409, detail="Private Project conversations are not available yet.")
+    target_project = payload.project_id if "project_id" in payload.model_fields_set else current.project_id
+    project_private = (
+        await _owned_project_private(request, principal, target_project)
+        if target_project is not None else False
+    )
+    if project_private:
+        if selected is not None and selected.id != "private":
+            raise HTTPException(status_code=409, detail="This Project requires Private processing.")
+        if selected is None and not current.private_required:
+            selected = await _selected_model(request, principal, "private")
+    if (current.private_required or (selected is not None and selected.id == "private")) and target_project is not None and not project_private:
+        raise HTTPException(status_code=409, detail="Private conversations require a Private project.")
     try:
         record = await _store(request).conversations.update(
             user_id=principal.user_id,

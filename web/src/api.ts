@@ -281,6 +281,7 @@ export interface ProjectLimits {
 
 export interface AudreyProject {
   id: string;
+  readonly private_required?: boolean;
   name: string;
   instructions: string;
   created_at: string;
@@ -736,11 +737,12 @@ export function listProjects(cursor?: string): Promise<AudreyProjectList> {
 export function createProject(
   name: string,
   instructions = "",
+  modelId: "auto" | "private" = "auto",
 ): Promise<AudreyProject> {
   return apiJson<AudreyProject>("/api/projects", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, instructions }),
+    body: JSON.stringify({ name, instructions, model_id: modelId }),
   });
 }
 
@@ -1035,6 +1037,25 @@ export async function uploadFile(
     `/api/files/upload-sessions/${encodeURIComponent(session.upload_id)}/complete`,
     { method: "POST" },
   );
+}
+
+export async function uploadPrivateProjectFile(
+  projectId: string,
+  file: File,
+  limits: AudreyFileLimits,
+  onProgress: (fraction: number) => void = () => undefined,
+): Promise<AudreyFileUpload> {
+  if (!projectId.trim()) throw new Error("A Private project is required for this upload.");
+  const issue = uploadPrecheck(file, limits, true);
+  if (issue) throw new Error(file.name + ": " + issue);
+  const body = new FormData();
+  body.append("file", file, file.name);
+  onProgress(0);
+  const result = await uploadMultipart<AudreyFileUpload>(
+    `/api/projects/${encodeURIComponent(projectId)}/uploads`, body, onProgress,
+  );
+  onProgress(1);
+  return result;
 }
 
 function uploadMultipart<T>(

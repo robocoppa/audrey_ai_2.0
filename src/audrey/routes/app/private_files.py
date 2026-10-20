@@ -1,4 +1,4 @@
-"""Owner-authorized document uploads into an explicitly Private conversation."""
+"""Owner-authorized document uploads into Private conversations or Projects."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
+from audrey.app_state import ProjectFileConflictError, ProjectFileLimitError, ProjectNotFoundError
 from audrey.auth import require_scope
 from audrey.identity import Principal
 from audrey.kb.private_documents import PrivateDocumentError
@@ -47,10 +48,39 @@ async def upload_private_document(
             status_code=409,
             detail="Select Private in a new conversation before uploading Private documents.",
         )
-    if conversation.project_id is not None or conversation.archived_at is not None:
+    if conversation.archived_at is not None:
         raise HTTPException(
-            status_code=409, detail="Upload into an active Private conversation outside a Project."
+            status_code=409, detail="Upload into an active Private conversation."
         )
+    if conversation.project_id is not None:
+        project = await store.projects.get(
+            user_id=principal.user_id, project_id=conversation.project_id,
+        )
+        if project is None or not project.private_required:
+            raise HTTPException(status_code=409, detail="Private documents require a Private Project.")
+    return await _upload_document(request, file, principal)
+
+
+@router.post("/projects/{project_id}/uploads", response_model=NativeFileUploadResponse)
+async def upload_private_project_document(
+    project_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    principal: Principal = Depends(_access),
+) -> NativeFileUploadResponse:
+    from audrey.routes.app.conversations import _selected_model
+    from audrey.routes.app.projects import _owned_project
+
+    project = await _owned_project(request, principal, project_id)
+    if not project.private_required:
+        raise HTTPException(status_code=409, detail="Use the ordinary uploader for this Project.")
+    await _selected_model(request, principal, "private")
+    return await _upload_document(request, file, principal, project_id=project_id)
+
+
+async def _upload_document(
+    request: Request, file: UploadFile, principal: Principal, *, project_id: str | None = None,
+) -> NativeFileUploadResponse:
     # No browser flag, chosen model name or transport setting establishes the
     # restriction. Both the conversation and owned quota reservation are durable.
     storage = uploads._get_storage_lifecycle(request)
@@ -129,6 +159,21 @@ async def upload_private_document(
                     written=written,
                     max_total=total,
                 )
+                if project_id is not None:
+                    try:
+                        await uploads._settle_private_persistence(
+                            request.app.state.application_store.projects.add_file(
+                                user_id=principal.user_id, project_id=project_id,
+                                file_id=file_id, file_is_private=True,
+                            )
+                        )
+                    except (ProjectNotFoundError, ProjectFileConflictError, ProjectFileLimitError):
+                        # The source is already committed and remains owner-bound.
+                        # Project deletion/limits must not erase a successful upload.
+                        raise HTTPException(status_code=409, detail={
+                            "message": "Upload succeeded, but the Project changed or is full. Your Private document remains in My Files.",
+                            "file_id": file_id,
+                        }) from None
                 return _upload_response(result)
     except QuotaExceededError as exc:
         raise uploads._quota_http_error(exc) from None
