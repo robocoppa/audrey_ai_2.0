@@ -59,6 +59,7 @@ import {
   listProjectConversations,
   listProjectFiles,
   listProjects,
+  PRIVATE_DOCUMENT_EXTENSIONS,
   uploadFile,
   uploadPrecheck,
   updateConversation,
@@ -80,6 +81,12 @@ import {
 } from "./api";
 import { latestActionFetch } from "./agentTransport";
 import { NewProjectDialog, ProjectHome } from "./ProjectWorkspace";
+
+const PRIVATE_MODEL: AudreyModel = {
+  id: "private", label: "Private", description: "Local models and tools for private conversations.",
+  kind: "workflow", mode: "local", presentation: "local", capabilities: ["text", "files", "tools"],
+  enabled: true, audience: "users", visibility: "public", roles: ["users"], portrait_url: "",
+};
 
 const MODEL_PORTRAITS: Readonly<Record<string, string>> = {
   auto: autoPortrait,
@@ -1170,6 +1177,8 @@ function ConversationThread({
   onOpenProject: (projectId: string) => void;
 }) {
   const [thread, setThread] = useState<ThreadState>({ status: "idle" });
+  const privateRequired = conversation.private_required === true || conversation.default_model_id === "private";
+  const conversationModels = privateRequired ? [models.find(({ id }) => id === "private") ?? PRIVATE_MODEL] : models;
   const [modelId, setModelId] = useState(
     models.some(({ id }) => id === conversation.default_model_id)
       ? conversation.default_model_id
@@ -1190,7 +1199,7 @@ function ConversationThread({
   const onConversationChangeRef = useRef(onConversationChange);
   useEffect(() => { onConversationChangeRef.current = onConversationChange; }, [onConversationChange]);
   const archived = conversation.archived_at !== null;
-  const selectedModelId = models.some(({ id }) => id === modelId)
+  const selectedModelId = privateRequired ? "private" : models.some(({ id }) => id === modelId)
     ? modelId
     : (models.find(({ id }) => id === "auto") ?? models[0]).id;
   const conversationProject = projects.find(({ id }) => id === conversation.project_id) ?? null;
@@ -1338,7 +1347,7 @@ function ConversationThread({
   }
 
   async function changeModel(next: string) {
-    if (next === modelId || runActive) return;
+    if (next === modelId || runActive || (privateRequired && next !== "private")) return;
     setMutation("model");
     setMutationError("");
     try {
@@ -1517,7 +1526,8 @@ function ConversationThread({
       projects={projects}
       projectId={conversation.project_id ?? null}
       projectName={conversationProject?.name}
-      disabled={runActive || mutation !== null}
+      disabled={runActive || mutation !== null || privateRequired}
+      disabledReason={privateRequired ? "Projects are not available in Private yet." : undefined}
       onChange={moveToProject}
     />
   );
@@ -1555,7 +1565,8 @@ function ConversationThread({
           focusComposer={focusComposer}
           onComposerFocused={onComposerFocused}
           projectPicker={projectPicker}
-          models={models}
+          models={conversationModels}
+          privateRequired={privateRequired}
           skills={skills}
           canBrowseDirectModels={canBrowseDirectModels}
           modelId={selectedModelId}
@@ -1578,6 +1589,7 @@ function ConversationThread({
 }
 
 function AudreyThread({
+  privateRequired,
   conversationId,
   focusComposer,
   onComposerFocused,
@@ -1596,6 +1608,7 @@ function AudreyThread({
   onRunStarted,
   onRunFinished,
 }: {
+  privateRequired: boolean;
   conversationId: string;
   focusComposer: boolean;
   onComposerFocused: (conversationId: string) => void;
@@ -1614,6 +1627,7 @@ function AudreyThread({
   onRunStarted: () => void;
   onRunFinished: (runId: string) => void;
 }) {
+  const isPrivate = privateRequired || modelId === "private";
   const [runError, setRunError] = useState("");
   const [skillId, setSkillId] = useState("");
   const [activityLedger, setActivityLedger] = useState<ActivityLedger>({
@@ -1701,25 +1715,27 @@ function AudreyThread({
   }, [attachmentFiles, attachmentKind, attachmentSearch]);
   const selectedModel = modelDetails(models, modelId);
   const selectedSkillMode = skillModeForModel(selectedModel);
-  const compatibleSkills = skills.filter((skill) =>
+  const compatibleSkills = isPrivate ? [] : skills.filter((skill) =>
     selectedSkillMode !== null && skill.supported_modes.includes(selectedSkillMode),
   );
   const selectedSkill = skills.find((skill) => skill.id === skillId);
-  const skillControlValue = selectedSkill?.name
+  const effectiveSkillId = isPrivate ? "" : skillId;
+  const skillControlValue = isPrivate ? "Local only" : selectedSkill?.name
     ?? (selectedSkillMode === null ? "Not available" : "Automatic");
   const supportsFiles = selectedModel.capabilities.includes("files");
   useEffect(() => {
     if (!skillId) return;
     const selectedSkill = skills.find((skill) => skill.id === skillId);
     if (
-      !selectedSkill
+      isPrivate
+      || !selectedSkill
       || selectedSkill.availability !== "available"
       || selectedSkillMode === null
       || !selectedSkill.supported_modes.includes(selectedSkillMode)
     ) {
       setSkillId("");
     }
-  }, [selectedSkillMode, skillId, skills]);
+  }, [isPrivate, selectedSkillMode, skillId, skills]);
   const attachmentIds = useMemo(
     () => selectedAttachments.map(({ id }) => id),
     [selectedAttachments],
@@ -1757,7 +1773,7 @@ function AudreyThread({
     () =>
       new HttpAgent({
         url: `/api/agent?model=${encodeURIComponent(modelId)}${
-          skillId ? `&skill=${encodeURIComponent(skillId)}` : ""
+          effectiveSkillId ? `&skill=${encodeURIComponent(effectiveSkillId)}` : ""
         }`,
         threadId: conversationId,
         fetch: (url, init) => latestActionFetch(
@@ -1767,7 +1783,7 @@ function AudreyThread({
           setActiveRunId,
         ),
       }),
-    [attachmentIds, conversationId, modelId, skillId],
+    [attachmentIds, conversationId, modelId, effectiveSkillId],
   );
   async function changeModel(nextModelId: string) {
     if (attachmentBusy || retrying) return;
@@ -1782,7 +1798,7 @@ function AudreyThread({
     ) {
       setSkillId("");
     }
-    if (!nextModel.capabilities.includes("files")) {
+    if (!nextModel.capabilities.includes("files") || (nextModelId === "private") !== isPrivate) {
       void runtime.thread.composer.clearAttachments();
       setActivePicker(null);
       setSelectedAttachments([]);
@@ -2017,6 +2033,9 @@ function AudreyThread({
         throw new Error("The selected model accepts text only. Choose a file-capable model to retry this question.");
       }
       const attachments = await Promise.all(lastAttempt.attachmentIds.map((id) => getFile(id)));
+      if (attachments.some((file) => !attachmentAllowed(file, isPrivate))) {
+        throw new Error("These files are not available in this conversation. Choose files from its file picker.");
+      }
       if (attachments.some(({ status }) => status !== "ready")) {
         throw new Error("An attached file is no longer ready. Choose a ready file before sending again.");
       }
@@ -2076,7 +2095,7 @@ function AudreyThread({
     setAttachmentError("");
     try {
       const listing = await listFiles();
-      setAttachmentFiles(listing.items.filter(({ status }) => status === "ready"));
+      setAttachmentFiles(listing.items.filter((file) => file.status === "ready" && attachmentAllowed(file, isPrivate)));
       setFileLimits(listing.limits);
       setImageLimit(Number.isInteger(listing.limits.max_images_per_turn)
         ? Math.max(0, listing.limits.max_images_per_turn)
@@ -2137,7 +2156,7 @@ function AudreyThread({
 
   async function uploadFromChat(file: File) {
     if (!fileLimits || attachmentBusy || selectedAttachments.length >= 10) return;
-    const precheck = uploadPrecheck(file, fileLimits);
+    const precheck = uploadPrecheck(file, fileLimits, isPrivate);
     if (precheck) {
       setUploadIssue(file.name + ": " + precheck);
       return;
@@ -2147,10 +2166,11 @@ function AudreyThread({
     setUploadProgress(0);
     let stored = false;
     try {
-      const uploaded = await uploadFile(file, fileLimits, setUploadProgress);
+      const uploaded = await uploadFile(file, fileLimits, setUploadProgress, isPrivate ? conversationId : undefined);
       stored = true;
       // The upload response has no failure details; fetch the owned row before attaching.
       const row = await getFile(uploaded.id);
+      if (!attachmentAllowed(row, isPrivate)) throw new Error("This file cannot be attached in this conversation.");
       if (row.status === "ready") {
         if (row.kind === "image" && imageLimit !== null && selectedImageCount >= imageLimit) {
           setUploadIssue(row.filename + " was uploaded to Files, but the image limit is full. Remove an image to attach it.");
@@ -2378,7 +2398,7 @@ function AudreyThread({
                       type="button"
                       onClick={toggleSkillPicker}
                       disabled={submissionBlocked || selectedSkillMode === null}
-                      title={selectedSkillMode === null
+                      title={isPrivate ? "Audrey uses available local tools automatically" : selectedSkillMode === null
                         ? `${selectedModel.label} does not support Audrey skills`
                         : "Choose automatic tool use or a focused Audrey skill"}
                       aria-label={`Tools and skills: ${skillControlValue}`}
@@ -2389,6 +2409,9 @@ function AudreyThread({
                     </button>
                   </div>
                 </ComposerPrimitive.Root>
+                {isPrivate ? <p className="attachment-status">
+                  Private uses local models and tools. Documents only; web, saved memory and projects are unavailable.
+                </p> : null}
                 {attachmentPickerOpen ? (
                   <ComposerPickerPanel
                     className="attachment-picker"
@@ -2399,10 +2422,12 @@ function AudreyThread({
                     <header>
                       <div>
                         <strong>Add files to this message</strong>
-                        <span>Upload a new file or choose ready files from My Files.</span>
+                        <span>{isPrivate
+                          ? "Upload a document privately or choose a ready Private document."
+                          : "Upload a new file or choose ready files from My Files."}</span>
                         <small>
                           {selectedAttachments.length}/10 files
-                          {imageLimit === null ? "" : " · " + selectedImageCount + "/" + imageLimit + " images"}
+                          {isPrivate || imageLimit === null ? "" : " · " + selectedImageCount + "/" + imageLimit + " images"}
                         </small>
                       </div>
                       <button
@@ -2438,7 +2463,7 @@ function AudreyThread({
                           type="file"
                           aria-label="Choose a file from your device"
                           tabIndex={-1}
-                          accept={fileLimits?.allowed_extensions.join(",")}
+                          accept={(isPrivate ? PRIVATE_DOCUMENT_EXTENSIONS : fileLimits?.allowed_extensions)?.join(",")}
                           onChange={(event) => {
                             const file = event.currentTarget.files?.[0];
                             event.currentTarget.value = "";
@@ -2449,7 +2474,7 @@ function AudreyThread({
                     </div>
                     {attachmentFiles.length > 0 ? (
                       <div className="attachment-folders" role="group" aria-label="File types">
-                        {ATTACHMENT_FOLDERS.map((folder) => {
+                        {ATTACHMENT_FOLDERS.filter((folder) => !isPrivate || ["all", "text"].includes(folder.kind)).map((folder) => {
                           const count = folder.kind === "all"
                             ? attachmentFiles.length
                             : attachmentFiles.filter(({ kind }) => kind === folder.kind).length;
@@ -2524,7 +2549,8 @@ function AudreyThread({
                       <div>
                         <strong>Choose how Audrey uses tools</strong>
                         <span>
-                          Skills give Audrey focused instructions and may narrow the tools available for this message.
+                          {isPrivate ? "Audrey automatically uses available local tools. Web, saved memory and media tools are unavailable in Private."
+                            : "Skills give Audrey focused instructions and may narrow the tools available for this message."}
                         </span>
                       </div>
                       <button
@@ -2552,7 +2578,7 @@ function AudreyThread({
                         }}
                       >
                         <strong>Automatic</strong>
-                        <span>Audrey chooses the available tools when they are useful.</span>
+                        <span>{isPrivate ? "Audrey chooses available local tools when they are useful." : "Audrey chooses the available tools when they are useful."}</span>
                       </button>
                       {compatibleSkills.map((skill) => (
                         <button
@@ -3074,12 +3100,14 @@ function ComposerProjectPicker({
   projectId,
   projectName,
   disabled,
+  disabledReason,
   onChange,
 }: {
   projects: AudreyProject[];
   projectId: string | null;
   projectName?: string;
   disabled: boolean;
+  disabledReason?: string;
   onChange: (id: string | null) => Promise<void>;
 }) {
   const { activePicker, setActivePicker } = useContext(ComposerPickerContext);
@@ -3098,6 +3126,7 @@ function ComposerProjectPicker({
         type="button"
         className="composer-rail-control composer-project-picker"
         aria-label="Move conversation to project"
+        title={disabledReason}
         aria-haspopup="dialog"
         aria-expanded={open}
         data-value={projectId ?? ""}
@@ -3381,6 +3410,10 @@ function attachmentKindLabel(kind: AudreyFile["kind"]): string {
   return kind[0].toUpperCase() + kind.slice(1);
 }
 
+function attachmentAllowed(file: AudreyFile, privateMode: boolean): boolean {
+  return privateMode ? file.private_required === true && file.kind === "text" : !file.private_required;
+}
+
 function attachmentKindSymbol(kind: AudreyFile["kind"]): string {
   return ATTACHMENT_FOLDERS.find((folder) => folder.kind === kind)?.symbol ?? "≡";
 }
@@ -3411,6 +3444,7 @@ function upsertConversation(
 }
 
 function modelLabel(models: AudreyModel[], conversation: Conversation): string {
+  if (conversation.private_required) return "Private";
   return models.find(({ id }) => id === conversation.default_model_id)?.label
     ?? models[0]?.label
     ?? conversation.default_mode;

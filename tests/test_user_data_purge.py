@@ -171,7 +171,7 @@ async def test_purge_tombstones_snapshot_cleans_paths_and_preserves_new_activity
         await _record(db, file_id="bob-old", user=BOB, uploaded_at=OLD)
         with db._lock, db._transaction_locked():
             db._conn.execute(
-                "INSERT INTO upload_sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO upload_sessions (upload_id,user,filename,total_bytes,part_size,parts_total,created_at,updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 ("session-old", ALICE, "large.bin", 20, 10, 2, OLD, OLD),
             )
             db._conn.execute(
@@ -179,7 +179,7 @@ async def test_purge_tombstones_snapshot_cleans_paths_and_preserves_new_activity
                 ("session-old", 0, 10),
             )
             db._conn.execute(
-                "INSERT INTO storage_reservations VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO storage_reservations (reservation_id,user,kind,bytes,created_at,updated_at) VALUES (?, ?, ?, ?, ?, ?)",
                 ("single-old", ALICE, "single_shot", 10, OLD, OLD),
             )
 

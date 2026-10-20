@@ -702,3 +702,36 @@ async def test_history_resume_refuses_changed_requested_collection_without_mutat
     assert not client.collection_exists("another-history-collection")
     assert {item.name: retained_collection(client, item.name)
             for item in client.get_collections().collections} == before
+
+
+async def test_ordinary_full_migration_refuses_protected_collections_before_any_write(setup):
+    client, embedder, args, _ = setup
+    client.create_collection("kb_private_text_owner", vectors_config=qm.VectorParams(size=768, distance=qm.Distance.COSINE))
+    before = {item.name for item in client.get_collections().collections}
+    with pytest.raises(m.MigrationError, match="dedicated local migration"):
+        await m.migrate(client, embedder, {}, **args)
+    assert {item.name for item in client.get_collections().collections} == before
+    assert not list(args["state"].iterdir())
+    embedder.verify_identity.assert_not_awaited()
+    embedder.embed_many.assert_not_awaited()
+    assert client.get_collection("kb_text").config.params.vectors.size == 768
+
+
+async def test_history_only_migration_leaves_protected_upload_collections_untouched(setup):
+    client, embedder, args, _ = setup
+    name = "kb_private_text_owner"
+    client.create_collection(name, vectors_config=qm.VectorParams(size=768, distance=qm.Distance.COSINE))
+    report = await m.migrate(client, embedder, {}, scope="history", **args)
+    assert report["status"] == "completed"
+    assert client.get_collection(name).config.params.vectors.size == 768
+    assert {row["role"] for row in report["collections"]} == {"history"}
+
+
+async def test_history_only_migration_cannot_target_a_protected_upload_collection(setup):
+    client, embedder, args, _ = setup
+    name = "kb_private_text_owner"
+    client.create_collection(name, vectors_config=qm.VectorParams(size=768, distance=qm.Distance.COSINE))
+    with pytest.raises(m.MigrationError, match="overlaps another data role"):
+        await m.migrate(client, embedder, {}, scope="history", history=name, **args)
+    embedder.verify_identity.assert_not_awaited()
+    assert client.get_collection(name).config.params.vectors.size == 768

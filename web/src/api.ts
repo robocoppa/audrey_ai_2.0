@@ -196,6 +196,7 @@ export type AudreyMode =
 
 export interface Conversation {
   id: string;
+  private_required?: boolean;
   project_id?: string | null;
   title: string;
   default_mode: AudreyMode;
@@ -308,6 +309,7 @@ export interface AudreyProjectFileList {
 
 export interface AudreyFile {
   id: string;
+  private_required?: boolean;
   filename: string;
   mime: string;
   bytes: number;
@@ -957,13 +959,19 @@ export function fetchVideoFromUrl(url: string): Promise<AudreyFileUpload> {
   });
 }
 
-export function uploadPrecheck(file: File, limits: AudreyFileLimits): string | null {
+export const PRIVATE_DOCUMENT_EXTENSIONS = [".txt", ".md", ".csv", ".pdf", ".docx", ".xlsx", ".html", ".htm"];
+
+export function uploadPrecheck(file: File, limits: AudreyFileLimits, privateMode = false): string | null {
   if (file.size === 0) return "the file is empty";
-  if (file.size > limits.chunked_max_bytes) {
-    return "over the " + formatByteLimit(limits.chunked_max_bytes) + " per-file limit";
+  const sizeLimit = privateMode ? limits.max_upload_bytes : limits.chunked_max_bytes;
+  if (file.size > sizeLimit) {
+    return "over the " + formatByteLimit(sizeLimit) + " per-file limit";
   }
   const dot = file.name.lastIndexOf(".");
   const extension = dot > 0 ? file.name.slice(dot).toLowerCase() : "";
+  if (privateMode && !PRIVATE_DOCUMENT_EXTENSIONS.includes(extension)) {
+    return "Private accepts documents only (TXT, Markdown, CSV, PDF, DOCX, XLSX or HTML)";
+  }
   if (!limits.allowed_extensions.includes(extension)) {
     return extension ? "unsupported format " + extension : "a file extension is required";
   }
@@ -975,12 +983,20 @@ export async function uploadFile(
   file: File,
   limits: AudreyFileLimits,
   onProgress: (fraction: number) => void = () => undefined,
+  privateConversationId?: string,
 ): Promise<AudreyFileUpload> {
+  if (privateConversationId !== undefined) {
+    if (!privateConversationId.trim()) throw new Error("A Private conversation is required for this upload.");
+    const issue = uploadPrecheck(file, limits, true);
+    if (issue) throw new Error(file.name + ": " + issue);
+  }
   if (file.size <= limits.max_upload_bytes) {
     const body = new FormData();
     body.append("file", file, file.name);
     onProgress(0);
-    const result = await uploadMultipart<AudreyFileUpload>("/api/files", body, onProgress);
+    const path = privateConversationId === undefined ? "/api/files"
+      : `/api/conversations/${encodeURIComponent(privateConversationId)}/files`;
+    const result = await uploadMultipart<AudreyFileUpload>(path, body, onProgress);
     onProgress(1);
     return result;
   }

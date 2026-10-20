@@ -1,14 +1,15 @@
 """Server-owned verified runtime for protected native work.
 
-This module does not enable a browser workflow. Internal callers must preserve
-stored restrictions and finish file, derived-context and logging enforcement
-before offering Private processing to users.
+Native Private operations use this runtime for verified local models, private
+documents and owned reference tools. Unsupported operations remain unavailable;
+ordinary workflow clients and configuration are never mutated.
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
+from copy import copy, deepcopy
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
@@ -16,7 +17,9 @@ from typing import Any
 import httpx
 
 from audrey.conversation_titles import ConversationTitleGenerator
+from audrey.kb.embed import text_embedder
 from audrey.models.ollama import OllamaClient
+from audrey.models.registry import ModelRegistry
 from audrey.pipeline.graph import build_graph
 from audrey.processing_policy import (
     ProcessingPolicy,
@@ -24,6 +27,8 @@ from audrey.processing_policy import (
     _model_name,
     processing_scope,
 )
+from audrey.references.embedding import reference_embedder
+from audrey.references.search import ReferenceSearchService
 from audrey.tools.discovery import ToolRegistry
 
 
@@ -125,6 +130,67 @@ async def prepare_processing_policy(
         await ollama.aclose()
 
 
+def private_configuration(cfg: Any, policy: ProcessingPolicy) -> Any:
+    """Copy routing configuration, removing every unverified generation target."""
+    isolated = copy(cfg)
+    raw = deepcopy(cfg.raw)
+    registry = raw.get("model_registry", {})
+    def permitted(entry):
+        try:
+            return _model_name(entry["name"]) in policy.local_models
+        except ProcessingPolicyError:
+            return False
+
+    raw["model_registry"] = {
+        task: [{**entry, "location": "local"} for entry in entries if permitted(entry)]
+        for task, entries in registry.items()
+    }
+    # Local's panel is the source of truth for protected deep work. The generic
+    # pool also covers fast-path escalation; no cloud pool can become a fallback.
+    if "deep_panel_local" in raw:
+        raw["deep_panel"] = deepcopy(raw["deep_panel_local"])
+    agentic = raw.setdefault("agentic", {})
+    agentic.setdefault("memory", {})["enabled"] = False
+    for key in ("debug_context_trace", "debug_research_trace", "debug_panel_drafts"):
+        agentic[key] = False
+    raw.setdefault("debug", {}).update(log_incoming_payload=False, log_incoming_payload_content=False)
+    raw.setdefault("complexity", {})["log_breakdown"] = False
+    isolated._merged = raw
+    return isolated
+
+
+async def prepare_native_private_runtime(app: Any) -> PrivateProcessingRuntime:
+    """Prepare the explicit native Private workflow from deployment settings."""
+    cfg = app.state.cfg
+    if (cfg.raw.get("private_processing") or {}).get("enabled") is not True:
+        raise ProcessingPolicyError("private_processing_unavailable")
+    names = {str(cfg.router.get("model") or "")}
+    titles = cfg.raw.get("title_generation") or {}
+    if titles.get("enabled", True):
+        names.add(str(titles.get("model") or cfg.router.get("model") or ""))
+    pools = cfg.raw.get("deep_panel_local") or {}
+    for pool in pools.values():
+        names.update(pool.get("workers") or [])
+        names.update(str(pool.get(key) or "") for key in ("synthesizer", "fallback_synth"))
+    summary = ((cfg.raw.get("kb") or {}).get("video") or {}).get("summarise_model")
+    if summary:
+        names.add(str(summary))
+    profile = cfg.raw.get("text_embedding") or {}
+    if not pools or not profile.get("model") or not profile.get("digest"):
+        raise ProcessingPolicyError("private_processing_unavailable")
+    names.add(profile["model"])
+    names.discard("")
+    from audrey.tools.private_handlers import SUPPORTED_PRIVATE_TOOL_NAMES
+    available = frozenset(app.state.tools.names()) & SUPPORTED_PRIVATE_TOOL_NAMES
+    specs = app.state.tools.restrict(available).specs()
+    policy = await prepare_processing_policy(
+        ollama_base_url=cfg.env.ollama_host,
+        model_names=sorted(names), expected_digests={profile["model"]: profile["digest"]},
+        allowed_tools=available, tool_servers=frozenset(spec.server_url for spec in specs),
+    )
+    return PrivateProcessingRuntime(policy)
+
+
 @dataclass(frozen=True, slots=True)
 class _ExecutionState:
     original: Any
@@ -167,7 +233,7 @@ class PrivateProcessingRuntime:
         """Yield an isolated execution view only after every local pin verifies."""
         with processing_scope(self.policy):
             async with AsyncExitStack() as stack:
-                cfg = app.state.cfg
+                cfg = private_configuration(app.state.cfg, self.policy)
                 timeout = float(cfg.timeouts.get("medium", 180))
                 ollama = OllamaClient(
                     self.policy.ollama_base_url, default_timeout_s=timeout,
@@ -184,8 +250,9 @@ class PrivateProcessingRuntime:
                     self.policy.assert_tool_allowed(spec.name, server_url=spec.server_url)
                     if spec.path != f"/{spec.name}":
                         raise ProcessingPolicyError("private_tool_not_allowed")
+                registry = ModelRegistry(cfg)
                 graph = build_graph(
-                    cfg, ollama, app.state.registry, app.state.health,
+                    cfg, ollama, registry, app.state.health,
                     app.state.gate, tools, http,
                 )
                 title = None
@@ -200,7 +267,7 @@ class PrivateProcessingRuntime:
                         pass
                     else:
                         title = ConversationTitleGenerator(
-                            ollama=ollama, registry=app.state.registry,
+                            ollama=ollama, registry=registry,
                             gate=app.state.gate, inflight=app.state.inflight,
                             model=title_model,
                             timeout_s=float(title_cfg.get("timeout_s", 10.0)),
@@ -208,7 +275,19 @@ class PrivateProcessingRuntime:
                             max_tokens=int(title_cfg.get("max_tokens", 32)),
                             no_thinking=bool(title_cfg.get("no_thinking", True)),
                         )
+                embedder = text_embedder(ollama, cfg.raw) if "text_embedding" in cfg.raw else None
+                reference_search = None
+                original_search = getattr(app.state, "reference_search", None)
+                if original_search is not None and embedder is not None:
+                    reference_search = ReferenceSearchService(
+                        original_search.registry, original_search.releases, original_search.qdrant,
+                        reference_embedder(ollama, cfg.raw),
+                        config={"min_dense_score": original_search.min_dense_score,
+                                "min_term_overlap": original_search.min_term_overlap},
+                    )
                 overrides = MappingProxyType({
+                    "cfg": cfg, "registry": registry, "text_embedder": embedder,
+                    "reference_search": reference_search,
                     "ollama": ollama, "graph": graph, "archive_http": http,
                     "tools": tools, "conversation_titles": title,
                     "archive_client": None,
@@ -216,4 +295,4 @@ class PrivateProcessingRuntime:
                 yield _ExecutionApp(app, _ExecutionState(app.state, overrides))
 
 
-__all__ = ["PrivateProcessingRuntime", "prepare_processing_policy"]
+__all__ = ["PrivateProcessingRuntime", "prepare_processing_policy", "prepare_native_private_runtime"]

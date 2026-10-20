@@ -6,6 +6,7 @@ system message. Writes happen later via the model's own `memory_store` tool
 call — this module only reads.
 
 Skipped (no-op) when:
+  • a protected processing policy is active (general memories are unavailable)
   • `user_id` is empty (no logged-in user — happens with direct curl)
   • `memory_search` isn't in the tool registry (custom-tools unreachable)
   • the last user turn is empty
@@ -26,6 +27,7 @@ import httpx
 
 from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.prompts import MEMORY_STORE_HINT, prompt_from_config
+from audrey.processing_policy import current_processing_policy
 from audrey.tools.discovery import ToolRegistry
 from audrey.tools.dispatch import dispatch_one
 
@@ -67,6 +69,10 @@ async def recall_for_request(
     timeout_s: float = 5.0,
 ) -> list[dict[str, Any]]:
     """Return recalled memory entries (possibly empty). Never raises."""
+    # Protected turns retain their own canonical history. General memories are
+    # unavailable until their derived storage and later reuse preserve policy.
+    if current_processing_policy() is not None:
+        return []
     if not user_id:
         return []
     if registry is None or MEMORY_SEARCH_TOOL not in registry.by_name:
@@ -121,10 +127,12 @@ def memory_system_message(
 ) -> dict[str, Any] | None:
     """Wrap hits (and optionally the memory_store usage hint) into a system message.
 
-    Returns None when there is nothing to inject — no hits and no store hint.
+    Returns None in protected scopes, or when there are no hits/store hint.
     When `cfg` is supplied, `agentic.prompts.memory_store_hint` overrides
     the default hint template; missing/empty falls back to the default.
     """
+    if current_processing_policy() is not None:
+        return None
     parts: list[str] = []
     if hits:
         parts.append(_format_memory_hint(hits))

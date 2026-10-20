@@ -159,6 +159,14 @@ def configured_models(cfg: Config) -> tuple[ServedModel, ...]:
     direct_defaults = native.get("direct_defaults") or {}
     overrides = native.get("entries") or {}
     models = list(_WORKFLOWS)
+    if (cfg.raw.get("private_processing") or {}).get("enabled") is True:
+        models.insert(5, ServedModel(
+            id="private", label="Private",
+            description="Local model processing for text documents; no web or shared memory.",
+            kind="workflow", mode="local", protocol_model="audrey_local", concrete_model="",
+            presentation="local", capabilities=("text", "files", "tools", "private"),
+            enabled=True, audience="users",
+        ))
     passthrough = cfg.raw.get("passthrough") or {}
     if not passthrough.get("enabled", False):
         return tuple(models)

@@ -542,3 +542,49 @@ async def test_empty_index_keeps_native_file_access_owner_bound(
     with pytest.raises(HTTPException) as denied:
         await native_files.resolve_owned_attachments(request, principal, ["foreign"])
     assert denied.value.status_code == 422
+
+
+async def _add_private(db, file_id, collection="kb_private_text_a_b_c"):
+    stamp = "2026-10-19T12:00:00+00:00"
+    reservation = await db.reserve_single_upload(
+        reservation_id=file_id, user=USER, bytes_=10, max_user_bytes=100_000,
+        now=stamp, expired_before="2026-10-18T00:00:00+00:00", private_required=True,
+    )
+    assert reservation.accepted
+    assert (await db.commit_reserved_upload(
+        reservation_id=file_id, reservation_kind="single_shot", file_id=file_id,
+        user=USER, filename="owned-private.txt", mime="text/plain", bytes_=10,
+        kind="text", collection=collection, chunks=1, uploaded_at=stamp,
+        status="ready", max_user_bytes=100_000,
+    )).accepted
+
+
+@pytest.mark.parametrize("points", [{}, {"kb_private_text_a_b_c": []}])
+async def test_private_catalog_survives_empty_index_and_reports_real_missing_points(db, points):
+    await _add_private(db, "protected")
+    before = await db.get_upload("protected")
+    stats = await reconcile_with_qdrant(db, _FakeQdrant(points))
+    assert await db.get_upload("protected") == before
+    assert stats["missing_index_files"] == 1
+
+
+async def test_private_points_count_as_present_without_recovering_catalog_metadata(db):
+    await _add_private(db, "protected")
+    before = await db.get_upload("protected")
+    stats = await reconcile_with_qdrant(db, _FakeQdrant({
+        "kb_private_text_a_b_c": [_point("protected"), _point("payload-only")],
+    }))
+    assert await db.get_upload("protected") == before
+    assert await db.get_upload("payload-only") is None
+    assert stats["missing_index_files"] == 0
+    assert stats["backfilled_rows"] == stats["backfilled_collections"] == 0
+
+
+@pytest.mark.parametrize("collection", [TEXT_COL, "kb_private_text_wrong_owner"])
+async def test_private_drift_cannot_be_hidden_by_points_in_an_unrelated_collection(db, collection):
+    await _add_private(db, "protected")
+    before = await db.get_upload("protected")
+    stats = await reconcile_with_qdrant(db, _FakeQdrant({collection: [_point("protected")]}))
+    assert await db.get_upload("protected") == before
+    assert stats["missing_index_files"] == 1
+    assert stats["backfilled_rows"] == 0

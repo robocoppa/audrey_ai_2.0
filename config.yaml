@@ -4,6 +4,11 @@
 
 version: "7.0.0"
 
+# Native Private: verified local text/document processing and local tools.
+# Unsupported media, OCR and Projects are refused rather than sent elsewhere.
+private_processing:
+  enabled: true
+
 router:
   # ⚠️⚠️ THIS SLOT MUST STAY TINY, AND NOT FOR THE REASON IT LOOKS LIKE.
   # `classify_with_registry` takes NO gate argument and calls Ollama directly on

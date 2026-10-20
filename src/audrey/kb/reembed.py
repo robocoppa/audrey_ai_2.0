@@ -366,6 +366,13 @@ async def migrate(client, embedder, config, *, state, uploads, archive, app_db,
         raise MigrationError("Migration scope must be all or history")
     if config.get("history_embedding") and history_embedder is None:
         raise MigrationError("The configured history embedding profile must be provided")
+    if scope == "all" and any(
+        item.name.startswith("kb_private_text_") for item in client.get_collections().collections
+    ):
+        # Protected text requires its own verified local operation. This older
+        # maintenance path must not silently leave private vectors in the old
+        # space or send them through an ordinary model client.
+        raise MigrationError("Protected upload collections require a dedicated local migration")
     role_embedders = {"text": embedder, "history": history_embedder or embedder}
     selected_roles = ("history",) if scope == "history" else ("text", "history")
     target_profiles = {role: role_embedders[role].profile.metadata for role in selected_roles}
@@ -376,7 +383,7 @@ async def migrate(client, embedder, config, *, state, uploads, archive, app_db,
     global_name = config.get("kb", {}).get("text_collection", "kb_text")
     image_name = config.get("kb", {}).get("image_collection", "kb_images")
     if (history in {global_name, image_name, memory}
-            or history.startswith("kb_user_text_")):
+            or history.startswith(("kb_user_text_", "kb_private_text_"))):
         raise MigrationError("History collection overlaps another data role")
     manifest = state / "manifest.json"
     for role in selected_roles:

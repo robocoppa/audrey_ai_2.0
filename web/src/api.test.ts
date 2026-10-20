@@ -189,6 +189,35 @@ describe("native file uploads", () => {
     expect(progress).toEqual([0, 1 / 3, 2 / 3, 1]);
   });
 
+  it("sends Private documents only to their encoded conversation endpoint", async () => {
+    let onLoad: (() => void) | undefined;
+    const request = {
+      status: 200, responseText: JSON.stringify({ id: "private_file", status: "ready" }),
+      upload: { addEventListener: vi.fn() }, open: vi.fn(), setRequestHeader: vi.fn(),
+      addEventListener: vi.fn((name: string, listener: () => void) => { if (name === "load") onLoad = listener; }),
+      send: vi.fn(() => queueMicrotask(() => onLoad?.())), withCredentials: false,
+    };
+    vi.stubGlobal("XMLHttpRequest", vi.fn(function () { return request; }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await uploadFile(new File(["one"], "private.txt"), LIMITS, undefined, "con / private");
+    expect(request.open).toHaveBeenCalledWith("POST", "/api/conversations/con%20%2F%20private/files");
+    expect(request.withCredentials).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["large.txt", "too large"], ["image.png", "one"], ["empty.txt", ""],
+  ])("refuses unsupported Private upload %s without using any transport", async (name, content) => {
+    const fetchMock = vi.fn();
+    const xhrMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("XMLHttpRequest", xhrMock);
+    await expect(uploadFile(new File([content], name), LIMITS, undefined, "con_private")).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(xhrMock).not.toHaveBeenCalled();
+  });
+
   it("rejects a file above the published limit before sending bytes", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

@@ -154,7 +154,7 @@ async def test_owner_browser_can_view_and_download_protected_document(resources,
         assert "protected-doc" in {item["id"] for item in listing.json()["items"]}
         metadata = client.get("/api/files/protected-doc")
         assert metadata.status_code == 200
-        assert "private_required" not in metadata.json()
+        assert metadata.json()["private_required"] is True
         text = client.get("/api/files/protected-doc/text")
         assert text.status_code == 200
         assert "invoice total of 42" in text.json()["text"]

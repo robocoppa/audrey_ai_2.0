@@ -12,6 +12,7 @@ from audrey.models.ollama import OllamaClient, observe_model_calls
 from audrey.processing_policy import ProcessingPolicy, ProcessingPolicyError, processing_scope
 from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, ToolSpec
 from audrey.tools.dispatch import dispatch_one
+from audrey.tools.private_dispatch import private_tool_scope
 
 _MODEL = "local-chat:latest"
 _DIGEST = "a" * 64
@@ -282,15 +283,15 @@ async def test_tool_dispatch_refuses_url_path_proxy_or_registry_bypasses(issue):
 async def test_allowed_readonly_tool_still_binds_authenticated_owner():
     seen = []
 
-    def handler(request):
-        seen.append(request)
-        return httpx.Response(200, json={"text": "owned text"})
+    async def handler(args):
+        seen.append(args)
+        return {"text": "owned text"}
 
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler), trust_env=False) as client:
-        with processing_scope(_policy()):
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: pytest.fail("No private HTTP")), trust_env=False) as client:
+        with processing_scope(_policy()), private_tool_scope(user_id="owner", handlers={"get_file_text": handler}):
             result = await _dispatch(client, _registry("get_file_text"), "get_file_text", {"user": "foreign", "file_id": "file"})
     assert not result.is_error
-    assert json.loads(seen[0].content)["user"] == "owner"
+    assert seen[0]["user"] == "owner"
 
 
 async def test_private_tool_redirect_cannot_escape_even_with_redirecting_client():
@@ -304,8 +305,7 @@ async def test_private_tool_redirect_cannot_escape_even_with_redirecting_client(
         with processing_scope(_policy()):
             result = await _dispatch(client, _registry())
     assert result.is_error
-    assert len(seen) == 1
-    assert seen[0].url.host == "custom-tools"
+    assert seen == []
     assert _PRIVATE_TEXT not in result.content
 
 

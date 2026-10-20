@@ -1,8 +1,8 @@
-"""Inactive-by-default local processing guards shared by model/tool boundaries.
+"""Local processing guards shared by model and tool boundaries.
 
-This foundation is deliberately not a user-facing privacy mode. It covers only
-calls made in a server-owned scope; durable file/conversation restrictions and
-cross-process propagation must be implemented before offering that guarantee.
+The native Private workflow composes these server-owned scopes with durable
+conversation/file restrictions and local handlers. Caller flags alone never
+establish a processing policy, and ordinary requests keep their existing scope.
 """
 
 from __future__ import annotations
@@ -17,12 +17,14 @@ from types import MappingProxyType
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-# These tools neither call another model nor write material into a general
-# memory/history index. Model-using tools require explicit policy propagation
-# and protected-content reuse rules before they can join this subset.
-LOCAL_MODEL_FREE_TOOLS = frozenset({
+from audrey.private_logging import install_private_logging
+
+# Eligible operations run only through bound in-process handlers. Reference
+# search additionally uses the verified local embedder. None writes into the
+# ordinary memory/history index; web and media operations remain unavailable.
+LOCAL_PROCESSING_TOOLS = frozenset({
     "calculate", "analyze_table", "reference_lookup", "read_reference",
-    "list_my_files", "get_file_text",
+    "list_my_files", "get_file_text", "reference_search", "kb_search",
 })
 
 _MODEL_PART = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
@@ -139,7 +141,7 @@ class ProcessingPolicy:
                 or not isinstance(self.tool_servers, (frozenset, set))
                 or any(
                     not isinstance(name, str) or not _TOOL.fullmatch(name)
-                    or name not in LOCAL_MODEL_FREE_TOOLS for name in self.allowed_tools
+                    or name not in LOCAL_PROCESSING_TOOLS for name in self.allowed_tools
                 )
             ):
                 raise ProcessingPolicyError("invalid_processing_policy")
@@ -260,8 +262,17 @@ def processing_scope(policy: ProcessingPolicy | None) -> Iterator[None]:
         or not policy.tool_servers <= current.tool_servers
     ):
         raise ProcessingPolicyError("processing_policy_downgrade")
+    if policy is not None:
+        install_private_logging()
     token = _CURRENT_POLICY.set(policy)
     try:
-        yield
+        if policy is None:
+            yield
+        else:
+            # LangGraph's optional environment-enabled tracing serializes model
+            # inputs. A Private scope must not inherit that external exporter.
+            from langsmith.run_helpers import tracing_context
+            with tracing_context(enabled=False, parent=False):
+                yield
     finally:
         _CURRENT_POLICY.reset(token)

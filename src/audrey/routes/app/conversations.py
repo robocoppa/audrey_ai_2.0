@@ -78,6 +78,7 @@ class ConversationResponse(BaseModel):
     last_message_at: str | None
     archived_at: str | None
     project_id: str | None
+    private_required: bool = False
 
 
 class ConversationListResponse(BaseModel):
@@ -171,6 +172,7 @@ def _conversation_response(record: ConversationRecord) -> ConversationResponse:
         last_message_at=record.last_message_at,
         archived_at=record.archived_at,
         project_id=record.project_id,
+        private_required=record.private_required,
     )
 
 
@@ -247,6 +249,8 @@ async def create_conversation(
         else payload.model_id
     )
     model = await _selected_model(request, principal, requested_model or "auto")
+    if model.id == "private" and payload.project_id is not None:
+        raise HTTPException(status_code=409, detail="Private Project conversations are not available yet.")
     try:
         record = await _store(request).conversations.create(
             user_id=principal.user_id,
@@ -254,6 +258,7 @@ async def create_conversation(
             default_mode=model.mode,
             default_model_id=model.id,
             project_id=payload.project_id,
+            private_required=model.id == "private",
         )
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found.") from exc
@@ -346,6 +351,13 @@ async def update_conversation(
             else payload.default_mode
         )
         selected = await _selected_model(request, principal, requested_model or "auto")
+    current = await _store(request).conversations.get(user_id=principal.user_id, conversation_id=conversation_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    if current.private_required and selected is not None and selected.id != "private":
+        raise HTTPException(status_code=409, detail="This conversation stays Private. Start a new conversation to use another workflow.")
+    if (current.private_required or (selected is not None and selected.id == "private")) and payload.project_id is not None:
+        raise HTTPException(status_code=409, detail="Private Project conversations are not available yet.")
     try:
         record = await _store(request).conversations.update(
             user_id=principal.user_id,
@@ -356,6 +368,7 @@ async def update_conversation(
             archived=payload.archived if "archived" in payload.model_fields_set else None,
             project_id=payload.project_id,
             update_project="project_id" in payload.model_fields_set,
+            require_private=selected is not None and selected.id == "private",
         )
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found.") from exc

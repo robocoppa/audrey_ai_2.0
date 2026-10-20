@@ -63,6 +63,7 @@ class NativeFileRecord(BaseModel):
     transcript_source: str
     fetch_downloaded_bytes: int
     fetch_total_bytes: int
+    private_required: bool = False
 
 
 class NativeFileListResponse(BaseModel):
@@ -157,6 +158,7 @@ def _file_record(row: upload_routes.FileRow) -> NativeFileRecord:
         transcript_source=row.transcript_source,
         fetch_downloaded_bytes=row.fetch_downloaded_bytes,
         fetch_total_bytes=row.fetch_total_bytes,
+        private_required=row.private_required,
     )
 
 

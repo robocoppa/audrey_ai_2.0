@@ -7,9 +7,10 @@ Publication 5902 is the sole approved content-search gap: its original remains
 available and incomplete coverage is explicitly disclosed. **20B retrieval is
 accepted October 18:** correct tool calls and matching cited PDF pages/year.
 Tax accuracy remains 20E work. **20C.1–3 accepted/deployed:** shared model/tool
-policy and durable restrictions. **20C.4 built:** verified native runtime and
-title-task binding. Ingestion and derived-context propagation remain before
-user-facing private processing.
+policy and durable restrictions. **20C.4–6 built; browser acceptance next:**
+verified native runtime, protected document processing and Private in the model
+picker. The supported text/document path is enforced; Projects, OCR and media
+remain unavailable until their own protected processing exists.
 Qwen3 Embedding 4B remains the reference model; Nomic history and prior personal
 retrieval checks remain accepted.
 English content and requests only. Federal coverage can begin independently;
@@ -273,12 +274,13 @@ Tower is separate from browser transport and the server administrator's access.
 Verify storage/backup protection; a fully private-network browser route requires
 its own acceptance. Cloudflare access is not described as offline processing.
 
-#### 20C.1 — shared policy boundary (built; no user activation)
+#### 20C.1 — shared policy boundary (accepted)
 
 `ProcessingPolicy` is an immutable server-owned allowlist carried in the current
 async task. Nested scopes may only tighten it; child tasks inherit it and exit
 restores the parent policy. The scope must cover full async-stream consumption.
-No request field, browser control or configuration enables protected work yet.
+The native Private entrypoint below binds this policy from server-owned state.
+A client flag cannot construct or weaken it.
 
 Ollama chat, streaming and embedding calls require a trusted exact endpoint,
 disabled environment-proxy inheritance, an approved model name/digest, matching
@@ -290,13 +292,13 @@ swap. No automatic cloud fallback can bypass the boundary while scope is active.
 
 Tool dispatch checks the actual endpoint and operation path before parsing or
 logging arguments. It refuses redirects and proxy inheritance. Only explicitly
-allowed calculator, table-analysis, catalog/page-reader and basic owned-file
-operations are eligible. Web tools, memory/history operations and tools making
-further model requests are refused until their policy propagation and reuse
-rules are implemented. Protected failure messages omit prompt/tool contents.
+allowed local operations are eligible. The supported document/reference search
+uses verified local embeddings; web, memory/history and media operations remain
+refused. Owner-bound callbacks below preserve policy across local service logic.
+Protected failure messages omit prompt/tool contents.
 Ordinary requests retain existing behavior.
 
-#### 20C.2 — durable restrictions (deployed October 19; no user activation)
+#### 20C.2 — durable restrictions (accepted; deployed October 19)
 
 Schema 22 adds an owner-scoped `private_required` restriction to Projects,
 conversations and each accepted run. Existing records remain ordinary. New
@@ -308,10 +310,11 @@ restriction or changing a run's snapshot.
 
 Run admission rechecks the expected restriction in the message-save transaction.
 Protected server-side admission additionally requires a bound processing policy.
-Browser/API admission remains refused before model selection, file/context work
-or title generation. Private Project file linking is also refused until ingestion
-carries the restriction. Standalone Project-context reads need the active policy.
-This is stored enforcement metadata, not an exposed Private model choice.
+Ordinary admission refuses protected work before model selection, file/context
+work or title generation. The supported native Private entrypoint below supplies
+the bound policy. Private Project file linking remains refused, and standalone
+Project-context reads need the active policy. The stored restriction is derived
+by the server, never accepted as a caller-supplied privacy flag.
 
 Finished and interrupted private turns do not enter ordinary chat-history
 projection. Projection delivery also excludes protected conversations; ordinary
@@ -327,11 +330,11 @@ one commit transaction, never a worker result, caller object or vector payload.
 Retries cannot relabel it; startup/backfill preserves protected metadata.
 Authoritative checks happen before extraction, embeddings or summarization.
 
-Until the complete local path is connected, protected uploads are held out of
-ordinary processing: current workers cannot claim/complete them or reclaim their
-originals. OCR/media/fetch callbacks and requeue refuse before content writes or
-model calls. Public upload entry points cannot shed an active private policy.
-No protected file processing or new Private upload control is enabled yet.
+Protected uploads remain excluded from ordinary processing: current workers
+cannot claim/complete them or reclaim their originals. OCR/media/fetch callbacks
+and requeue refuse before content writes or model calls. Public upload entry
+points cannot shed an active private policy. The dedicated native path below
+handles supported documents with the existing restriction intact.
 
 Ordinary model reads refuse protected files, including native attachments,
 Responses file/image inputs, Project links/manifests, file artifacts, table
@@ -342,7 +345,7 @@ metadata. Exact newest protected filename matches refuse rather than substitute
 an older ordinary file. Direct history reads also exclude protected conversations,
 including imported IDs. Owner browser previews and downloads remain available.
 
-#### 20C.4 — verified native runtime (built; no user activation)
+#### 20C.4 — verified native runtime (built)
 
 A metadata-only factory verifies the server-selected local model roster and
 snapshots exact installed digests, including any configured pins. Each execution
@@ -358,32 +361,78 @@ require a bound policy and an unchanged owner/revision/private restriction.
 Private failures at the manager boundary report safe codes without exception
 contents. Private turns remain excluded from ordinary history delivery.
 
-The public create-run refusal remains. This internal runtime does not select a
-production Private roster or finish protected uploads, service propagation,
-derived memory/history, pipeline logging and storage protection. Ordinary Local
-and direct-model choices retain their existing behavior. No browser Private
-option or complete privacy guarantee is enabled.
+#### 20C.5 — protected documents and local tools (built)
 
-**Remaining 20C work:** use this runtime for supported protected ingestion,
-service calls and background jobs; preserve restrictions on derived evidence and
-memory/history; finish private logging/storage and failure behavior; then expose
-the explicit Private selection in the existing model picker. No sensitive-content
-detector or separate privacy tool selector is queued. Accept the complete flow
-with synthetic documents before using private taxpayer evidence.
+A dedicated native upload route derives protection from the authenticated
+conversation and owned quota reservation. Plain text/Markdown, CSV, text-bearing
+PDF, DOCX/XLSX and HTML extract locally. Genuine blank PDF pages retain their
+numbering; nonblank pages without extractable text require the future OCR path.
+Images, audio/video, URL fetching and legacy worker processing remain refused.
+PDF summaries and embeddings use verified local models only.
 
-After normal commit/push/pull on **Tower**, in
-`/mnt/user/appdata/audrey_ai_2.0`, deploy this runtime and the paired file-chooser
-presentation adjustment:
+Protected vectors live in separate owner-scoped `kb_private_text_*` collections,
+including during staging and failed commits. Source and text sidecars have
+restrictive permissions. Cancellation settles disk/vector writes and SQLite
+commit before deciding cleanup. Owner browser reads/downloads remain available;
+ordinary model readers cannot reuse protected files. Deletion/purge includes
+the private collection. Startup checks never reconstruct protected ownership
+from vector payloads. The ordinary full embedding-migration CLI refuses private
+collections until dedicated protected migration support exists; unrelated
+history-only maintenance remains available. No current migration rerun is needed.
+
+Private tools execute through server-bound, expiring owner-scoped callbacks,
+with no sidecar HTTP fallback. Calculator, CSV/XLSX analysis, owned file listing,
+paged text/summary reading, private hybrid document search and IRS catalog/search/
+page reading reuse existing cores. Dense and keyword retrieval share the exact
+owned-file selection and private collection. Document/reference query embeddings
+use the scoped verified client and pinned profile. Web, general memory/history
+and media tools are unavailable. General recall/store guidance is suppressed;
+Private conversation context remains in its canonical local history.
+
+Private log records remove contents, arguments, exception traces and stacks
+before formatting; child tasks and worker threads retain the boundary. Graph
+tracing is disabled task-locally. Model/tool/data clients disable environment
+proxies and redirects; failures do not select a cloud fallback.
+
+#### 20C.6 — native Private chats (built; manual acceptance pending)
+
+The deployment's canonical `private_processing.enabled` exposes **Private** in
+the existing picker. It uses the installed Local panel plus verified router/title,
+summary and pinned text-embedding models. Routing configuration and clients are
+isolated from ordinary requests. Local and direct-model choices are unchanged.
+No sensitive-content detector or separate privacy tool selector is added.
+
+Only a new/empty conversation can become Private. Its restriction persists
+through reload and cannot be cleared by selecting another model. UI/API refuse
+Project assignment for this first release. Uploads automatically use protected
+processing; its picker offers only ready Private documents. Ordinary chat pickers
+exclude those documents, and backend read guards enforce the same restriction.
+This is local **server processing**: browser traffic still follows the configured
+Cloudflare route, and the server administrator remains trusted. It does not claim
+an offline connection or verified tax-preparation accuracy.
+
+After normal commit/push/pull, run on **Tower**, in
+`/mnt/user/appdata/audrey_ai_2.0`:
 
 ```bash
-docker compose up -d --build audrey audrey-ui
+docker compose up -d --build --force-recreate audrey custom-tools audrey-ui
 ```
 
-No configuration/schema migration, sidecar/media-worker rebuild, model change or
-reindex is needed. Hermetic checks cover metadata preflight, transport/tool
-isolation, native stream/title lifetime, cancellation and ordinary chat/state
-controls. Browser acceptance is the changed Add files layout and plus chooser;
-no upload is required for layout alone. Keep accepted IRS/20C.3 tests closed.
+Recreate applies canonical configuration. The sidecar rebuild uses the shared
+calculator core. No model pull, schema migration, reindex, collector or media
+worker rebuild is required. Existing accepted IRS/migration checks stay closed.
+
+**Manual acceptance at `https://ai.builtryte.xyz`:** start a new chat, select
+Private, upload a small non-sensitive PDF with selectable text (or TXT/CSV), and
+ask for its contents plus calculator `1250 * 1.08` (expected `1350`). Verify
+Processing/Ready, local models/tool disclosure, reload/reconnect and the retained
+Private choice. Use owned IRS tools to read Publication17 page1 and identify its
+stated tax year. In an ordinary new chat, the Private document must be absent
+from the attachment picker. A real upload is required for this gate; use synthetic
+or public evidence before taxpayer records.
+
+After this acceptance, extend Private Projects and supported worker operations
+without weakening the first release's boundaries, then proceed to 20D/20E.
 
 ### 20D/20E — verified assistance
 

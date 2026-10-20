@@ -19,6 +19,7 @@ this module so the ReAct loop stays in control.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -30,6 +31,7 @@ import httpx
 from audrey.metrics import tool_call_seconds, tool_calls_total
 from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
 from audrey.tools.discovery import ToolRegistry, ToolUserScope
+from audrey.tools.private_dispatch import PrivateToolHandler, private_tool_handler
 from audrey.user_data_visibility import remote_personal_reads_blocked
 
 log = logging.getLogger(__name__)
@@ -181,6 +183,7 @@ async def dispatch_one(
     name = str(fn.get("name") or "?")
     call_id = tool_call.get("id")
     policy = current_processing_policy()
+    private_handler: PrivateToolHandler | None = None
     if policy is not None:
         # Run before argument parsing, echoing or logging. Tool names alone
         # cannot vouch for a remote server or an unrelated endpoint path.
@@ -193,6 +196,7 @@ async def dispatch_one(
             policy.assert_tool_allowed(name, server_url=spec.server_url)
             if client.trust_env:
                 raise ProcessingPolicyError("private_transport_not_allowed")
+            private_handler = private_tool_handler(name, user_id=user_id)
         except ProcessingPolicyError as exc:
             tool_calls_total.labels(tool="processing_policy", outcome="error").inc()
             return ToolResult(
@@ -284,6 +288,44 @@ async def dispatch_one(
             }),
             elapsed_s=0.0,
             is_error=True,
+        )
+
+    if policy is not None:
+        # This is the only protected execution path. Missing local bindings
+        # already refused before arguments were parsed; no HTTP fallback exists.
+        start = time.monotonic()
+        try:
+            if private_handler is None:
+                raise ProcessingPolicyError("private_tool_not_allowed")
+            dispatch_timeout = spec.timeout_s if spec.timeout_s is not None else timeout_s
+            async with asyncio.timeout(dispatch_timeout):
+                payload = await private_handler(dict(args))
+            content = json.dumps(payload, ensure_ascii=False)
+            truncated = _truncate_payload(payload, content, max_result_chars)
+        except TimeoutError:
+            elapsed = round(time.monotonic() - start, 2)
+            tool_calls_total.labels(tool=name, outcome="timeout").inc()
+            tool_call_seconds.labels(tool=name).observe(elapsed)
+            return ToolResult(
+                name=name, call_id=call_id,
+                content=json.dumps({"error": "timeout", "detail": "Local tool timed out."}),
+                elapsed_s=elapsed, is_error=True,
+            )
+        except Exception:  # noqa: BLE001 - protected diagnostics must never echo arguments
+            elapsed = round(time.monotonic() - start, 2)
+            tool_calls_total.labels(tool=name, outcome="error").inc()
+            tool_call_seconds.labels(tool=name).observe(elapsed)
+            return ToolResult(
+                name=name, call_id=call_id,
+                content=json.dumps({"error": "private_tool_unavailable", "detail": "Local tool request failed."}),
+                elapsed_s=elapsed, is_error=True,
+            )
+        elapsed = round(time.monotonic() - start, 2)
+        tool_calls_total.labels(tool=name, outcome="ok").inc()
+        tool_call_seconds.labels(tool=name).observe(elapsed)
+        return ToolResult(
+            name=name, call_id=call_id, content=truncated,
+            elapsed_s=elapsed, is_error=False,
         )
 
     url = f"{spec.server_url}{spec.path}"

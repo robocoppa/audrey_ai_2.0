@@ -23,23 +23,18 @@ they are not ongoing task lists.
   remains available and incomplete coverage is disclosed. **20B.2 browser retrieval
   accepted October 18:** matching source pages/year and correct tool calls.
   Answer conditions and conflicting source figures remain 20E accuracy cases.
-  **20C.1 built:** shared model/tool boundaries enforce an immutable server-owned
-  local policy with exact model identities, trusted endpoints and safe refusals.
-  It is not activated in user requests. **October 19 direction:** add a **Private**
-  workflow to the existing model picker, using installed local models. Explicit
-  selection activates local-only processing and automatically limits tools; no
-  sensitive-content detection or separate privacy tool selector. Next: persist
-  and enforce that choice across files and derived context before exposing it.
-  **20C.2 deployed October 19 (user confirmed):** durable Project/conversation
-  restrictions, immutable run snapshots and ordinary-history exclusion.
-  **20C.3 accepted October 19:** file restrictions survive upload reservations/sessions and
-  commits; existing workers and ordinary model readers cannot process protected
-  files. Owner previews/downloads remain available. **20C.4 built:** verified
-  runtime binds local model/tool transports through native streams, cancellation
-  cleanup and later title tasks without replacing ordinary shared clients.
-  Private remains unexposed. Next carry policy through protected ingestion and
-  service/background work, then finish derived context and logging/storage.
-  General Local/direct-model choices keep their present meaning.
+  **20C.1–3 accepted/deployed:** immutable model/tool policy and durable
+  conversation/file restrictions. **20C.4–6 built; manual acceptance next:**
+  verified native runtime, protected document ingestion and the **Private**
+  model-picker workflow. Local model calls, summaries, embeddings and tools
+  stay in the protected path. Private files use isolated collections; ordinary
+  chats cannot reuse them. Canonical history stays local, shared memory is off,
+  and protected logs/tracing omit contents. Explicit selection before the first
+  message establishes the durable restriction; no detector or extra tool picker.
+  The first release supports text documents, calculations/tables and owned IRS
+  retrieval. Projects, visual/media processing, URL imports and OCR remain
+  refused until their protected paths exist. General Local/direct choices and
+  Hermes retain their meaning. Cloudflare still handles browser transport.
   [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds
   the contract and remaining privacy/tax workflow. State jurisdictions remain
   unspecified; fine-tuning requires evidence.
@@ -63,8 +58,8 @@ they are not ongoing task lists.
   right, with matching field heights, a plus chooser and captions below the
   fields. Actions align; mobile stacks the forms. My Files, chat and
   Project uploads show transfer completion followed by explicit Processing
-  status while awaiting the server. The UI portion needs `audrey-ui`; 20C.4
-  also needs `audrey`. Phase 11 holds the
+  status while awaiting the server. The chooser alone needs `audrey-ui`; the current Private
+  release rebuilds `audrey`, `custom-tools` and `audrey-ui`. Phase 11 holds the
   interaction contract; the Private processing queue remains unchanged.
 
 - **19 — deeper evidence tools:** complete; user accepted all five tools October 13.
@@ -144,7 +139,7 @@ they are not ongoing task lists.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A/20B accepted; 20C.1–3 accepted/deployed; 20C.4 built |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A/20B accepted; 20C.1–3 accepted/deployed; 20C.4–6 built; Private browser gate next |
 
 ## Remaining work
 
@@ -152,10 +147,10 @@ they are not ongoing task lists.
    history. Preserve accepted history/memory checks. New conversation focus and
    the existing-file browser check remain unreported. The current-catalog IRS
    index and cited-search browser check are accepted, with the approved
-   Publication 5902 search gap. Finish 20C enforced private processing: protect
-   ingestion, background jobs and derived context using the verified
-   native runtime; finish logging/storage, then expose Private in the model
-   picker with automatically limited tools. No sensitive-content detection is queued. Follow with 20D's
+   Publication 5902 search gap. Accept the first native Private chat/document
+   flow, then extend protected Projects and supported worker operations.
+   Unsupported operations stay refused. No sensitive-content detection is queued.
+   Follow with 20D's
    tax workflow and targeted 20E evaluation,
    including source conditions and conflicting figures. Broad collection and both migrations stay
    complete; no repeat is queued.

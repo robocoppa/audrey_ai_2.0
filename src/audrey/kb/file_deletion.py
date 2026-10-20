@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from audrey.kb.private_documents import private_text_collection
 from audrey.kb.uploads_db import UploadsDB
 from audrey.kb.user_store import (
     sanitize_user,
@@ -216,6 +217,10 @@ class FileDeletionWorker:
                 user_text_collection(user),
                 user_image_collection(user),
             )
+            upload = await self._db.get_upload(file_id)
+            protected = bool(upload and upload.get("user") == user and upload.get("private_required", False))
+            if protected:
+                collections = (*collections, private_text_collection(user))
             outcomes = await asyncio.gather(
                 *(
                     self._qdrant.delete_by_file_id(
@@ -243,7 +248,7 @@ class FileDeletionWorker:
                 await self._db.mark_source_freed(file_id, freed_at=attempted_at)
 
             if errors:
-                error = "; ".join(errors)[:500]
+                error = "Private file cleanup is pending." if protected else "; ".join(errors)[:500]
                 await self._db.fail_file_deletion(file_id, user=user, error=error)
                 file_deletion_events_total.labels(result="retry").inc()
                 log.warning(

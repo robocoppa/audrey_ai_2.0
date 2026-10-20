@@ -744,6 +744,141 @@ async def _store_document_summary(
     return summary, added
 
 
+async def _settle_private_persistence(operation):
+    """Finish one started disk/vector mutation before cancellation cleanup."""
+    task = asyncio.ensure_future(operation)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        with contextlib.suppress(Exception):
+            await task
+        raise
+
+
+def _write_private_text(path: Path, text: str) -> None:
+    """Create protected derived files with explicit owner-only permissions."""
+    import os
+
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        stream.write(text)
+
+
+async def _ingest_private_document(
+    request: Request,
+    dest: Path,
+    *,
+    runtime,
+    storage: StorageLifecycle,
+    reservation: StorageReservation,
+    user: str,
+    file_id: str,
+    filename: str,
+    written: int,
+    max_total: int,
+) -> UploadResponse:
+    """Complete a native protected upload; ordinary transports stay closed.
+
+    Protection comes from the owned reservation, not a request flag. Collection
+    isolation prevents uncommitted/failed vectors entering ordinary retrieval.
+    The native transport reserves protected capacity before landing bytes.
+    """
+    from audrey.kb.private_documents import (
+        PrivateDocumentError,
+        prepare_private_document,
+        private_text_collection,
+    )
+    from audrey.private_processing import PrivateProcessingRuntime
+
+    if not isinstance(runtime, PrivateProcessingRuntime) or reservation.user != user:
+        raise ProcessingPolicyError("private_processing_unavailable")
+    try:
+        protected = await storage.reservation_private_required(reservation)
+    except ValueError:
+        raise ProcessingPolicyError("private_processing_unavailable") from None
+    if not protected or reservation.kind not in {"single_shot", "chunked"}:
+        raise ProcessingPolicyError("private_processing_unavailable")
+    # Never let an internal caller overwrite an existing source/row or operate
+    # outside the UUID-named owner directory used by native upload transports.
+    try:
+        if str(uuid.UUID(file_id)) != file_id or Path(filename).suffix.lower() != dest.suffix.lower():
+            raise ValueError
+        expected = _upload_root(request) / sanitize_user(user) / f"{file_id}{dest.suffix.lower()}"
+        valid_source = await asyncio.to_thread(
+            lambda: dest == expected and not dest.is_symlink()
+            and dest.resolve() == expected.absolute() and dest.stat().st_size == written,
+        )
+        if not valid_source or written <= 0 or await _get_uploads_db(request).get_upload(file_id):
+            raise ValueError
+    except (ValueError, OSError):
+        raise ProcessingPolicyError("private_processing_unavailable") from None
+
+    collection = private_text_collection(user)
+    derived = ocr_text_path(dest)
+    summary_path = dest.with_suffix(".summary.txt")
+    if derived.exists() or summary_path.exists():
+        raise ProcessingPolicyError("private_processing_unavailable")
+    qdrant = request.app.state.qdrant
+    committed = False
+    staged = False
+    try:
+        async with runtime.scope(request.app) as app:
+            stamp = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+            prepared = await prepare_private_document(
+                app, dest, user=user, file_id=file_id,
+                filename=Path(filename or file_id).name[:255],
+                source_bytes=written, stamp=stamp,
+            )
+            await qdrant.ensure_collection(collection, dim=prepared.dimensions, sparse=True)
+            await qdrant.validate_text_embedding(collection)
+            await qdrant.ensure_user_payload_indexes(collection)
+            await _settle_private_persistence(asyncio.to_thread(
+                _write_private_text, derived, prepared.text,
+            ))
+            if prepared.summary:
+                await _settle_private_persistence(asyncio.to_thread(
+                    _write_private_text, summary_path, prepared.summary,
+                ))
+            staged = True  # A failed upsert can still have written some points.
+            await _settle_private_persistence(qdrant.upsert_text(prepared.points, collection=collection))
+            commit = asyncio.create_task(storage.commit_upload(
+                reservation, file_id=file_id, filename=Path(filename or file_id).name[:255],
+                mime=prepared.mime, bytes_=written, kind="text", collection=collection,
+                chunks=len(prepared.points), uploaded_at=stamp, status="ready",
+                max_user_bytes=max_total, summary=prepared.summary,
+            ))
+            try:
+                await asyncio.shield(commit)
+            except asyncio.CancelledError:
+                # SQLite's worker may have committed already. Resolve its outcome
+                # before cleanup so cancellation cannot erase a valid owned row.
+                try:
+                    await commit
+                except Exception:  # noqa: BLE001 - cancelled SQLite failure remains a rollback
+                    committed = False
+                else:
+                    committed = True
+                raise
+            committed = True
+            return UploadResponse(
+                file_id=file_id, filename=Path(filename or file_id).name[:255],
+                mime=prepared.mime, bytes=written, kind="text", collection=collection,
+                chunks=len(prepared.points), status="ready",
+            )
+    except (PrivateDocumentError, ProcessingPolicyError, asyncio.CancelledError):
+        raise
+    except Exception:  # noqa: BLE001 - private diagnostics must not include content
+        raise ProcessingPolicyError("private_processing_unavailable") from None
+    finally:
+        if not committed:
+            if staged:
+                with contextlib.suppress(Exception):
+                    await qdrant.delete_by_file_id(file_id, user=user, collection=collection)
+            for path in (dest, derived, summary_path):
+                _safe_unlink(path)
+        await storage.release(reservation)
+
+
 async def _validate_and_ingest(
     request: Request,
     dest: Path,

@@ -8,7 +8,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from audrey.processing_policy import (
-    LOCAL_MODEL_FREE_TOOLS,
+    LOCAL_PROCESSING_TOOLS,
     ProcessingPolicy,
     ProcessingPolicyError,
     current_processing_policy,
@@ -187,7 +187,7 @@ def test_unknown_model_is_refused_before_inspecting_metadata():
     assert caught.value.code == "local_model_not_allowed"
 
 
-@pytest.mark.parametrize("name", ["web_search", "web_fetch", "reference_search", "kb_search", "memory_store", "memory_recall", "memory_search", "chat_history_search", "open_chat_history", "inspect_pdf_page", "inspect_video_frame", "unknown", "Calculate", "calculate "])
+@pytest.mark.parametrize("name", ["web_search", "web_fetch", "memory_store", "memory_recall", "memory_search", "chat_history_search", "open_chat_history", "inspect_pdf_page", "inspect_video_frame", "unknown", "Calculate", "calculate "])
 def test_external_model_using_write_and_unknown_tools_cannot_be_authorized(name):
     with pytest.raises(ProcessingPolicyError):
         policy(allowed_tools={name})
@@ -195,11 +195,11 @@ def test_external_model_using_write_and_unknown_tools_cannot_be_authorized(name)
 
 def test_default_tool_policy_denies_all_and_model_free_tools_need_exact_endpoint():
     protected = ProcessingPolicy(local_models={MODEL: DIGEST}, ollama_base_url=OLLAMA)
-    for name in LOCAL_MODEL_FREE_TOOLS:
+    for name in LOCAL_PROCESSING_TOOLS:
         with pytest.raises(ProcessingPolicyError):
             protected.assert_tool_allowed(name, server_url=TOOLS)
-    protected = policy(allowed_tools=set(LOCAL_MODEL_FREE_TOOLS))
-    for name in LOCAL_MODEL_FREE_TOOLS:
+    protected = policy(allowed_tools=set(LOCAL_PROCESSING_TOOLS))
+    for name in LOCAL_PROCESSING_TOOLS:
         protected.assert_tool_allowed(name, server_url=TOOLS)
     with pytest.raises(ProcessingPolicyError) as caught:
         protected.assert_tool_allowed("calculate", server_url="https://external.example")

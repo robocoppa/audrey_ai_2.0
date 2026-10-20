@@ -204,7 +204,9 @@ class QdrantKB:
         image_collection: str = "kb_images",
         embedding_profile: EmbeddingProfile | None = None,
     ) -> None:
-        self._client = QdrantClient(host=host, port=port)
+        # Personal document vectors and query payloads must stay on the
+        # operator-configured data endpoint, including background cleanup.
+        self._client = QdrantClient(host=host, port=port, trust_env=False, follow_redirects=False)
         self.text_collection = text_collection
         self.image_collection = image_collection
         self.embedding_profile = embedding_profile

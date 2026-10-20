@@ -2954,6 +2954,7 @@ async def reconcile_with_qdrant(db: UploadsDB, qdrant) -> dict[str, int]:
     sidecars remain usable independently of search. Qdrant errors propagate
     to the startup caller, which logs them and retains the SQLite catalog.
     """
+    from audrey.kb.private_documents import private_text_collection
     from audrey.kb.user_store import USER_IMAGE_PREFIX, USER_TEXT_PREFIX
 
     deletion_keys = await db.file_deletion_keys()
@@ -2962,15 +2963,31 @@ async def reconcile_with_qdrant(db: UploadsDB, qdrant) -> dict[str, int]:
     indexed_ids: dict[str, set[str]] = {}
     backfilled_rows = 0
     for col in all_collections:
-        if not (col.startswith(USER_TEXT_PREFIX) or col.startswith(USER_IMAGE_PREFIX)):
+        protected = col.startswith("kb_private_text_")
+        if not (protected or col.startswith(USER_TEXT_PREFIX) or col.startswith(USER_IMAGE_PREFIX)):
             continue
         # Payloads retain the raw owner; collection suffixes are sanitized.
         rows = await _scroll_user_rows(qdrant, col)
         for user, files in rows.items():
-            user_to_collections.setdefault(user, set()).add(col)
+            if not protected:
+                user_to_collections.setdefault(user, set()).add(col)
             for row in files:
                 file_id = str(row["file_id"])
                 if (user, file_id) in deletion_keys:
+                    continue
+                stored = await db.get_upload(file_id)
+                if protected:
+                    # Private ownership/protection is established only by the
+                    # upload catalog. Count existing owned points for drift,
+                    # but never recover or relabel a row from vector payloads.
+                    if (
+                        stored and stored.get("user") == user
+                        and stored.get("private_required")
+                        and stored.get("collection") == col == private_text_collection(user)
+                    ):
+                        indexed_ids.setdefault(user, set()).add(file_id)
+                    continue
+                if stored and stored.get("private_required"):
                     continue
                 indexed_ids.setdefault(user, set()).add(file_id)
                 backfilled_rows += int(await db.backfill_upload(

@@ -27,7 +27,9 @@ from audrey.processing_policy import (
 from audrey.routes.app.runs import NativeRunManager
 from audrey.routes.inflight import UserInflightRegistry
 from audrey.routes.openai.schemas import ChatCompletionRequest
+from audrey.tools.calculator import CalculateRequest, calculate_value
 from audrey.tools.discovery import ToolRegistry, ToolSpec
+from audrey.tools.private_dispatch import private_tool_scope
 
 MODEL = "local-test:latest"
 PRIVATE_TEXT = "PRIVATE_NATIVE_CONTENT_6385"
@@ -437,18 +439,22 @@ async def test_private_graph_dispatches_calculator_without_environment_proxy_or_
     monkeypatch.setenv("HTTP_PROXY", "http://untrusted.invalid:8080")
     monkeypatch.setattr(httpx, "AsyncClient", client_factory)
     runtime = PrivateProcessingRuntime(POLICY)
+    async def calculate(args):
+        return calculate_value(CalculateRequest.model_validate(args)).model_dump()
+
     async with runtime.scope(app) as execution_app:
-        final = await execution_app.state.graph.ainvoke(
-            {
-                "virtual_model": "audrey_fast",
-                "messages": [{"role": "user", "content": "Calculate 1250 times 1.08"}],
-                "user_id": "owner",
-                "compatibility_request": False,
-            }
-        )
-        assert final["content"] == "1350"
-        assert final["tool_rounds"] == 1
+        with private_tool_scope(user_id="owner", handlers={"calculate": calculate}):
+            final = await execution_app.state.graph.ainvoke(
+                {
+                    "virtual_model": "audrey_fast",
+                    "messages": [{"role": "user", "content": "Calculate 1250 times 1.08"}],
+                    "user_id": "owner",
+                    "compatibility_request": False,
+                }
+            )
+            assert final["content"] == "1350"
+            assert final["tool_rounds"] == 1
     assert generations == 2
-    assert len([r for r in requests if r.url.path == "/calculate"]) == 1
+    assert not any(r.url.path == "/calculate" for r in requests)
     assert not any("memory" in r.url.path or "web" in r.url.path for r in requests)
     assert all(not client.trust_env and client.is_closed for client in clients)

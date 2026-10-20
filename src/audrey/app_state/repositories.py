@@ -415,6 +415,7 @@ class ConversationsRepository:
         archived: bool | None = None,
         project_id: str | None = None,
         update_project: bool = False,
+        require_private: bool = False,
     ) -> ConversationRecord | None:
         return await asyncio.to_thread(
             self._update_sync,
@@ -426,6 +427,7 @@ class ConversationsRepository:
             archived,
             project_id,
             update_project,
+            require_private,
         )
 
     def _update_sync(
@@ -438,7 +440,10 @@ class ConversationsRepository:
         archived: bool | None,
         project_id: str | None,
         update_project: bool,
+        require_private: bool,
     ) -> ConversationRecord | None:
+        if type(require_private) is not bool:
+            raise InvalidApplicationStateError("private requirement must be a boolean")
         user_id = _required(user_id, "user id")
         conversation_id = _required(conversation_id, "conversation id")
         if (
@@ -472,6 +477,17 @@ class ConversationsRepository:
                     self._conn.rollback()
                     return None
                 private_required = bool(existing["private_required"])
+                if require_private and not private_required:
+                    if self._has_active_run_locked(user_id, conversation_id):
+                        raise ConversationHasActiveRunError("conversation has an active run")
+                    if self._conn.execute(
+                        "SELECT 1 FROM app_messages WHERE user_id = ? AND conversation_id = ? LIMIT 1",
+                        (user_id, conversation_id),
+                    ).fetchone() is not None:
+                        raise InvalidApplicationStateError("Start a new conversation to use Private processing.")
+                    if existing["project_id"] is not None or (update_project and normalized_project_id is not None):
+                        raise InvalidApplicationStateError("Private Project conversations are not available yet.")
+                    private_required = True
                 if update_project and normalized_project_id is not None:
                     project = self._conn.execute(
                         "SELECT private_required FROM app_projects "
