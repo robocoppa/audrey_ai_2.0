@@ -31,7 +31,11 @@ import httpx
 from audrey.metrics import tool_call_seconds, tool_calls_total
 from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
 from audrey.tools.discovery import ToolRegistry, ToolUserScope
-from audrey.tools.private_dispatch import PrivateToolHandler, private_tool_handler
+from audrey.tools.private_dispatch import (
+    PrivateToolArgumentsError,
+    PrivateToolHandler,
+    private_tool_handler,
+)
 from audrey.user_data_visibility import remote_personal_reads_blocked
 
 log = logging.getLogger(__name__)
@@ -311,13 +315,19 @@ async def dispatch_one(
                 content=json.dumps({"error": "timeout", "detail": "Local tool timed out."}),
                 elapsed_s=elapsed, is_error=True,
             )
-        except Exception:  # noqa: BLE001 - protected diagnostics must never echo arguments
+        except Exception as exc:  # noqa: BLE001 - never expose untrusted exception text
             elapsed = round(time.monotonic() - start, 2)
             tool_calls_total.labels(tool=name, outcome="error").inc()
             tool_call_seconds.labels(tool=name).observe(elapsed)
+            # Only this server-defined schema failure has safe corrective text.
+            # ValidationError itself contains input values and must never escape.
+            invalid_arguments = isinstance(exc, PrivateToolArgumentsError)
             return ToolResult(
                 name=name, call_id=call_id,
-                content=json.dumps({"error": "private_tool_unavailable", "detail": "Local tool request failed."}),
+                content=json.dumps({
+                    "error": PrivateToolArgumentsError.code if invalid_arguments else "private_tool_unavailable",
+                    "detail": PrivateToolArgumentsError.detail if invalid_arguments else "Local tool request failed.",
+                }),
                 elapsed_s=elapsed, is_error=True,
             )
         elapsed = round(time.monotonic() - start, 2)

@@ -1804,7 +1804,7 @@ function AudreyThread({
   );
   const selectedSkill = skills.find((skill) => skill.id === skillId);
   const effectiveSkillId = isPrivate ? "" : skillId;
-  const skillControlValue = isPrivate ? "Local only" : selectedSkill?.name
+  const skillControlValue = isPrivate ? "Automatic" : selectedSkill?.name
     ?? (selectedSkillMode === null ? "Not available" : "Automatic");
   const supportsFiles = selectedModel.capabilities.includes("files");
   useEffect(() => {

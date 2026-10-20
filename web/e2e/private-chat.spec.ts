@@ -149,7 +149,7 @@ test(`Private keeps local controls, protected documents and upload routing throu
   await choosePrivate(page);
   await expect(page.getByText("Private uses local models and tools.", { exact: false })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toBeInViewport();
-  await expect(page.getByRole("button", { name: "Tools and skills: Local only" })).toBeInViewport();
+  await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
   await expect(page.getByRole("button", { name: "Move conversation to project" })).toBeEnabled();
   await page.getByRole("button", { name: "Audrey model", exact: true }).click();
@@ -157,7 +157,7 @@ test(`Private keeps local controls, protected documents and upload routing throu
   await expect(models.getByRole("button", { name: "Private", exact: true })).toBeVisible();
   await expect(models.getByRole("button", { name: "Cloud", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Tools and skills: Local only" }).click();
+  await page.getByRole("button", { name: "Tools and skills: Automatic" }).click();
   const skills = page.getByRole("dialog", { name: "Choose how Audrey uses tools" });
   await expect(skills.getByRole("button", { name: /Automatic/u })).toBeVisible();
   await expect(skills.getByRole("button", { name: /Video analysis/u })).toHaveCount(0);
@@ -182,7 +182,7 @@ test(`Private keeps local controls, protected documents and upload routing throu
   await expect(page.getByRole("dialog", { name: "Choose an Audrey model" }).getByRole("button", { name: "Cloud", exact: true })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toBeInViewport();
-  await expect(page.getByRole("button", { name: "Tools and skills: Local only" })).toBeInViewport();
+  await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
   if (viewport.width === 390) await page.screenshot({ path: "/tmp/audrey-private-mobile.png" });
 });

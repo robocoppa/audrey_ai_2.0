@@ -454,16 +454,23 @@ Admin model ordering/role grants and `/v1`/Hermes behavior remain unchanged.
 No tax-specific Project fields, schema migration or new model is introduced.
 
 Private Project upload/context/reopen/file-isolation acceptance is complete.
-Draft selection, deletion navigation and the MiniMax cloud addition are accepted.
-The portrait/history followup does not require repeating Project uploads,
-indexing or migration. Tool activity and catalog metadata must not be presented
-to synthesis as proof that factual claims were verified. Synthesis now receives
+Draft selection, deletion navigation, the MiniMax cloud addition, Private
+portrait and activity-sorted history are accepted. Private's Tools and skills
+control says Automatic; its processing restrictions remain enforced.
+No Project upload, indexing or migration needs repeating. Tool activity and
+catalog metadata must not be presented to synthesis as proof that factual
+claims were verified. Synthesis now receives
 successful/failed tool counts and an explicit limitation when reference calls
 returned no passage/page evidence. Reference guidance recommends page reads
 only when those tools are actually available; it adds no forced call or new
-model. The reported failed-search conversation was deleted, so its failure
-cause is unavailable. Only current-catalog search is published; lookup/read
-access to retained earlier editions does not imply a prior search index.
+model. Private callbacks cap oversized positive integer result counts, using
+the same
+search/catalog maximums. Invalid identity, scope, page/year, types and unknown
+fields retain normal validation; no count repair changes the requested library
+or edition. Native HTTP APIs keep their strict limits. Tool validation feedback
+uses fixed messages without arguments or exception contents. Only current-
+catalog search is published; retained earlier editions do not imply a prior
+search index.
 The main plan owns the remaining queue; no temporary smoke document is retained.
 
 ### Tax review and longer Private task contracts (planned)

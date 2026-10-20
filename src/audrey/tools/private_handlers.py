@@ -11,17 +11,18 @@ from types import MappingProxyType
 from typing import Any, Literal
 
 from fastapi import Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from audrey.identity import Principal
 from audrey.kb.fusion import RRF_K, passes_evidence, reciprocal_rank_fusion
 from audrey.kb.qdrant import SearchScope
 from audrey.kb.table_analysis import TableAnalysisRequest, analyze_table
 from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
+from audrey.references.library import ReferenceReadError
 from audrey.routes import files as upload_routes
 from audrey.routes import references
 from audrey.tools.calculator import CalculateRequest, calculate_value
-from audrey.tools.private_dispatch import PrivateToolHandler
+from audrey.tools.private_dispatch import PrivateToolArgumentsError, PrivateToolHandler
 
 SUPPORTED_PRIVATE_TOOL_NAMES = frozenset({
     "calculate", "list_my_files", "get_file_text", "analyze_table", "kb_search",
@@ -92,19 +93,61 @@ def make_private_tool_handlers(
         guard()
         return calculate_value(CalculateRequest.model_validate(args)).model_dump()
 
+    def reference_body(schema, args, *, count=None, maximum=None):
+        # Models sometimes request more results than the declared context budget.
+        # Reduce only a positive integer result count, never identity or scope.
+        normalized = dict(args)
+        value = normalized.get(count)
+        capped = (
+            count is not None and maximum is not None
+            and isinstance(value, int) and not isinstance(value, bool) and value > maximum
+        )
+        if capped:
+            normalized[count] = maximum
+        try:
+            return schema.model_validate(normalized), capped
+        except ValidationError:
+            # Pydantic's message includes supplied values, paths and unknown keys.
+            raise PrivateToolArgumentsError() from None
+
+    def result_count_notice(result, notice, bound):
+        annotated = {**result, "notice": (result.get("notice", "") + " " + notice).strip()}
+        try:
+            bounded = bound(annotated)
+        except ReferenceReadError:
+            # A notice must not displace required provenance or turn useful
+            # evidence into a failure when metadata already fills the budget.
+            return result
+        if result.get("result_limit_applied"):
+            bounded["result_limit_applied"] = True
+        return bounded
+
     async def lookup(args: dict[str, Any]) -> dict:
         guard()
-        return await references.catalog(references.CatalogRequest.model_validate(args), request, None)
+        body, capped = reference_body(references.CatalogRequest, args, count="limit", maximum=20)
+        result = await references.catalog(body, request, None)
+        if capped:
+            result = result_count_notice(
+                result, "Requested result count capped at 20 catalog entries.", references._bounded_catalog,
+            )
+        return result
 
     async def read(args: dict[str, Any]) -> dict:
         guard()
-        return await references.read(references.ReadRequest.model_validate(args), request, None)
+        body, _ = reference_body(references.ReadRequest, args)
+        return await references.read(body, request, None)
 
     async def search(args: dict[str, Any]) -> dict:
         guard()
+        body, capped = reference_body(references.SearchRequest, args, count="top_k", maximum=5)
         # The runtime supplies an isolated reference_search whose embedder uses
         # its verified local Ollama transport. No sidecar or web fallback occurs.
-        return await references.search(references.SearchRequest.model_validate(args), request, None)
+        result = await references.search(body, request, None)
+        if capped:
+            result = result_count_notice(
+                result, "Requested result count capped at 5 passages.", references._bounded_search,
+            )
+        return result
 
     async def list_files(args: dict[str, Any]) -> dict:
         body = _OwnerRequest.model_validate(args)

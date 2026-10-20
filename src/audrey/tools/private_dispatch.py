@@ -22,6 +22,19 @@ from audrey.processing_policy import (
 PrivateToolHandler = Callable[[dict[str, Any]], Awaitable[Any]]
 
 
+class PrivateToolArgumentsError(ValueError):
+    """Content-free feedback for a callback's declared-schema validation failure."""
+
+    code = "arguments_invalid"
+    detail = (
+        "The tool arguments do not match its declaration. Use only declared fields "
+        "with the stated types and limits."
+    )
+
+    def __init__(self) -> None:
+        super().__init__(self.detail)
+
+
 @dataclass(slots=True)
 class _ToolBinding:
     policy: ProcessingPolicy
@@ -78,4 +91,4 @@ def private_tool_handler(name: str, *, user_id: str | None) -> PrivateToolHandle
     return binding.handlers[name]
 
 
-__all__ = ["PrivateToolHandler", "private_tool_scope"]
+__all__ = ["PrivateToolArgumentsError", "PrivateToolHandler", "private_tool_scope"]
