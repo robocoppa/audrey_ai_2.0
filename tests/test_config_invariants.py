@@ -23,11 +23,16 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 
+from audrey.model_catalog import configured_models
+from audrey.models.health import HealthTracker
+from audrey.models.registry import ModelRegistry
 from audrey.pipeline.classify import classify
+from audrey.pipeline.deep_panel import select_researchers, select_workers
 from audrey.routes.openai.routes import VIRTUAL_MODELS
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -120,6 +125,47 @@ def test_kimi_k3_leads_every_panel_with_cloud_workers(cfg):
                     f"{pool_name}/{task}: Kimi K3 must lead cloud-bearing panels; "
                     f"got {workers}"
                 )
+
+
+def test_all_configured_panel_workers_fit_their_runtime_cloud_caps(cfg):
+    """Appending a model beyond a cap must not create an unreachable draft."""
+    runtime = SimpleNamespace(raw=cfg, model_registry=cfg["model_registry"])
+    registry = ModelRegistry(runtime)
+    health = HealthTracker()
+    for pool_name, pools in cfg.items():
+        if not str(pool_name).startswith("deep_panel"):
+            continue
+        for task, pool in pools.items():
+            if "researchers" in pool:
+                expected = pool["researchers"]
+                actual = select_researchers(
+                    runtime, registry, health, task=task,
+                    max_researchers_cloud=cfg["agentic"]["max_research_workers_cloud"],
+                )
+            else:
+                expected = pool["workers"]
+                actual = select_workers(
+                    runtime, registry, health, pool_key=pool_name, task=task,
+                    max_workers_cloud=cfg["agentic"]["max_deep_workers_cloud"],
+                )
+            assert [name for name, _ in actual] == expected, (pool_name, task)
+
+
+def test_minimax_candidate_is_available_without_becoming_a_fast_path_primary(cfg):
+    runtime = SimpleNamespace(raw=cfg, model_registry=cfg["model_registry"])
+    name = "minimax-m3.1-flash:cloud"
+    direct = next(model for model in configured_models(runtime)
+                  if model.id == f"direct/{name}")
+    assert direct.presentation == "cloud"
+    assert direct.protocol_model == f"audrey_passthrough/{name}"
+    assert name in cfg["fast_path"]["tool_capable_models"]
+    assert name in cfg["vision"]["also_capable"]
+    for task, candidates in cfg["model_registry"].items():
+        assert _leader(candidates)["name"] != name, task
+    for pool in cfg["deep_panel_local"].values():
+        assert name not in pool["workers"]
+        assert name != pool["synthesizer"]
+        assert name != pool["fallback_synth"]
 
 
 # ─── The two model authorities ─────────────────────────────────────────

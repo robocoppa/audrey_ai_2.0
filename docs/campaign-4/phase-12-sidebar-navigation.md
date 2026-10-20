@@ -7,6 +7,10 @@ Desktop Archive/Delete use larger action buttons. Composer controls,
 including Project, have larger targets; model focus highlights only
 the outer control, without a second glow on the select text. An archive/delete
 request finishing after navigation preserves the newly selected chat and draft.
+Deleting the selected conversation removes its cached thread and opens a fresh
+focused draft. It does not select an older chat or expose a stale deleted-ID
+error. A later navigation wins if the replacement draft is still being created.
+Deleting an unselected sidebar chat preserves the currently open conversation.
 
 The desktop sidebar starts with one full-width **New conversation** action.
 Workspace, the sidebar username, and the old Files/+ New pair are removed.

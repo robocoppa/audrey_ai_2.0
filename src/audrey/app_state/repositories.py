@@ -421,6 +421,7 @@ class ConversationsRepository:
         project_id: str | None = None,
         update_project: bool = False,
         require_private: bool = False,
+        replace_empty_private_draft: bool = False,
     ) -> ConversationRecord | None:
         return await asyncio.to_thread(
             self._update_sync,
@@ -433,6 +434,7 @@ class ConversationsRepository:
             project_id,
             update_project,
             require_private,
+            replace_empty_private_draft,
         )
 
     def _update_sync(
@@ -446,8 +448,9 @@ class ConversationsRepository:
         project_id: str | None,
         update_project: bool,
         require_private: bool,
+        replace_empty_private_draft: bool,
     ) -> ConversationRecord | None:
-        if type(require_private) is not bool:
+        if type(require_private) is not bool or type(replace_empty_private_draft) is not bool:
             raise InvalidApplicationStateError("private requirement must be a boolean")
         user_id = _required(user_id, "user id")
         conversation_id = _required(conversation_id, "conversation id")
@@ -495,6 +498,47 @@ class ConversationsRepository:
                     if project is None:
                         raise ProjectNotFoundError("project not found")
                     project_is_private = bool(project["private_required"])
+                if replace_empty_private_draft:
+                    # Private rows never become ordinary. Before any canonical turn,
+                    # a model change replaces the disposable draft in one transaction.
+                    if not private_required or require_private or default_model_id in (None, "private"):
+                        raise InvalidApplicationStateError("Only an empty Private draft can be replaced.")
+                    if project_is_private:
+                        raise InvalidApplicationStateError("Leave this Private Project before choosing another model.")
+                    if self._has_active_run_locked(user_id, conversation_id):
+                        raise ConversationHasActiveRunError("conversation has an active run")
+                    used = self._conn.execute(
+                        "SELECT 1 FROM app_messages WHERE user_id = ? AND conversation_id = ? "
+                        "UNION ALL SELECT 1 FROM app_runs WHERE user_id = ? AND conversation_id = ? LIMIT 1",
+                        (user_id, conversation_id, user_id, conversation_id),
+                    ).fetchone()
+                    if used is not None:
+                        raise InvalidApplicationStateError(
+                            "This conversation stays Private after its first message. Start a new conversation to use another model."
+                        )
+                    replacement_id = _new_id("con")
+                    self._conn.execute(
+                        "INSERT INTO app_conversations "
+                        "(conversation_id, user_id, title, default_mode, default_model_id, "
+                        "created_at, updated_at, last_message_at, archived_at, project_id, private_required) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0)",
+                        (
+                            replacement_id, user_id,
+                            normalized_title if title is not None else existing["title"],
+                            normalized_mode if default_mode is not None else "auto",
+                            normalized_model_id, now, now,
+                            (now if archived else None) if archived is not None else existing["archived_at"],
+                            target_project_id,
+                        ),
+                    )
+                    self._conn.execute(
+                        "DELETE FROM app_conversations WHERE user_id = ? AND conversation_id = ?",
+                        (user_id, conversation_id),
+                    )
+                    row = self._conversation_row_locked(user_id, replacement_id)
+                    assert row is not None
+                    self._conn.commit()
+                    return _conversation_from_row(row)
                 if (require_private or project_is_private) and not private_required:
                     if self._has_active_run_locked(user_id, conversation_id):
                         raise ConversationHasActiveRunError("conversation has an active run")

@@ -120,6 +120,11 @@ model_registry:
     # ▶ It was the worst of the three placements: a phantom in
     # `tool_capable_models` gates whether the fast path runs the TOOL LOOP at
     # all, so the damage is a silently tool-less turn, not a visible error.
+    # User-installed 2026-10-20. Ollama declares vision/tools/thinking:
+    # https://ollama.com/library/minimax-m3.1-flash:cloud
+    # Candidate priority only: no quality/latency measurement yet. Omitted
+    # speed/quality use neutral registry defaults, not benchmark scores.
+    - { name: "minimax-m3.1-flash:cloud", priority: 55, location: cloud }
 
   reasoning:
     # Ranked by the quality column, not by locality: the local entry led this
@@ -137,6 +142,11 @@ model_registry:
     # is, and takes the slot. ⚠️ speed/quality UNMEASURED — planner hints only.
     - { name: "muse-glimmer:latest",      priority:  85, speed: 82, quality: 86, location: local }
     - { name: "nemotron-3-super:cloud",   priority:  70, speed: 85, quality: 90, location: cloud }
+    # User-installed 2026-10-20. Ollama declares vision/tools/thinking:
+    # https://ollama.com/library/minimax-m3.1-flash:cloud
+    # Candidate priority only: no quality/latency measurement yet. Omitted
+    # speed/quality use neutral registry defaults, not benchmark scores.
+    - { name: "minimax-m3.1-flash:cloud", priority: 55, location: cloud }
 
   general:
     - { name: "qwen3.8:latest",           priority: 100, speed: 75, quality: 92, location: local }
@@ -168,6 +178,11 @@ model_registry:
     # lists below choose its lead position without putting paid inference on
     # the normal fast path. Speed/quality are routing hints, not measurements.
     - { name: "kimi-k3:cloud",             priority:  60, speed: 90, quality: 90, location: cloud }
+    # User-installed 2026-10-20. Ollama declares vision/tools/thinking:
+    # https://ollama.com/library/minimax-m3.1-flash:cloud
+    # Candidate priority only: no quality/latency measurement yet. Omitted
+    # speed/quality use neutral registry defaults, not benchmark scores.
+    - { name: "minimax-m3.1-flash:cloud", priority: 55, location: cloud }
 
   vl:
     # Vision-language pool — image turns on the chat path route here.
@@ -257,6 +272,8 @@ fast_path:
     # Installed Ollama metadata confirms Kimi K3 supports tools. This list
     # gates file/search access for analysis and research workers too.
     - "kimi-k3:cloud"
+    # Official Ollama catalog declares tool calling for the installed tag.
+    - "minimax-m3.1-flash:cloud"
     - "kimi-k2.7-code:cloud"
     - "kimi-k2.6:cloud"
     - "deepseek-v4-pro:cloud"
@@ -283,8 +300,9 @@ deep_panel:
   code:
     # LINEUP AS OF 2026-10-02: Kimi K3 first, then one local and one other-vendor
     # cloud worker. The three-worker house shape and call count are unchanged.
-    # `nemotron-3.5-lightning:latest` is the sole local draft; `minimax-m3` is
-    # OUT. The panel costs THREE cloud calls (2 workers + the cloud synth), not
+    # `nemotron-3.5-lightning:latest` is the sole local draft; legacy
+    # `minimax-m3` is OUT; M3.1 Flash uses other pools. This panel costs
+    # THREE cloud calls (2 workers + the cloud synth), not
     # four. Cloud credits are a hard budget — `scripts/analysis/analyze_escalations.py`
     # prices what escalation multiplies that by.
     #
@@ -295,10 +313,8 @@ deep_panel:
     # weakest cloud call on every axis but one. ⚠️ It did uniquely win 4 cases,
     # and those are forfeited — this was a cost decision, not a claim that it
     # contributed nothing. Re-add it if code answers visibly thin out.
-    # ⚠️ It is now gone from the config ENTIRELY — registries, the cloud
-    # allow-list, the OWUI model list, `deep_panel_cloud.code` and
-    # `pull-models.sh` — and off the box. Re-adding it is a re-pull, not an
-    # edit; `deep_panel_cloud.code` took `kimi-k2.7-code` in its place.
+    # These measurements concern legacy `minimax-m3`, not M3.1 Flash.
+    # The new candidate has no local quality evidence yet.
     #
     # ⚠️ That takes the pool back OFF `max_deep_workers_cloud` (3, pinned by
     # MAX_DEEP_WORKERS_CLOUD in .env), so there is one slot of headroom. AT the
@@ -322,12 +338,14 @@ deep_panel:
     # the cloud synth call fails.
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "qwen3.8:latest"
+  # MiniMax is a new draft candidate, not a measured synthesizer promotion.
+  # Keep the existing worker count and Kimi lead; code retains DeepSeek.
   reasoning:
-    workers: ["kimi-k3:cloud", "qwen3.8:latest", "deepseek-v4-pro:cloud"]
+    workers: ["kimi-k3:cloud", "qwen3.8:latest", "minimax-m3.1-flash:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "qwen3.8:latest"
   general:
-    workers: ["kimi-k3:cloud", "qwen3.8:latest", "deepseek-v4-pro:cloud"]
+    workers: ["kimi-k3:cloud", "qwen3.8:latest", "minimax-m3.1-flash:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "qwen3.8:latest"
   # vl stays one local + one cloud: the deep path rebuilds prompts text-only,
@@ -345,46 +363,24 @@ deep_panel:
 # the different-vendor degrade target so a GLM outage does not fall onto a
 # second GLM call.
 deep_panel_cloud:
+  # M3.1 Flash replaces the duplicate GLM draft slot without increasing the
+  # worker count. GLM still synthesizes; DeepSeek remains the measured code
+  # worker and every pool's fallback synth. Candidate quality is unmeasured.
   code:
-    # 2026-10-02: Kimi K3 replaces Kimi 2.7 and leads this three-worker list.
-    # The 2026-08-17 Kimi 2.7 measurement below remains the history of the slot.
-    # ⚠️ This was a forced swap, not a free one — dropping minimax without a
-    # replacement would have left ONE worker synthesised by ITSELF (glm
-    # holds both slots), which drafts once and then "merges" its own only draft:
-    # strictly more latency than answering directly, for nothing. Caught by
-    # `test_no_flat_panel_is_degenerate`, which asserts on DISTINCT names.
-    # THREE workers. `deepseek-v4-pro` is the measured #1 code contributor
-    # (`analyze_draft_contribution.py`: 0.69 code recall, 0.60 win rate, and the
-    # fastest cloud worker). It is also `fallback_synth`; a model may hold both
-    # roles, and a glm-synth outage still degrades to a different vendor.
-    # ⚠️ It did NOT draft on `202130` and the cap was NOT why — the deployed
-    # `MAX_DEEP_WORKERS_CLOUD` is 3, confirmed from the `ENV OVERRIDE` log line.
-    # The likely cause was simply that this edit was not yet in the running
-    # image. ▶ LESSON: `config.yaml` is not evidence of what is deployed; read
-    # `docker logs audrey | grep "ENV OVERRIDE"` before diagnosing a missing
-    # draft, and check for a `deep_panel: DROPPING cloud worker` warning, which
-    # now fires whenever the cap really is the reason.
-    # ⚠️⚠️ THREE cloud workers sits EXACTLY ON the cap of 3. A fourth is dropped
-    # by `_healthy_workers` — audibly now, but still dropped. Swap, do not add.
-    # ▶ On `202130` (5/5, two workers): `kimi-k2.7-code` supplied the winning
-    # code in four of five cases, `glm-5.2` in one. ⚠️ That run measured 5.2,
-    # which no longer holds this slot — it is the reason the slot exists, not
-    # evidence about `glm-5.3`.
-    workers: ["kimi-k3:cloud", "glm-5.3:cloud", "deepseek-v4-pro:cloud"]
+    workers: ["kimi-k3:cloud", "minimax-m3.1-flash:cloud", "deepseek-v4-pro:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
-  # 2026-10-02: Kimi K3 replaces Kimi 2.6 in the remaining pools and leads
-  # each list. GLM preserves the second distinct cloud draft.
   reasoning:
-    workers: ["kimi-k3:cloud", "glm-5.3:cloud"]
+    workers: ["kimi-k3:cloud", "minimax-m3.1-flash:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
   general:
-    workers: ["kimi-k3:cloud", "glm-5.3:cloud"]
+    workers: ["kimi-k3:cloud", "minimax-m3.1-flash:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
+  # The panel rebuilds image turns as text; default fast vision stays local.
   vl:
-    workers: ["kimi-k3:cloud", "glm-5.3:cloud"]
+    workers: ["kimi-k3:cloud", "minimax-m3.1-flash:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
 
@@ -510,7 +506,7 @@ deep_panel_local:
 # bump is not a fix for a defect nobody has re-tested.
 #
 # ⚠️⚠️ ROLE-DOUBLING IS ONLY SAFE WHEN THE ROLES CANNOT DISQUALIFY EACH OTHER.
-# `deepseek-v4-pro` is BOTH a researcher and the factchecker here, and on
+# `deepseek-v4-pro` is BOTH a researcher and the factchecker in code/VL; on
 # 2026-08-18 that cost a real answer its verdicts: it 503'd once in Stage 1
 # ("model 'deepseek-v4-pro:0813' is temporarily overloaded"), `HealthTracker`
 # put it in cooldown, and the Stage-3 gate then skipped the WHOLE stage. The
@@ -525,20 +521,17 @@ deep_panel_local:
 # disqualify it by the same event), and it must be in
 # `fast_path.tool_capable_models` (the gate tests membership; a model missing
 # from that list silently fails the gate exactly like an unhealthy one).
-# ▶ It is the FIRST rule that rules glm out of the fallback despite glm already
-# holding verifier + writer + fallback_synth here: glm is a `researcher` in
-# every one of these pools, so a Stage-1 failure cools it down and disqualifies
-# it from Stage 3 — the exact defect the fallback exists to cover.
-# `test_the_factcheck_fallback_is_not_also_a_researcher` pins that.
-# ⚠️ This paragraph used to give a different reason — "glm is not tool-capable
-# in this config" — and that was STALE: glm has been in
-# `fast_path.tool_capable_models` for some time, so the second rule does not
-# exclude it and never did once it was listed there. Corrected 2026-08-29.
+# Keep the fallback separate from earlier pipeline roles: a researcher or
+# verifier failure can otherwise disqualify the fact-check stage as well.
+# `test_the_factcheck_fallback_is_not_also_a_researcher` pins the Stage-1 rule.
 # `kimi-k2.6` satisfies both, and adds vendor diversity — a DeepSeek-side
 # outage does not reach it. A fallback firing is logged at WARNING
 # ("fact-check FELL BACK to"); the answer looks identical, so that line is the
 # only way to learn the primary is failing.
 deep_panel_research:
+  # General/reasoning use MiniMax as the second cloud researcher within the
+  # existing two-cloud cap. Code/VL researchers and all verification/writer
+  # roles stay as configured; this is an unmeasured draft candidate.
   code:
     researchers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud", "qwen3.8:latest"]
     verifier: "glm-5.3:cloud"
@@ -547,14 +540,14 @@ deep_panel_research:
     writer: "glm-5.3:cloud"
     fallback_synth: "glm-5.3:cloud"
   reasoning:
-    researchers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud", "qwen3.8:latest"]
+    researchers: ["kimi-k3:cloud", "minimax-m3.1-flash:cloud", "qwen3.8:latest"]
     verifier: "glm-5.3:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     fallback_factcheck: "kimi-k2.6:cloud"
     writer: "glm-5.3:cloud"
     fallback_synth: "glm-5.3:cloud"
   general:
-    researchers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud", "qwen3.8:latest"]
+    researchers: ["kimi-k3:cloud", "minimax-m3.1-flash:cloud", "qwen3.8:latest"]
     verifier: "glm-5.3:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     fallback_factcheck: "kimi-k2.6:cloud"
@@ -1487,6 +1480,8 @@ vision:
   # https://ollama.com/library/medgemma:27b
   also_capable:
     - medgemma:27b
+    # Exact cloud tag declares Text/Image input; direct clients use its encoder.
+    - minimax-m3.1-flash:cloud
 
   # ─── Sampling (Phase 38) ─────────────────────────────────────────────
   # Measured on the box 2026-08-04, six keyframes through qwen3-vl:32b:
@@ -1679,6 +1674,8 @@ passthrough:
     # ⚠️ This list is global: any `compat:full` token can use it, whatever the
     # Admin model access says. That access governs the native UI, not `/v1`.
     - kimi-k3:cloud
+    # User-installed candidate; uses the existing shared passthrough policy.
+    - minimax-m3.1-flash:cloud
     - deepseek-v4.1-flash:cloud
     - nemotron-3-super:cloud
     - llama4:latest

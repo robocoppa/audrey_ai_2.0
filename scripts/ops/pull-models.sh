@@ -68,8 +68,10 @@ CLOUD_MODELS=(
   "deepseek-v4-pro:cloud"
   "kimi-k2.6:cloud"
   "kimi-k2.7-code:cloud"
-  # 2026-10-01: passthrough-only, for the Claudette bot. No pool or registry slot.
+  # Kimi K3 leads every panel containing cloud workers.
   "kimi-k3:cloud"
+  # User-installed cloud draft/research candidate, 2026-10-20.
+  "minimax-m3.1-flash:cloud"
   "deepseek-v4.1-flash:cloud"
   "nemotron-3-super:cloud"
   # 2026-08-29: `glm-5.3` REPLACES `glm-5.2` in every role glm held (registries,

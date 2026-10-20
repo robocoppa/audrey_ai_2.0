@@ -371,8 +371,7 @@ async def update_conversation(
     current = await _store(request).conversations.get(user_id=principal.user_id, conversation_id=conversation_id)
     if current is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
-    if current.private_required and selected is not None and selected.id != "private":
-        raise HTTPException(status_code=409, detail="This conversation stays Private. Start a new conversation to use another workflow.")
+    replace_private_draft = current.private_required and selected is not None and selected.id != "private"
     target_project = payload.project_id if "project_id" in payload.model_fields_set else current.project_id
     project_private = (
         await _owned_project_private(request, principal, target_project)
@@ -383,7 +382,7 @@ async def update_conversation(
             raise HTTPException(status_code=409, detail="This Project requires Private processing.")
         if selected is None and not current.private_required:
             selected = await _selected_model(request, principal, "private")
-    if (current.private_required or (selected is not None and selected.id == "private")) and target_project is not None and not project_private:
+    if ((current.private_required and not replace_private_draft) or (selected is not None and selected.id == "private")) and target_project is not None and not project_private:
         raise HTTPException(status_code=409, detail="Private conversations require a Private project.")
     try:
         record = await _store(request).conversations.update(
@@ -396,13 +395,14 @@ async def update_conversation(
             project_id=payload.project_id,
             update_project="project_id" in payload.model_fields_set,
             require_private=selected is not None and selected.id == "private",
+            replace_empty_private_draft=replace_private_draft,
         )
     except ProjectNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Project not found.") from exc
     except ConversationHasActiveRunError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except InvalidApplicationStateError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=409 if replace_private_draft else 422, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="Conversation not found.")
     return _conversation_response(record)

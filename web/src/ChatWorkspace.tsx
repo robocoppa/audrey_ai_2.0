@@ -185,6 +185,8 @@ const SavedSourcesContext = createContext<ReadonlyMap<string, MessageSource[]>>(
 const SavedModelsContext = createContext<ReadonlyMap<string, MessageModelUsage[]>>(new Map());
 const SavedToolsContext = createContext<ReadonlyMap<string, RunTool[]>>(new Map());
 
+type ComposerDraft = { text: string; notice: string };
+
 const IDLE_ACTIVITY: RunActivity = {
   status: "idle",
   label: "Ready",
@@ -301,6 +303,8 @@ export function ChatWorkspace({
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [openedConversations, setOpenedConversations] = useState<Conversation[]>([]);
+  const [replacedDrafts, setReplacedDrafts] = useState<Record<string, ComposerDraft>>({});
+  const navigationRevisionRef = useRef(0);
   const [projects, setProjects] = useState<AudreyProject[]>([]);
   const [projectLimits, setProjectLimits] = useState<ProjectLimits>(DEFAULT_PROJECT_LIMITS);
   const [projectsLoading, setProjectsLoading] = useState(true);
@@ -350,6 +354,7 @@ export function ChatWorkspace({
   });
 
   function selectConversation(conversation: Conversation | null) {
+    navigationRevisionRef.current += 1;
     setComposerFocusId((current) => current === conversation?.id ? current : null);
     const previousId = selectedIdRef.current;
     if (previousId && previousId !== conversation?.id) {
@@ -548,12 +553,17 @@ export function ChatWorkspace({
     selectConversation(conversation);
   }
 
-  async function startConversation({ focusComposer = false } = {}) {
+  async function startConversation({ focusComposer = false, preserveNavigation = false } = {}) {
     if (!defaultModelId) return;
+    const expectedNavigation = navigationRevisionRef.current;
     setCreating(true);
     setError("");
     try {
       const conversation = await createConversation(defaultModelId);
+      if (preserveNavigation && navigationRevisionRef.current !== expectedNavigation) {
+        void discardEmptyConversation(conversation.id).catch(() => {});
+        return;
+      }
       clearProjectSelection();
       const visibleImmediately = view === "active" && !searchQuery;
       if (visibleImmediately) {
@@ -568,7 +578,7 @@ export function ChatWorkspace({
       if (focusComposer) setComposerFocusId(conversation.id);
       closeNavigation();
     } catch (reason) {
-      setError(messageOf(reason));
+      if (!preserveNavigation || navigationRevisionRef.current === expectedNavigation) setError(messageOf(reason));
     } finally {
       setCreating(false);
     }
@@ -597,7 +607,20 @@ export function ChatWorkspace({
     setConversations((current) => upsertConversation(current, updated));
   }
 
-  function removeFromCurrentView(conversationId: string, closeThread = false) {
+  function replaceDraftConversation(previousId: string, updated: Conversation, draft: ComposerDraft) {
+    setReplacedDrafts((current) => ({ ...current, [updated.id]: draft }));
+    setConversations((current) => upsertConversation(current.filter(({ id }) => id !== previousId), updated));
+    setOpenedConversations((current) => upsertConversation(current.filter(({ id }) => id !== previousId), updated));
+    setProjectConversations((current) => current.filter(({ id }) => id !== previousId));
+    if (selectedIdRef.current === previousId) {
+      // The server replaced the empty draft. Do not read/discard its deleted ID.
+      selectedIdRef.current = null;
+      openConversation(updated);
+      setComposerFocusId(updated.id);
+    }
+  }
+
+  function removeFromCurrentView(conversationId: string, closeThread = false, openNewDraft = false) {
     const remaining = conversations.filter(({ id }) => id !== conversationId);
     setConversations((current) => current.filter(({ id }) => id !== conversationId));
     setProjectConversations((current) => current.filter(({ id }) => id !== conversationId));
@@ -607,7 +630,14 @@ export function ChatWorkspace({
       );
     }
     if (selectedIdRef.current === conversationId) {
-      if (selectedProjectIdRef.current) {
+      if (openNewDraft) {
+        // Remove the deleted thread before creating its replacement. A later
+        // navigation must win if the create request is still in flight.
+        selectedIdRef.current = null;
+        clearProjectSelection();
+        selectConversation(null);
+        void startConversation({ focusComposer: true, preserveNavigation: true });
+      } else if (selectedProjectIdRef.current) {
         selectConversation(null);
       } else {
         const nextOrdinary = remaining.find(({ project_id }) => !project_id) ?? null;
@@ -692,7 +722,7 @@ export function ChatWorkspace({
     try {
       await deleteConversation(conversationId);
       setConfirmDeleteId(null);
-      removeFromCurrentViewRef.current(conversationId, true);
+      removeFromCurrentViewRef.current(conversationId, true, true);
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
@@ -1135,6 +1165,13 @@ export function ChatWorkspace({
               canBrowseDirectModels={canBrowseDirectModels}
               showProgress={preferences.show_progress}
               onConversationChange={replaceConversation}
+              replacementDraft={replacedDrafts[opened.id]}
+              onDraftConsumed={(conversationId) => setReplacedDrafts((current) => {
+                const remaining = { ...current };
+                delete remaining[conversationId];
+                return remaining;
+              })}
+              onDraftReplaced={replaceDraftConversation}
               onRemoveFromView={removeFromCurrentView}
               onOpenProject={(projectId) => {
                 const project = projects.find(({ id }) => id === projectId);
@@ -1166,6 +1203,9 @@ function ConversationThread({
   canBrowseDirectModels,
   showProgress,
   onConversationChange,
+  replacementDraft,
+  onDraftConsumed,
+  onDraftReplaced,
   onRemoveFromView,
   onOpenProject,
 }: {
@@ -1180,14 +1220,24 @@ function ConversationThread({
   canBrowseDirectModels: boolean;
   showProgress: boolean;
   onConversationChange: (conversation: Conversation) => void;
-  onRemoveFromView: (conversationId: string, closeThread?: boolean) => void;
+  replacementDraft?: ComposerDraft;
+  onDraftConsumed: (conversationId: string) => void;
+  onDraftReplaced: (previousId: string, conversation: Conversation, draft: ComposerDraft) => void;
+  onRemoveFromView: (conversationId: string, closeThread?: boolean, openNewDraft?: boolean) => void;
   onOpenProject: (projectId: string) => void;
 }) {
   const [thread, setThread] = useState<ThreadState>({ status: "idle" });
   const privateRequired = conversation.private_required === true || conversation.default_model_id === "private";
-  const conversationModels = privateRequired ? [models.find(({ id }) => id === "private") ?? PRIVATE_MODEL]
+  const [acceptedMessage, setAcceptedMessage] = useState(false);
+  const [pendingDraft, setPendingDraft] = useState(replacementDraft);
+  const privateLocked = privateRequired && (Boolean(conversation.project_id)
+    || acceptedMessage || conversation.last_message_at !== null
+    || (thread.status === "ready" && thread.messages.some(({ role }) => role === "user")));
+  const availableModels = privateRequired && !models.some(({ id }) => id === "private")
+    ? [...models, PRIVATE_MODEL] : models;
+  const conversationModels = privateLocked ? [availableModels.find(({ id }) => id === "private") ?? PRIVATE_MODEL]
     : conversation.default_model_id === "local" && !models.some(({ id }) => id === "local")
-      ? [...models, LEGACY_LOCAL_MODEL] : models;
+      ? [...availableModels, LEGACY_LOCAL_MODEL] : availableModels;
   const [modelId, setModelId] = useState(
     conversationModels.some(({ id }) => id === conversation.default_model_id)
       ? conversation.default_model_id
@@ -1355,18 +1405,24 @@ function ConversationThread({
     }
   }
 
-  async function changeModel(next: string) {
-    if (next === modelId || runActive || (privateRequired && next !== "private")) return;
+  async function changeModel(next: string, draft: ComposerDraft): Promise<boolean> {
+    if (next === modelId || runActive || (privateLocked && next !== "private")) return false;
     setMutation("model");
     setMutationError("");
     try {
       const updated = await updateConversationModel(conversation.id, next);
+      if (updated.id !== conversation.id) {
+        onDraftReplaced(conversation.id, updated, draft);
+        return true;
+      }
       const messages = await listMessages(conversation.id);
       setThread({ status: "ready", messages: messages.items });
       setModelId(updated.default_model_id);
       onConversationChange(updated);
+      return true;
     } catch (reason) {
       setMutationError(messageOf(reason));
+      return false;
     } finally {
       setMutation(null);
     }
@@ -1438,7 +1494,7 @@ function ConversationThread({
     setMutationError("");
     try {
       await deleteConversation(conversation.id);
-      onRemoveFromView(conversation.id, true);
+      onRemoveFromView(conversation.id, true, true);
     } catch (reason) {
       setMutationError(messageOf(reason));
       setConfirmingDelete(false);
@@ -1575,17 +1631,28 @@ function ConversationThread({
           projectPicker={projectPicker}
           models={conversationModels}
           privateRequired={privateRequired}
+          privateLockReason={privateLocked ? conversation.project_id
+            ? "Leave this Private project before choosing another processing mode."
+            : "Private stays selected after the first message." : ""}
           skills={skills}
           canBrowseDirectModels={canBrowseDirectModels}
           modelId={selectedModelId}
           showProgress={showProgress}
           initialMessages={thread.messages}
+          replacementDraft={pendingDraft}
+          onDraftRestored={() => {
+            setPendingDraft(undefined);
+            onDraftConsumed(conversation.id);
+          }}
           readOnly={archived}
           modeDisabled={runActive || mutation !== null}
           recoveredRunActive={recoveredRunId !== null}
           onModelChange={changeModel}
           onRunActiveChange={setRunActive}
-          onRunStarted={() => void refreshAutomaticTitle()}
+          onRunStarted={() => {
+            setAcceptedMessage(true);
+            void refreshAutomaticTitle();
+          }}
           onRunFinished={(runId) => {
             titleRefreshVersionRef.current += 1;
             setTitleRunId(runId);
@@ -1598,6 +1665,7 @@ function ConversationThread({
 
 function AudreyThread({
   privateRequired,
+  privateLockReason,
   conversationId,
   focusComposer,
   onComposerFocused,
@@ -1608,6 +1676,8 @@ function AudreyThread({
   modelId,
   showProgress,
   initialMessages,
+  replacementDraft,
+  onDraftRestored,
   readOnly,
   modeDisabled,
   recoveredRunActive,
@@ -1617,6 +1687,7 @@ function AudreyThread({
   onRunFinished,
 }: {
   privateRequired: boolean;
+  privateLockReason: string;
   conversationId: string;
   focusComposer: boolean;
   onComposerFocused: (conversationId: string) => void;
@@ -1627,10 +1698,12 @@ function AudreyThread({
   modelId: string;
   showProgress: boolean;
   initialMessages: ConversationMessage[];
+  replacementDraft?: ComposerDraft;
+  onDraftRestored: () => void;
   readOnly: boolean;
   modeDisabled: boolean;
   recoveredRunActive: boolean;
-  onModelChange: (modelId: string) => Promise<void>;
+  onModelChange: (modelId: string, draft: ComposerDraft) => Promise<boolean>;
   onRunActiveChange: (active: boolean) => void;
   onRunStarted: () => void;
   onRunFinished: (runId: string) => void;
@@ -1685,6 +1758,7 @@ function AudreyThread({
   const [attachmentFiles, setAttachmentFiles] = useState<AudreyFile[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentError, setAttachmentError] = useState("");
+  const [modelChangeNotice, setModelChangeNotice] = useState(replacementDraft?.notice ?? "");
   const [attachmentSearch, setAttachmentSearch] = useState("");
   const [attachmentKind, setAttachmentKind] = useState<AttachmentKindFilter>("all");
   const [selectedAttachments, setSelectedAttachments] = useState<AudreyFile[]>([]);
@@ -1796,7 +1870,12 @@ function AudreyThread({
   async function changeModel(nextModelId: string) {
     if (attachmentBusy || retrying) return;
     setActivePicker(null);
-    await onModelChange(nextModelId);
+    const changesProtection = (nextModelId === "private") !== isPrivate;
+    const notice = changesProtection && selectedAttachments.length > 0
+      ? "Attachments were removed when you changed processing mode. Your files remain in My Files." : "";
+    const changed = await onModelChange(nextModelId, { text: runtime.thread.composer.getState().text, notice });
+    if (!changed) return;
+    setModelChangeNotice(notice);
     const nextModel = modelDetails(models, nextModelId);
     const nextSkillMode = skillModeForModel(nextModel);
     const selectedSkill = skills.find((skill) => skill.id === skillId);
@@ -2031,6 +2110,14 @@ function AudreyThread({
       });
     },
   });
+
+  const restoredDraftRef = useRef(false);
+  useEffect(() => {
+    if (!replacementDraft || restoredDraftRef.current) return;
+    restoredDraftRef.current = true;
+    runtime.thread.composer.setText(replacementDraft.text);
+    onDraftRestored();
+  }, [onDraftRestored, replacementDraft, runtime]);
 
   async function retryLastQuestion() {
     if (!lastAttempt || retrying || modeDisabled || attachmentBusy || readOnly) return;
@@ -2417,8 +2504,9 @@ function AudreyThread({
                     </button>
                   </div>
                 </ComposerPrimitive.Root>
+                {modelChangeNotice ? <p className="attachment-status" role="status">{modelChangeNotice}</p> : null}
                 {isPrivate ? <p className="attachment-status">
-                  Private uses local models and tools. Documents and Private projects only; web, saved memory and media are unavailable.
+                  Private uses local models and tools. Documents and Private projects only; web, saved memory and media are unavailable. {privateLockReason}
                 </p> : null}
                 {attachmentPickerOpen ? (
                   <ComposerPickerPanel
@@ -3465,7 +3553,8 @@ function modelDetails(models: AudreyModel[], modelId: string) {
   const model = models.find(({ id }) => id === modelId) ?? models[0];
   return {
     ...model,
-    portrait: model.portrait_url || MODEL_PORTRAITS[model.presentation] || autoPortrait,
+    portrait: model.id === "private" ? localPortrait
+      : model.portrait_url || MODEL_PORTRAITS[model.presentation] || autoPortrait,
   };
 }
 

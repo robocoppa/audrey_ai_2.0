@@ -9,7 +9,7 @@ accepted October 18:** correct tool calls and matching cited PDF pages/year.
 Tax accuracy remains 20E work. **20C.1–3 accepted/deployed:** shared model/tool
 policy and durable restrictions. **20C document/calculator and IRS retry accepted October 20:**
 verified native runtime, protected document processing and Private in the model
-picker. **20D.1 built; browser gate next:** protected Projects and native Local
+picker. **20D.1 accepted October 20:** protected Projects and native Local
 choice consolidation. OCR and media remain unavailable pending a supported case.
 Qwen3 Embedding 4B remains the reference model; Nomic history and prior personal
 retrieval checks remain accepted.
@@ -398,8 +398,14 @@ summary and pinned text-embedding models. Routing configuration and clients are
 isolated from ordinary requests. Local and direct-model choices are unchanged.
 No sensitive-content detector or separate privacy tool selector is added.
 
-Only a new/empty conversation can become Private. Its restriction persists
-through reload and cannot be cleared by selecting another model. UI/API permit
+Only a new/empty conversation can become Private. Before its first canonical
+message or run, a standalone Private draft may choose another model: the server
+atomically replaces that empty draft and returns a new conversation ID. It never
+weakens the protected row or any uploaded file. Unsent text is preserved; existing
+attachments are removed from the replacement with a visible notice. After the
+first message/run, Private remains locked through reload. A Private Project keeps
+its protection; explicitly leave that Project before changing processing mode.
+Private uses the same portrait asset as the legacy Local workflow. UI/API permit
 assignment only to an owned matching Private Project. Uploads automatically use protected
 processing; its picker offers only ready Private documents. Ordinary chat pickers
 exclude those documents, and backend read guards enforce the same restriction.
@@ -420,7 +426,7 @@ restriction from the selected workflow. Every admitted Private turn must use the
 retry. These prove those flows, not general tax-answer accuracy. Refresh and
 ordinary-picker isolation are included in the new Project gate below.
 
-### 20D.1 — Private Projects and native model choices (built)
+### 20D.1 — Private Projects and native model choices (accepted October 20)
 
 Project creation offers Auto or Private and derives an immutable restriction on
 the server. Responses expose it read-only. Private Project conversations inherit
@@ -446,23 +452,10 @@ conversations retain their actual model ID/label, including catalog omissions.
 Admin model ordering/role grants and `/v1`/Hermes behavior remain unchanged.
 No tax-specific Project fields, schema migration or new model is introduced.
 
-**Deploy on Tower after normal commit/push/pull**, in
-`/mnt/user/appdata/audrey_ai_2.0`:
-
-```bash
-docker compose up -d --build audrey audrey-ui
-```
-
-No sidecar rebuild, reindex, collector or migration is required. **Browser gate
-at `https://ai.builtryte.xyz`:** create a Private Project, upload one small
-non-sensitive TXT or selectable-text PDF directly from its screen, then start a
-conversation there. Ask a question answered by that document without attaching
-it again. Verify correct evidence, local Models/Tools/Sources and the Private
-choice. Refresh/reopen and verify the answer/Project remain. An ordinary chat's
-picker must omit the protected document. New choices show Private instead of
-Local; an existing Local conversation, if present, still shows Local. A new
-upload is required to exercise direct Project upload. The accepted IRS question
-does not need another run.
+Private Project upload/context/reopen/file-isolation acceptance is complete.
+The followup changes only draft selection, deletion navigation, portrait and
+cloud configuration. No Project/IRS upload, reindex or migration needs repeating.
+The main plan owns the remaining queue; no temporary smoke document is retained.
 
 ### Tax review and longer Private task contracts (planned)
 

@@ -9,21 +9,25 @@ they are not ongoing task lists.
 
 ## Current work
 
-**20D.1 — Private Projects and native model choices:** built; browser acceptance
-is next. Project uploads/context stay protected, conversations inherit Private,
-and new native choices use Private in place of Local. Existing Local history and
-working compatibility APIs keep their meaning. [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md)
-contains the implementation contract; the build queue below is the only todo list.
+**20D.1 accepted October 20:** Private Projects, protected uploads/context,
+refresh/isolation and new Private model choices passed. The user reported three
+followups: deletion should open a clean draft, Private should remain changeable
+before the first message, and its portrait should match Local. Those fixes and
+the requested MiniMax cloud addition are built; targeted browser checks remain.
+[Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds the
+privacy contract; [navigation](phase-12-sidebar-navigation.md) holds deletion.
 
-**Accepted:** Private document summary/calculator and the October 20 IRS retry
-(owned lookup/read, cited Publication 17 page 1, tax year 2025). The optional
-planner fallback is deployed and that failed IRS case is closed. The next Project
-browser check also covers the unreported refresh and ordinary-file-isolation steps.
-Do not repeat the accepted IRS prompt, collector, index or embedding migrations.
+**MiniMax M3.1 Flash:** configured as an unmeasured cloud draft/research candidate
+in mixed, Cloud and selected Research panels. Kimi K3 stays first, panel worker
+counts/caps are unchanged, and existing synthesis/verification roles remain.
+Private/Local pools and fast primaries are unchanged. Direct model discovery,
+tool/vision metadata and the shared passthrough allowlist include the installed
+tag. No performance promotion or new model pull is implied.
 
-**Model/storage decisions remain settled:** Qwen3 Embedding 4B serves documents,
-files, references and memory; pinned Nomic serves history. Router remains Qwen3.5
-4B. Evidence and limits live in the phase contracts/model ledger, not this queue.
+Private document/calculator and the owned IRS page-read retry remain accepted.
+The collector, published index and both embedding migrations stay closed.
+Qwen3 Embedding 4B serves documents/files/references/memory; pinned Nomic serves
+history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 
 ## Phases
 
@@ -48,15 +52,17 @@ files, references and memory; pinned Nomic serves history. Router remains Qwen3.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Private document/calculator + IRS accepted; Private Projects/chooser built; tax review next |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Private Projects accepted; draft/deletion/portrait followup built; tax review next |
 
 ## Build queue
 
 - [x] **20A–20B:** owned IRS library, published search and cited retrieval.
 - [x] **20C:** Private document/calculator flow and successful IRS retry; planner
   fallback and consistent durable admission are in place.
-- [ ] **20D.1 — current browser gate:** Private Projects, direct protected upload,
-  project evidence, refresh/isolation and Local-to-Private new-choice consolidation.
+- [x] **20D.1:** Private Projects, direct protected upload, project evidence,
+  refresh/isolation and Local-to-Private new-choice consolidation.
+- [ ] **Current followup:** verify delete-to-new-chat, model switching before the
+  first message and Local portrait; confirm MiniMax appears in Cloud activity.
 - [ ] **20D.2:** dedicated `tax_review` tool with saved facts, evidence, missing
   items and a deterministic case checklist.
 - [ ] **20D.3:** one complete foreground tax review and a known-answer baseline.
