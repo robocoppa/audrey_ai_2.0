@@ -441,6 +441,43 @@ def test_projects_api_is_owner_scoped_and_revalidates_ready_files(tmp_path, monk
         store.close()
 
 
+
+@pytest.mark.parametrize("project_private", [False, True])
+def test_project_conversation_refuses_private_before_saving(tmp_path, monkeypatch, project_private):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner = asyncio.run(_resolve(
+        store, subject="private-project-owner", email="owner@example.com",
+    ))
+    project = asyncio.run(store.projects.create(
+        user_id=owner.user_id, name="Protected admission", private_required=project_private,
+    ))
+    app = FastAPI()
+    app.state.application_store = store
+    app.state.cfg = SimpleNamespace(raw={
+        "passthrough": {"enabled": False}, "private_processing": {"enabled": True},
+    })
+    app.include_router(router)
+    app.dependency_overrides[require_principal] = lambda: owner
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Unsupported Private Projects must refuse before saving a conversation")
+
+    monkeypatch.setattr(store.conversations, "create", forbidden)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/projects/{project.project_id}/conversations",
+                json={"model_id": "private", "title": "A private conversation"},
+            )
+            assert response.status_code == 409
+            assert response.json()["detail"] == "Private Project conversations are not available yet."
+        assert asyncio.run(store.conversations.list_page(
+            user_id=owner.user_id, project_id=project.project_id, archived=False, limit=10,
+        )) == ()
+    finally:
+        store.close()
+
+
 def test_native_file_delete_prunes_project_memberships(tmp_path, monkeypatch):
     store = ApplicationStore(tmp_path / "app.sqlite")
     alice = asyncio.run(_resolve(store, subject="alice-file-prune", email="alice@example.com"))

@@ -1104,7 +1104,12 @@ async def create_run(
         raise HTTPException(status_code=404, detail="Conversation not found.")
     if conversation.private_required:
         return await _create_private_run(request, principal, conversation, payload, manager, store)
-    requested_model_id = payload.model_id or payload.mode or conversation.default_model_id
+    requested_model_id = (payload.model_id or payload.mode or conversation.default_model_id).strip()
+    if conversation.default_model_id == "private" or requested_model_id == "private":
+        raise HTTPException(
+            status_code=409,
+            detail="Select Private in a new or empty conversation before sending a message.",
+        )
     selected_model = await resolve_model(
         request.app.state.cfg,
         store,

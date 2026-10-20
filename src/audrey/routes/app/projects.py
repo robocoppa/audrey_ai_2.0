@@ -382,6 +382,8 @@ async def create_project_conversation(
         payload.default_mode if "default_mode" in payload.model_fields_set else payload.model_id
     )
     model = await _selected_model(request, principal, requested_model or "auto")
+    if model.id == "private":
+        raise HTTPException(status_code=409, detail="Private Project conversations are not available yet.")
     try:
         record = await _store(request).conversations.create(
             user_id=principal.user_id,

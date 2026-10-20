@@ -24,17 +24,21 @@ they are not ongoing task lists.
   accepted October 18:** matching source pages/year and correct tool calls.
   Answer conditions and conflicting source figures remain 20E accuracy cases.
   **20C.1–3 accepted/deployed:** immutable model/tool policy and durable
-  conversation/file restrictions. **20C.4–6 built; manual acceptance next:**
+  conversation/file restrictions. **20C.4–6 built; document/calculator step passed:**
   verified native runtime, protected document ingestion and the **Private**
-  model-picker workflow. Local model calls, summaries, embeddings and tools
-  stay in the protected path. Private files use isolated collections; ordinary
+  model-picker workflow. The Private IRS failure exposed an optional-planner
+  unavailability fallback defect; its fix awaits the targeted retry. Refresh/
+  reopen and ordinary-chat file isolation still await confirmation. Private
+  sidebar chats now have a subtle red tint. Local model calls, summaries,
+  embeddings and tools stay in the protected path. Private files use isolated collections; ordinary
   chats cannot reuse them. Canonical history stays local, shared memory is off,
   and protected logs/tracing omit contents. Explicit selection before the first
   message establishes the durable restriction; no detector or extra tool picker.
   The first release supports text documents, calculations/tables and owned IRS
   retrieval. Projects, visual/media processing, URL imports and OCR remain
-  refused until their protected paths exist. General Local/direct choices and
-  Hermes retain their meaning. Cloudflare still handles browser transport.
+  refused until their protected paths exist. Next, Private replaces Local for
+  new native choices once protected Projects are ready; legacy Local
+  conversations/API and Hermes keep their meaning. Cloudflare handles browser transport.
   [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds
   the contract and remaining privacy/tax workflow. State jurisdictions remain
   unspecified; fine-tuning requires evidence.
@@ -139,7 +143,7 @@ they are not ongoing task lists.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A/20B accepted; 20C.1–3 accepted/deployed; 20C.4–6 built; Private browser gate next |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | 20A/20B accepted; 20C.1–3 accepted/deployed; 20C.4–6 built; document/calculator passed, remaining browser checks pending |
 
 ## Remaining work
 
@@ -148,12 +152,13 @@ they are not ongoing task lists.
    the existing-file browser check remain unreported. The current-catalog IRS
    index and cited-search browser check are accepted, with the approved
    Publication 5902 search gap. Accept the first native Private chat/document
-   flow, then extend protected Projects and supported worker operations.
-   Unsupported operations stay refused. No sensitive-content detection is queued.
-   Follow with 20D's
-   tax workflow and targeted 20E evaluation,
-   including source conditions and conflicting figures. Broad collection and both migrations stay
-   complete; no repeat is queued.
+   flow after the planner fix. Then enable protected Projects and consolidate
+   new native Local choices into Private; add the dedicated tax_review tool/case
+   checklist; establish a foreground review baseline; add durable resumable
+   Private tasks and bounded evidence-check/repair loops; compare their accuracy
+   in 20E before extending defaults. Phase 20 owns the slice contracts. OCR/media
+   support waits for an actual case; no detector or broad worker build is queued.
+   Broad collection and both migrations stay complete; no repeat is queued.
 2. Confirm Tower deployment and close pending targeted acceptance for the
    current course-reviewed work. The local, gitignored [AUDIT](../lesson-ai/AUDIT.md)
    holds its review record; the [operations guide](../reference/box-operations.md#10-memory-backups-and-isolated-restore-verification)

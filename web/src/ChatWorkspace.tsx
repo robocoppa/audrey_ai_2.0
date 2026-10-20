@@ -1022,6 +1022,7 @@ export function ChatWorkspace({
                 <div className="conversation-row">
                   <button
                     className={conversation.id === selectedId ? "conversation active" : "conversation"}
+                    data-private={conversation.private_required === true || conversation.default_model_id === "private" ? "true" : undefined}
                     type="button"
                     onClick={() => openConversation(conversation)}
                     aria-current={conversation.id === selectedId ? "page" : undefined}
@@ -2164,6 +2165,7 @@ function AudreyThread({
     setUploadIssue("");
     setUploadingFile(file.name);
     setUploadProgress(0);
+    setActivePicker(null);
     let stored = false;
     try {
       const uploaded = await uploadFile(file, fileLimits, setUploadProgress, isPrivate ? conversationId : undefined);
@@ -2182,7 +2184,6 @@ function AudreyThread({
       } else {
         setPendingAttachment(row);
       }
-      setActivePicker(null);
     } catch (reason) {
       setUploadIssue(stored
         ? file.name + " was uploaded to Files, but could not be attached: " + messageOf(reason)

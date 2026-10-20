@@ -11,6 +11,8 @@ request finishing after navigation preserves the newly selected chat and draft.
 The desktop sidebar starts with one full-width **New conversation** action.
 Workspace, the sidebar username, and the old Files/+ New pair are removed.
 Conversation history scrolls independently below the primary action.
+Private conversation rows use a subtle red background, with stronger hover and
+selected states, in desktop history and the mobile drawer, including Archived.
 
 **My Files** lives in the desktop top bar as an accented folder action,
 separated from username, Admin Panel, and Log out. The app shell owns its dialog.

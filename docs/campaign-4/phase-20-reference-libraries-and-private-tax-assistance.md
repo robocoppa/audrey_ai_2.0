@@ -7,14 +7,14 @@ Publication 5902 is the sole approved content-search gap: its original remains
 available and incomplete coverage is explicitly disclosed. **20B retrieval is
 accepted October 18:** correct tool calls and matching cited PDF pages/year.
 Tax accuracy remains 20E work. **20C.1–3 accepted/deployed:** shared model/tool
-policy and durable restrictions. **20C.4–6 built; browser acceptance next:**
+policy and durable restrictions. **20C.4–6 built; browser acceptance in progress:**
 verified native runtime, protected document processing and Private in the model
 picker. The supported text/document path is enforced; Projects, OCR and media
 remain unavailable until their own protected processing exists.
 Qwen3 Embedding 4B remains the reference model; Nomic history and prior personal
 retrieval checks remain accepted.
 English content and requests only. Federal coverage can begin independently;
-state jurisdiction and priority tax years await the user's answer.
+the tax year is collected per case and state coverage is added when requested.
 
 ## Outcome
 
@@ -244,8 +244,10 @@ Private tax processing and the assistance workflow remain 20C/20D work.
 
 ### 20C — private processing
 
-**Explicit selection, decided October 19:** add **Private** beside the existing
-workflows in the model picker. This uses installed local models, with no new
+**Explicit selection, updated October 20:** use **Private** as the native
+local-processing choice. After the first Private gate and protected Project
+path are ready, replace Local in new native model choices; retain legacy Local
+history and API behavior. This uses installed local models, with no new
 model download. The selection activates the policy; no sensitive-content
 detection, extra classifier or separate privacy tool selector is required.
 
@@ -257,8 +259,10 @@ detection, extra classifier or separate privacy tool selector is required.
 - Persist the choice on the conversation and propagate restrictions to files
   added through private flows and their derived content. Later reuse must not
   silently send protected material to a cloud model.
-- General Local and direct-model choices keep their current meaning. Private
-  carries the end-to-end processing promise once it is implemented and tested.
+- Existing Local conversations keep their actual processing status and legacy
+  model ID; they are never relabelled Private. Compatibility/API Local and
+  direct-model choices retain their meaning. The native chooser consolidation
+  follows the verified Private entrypoint and supported Project path.
 
 One enforceable policy covers routing, planning, workers, synthesis, fallbacks,
 OCR/vision, summaries, embeddings and tool dispatch. Cloud fallback is refused;
@@ -422,39 +426,151 @@ Recreate applies canonical configuration. The sidecar rebuild uses the shared
 calculator core. No model pull, schema migration, reindex, collector or media
 worker rebuild is required. Existing accepted IRS/migration checks stay closed.
 
-**Manual acceptance at `https://ai.builtryte.xyz`:** start a new chat, select
-Private, upload a small non-sensitive PDF with selectable text (or TXT/CSV), and
-ask for its contents plus calculator `1250 * 1.08` (expected `1350`). Verify
-Processing/Ready, local models/tool disclosure, reload/reconnect and the retained
-Private choice. Use owned IRS tools to read Publication17 page1 and identify its
-stated tax year. In an ordinary new chat, the Private document must be absent
-from the attachment picker. A real upload is required for this gate; use synthetic
-or public evidence before taxpayer records.
+Optional planning now skips protected provider unavailability and continues
+the original question through the same verified Local panel. Model, digest
+and transport-policy refusals still abort. A timed-out optional planner
+reproduced the Private IRS failure; the narrow fallback fix awaits retry.
+Private run admission requires the durable restriction even when a caller
+submits the Private model ID directly; unsupported Project creation refuses
+it before work. Every admitted Private turn must use the bound runtime.
 
-After this acceptance, extend Private Projects and supported worker operations
-without weakening the first release's boundaries, then proceed to 20D/20E.
+**Browser acceptance at `https://ai.builtryte.xyz`:** the uploaded-document
+summary and calculator step passed with local model/tool disclosure. Reuse that
+conversation for the remaining checks: refresh/reopen and confirm the final
+answer and retained Private choice; use owned IRS tools to identify Publication
+17's stated tax year from PDF page 1; open an ordinary new chat and verify the
+Private document is absent from its attachment picker. No repeat upload is
+required. These checks do not establish general document or tax-answer accuracy.
 
-### 20D/20E — verified assistance
+After this acceptance, follow the ordered slices below. Protected Projects and
+tax-document work come first; OCR and media stay deferred until a case needs them.
 
-Use existing Projects, uploads, calculator, table tools and source disclosures.
-Add the smallest case record needed for confirmed facts, source locations,
-uncertainties and document coverage. Financial normalization handles currency,
-thousands separators and accounting negatives without hiding exclusions.
-Audrey asks for missing eligibility facts before making recommendations.
-Tax-specific deterministic rules are introduced only with dated official
-references and known-answer checks; generic arithmetic is not a tax engine.
+### 20C.7–20E — tax review and longer Private tasks (planned October 20)
 
-Use synthetic/redacted documents for repeatable cases and manual acceptance
-with real documents. Cover W-2/1099 box reading, CSV/XLSX totals, wrong-year
-retrieval, cross-references, missing records, conflicting facts and local-service
-failure. Compare local models on source fidelity and tax decisions separately
-from arithmetic; record supported strengths in the existing model report.
+**Scope:** build a dedicated tax-review tool and a reusable Private task runner,
+with tax assistance as the first workflow. Existing Private text/document and
+IRS checks must pass before extending them. This section is the implementation
+plan; the tax tool, protected Projects and resumable runner are not built yet.
 
-The initial filing-requirements answer supplies concrete 20E cases: preserve the
-age/blindness qualifiers in dependent charts and the January-1 age convention;
-reconcile conflicting official sources before presenting definitive thresholds.
-The current Publication 4012 chart and Rev. Proc. 2025-32 section 4.14 disagree
-on the single-65+ amount. Retrieval of a cited table does not settle that conflict.
+| Slice | Deliverable | Acceptance |
+|---|---|---|
+| 20C.7 | Finish the current Private IRS/refresh/isolation gate and entrypoint consistency fixes. Preserve the accepted document/calculator result. | The failed IRS prompt now reaches local tools; every Private admission requires its durable restriction. |
+| 20D.1 | Enable protected Projects and replace Local in new native picker choices with Private. Uploads/context/retrieval use the protected path. Preserve legacy Local IDs/history, role policy and `/v1` behavior; existing content is never relabelled Private. Store the case's explicit return year, jurisdictions and reference release. | A multi-document Private Project answers from owned evidence after refresh; legacy Local chats reopen accurately, and protected content cannot move to ordinary/cloud work. |
+| 20D.2 | Add one native **Tax review** capability backed by a typed **`tax_review`** tool and durable case record. Its checklist covers document inventory, missing facts, source verification, reconciliation and unresolved questions. | The tool produces a useful plan even when the optional small-model planner is unavailable; model proposals cannot silently become user-confirmed facts. |
+| 20D.3 | Deliver one complete foreground review: read evidence, retrieve/open applicable official guidance, calculate, verify and return a worksheet with questions. Capture this as the single-pass baseline. | Known-answer/redacted cases have correct fields, years, source locations and calculations; missing facts and conflicts remain visible. |
+| 20D.4 | Add durable Private tasks with leases/checkpoints, saved progress, Cancel and Resume. Reuse native conversations/disclosures for presentation; keep execution independent of the browser connection. | Close the browser, restart Audrey and resume from a committed step without duplicate results or loss of privacy restrictions. |
+| 20D.5 | Add a bounded investigate → verify → repair loop. Revisit only claims with missing evidence, contradictory inputs or failed calculations, using installed local models sequentially. | Additional work resolves identified gaps or stops with a specific unresolved item; repeated model agreement cannot mark an unsupported claim verified. |
+| 20E | Compare single-pass and extended review on matched cases; enable longer defaults only where measured accuracy justifies the extra time. | Field extraction, applicability, citations, arithmetic and unsupported-claim handling improve without owner/privacy regressions. |
+
+#### Tax review tool and case record
+
+**Tax review** appears in the existing Tools and skills control for a Private
+conversation/Project. It may be selected explicitly; ordinary Private questions
+remain lightweight. The tool is registered with the normal security declarations
+and bound in-process to the authenticated owner and Private case. No sidecar HTTP
+fallback, new external service or sensitive-content detector is needed.
+
+Typed operations inspect the case, propose facts, record evidence/calculations,
+return missing items, produce the next checklist steps and validate a result.
+The server controls permitted transitions and required evidence. Model-supplied
+IDs cannot select another owner or escape the active Private context. A model
+may propose tasks; it cannot run arbitrary code or replace the workflow rules.
+
+Keep a compact durable record of:
+
+- Return year and federal/state scope, task goal, selected file IDs/revisions and
+  pinned reference release. Calendar year and PDF revision date do not establish
+  the return year. A new edition/release becomes an explicit case update.
+- User statements, extracted facts and user-confirmed facts as distinct states.
+  Only a user action can confirm a proposal. Unknown stays unknown.
+- Document inventory and unread/uncertain pages; each extracted amount carries
+  file/checksum, page/box, original text and normalization. Do not require full
+  SSNs, bank details or unrelated identifiers for a planning/calculation task.
+- Rule claims with official document/revision, stated tax-year applicability,
+  exact page/section and supporting passage. Store conflicting evidence too.
+- Decimal inputs, expression, rounding and calculator result, plus duplicate and
+  missing-record checks. Generic arithmetic never substitutes for a dated tax rule.
+- Proposed return items, dependencies, unresolved questions and verification
+  status. Document instructions are evidence, never authority to change the task.
+
+Use a versioned tax checklist for planning and coverage. The small router can
+classify or suggest subtasks; it does not decide that all tax work is complete.
+An explicit request for Publication 17's year should use exact lookup and page
+reading. Search misses, missing library coverage and source conflicts remain
+unresolved; they do not establish that a rule or obligation does not exist.
+
+#### Longer-running Private execution
+
+The reusable core runs typed stages, with a tax adapter supplying the checklist
+and evidence checks. Existing native runs persist messages/results and support
+browser reconnect; they are not restart-resumable tasks. Add a small owner-scoped
+SQLite task/checkpoint repository. Reuse upload lease/fencing patterns, existing
+fair GPU scheduling, PrivateProcessingRuntime, reference/file handlers and native
+progress disclosures. Retired document-authoring job tables stay retired.
+
+Persist queued/running/waiting-for-user/paused/completed/cancelled/failed states,
+last committed stage and structured findings. Store work products and source
+citations, not private chain-of-thought. A worker lease prevents concurrent
+execution; revision/fencing checks reject stale results. Checkpoint mutations
+and final message delivery are idempotent. Renewing a lease requires live work;
+a watchdog records a safe timeout instead of leaving a run stuck forever.
+
+On restart, recover to a safe checkpoint and revalidate owner/access, cancellation,
+Private policy, installed model digests, file revisions and the reference release
+before any model/tool call. Changed evidence invalidates dependent findings and
+requires their recheck. Revocation/purge/cancel stops subsequent work and prevents
+late commits. Saved case/task data and recovery state participate in owner purge
+and the existing local backup/restore path.
+
+Start with sequential local stages sharing the existing GPU gate, releasing it
+between steps so interactive chat can proceed. Initial operator-configured limits
+cover wall time, generated tokens, tool calls and review passes. A provisional
+10-minute budget and two verification passes are starting settings to measure,
+not accuracy promises; longer limits can be requested for a specific task.
+No extra model download or model promotion is part of this plan.
+
+A reviewer reopens the original evidence and checks specific claims, conditions,
+amounts and missing topics. Use a different installed local model when useful,
+then repair only the failed parts. Agreement between models is not proof.
+Stop when checks complete, the user must supply facts, source coverage is
+insufficient/conflicting, two rounds yield no new evidence, the budget expires,
+or the user cancels. Report the exact stop reason and partial findings.
+
+#### Accuracy and visible user flow
+
+User flow: select Private → open a tax Project → choose Tax review → specify
+return year and jurisdiction → upload/select documents → review proposed facts
+and the plan → start review. Show one compact progress item such as
+“Checking income records · 3 of 8 checks complete,” with expandable current
+findings, missing items and Pause/Resume/Cancel. Keep the existing Models,
+Tool calls and Sources disclosures. Completion is a cited worksheet and a
+clear question list; this phase does not file returns or author office documents.
+
+Federal work can start with the owned IRS library. State-specific conclusions
+wait for the requested jurisdiction's official sources. Source updates run
+separately using public inputs; a Private case never performs public searches
+with taxpayer details. English-only work and the existing historical window stay.
+
+Compare matched single-pass and extended runs using the same files, library
+release, model identities and resource accounting. Score field/box extraction,
+duplicate/corrected documents, wrong-year exclusion, eligibility conditions,
+citation support, decimal arithmetic/rounding, missing-fact handling and false
+certainty. Measure time/tokens as costs, not quality. Synthetic/redacted cases
+cover W-2/1099 fields, CSV/XLSX reconciliation, unread pages, source conflicts,
+missing records, local-service failure, cancellation and restart recovery.
+Keep manual native-browser acceptance for uploads, progress and results.
+
+The earlier filing-requirements answer supplies concrete accuracy cases: preserve
+age/blindness qualifiers and the January-1 age convention; investigate the owned
+Publication 4012 / Rev. Proc. 2025-32 section 4.14 discrepancy before presenting
+a definitive threshold. A retrieved table alone does not resolve conflicting
+sources. Longer review must demonstrate improvements against these known gaps.
+
+Official design references: [IRS document-gathering guidance](https://www.irs.gov/filing/gather-your-documents)
+for the inventory/interview, [Publication 17 overview](https://www.irs.gov/forms-pubs/about-publication-17)
+for its role alongside form instructions, and [Taxpayer Advocate guidance on AI tax advice](https://www.taxpayeradvocate.irs.gov/news/tax-tips/is-ai-generated-tax-advice-making-the-grade/2024/06/)
+for the need to verify facts and calculations. These inform workflow design;
+tax-rule implementations still require the applicable retained official source.
 
 ## Deployment and testing
 

@@ -243,3 +243,55 @@ async def test_native_private_roster_comes_from_local_deployment_pools_and_profi
     assert not any(model.id == "private" for model in configured_models(s.app.state.cfg))
     with pytest.raises(ProcessingPolicyError):
         await prepare_native_private_runtime(s.app)
+
+
+@pytest.mark.parametrize("transport", ["native", "agui"])
+@pytest.mark.parametrize("stored_model,requested_model", [
+    ("auto", "private"), ("auto", " private "), ("private", None), ("private", "cloud"),
+])
+async def test_private_model_requires_durable_conversation_binding_before_any_work(
+    native, monkeypatch, transport, stored_model, requested_model,
+):
+    s = native
+    conversation = await s.store.conversations.create(
+        user_id=s.owner.user_id, default_model_id=stored_model,
+        default_mode="local" if stored_model == "private" else "auto",
+    )
+    assert not conversation.private_required
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Private model without durable binding must refuse before preparing content")
+
+    for name in (
+        "resolve_model", "resolve_owned_attachments", "resolve_project_context",
+        "resolve_native_auto_skill", "_image_parts_for_run", "prepare_native_private_runtime",
+    ):
+        monkeypatch.setattr(runs, name, forbidden)
+    if transport == "native":
+        payload = {"content": PRIVATE_TEXT}
+        if requested_model is not None:
+            payload["model_id"] = requested_model
+        response = await s.client.post(
+            f"/api/conversations/{conversation.conversation_id}/runs", json=payload,
+        )
+    else:
+        response = await s.client.post(
+            "/api/agent", params={"model": requested_model} if requested_model else None,
+            json={
+                "threadId": conversation.conversation_id, "runId": "client-private-unbound",
+                "messages": [{"id": "client-user", "role": "user", "content": PRIVATE_TEXT}],
+            },
+        )
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Select Private in a new or empty conversation before sending a message."
+    )
+    assert PRIVATE_TEXT not in response.text
+    assert await s.store.conversations.list_messages(
+        user_id=s.owner.user_id, conversation_id=conversation.conversation_id,
+    ) == ()
+    saved = await s.store.conversations.get(
+        user_id=s.owner.user_id, conversation_id=conversation.conversation_id,
+    )
+    assert saved.default_model_id == stored_model and not saved.private_required
+    assert s.captured == [] and s.env.seen == []

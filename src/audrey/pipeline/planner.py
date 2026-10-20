@@ -8,8 +8,8 @@ Gated on `agentic.planning.min_prompt_tokens` (default 40). Below that it's
 not worth the router round-trip — the planner returns `[]` and the panel runs
 the full prompt directly.
 
-Failure modes (timeout, parse error, only one subtask returned) all collapse
-to `[]` — never raise. The panel always has a fallback path.
+Provider unavailability, parse errors and a single subtask collapse to `[]`.
+Protected model, digest and transport-policy refusals still block the request.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from typing import Any
 
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.pipeline.prompts import PLANNER_SYSTEM, prompt_from_config
+from audrey.processing_policy import ProcessingPolicyError
 
 log = logging.getLogger(__name__)
 
@@ -40,8 +41,8 @@ async def plan(
 ) -> list[str]:
     """Return a list of sub-questions, or `[]` to skip planning.
 
-    Never raises — all failures degrade to `[]` so the deep panel can run the
-    original prompt unchanged.
+    Provider unavailability degrades to `[]` so the same panel can run the
+    original prompt unchanged. Protected trust-policy violations propagate.
 
     `cfg` is optional. When supplied, `agentic.prompts.planner` overrides
     the default system prompt; missing/empty falls back to the default.
@@ -63,6 +64,15 @@ async def plan(
             options={"temperature": 0.0},
             timeout_s=timeout_s,
         )
+    except ProcessingPolicyError as exc:
+        # The protected client redacts provider timeouts/unavailability into
+        # this stable code. Planning is optional: the same verified local
+        # panel can answer the original prompt without decomposition. Other
+        # policy failures must still block; no alternate provider is tried.
+        if exc.code != "private_model_unavailable":
+            raise
+        log.warning("planner: local provider unavailable, skipping decomposition")
+        return []
     except OllamaError as e:
         log.warning("planner: ollama error, skipping decomposition: %s", e)
         return []
