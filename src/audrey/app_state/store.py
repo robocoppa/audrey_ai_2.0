@@ -38,6 +38,7 @@ from audrey.app_state.repositories import (
     PreferencesRepository,
 )
 from audrey.app_state.responses import ResponsesRepository
+from audrey.app_state.tax_cases import TaxCasesRepository
 from audrey.identity import (
     TOKEN_SCOPES,
     IssuedPersonalToken,
@@ -105,6 +106,7 @@ class ApplicationStore:
         self.chat_projections = ChatProjectionsRepository(self._conn, self._lock)
         self.history_imports = HistoryImportRepository(self._conn, self._lock)
         self.responses = ResponsesRepository(self._conn, self._lock)
+        self.tax_cases = TaxCasesRepository(self._conn, self._lock)
         self.responses._prune_expired_sync()
 
     def _migrate_locked(self) -> None:

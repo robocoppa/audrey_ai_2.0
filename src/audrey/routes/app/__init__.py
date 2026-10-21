@@ -11,6 +11,7 @@ from audrey.routes.app.models import router as models_router
 from audrey.routes.app.private_files import router as private_files_router
 from audrey.routes.app.projects import router as projects_router
 from audrey.routes.app.runs import router as runs_router
+from audrey.routes.app.tax_review import router as tax_review_router
 
 router = APIRouter(prefix="/api")
 router.include_router(me_router)
@@ -21,6 +22,7 @@ router.include_router(projects_router)
 router.include_router(runs_router)
 router.include_router(files_router)
 router.include_router(private_files_router)
+router.include_router(tax_review_router)
 router.include_router(admin_router)
 
 __all__ = ["router"]

@@ -16,15 +16,16 @@ Private portrait, activity-sorted history and Automatic tools presentation are
 accepted. The reference count repair is accepted: the latest Private comparison
 completed content search and page reads. Accuracy remains open; retrieved pages
 did not prevent outdated deduction figures and a wrong credit cutoff year.
-Project deletion beside Edit with checkmark confirmation is built. Conversation
-deletion now verifies completion after an interrupted upstream response; only an
-explicit canonical not-found result permits navigation as success. Errors name
-the failed action and HTTP status. Live acceptance remains; the Cloudflare origin
-cause is not established. Both supplied access-log checks contain no failed API
-request; they do not identify the original failure. The next normal deletion
-checks recovery, with action/status text available if the error recurs.
-[Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds the
-privacy contract; [navigation](phase-12-sidebar-navigation.md) holds deletion.
+Project deletion beside Edit and interrupted conversation-deletion recovery are
+accepted. The original Cloudflare origin cause was not identified; diagnostics
+are closed. [Navigation](phase-12-sidebar-navigation.md) holds the behavior.
+
+**20D.2 built:** explicit Private Tax review with a saved owner-bound federal case,
+proposed/user-confirmed facts, checked document provenance, exact IRS passages,
+decimal calculations and a deterministic coverage checklist. Browser acceptance
+is next. Ordinary Private remains Automatic. Year/release changes and the full
+foreground review belong to the next slice; durable background work remains later.
+[Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds the contract.
 
 **MiniMax M3.1 Flash:** configured as an unmeasured cloud draft/research candidate
 in mixed, Cloud and selected Research panels. Kimi K3 stays first, panel worker
@@ -61,7 +62,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Private retrieval accepted; project/delete followup; tax review next |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Private retrieval and deletion accepted; saved tax review built |
 
 ## Build queue
 
@@ -75,12 +76,12 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **Private UI:** unused Audrey portrait and activity-sorted history accepted.
 - [x] **Reference request repair:** oversized counts bounded; content search
   and page reads accepted. General tax accuracy remains unverified.
-- [ ] **Current UI followup:** Project delete beside Edit with checkmark
-  confirmation and verified recovery after interrupted chat deletion; check the
-  browser flow and identify any remaining Cloudflare failure.
-- [ ] **20D.2:** dedicated `tax_review` tool with saved facts, evidence, missing
-  items and a deterministic case checklist.
-- [ ] **20D.3:** one complete foreground tax review and a known-answer baseline.
+- [x] **Current UI followup:** Project header delete/checkmark and interrupted
+  chat deletion recovery accepted; Cloudflare diagnostics closed.
+- [ ] **20D.2 built; acceptance next:** dedicated `tax_review` tool with saved
+  facts, evidence, missing items and a deterministic case checklist.
+- [ ] **20D.3:** one complete foreground tax review, explicit case year/release
+  updates and a known-answer baseline.
 - [ ] **20D.4:** durable Private tasks, checkpoints, progress, cancel and resume.
 - [ ] **20D.5:** bounded local evidence verification and targeted repair loops.
 - [ ] **20E:** compare single-pass and extended accuracy before extending defaults.

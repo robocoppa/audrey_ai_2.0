@@ -48,7 +48,8 @@ Delete project sits beside Edit project in the Project header. Its first click
 arms a checkmark confirmation with an accessible Confirm delete project label;
 Escape or leaving the control cancels it. Pending deletion disables the controls.
 The action's accessible help explains that files and conversations are retained.
-The two actions share dimensions and remain paired in compact layouts.
+The two actions share dimensions and remain paired in compact layouts. Project
+header deletion/checkmark confirmation is accepted October 20.
 
 ## Upload and processing
 

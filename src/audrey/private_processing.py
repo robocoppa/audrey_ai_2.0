@@ -159,7 +159,7 @@ def private_configuration(cfg: Any, policy: ProcessingPolicy) -> Any:
     return isolated
 
 
-async def prepare_native_private_runtime(app: Any) -> PrivateProcessingRuntime:
+async def prepare_native_private_runtime(app: Any, *, tax_review: bool = False) -> PrivateProcessingRuntime:
     """Prepare the explicit native Private workflow from deployment settings."""
     cfg = app.state.cfg
     if (cfg.raw.get("private_processing") or {}).get("enabled") is not True:
@@ -183,12 +183,16 @@ async def prepare_native_private_runtime(app: Any) -> PrivateProcessingRuntime:
     from audrey.tools.private_handlers import SUPPORTED_PRIVATE_TOOL_NAMES
     available = frozenset(app.state.tools.names()) & SUPPORTED_PRIVATE_TOOL_NAMES
     specs = app.state.tools.restrict(available).specs()
+    if tax_review:
+        if not specs:
+            raise ProcessingPolicyError("private_processing_unavailable")
+        available = available | {"tax_review"}
     policy = await prepare_processing_policy(
         ollama_base_url=cfg.env.ollama_host,
         model_names=sorted(names), expected_digests={profile["model"]: profile["digest"]},
         allowed_tools=available, tool_servers=frozenset(spec.server_url for spec in specs),
     )
-    return PrivateProcessingRuntime(policy)
+    return PrivateProcessingRuntime(policy, tax_review=tax_review)
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,11 +225,14 @@ class PrivateProcessingRuntime:
     """
 
     policy: ProcessingPolicy
+    tax_review: bool = field(default=False, kw_only=True)
     ollama_transport: httpx.AsyncBaseTransport | None = field(default=None, repr=False, compare=False)
     tool_transport: httpx.AsyncBaseTransport | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.policy, ProcessingPolicy):
+        if (not isinstance(self.policy, ProcessingPolicy)
+                or type(self.tax_review) is not bool
+                or (self.tax_review and "tax_review" not in self.policy.allowed_tools)):
             raise ProcessingPolicyError("invalid_processing_policy")
 
     @asynccontextmanager
@@ -246,6 +253,13 @@ class PrivateProcessingRuntime:
                 ))
                 await _verify_models(ollama, self.policy)
                 tools: ToolRegistry = app.state.tools.restrict(self.policy.allowed_tools)
+                if self.tax_review:
+                    from audrey.tax_review import tax_review_spec
+
+                    server = sorted(self.policy.tool_servers)[0]
+                    tools.by_name["tax_review"] = tax_review_spec(server)
+                else:
+                    tools.by_name.pop("tax_review", None)
                 for spec in tools.specs():
                     self.policy.assert_tool_allowed(spec.name, server_url=spec.server_url)
                     if spec.path != f"/{spec.name}":

@@ -1,7 +1,8 @@
 # Campaign 4 Phase 12 — navigation
 
-**Status:** Earlier desktop navigation accepted. Desktop/mobile followup built;
-browser acceptance pending.
+**Status:** Earlier desktop navigation accepted. Project header controls and
+interrupted chat deletion recovery accepted October 20. Older desktop/mobile
+polish remains covered during normal use.
 
 Desktop Archive/Delete use larger action buttons. Composer controls,
 including Project, have larger targets; model focus highlights only

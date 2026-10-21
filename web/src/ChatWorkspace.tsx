@@ -45,6 +45,8 @@ import { AudreyLoader } from "./AudreyLoader";
 import { ScrollToLatest } from "./ScrollToLatest";
 import { SwipeConversationRow } from "./SwipeConversationRow";
 import { UploadProgress } from "./UploadProgress";
+import { TaxReview } from "./TaxReview";
+import type { TaxCase } from "./taxReviewApi";
 import {
   ApiError,
   cancelRun,
@@ -1716,6 +1718,9 @@ function AudreyThread({
   const isPrivate = privateRequired || modelId === "private";
   const [runError, setRunError] = useState("");
   const [skillId, setSkillId] = useState("");
+  const [taxCase, setTaxCase] = useState<TaxCase | null>(null);
+  const [taxReviewExpanded, setTaxReviewExpanded] = useState(false);
+  const [taxReviewRefresh, setTaxReviewRefresh] = useState(0);
   const [activityLedger, setActivityLedger] = useState<ActivityLedger>({
     activity: IDLE_ACTIVITY,
     answerMessageId: null,
@@ -1806,15 +1811,19 @@ function AudreyThread({
     selectedSkillMode !== null && skill.supported_modes.includes(selectedSkillMode),
   );
   const selectedSkill = skills.find((skill) => skill.id === skillId);
-  const effectiveSkillId = isPrivate ? "" : skillId;
-  const skillControlValue = isPrivate ? "Automatic" : selectedSkill?.name
+  const effectiveSkillId = isPrivate
+    ? skillId === "tax-review" && taxCase ? "tax-review" : ""
+    : skillId === "tax-review" ? "" : skillId;
+  const skillControlValue = isPrivate ? effectiveSkillId === "tax-review" ? "Tax review" : "Automatic" : selectedSkill?.name
     ?? (selectedSkillMode === null ? "Not available" : "Automatic");
   const supportsFiles = selectedModel.capabilities.includes("files");
   useEffect(() => {
     if (!skillId) return;
+    if (isPrivate && skillId === "tax-review") return;
     const selectedSkill = skills.find((skill) => skill.id === skillId);
     if (
       isPrivate
+      || skillId === "tax-review"
       || !selectedSkill
       || selectedSkill.availability !== "available"
       || selectedSkillMode === null
@@ -2009,6 +2018,7 @@ function AudreyThread({
       },
       onRunFinishedEvent: ({ event }) => {
         onRunFinishedRef.current(event.runId);
+        setTaxReviewRefresh((current) => current + 1);
         setActiveRunId(null);
         userRequestedCancelRef.current = false;
         onRunActiveChange(false);
@@ -2364,6 +2374,16 @@ function AudreyThread({
                 {((showProgress && activity.status !== "complete") || activity.status === "error") ? (
                   <RunActivityStatus activity={activity} error={runError} />
                 ) : null}
+                {isPrivate ? <TaxReview
+                  conversationId={conversationId}
+                  expanded={taxReviewExpanded}
+                  active={effectiveSkillId === "tax-review"}
+                  disabled={submissionBlocked || activity.status === "running" || recoveredRunActive}
+                  refreshVersion={taxReviewRefresh}
+                  onExpandedChange={setTaxReviewExpanded}
+                  onCaseChange={setTaxCase}
+                  onSaved={() => setSkillId("tax-review")}
+                /> : null}
                 {lastAttempt && (restoredIncomplete || activity.status === "error" || runError) ? (
                   <button
                     className="retry-button"
@@ -2498,7 +2518,7 @@ function AudreyThread({
                       type="button"
                       onClick={toggleSkillPicker}
                       disabled={submissionBlocked || selectedSkillMode === null}
-                      title={isPrivate ? "Audrey uses available local tools automatically" : selectedSkillMode === null
+                      title={isPrivate ? "Choose automatic local tools or configure a Tax review" : selectedSkillMode === null
                         ? `${selectedModel.label} does not support Audrey skills`
                         : "Choose automatic tool use or a focused Audrey skill"}
                       aria-label={`Tools and skills: ${skillControlValue}`}
@@ -2674,6 +2694,7 @@ function AudreyThread({
                         aria-pressed={!skillId}
                         onClick={() => {
                           setSkillId("");
+                          setTaxReviewExpanded(false);
                           setActivePicker(null);
                           skillButtonRef.current?.focus({ preventScroll: true });
                         }}
@@ -2681,6 +2702,18 @@ function AudreyThread({
                         <strong>Automatic</strong>
                         <span>{isPrivate ? "Audrey chooses available local tools when they are useful." : "Audrey chooses the available tools when they are useful."}</span>
                       </button>
+                      {isPrivate ? <button
+                        type="button"
+                        aria-pressed={effectiveSkillId === "tax-review"}
+                        onClick={() => {
+                          if (taxCase) setSkillId("tax-review");
+                          setTaxReviewExpanded(true);
+                          setActivePicker(null);
+                        }}
+                      >
+                        <strong>Tax review</strong>
+                        <span>Configure a saved US federal tax case, review proposed facts and track missing information.</span>
+                      </button> : null}
                       {compatibleSkills.map((skill) => (
                         <button
                           type="button"

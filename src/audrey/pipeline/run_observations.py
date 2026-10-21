@@ -31,6 +31,7 @@ _SAFE_ERROR_CODE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 # secret-bearing argument before its UI projection has been reviewed.
 _VISIBLE_ARGUMENTS: dict[str, frozenset[str]] = {
     "calculate": frozenset({"operation", "from_unit", "to_unit"}),
+    "tax_review": frozenset({"operation"}),
     "reference_lookup": frozenset({"library_id", "product_number", "catalog", "offset", "tax_year"}),
     "reference_search": frozenset({"library_id", "catalog", "product_number", "tax_year", "top_k"}),
     "read_reference": frozenset({"library_id", "document_id", "catalog", "page", "offset"}),

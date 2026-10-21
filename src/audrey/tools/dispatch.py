@@ -30,7 +30,7 @@ import httpx
 
 from audrey.metrics import tool_call_seconds, tool_calls_total
 from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
-from audrey.tools.discovery import ToolRegistry, ToolUserScope
+from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, ToolUserScope
 from audrey.tools.private_dispatch import (
     PrivateToolArgumentsError,
     PrivateToolHandler,
@@ -249,6 +249,14 @@ async def dispatch_one(
             is_error=True,
         )
 
+    declaration = TOOL_DECLARATIONS.get(name)
+    if policy is None and (spec.in_process_only or (declaration and declaration.in_process_only)):
+        return ToolResult(
+            name=name, call_id=call_id,
+            content=json.dumps({"error": "private_tool_not_allowed"}),
+            elapsed_s=0.0, is_error=True,
+        )
+
     # Personal capabilities require a caller-owned identity, even when the
     # model supplies a plausible `user` argument or `user:` tag. A purge-gated
     # capability also needs an identity so the visibility check cannot be skipped.
@@ -331,11 +339,12 @@ async def dispatch_one(
                 elapsed_s=elapsed, is_error=True,
             )
         elapsed = round(time.monotonic() - start, 2)
-        tool_calls_total.labels(tool=name, outcome="ok").inc()
+        failed = isinstance(payload, dict) and bool(payload.get("error"))
+        tool_calls_total.labels(tool=name, outcome="error" if failed else "ok").inc()
         tool_call_seconds.labels(tool=name).observe(elapsed)
         return ToolResult(
             name=name, call_id=call_id, content=truncated,
-            elapsed_s=elapsed, is_error=False,
+            elapsed_s=elapsed, is_error=failed,
         )
 
     url = f"{spec.server_url}{spec.path}"

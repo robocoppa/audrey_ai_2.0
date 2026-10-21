@@ -65,6 +65,7 @@ class ToolDeclaration:
     dependencies: frozenset[str]
     purge_gated: bool = False
     timeout_s: float | None = None
+    in_process_only: bool = False
 
     @property
     def user_scoped(self) -> bool:
@@ -78,6 +79,7 @@ def _declare(
     dependencies: tuple[str, ...],
     purge_gated: bool = False,
     timeout_s: float | None = None,
+    in_process_only: bool = False,
 ) -> ToolDeclaration:
     return ToolDeclaration(
         name=name,
@@ -86,6 +88,7 @@ def _declare(
         dependencies=frozenset(dependencies),
         purge_gated=purge_gated,
         timeout_s=timeout_s,
+        in_process_only=in_process_only,
     )
 
 
@@ -98,6 +101,7 @@ TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
     declaration.name: declaration
     for declaration in (
         _declare("calculate", dependencies=()),
+        _declare("tax_review", dependencies=("application_state",), in_process_only=True),
         _declare("reference_lookup", dependencies=("audrey_references",)),
         _declare("read_reference", dependencies=("audrey_references",)),
         _declare(
@@ -185,6 +189,7 @@ class ToolSpec:
     available: bool = True
     unavailable_reason: str | None = None
     timeout_s: float | None = None  # None keeps the caller's default timeout.
+    in_process_only: bool = False
 
     @property
     def user_scoped(self) -> bool:
@@ -334,6 +339,8 @@ def _build_tool_from_operation(
     capability_status: dict[str, tuple[bool, str]],
 ) -> ToolSpec | None:
     """Convert one OpenAPI POST operation into a ToolSpec, or None if unsuitable."""
+    if declaration.in_process_only:
+        raise ToolPolicyError(f"{operation_id}: native tools cannot be discovered over HTTP")
     request_body = op.get("requestBody") or {}
     content = request_body.get("content") or {}
     json_schema_wrapper = content.get("application/json") or {}

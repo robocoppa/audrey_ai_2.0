@@ -1013,6 +1013,27 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           DEFAULT 0 CHECK (typeof(private_required) = 'integer' AND private_required IN (0, 1));
         """ + "\n".join(PRIVATE_PROCESSING_GUARDS_SQL),
     ),
+    (
+        23,
+        """
+        CREATE TABLE IF NOT EXISTS app_tax_cases (
+          case_id         TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL UNIQUE,
+          user_id         TEXT NOT NULL,
+          project_id      TEXT,
+          revision        INTEGER NOT NULL CHECK (revision >= 1),
+          record_json     TEXT NOT NULL CHECK (length(CAST(record_json AS BLOB)) <= 131072),
+          created_at      TEXT NOT NULL,
+          updated_at      TEXT NOT NULL,
+          FOREIGN KEY (conversation_id, user_id)
+            REFERENCES app_conversations(conversation_id, user_id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES app_users(user_id) ON DELETE CASCADE,
+          FOREIGN KEY (project_id) REFERENCES app_projects(project_id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_app_tax_cases_owner_conversation
+          ON app_tax_cases(user_id, conversation_id);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL"]

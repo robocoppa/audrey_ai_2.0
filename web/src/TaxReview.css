@@ -1,0 +1,99 @@
+.tax-review {
+  margin: 0 0 0.6rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  background: var(--surface-deep);
+  color: var(--text-soft);
+  font-size: 0.73rem;
+}
+
+.tax-review-toggle {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.65rem 0.8rem;
+  border: 0;
+  background: var(--surface-raised);
+  color: var(--text);
+  text-align: left;
+}
+
+.tax-review-toggle > span,
+.tax-review-note,
+.tax-review-release,
+.tax-review-actions > span {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.tax-review-content {
+  display: grid;
+  max-height: min(50dvh, 27rem);
+  gap: 0.65rem;
+  overflow-y: auto;
+  padding: 0.75rem 0.8rem;
+  scrollbar-width: thin;
+}
+
+.tax-review p { margin: 0; }
+.tax-review form, .tax-review-details { display: grid; gap: 0.6rem; }
+.tax-review label { display: grid; min-width: 0; gap: 0.3rem; }
+.tax-review-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 0.6rem; }
+
+.tax-review input,
+.tax-review select,
+.tax-review textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.tax-review textarea { resize: vertical; max-height: 8rem; }
+.tax-review-actions, .tax-review-summary { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.45rem; }
+.tax-review-actions button, .tax-review-records button, .tax-review-error button {
+  flex: none;
+  padding: 0.42rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.5rem;
+  background: var(--surface-active);
+  color: var(--text);
+  font: inherit;
+}
+.tax-review button:disabled { opacity: 0.5; cursor: default; }
+.tax-review button:focus-visible, .tax-review input:focus-visible, .tax-review textarea:focus-visible, .tax-review select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tax-review-summary > span { color: var(--muted); font-size: 0.68rem; }
+.tax-review-checks, .tax-review-records { display: grid; gap: 0.45rem; margin: 0; padding: 0; list-style: none; }
+.tax-review-checks li { display: flex; gap: 0.45rem; }
+.tax-review-checks [data-status="passed"] > span { color: var(--accent); }
+.tax-review-checks li > div, .tax-review-records li > div { display: grid; min-width: 0; gap: 0.2rem; overflow-wrap: anywhere; }
+.tax-review-checks li div > span, .tax-review-records small { color: var(--muted); font-size: 0.67rem; }
+.tax-review-records { margin-top: 0.5rem; }
+.tax-review-records li { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; padding: 0.5rem; border: 1px solid var(--border); border-radius: 0.5rem; }
+.tax-review details > summary { cursor: pointer; }
+.tax-review-next { display: grid; gap: 0.3rem; margin: 0.4rem 0 0; padding-left: 1.2rem; }
+.tax-review-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem; color: var(--danger); }
+.tax-review-release { overflow-wrap: anywhere; }
+
+.tax-review-scope { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 0.6rem; margin: 0; }
+.tax-review-scope > div { display: grid; gap: 0.3rem; min-width: 0; }
+.tax-review-scope > div:last-child { grid-column: 1 / -1; }
+.tax-review-scope dt { color: var(--muted); font-size: 0.68rem; }
+.tax-review-scope dd { margin: 0; overflow-wrap: anywhere; }
+
+.tax-review-source { margin-top: 0.3rem; }
+.tax-review-source > p, .tax-review-source > small { margin-top: 0.4rem; }
+.tax-review blockquote { margin: 0.4rem 0; padding: 0.35rem 0.6rem; border-left: 2px solid var(--border-strong); color: var(--text-soft); white-space: pre-wrap; }
+.tax-review-records code { overflow-wrap: anywhere; white-space: pre-wrap; }
+.tax-review-inputs { display: grid; gap: 0.2rem; margin: 0.3rem 0; }
+.tax-review-inputs > div { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.tax-review-inputs dt { color: var(--muted); }
+.tax-review-inputs dd { margin: 0; }

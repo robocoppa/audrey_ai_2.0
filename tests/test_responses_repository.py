@@ -88,7 +88,7 @@ async def test_reopen_retains_response_output_and_canonical_function_replay(tmp_
         retained = await reopened.responses.get(alice, "resp_root")
         assert retained["response"] == response
         assert retained["replay"] == replay
-        assert reopened.schema_version == 22
+        assert reopened.schema_version == 23
         assert reopened._conn.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         reopened.close()
@@ -118,7 +118,7 @@ async def test_additive_schema20_upgrade_keeps_existing_owner_and_conversation(t
         )
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 22
+        assert upgraded.schema_version == 23
         assert upgraded._conn.execute("SELECT title FROM app_conversations").fetchone()[0] == "Existing conversation"
         await upgraded.responses.save("usr_existing", _response(), [], now=100)
         assert await upgraded.responses.get("usr_existing", "resp_root", now=100) is not None

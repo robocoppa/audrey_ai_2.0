@@ -474,14 +474,39 @@ catalog search is published; retained earlier editions do not imply a prior
 search index.
 The main plan owns the remaining queue; no temporary smoke document is retained.
 
-### Tax review and longer Private task contracts (planned)
+### Tax review foundation and remaining Private task contracts
 
 The [main build queue](README.md#build-queue) owns status and order. The contracts
 below cover the dedicated tax-review tool and reusable Private task runner,
-with tax assistance as the first workflow. These parts are not built yet.
+with tax assistance as the first workflow. The saved case/tool foundation is built;
+foreground review and the task runner remain queued.
 OCR/media remain deferred until a case requires them.
 
 #### Tax review tool and case record
+
+**20D.2 built; browser acceptance pending.** Select Private, choose Tax review
+in Tools & skills, explicitly set the federal return year and goal, then save.
+Each conversation owns one case; Project membership is derived from its canonical
+conversation. A saved case does not activate Tax review automatically after reload.
+Automatic Private retains its existing tools and behavior. The additive schema 23
+record lives in the application database, participates in normal SQLite backup,
+and cascades on conversation deletion or owner purge.
+
+The in-process tool inspects/checks the case, proposes facts, retains exact IRS
+passages, runs decimal calculations and records missing items/return dependencies.
+Only owner UI actions confirm proposed facts or resolve missing items. Extracted
+facts require a selected Private file, original checksum, exact page/text and
+proposed normalization; a passage check does not validate that normalization.
+Official evidence must match an exact page in the pinned current release.
+Model-supplied tax-year applicability stays proposed/unknown. Checklists report
+coverage, including conflicting/unread material, without certifying tax correctness.
+
+This first case is federal-only and covers selected passages. There is no full
+return review, state adapter or background agent yet. The case year/goal/release
+are fixed at setup; a changed published release blocks case work until explicit
+updates are added with the foreground workflow. Historical originals are still
+available through ordinary reference tools but are not evidence in this current-
+release case. No collector/index/model rerun is needed.
 
 **Tax review** appears in the existing Tools and skills control for a Private
 conversation/Project. It may be selected explicitly; ordinary Private questions

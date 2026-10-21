@@ -54,7 +54,7 @@ class _TableRequest(TableAnalysisRequest):
 
 
 def make_private_tool_handlers(
-    app: Any, principal: Principal,
+    app: Any, principal: Principal, *, tax_conversation_id: str | None = None,
 ) -> Mapping[str, PrivateToolHandler]:
     """Close over the authenticated owner and isolated runtime, never model user."""
     policy = current_processing_policy()
@@ -182,8 +182,13 @@ def make_private_tool_handlers(
                 text, filename = str(row.get("summary") or ""), source.filename
         offset = min(body.offset, len(text))
         end = min(offset + 2_000, len(text))
+        identity = {}
+        if tax_conversation_id is not None and artifact == "document":
+            from audrey.tax_documents import private_source_identity
+
+            identity = await private_source_identity(app, principal, str(row["file_id"]))
         return {
-            "filename": filename, "artifact": artifact, "text": text[offset:end],
+            **identity, "filename": filename, "artifact": artifact, "text": text[offset:end],
             "offset": offset, "next_offset": end if end < len(text) else None,
             "total_chars": len(text),
             "note": "This is a page of the owned document; follow next_offset for the rest." if end < len(text) else "",
@@ -268,6 +273,12 @@ def make_private_tool_handlers(
         "reference_search": search, "list_my_files": list_files,
         "get_file_text": file_text, "analyze_table": table, "kb_search": kb_search,
     }
+    if tax_conversation_id is not None and "tax_review" in policy.allowed_tools:
+        from audrey.tax_review import make_tax_review_handler
+
+        handlers["tax_review"] = make_tax_review_handler(
+            app=app, principal=principal, conversation_id=tax_conversation_id,
+        )
     return MappingProxyType({name: handler for name, handler in handlers.items() if name in policy.allowed_tools})
 
 

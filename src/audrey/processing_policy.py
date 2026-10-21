@@ -24,7 +24,7 @@ from audrey.private_logging import install_private_logging
 # ordinary memory/history index; web and media operations remain unavailable.
 LOCAL_PROCESSING_TOOLS = frozenset({
     "calculate", "analyze_table", "reference_lookup", "read_reference",
-    "list_my_files", "get_file_text", "reference_search", "kb_search",
+    "list_my_files", "get_file_text", "reference_search", "kb_search", "tax_review",
 })
 
 _MODEL_PART = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
