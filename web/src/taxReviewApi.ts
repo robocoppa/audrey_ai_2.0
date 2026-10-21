@@ -58,6 +58,9 @@ export interface TaxCase {
   jurisdiction: "US-federal";
   goal: string;
   reference_release: string;
+  reference_update?:
+    | { status: "current" | "unavailable" }
+    | { status: "update_available"; release_id: string };
   revision: number;
   checklist_version: number;
   facts: TaxFact[];
@@ -111,6 +114,7 @@ export function saveTaxCase(conversationId: string, setup: TaxCaseSetup): Promis
 export type TaxCaseAction =
   | { operation: "reject_fact"; data: { fact_id: string } }
   | { operation: "change_year"; data: { tax_year: number } }
+  | { operation: "update_reference_release"; data: { reference_release: string } }
   | { operation: "confirm_fact"; data: { fact_id: string } }
   | { operation: "resolve_missing_item"; data: { id: string } };
 

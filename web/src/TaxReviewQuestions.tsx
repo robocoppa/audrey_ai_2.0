@@ -26,7 +26,7 @@ export function TaxReviewQuestions({
     return () => { active.current = false; };
   }, []);
   const proposed = taxCase.facts.filter(({ status }) => status === "proposed");
-  const visible = proposed.slice(0, 3);
+  const visible = proposed.slice(0, 1);
   const missing = taxCase.missing_items.find(({ id, status }) => status !== "resolved" && !deferred.includes(id));
 
   async function act(action: TaxCaseAction, itemId: string, success: string) {
@@ -50,22 +50,19 @@ export function TaxReviewQuestions({
 
   function choose(factId: string, confirm: boolean) {
     return act({ operation: confirm ? "confirm_fact" : "reject_fact", data: { fact_id: factId } }, factId,
-      confirm ? "I've saved your confirmation."
-        : "I won't use that detail. Tell me the correct information in your next message.");
+      confirm ? "Confirmed."
+        : "Noted. Send the correct information in your next message.");
   }
 
   if (!visible.length && !missing && !noticeText) return null;
-  return <article className="message message-assistant tax-review-question" aria-label="Audrey's tax review questions">
-    <div className="message-label">Audrey</div>
+  return <section className="tax-review-question" aria-label="Tax review choices">
     {visible.length ? <>
-      <p className="tax-question-intro">{proposed.length === 1
-        ? `Is this correct for your ${taxCase.tax_year} return?`
-        : `Could you check these details for your ${taxCase.tax_year} return?`}</p>
+      <h3 className="tax-question-intro">Confirm this detail</h3>
       <ul className="tax-question-facts">
         {visible.map((fact) => <li key={fact.id}>
           <div className="tax-question-value"><strong>{fact.label}</strong><span>{valueOf(fact.value)}</span></div>
           {fact.case_tax_year !== undefined && fact.case_tax_year !== taxCase.tax_year
-            ? <p className="tax-question-context">From your {fact.case_tax_year} review. Please check whether this still applies.</p> : null}
+            ? <p className="tax-question-context">From {fact.case_tax_year}. Check that this still applies.</p> : null}
           {fact.provenance ? <details className="tax-question-source">
             <summary>{taxCase.files?.find(({ file_id }) => file_id === fact.provenance?.file_id)?.filename || "Uploaded document"} · Page {fact.provenance.page}{fact.provenance.box ? ` · ${fact.provenance.box}` : ""}</summary>
             <blockquote>{fact.provenance.original_text}</blockquote>
@@ -73,35 +70,35 @@ export function TaxReviewQuestions({
           <div className="tax-question-actions">
             <button type="button" className="tax-question-confirm" aria-label={`Confirm ${fact.label}`}
               disabled={disabled || busy !== null || Boolean(currentError)} onClick={() => void choose(fact.id, true)}>
-              <span aria-hidden="true">✓</span> {busy === fact.id ? "Saving…" : "Yes, that's correct"}
+              <span aria-hidden="true">✓</span> {busy === fact.id ? "Saving…" : "Confirm"}
             </button>
             <button type="button" aria-label={`Not correct: ${fact.label}`}
               disabled={disabled || busy !== null || Boolean(currentError)} onClick={() => void choose(fact.id, false)}>Not correct</button>
           </div>
         </li>)}
       </ul>
-      {proposed.length > visible.length ? <p className="tax-question-context">{proposed.length - visible.length} more {proposed.length - visible.length === 1 ? "detail" : "details"} to review after these.</p> : null}
+      {proposed.length > visible.length ? <p className="tax-question-context">{proposed.length - visible.length} more {proposed.length - visible.length === 1 ? "detail" : "details"} left to review.</p> : null}
     </> : null}
     {!visible.length && missing ? <>
-      <p className="tax-question-intro">Before we continue, could you help with this?</p>
+      <h3 className="tax-question-intro">Still needed</h3>
       <ul className="tax-question-facts"><li>
         <div className="tax-question-value"><strong>{missing.label}</strong></div>
         <div className="tax-question-actions">
           <button type="button" className="tax-question-confirm" aria-label={`Mark ${missing.label} addressed`}
             disabled={disabled || busy !== null || Boolean(currentError)}
-            onClick={() => void act({ operation: "resolve_missing_item", data: { id: missing.id } }, missing.id, "I've marked that as addressed.")}>
+            onClick={() => void act({ operation: "resolve_missing_item", data: { id: missing.id } }, missing.id, "Marked addressed.")}>
             {busy === missing.id ? "Saving…" : "Mark addressed"}
           </button>
           <button type="button" disabled={disabled || busy !== null || Boolean(currentError)} onClick={() => {
             setDeferred((current) => [...current, missing.id]);
-            setNotice({ text: "I'll leave that open. You can add the information when you're ready.", answerVersion });
-          }}>Not yet</button>
+            setNotice({ text: "Left open for later.", answerVersion });
+          }}>Later</button>
         </div>
       </li></ul>
     </> : null}
     {noticeText ? <p className="tax-question-notice" role="status">{noticeText}</p> : null}
     {currentError ? <div className="tax-question-error" role="alert"><p>{currentError}</p><button type="button" disabled={disabled || busy !== null} onClick={onReload}>Reload details</button></div> : null}
-  </article>;
+  </section>;
 }
 
 function valueOf(value: unknown): string {

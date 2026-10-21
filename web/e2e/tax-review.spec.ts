@@ -50,7 +50,10 @@ async function mockTaxApi(page: Page) {
       const body = request.postDataJSON();
       requests.push({ path, body });
       if (!taxCase || body.expected_revision !== taxCase.revision) return json(route, { detail: "Case changed; reload it." }, 409);
-      if (body.operation === "change_year") {
+      if (body.operation === "update_reference_release") {
+        if (taxCase.reference_update?.status !== "update_available" || body.data.reference_release !== taxCase.reference_update.release_id) return json(route, { detail: "Library changed; reload it." }, 409);
+        taxCase = { ...taxCase, reference_release: body.data.reference_release, revision: taxCase.revision + 1, reference_update: { status: "current" } };
+      } else if (body.operation === "change_year") {
         taxCase = { ...taxCase, tax_year: body.data.tax_year, revision: taxCase.revision + 1,
           facts: taxCase.facts.map((fact) => ({ ...fact, case_tax_year: fact.case_tax_year ?? taxCase!.tax_year,
             status: fact.status === "confirmed" ? "proposed" : fact.status })) };
@@ -79,11 +82,14 @@ async function mockTaxApi(page: Page) {
     if (path.startsWith("/api/runs/run_tax_")) return json(route, { id: path.split("/").at(-1), conversation_id: ID, status: "succeeded", title_pending: false });
     await route.abort("failed");
   });
-  return { requests, skills };
+  return { requests, skills, offerLibraryUpdate() {
+    if (!taxCase) throw new Error("Create the case before offering a library update.");
+    taxCase = { ...taxCase, reference_update: { status: "update_available", release_id: "rel_updated_library" } };
+  } };
 }
 
 for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
-  test(`Tax review has quiet settings and conversational choices at ${viewport.width}px`, async ({ page }) => {
+  test(`Tax review keeps choices and library updates inside quiet settings at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.clock.setFixedTime(new Date(DATE));
     const observed = await mockTaxApi(page);
@@ -107,15 +113,16 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await composer.fill("Review my case.");
     await composer.press("Enter");
     await expect(page.getByText("Review findings saved 1.")).toBeVisible();
-    const question = page.getByRole("article", { name: "Audrey's tax review questions" });
-    await expect(question.getByText("Is this correct for your 2025 return?")).toBeVisible();
+    const question = panel.getByRole("region", { name: "Tax review choices" });
+    await expect(question.getByText("Confirm this detail")).toBeVisible();
     await expect(question.getByText("55000.00", { exact: true })).toBeVisible();
-    await expect(panel.getByRole("button", { name: "Confirm Wages" })).toHaveCount(0);
-    await expect(page.locator(".thread-viewport > .tax-review-question")).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Confirm Wages" })).toBeVisible();
+    await expect(composer).toBeInViewport();
+    await expect(page.locator(".thread-viewport > .tax-review-question")).toHaveCount(0);
     await question.getByRole("button", { name: "Confirm Wages" }).click();
-    await expect(question.getByRole("status")).toContainText("I've saved your confirmation.");
+    await expect(question.getByRole("status")).toContainText("Confirmed.");
     await question.getByRole("button", { name: "Mark W-2 box 1 addressed" }).click();
-    await expect(question.getByRole("status")).toContainText("I've marked that as addressed.");
+    await expect(question.getByRole("status")).toContainText("Marked addressed.");
     expect(observed.requests[1].body).toEqual({ expected_revision: fixtures.proposed.revision, operation: "confirm_fact", data: { fact_id: fixtures.proposed.facts[0].id } });
     expect(observed.requests[2].body).toEqual({ expected_revision: fixtures.confirmed.revision, operation: "resolve_missing_item", data: { id: fixtures.proposed.missing_items[0].id } });
     await page.getByRole("button", { name: "Tools and skills: Tax review" }).click();
@@ -123,7 +130,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await composer.fill("An ordinary Private question.");
     await composer.press("Enter");
     await expect(page.getByText("Review findings saved 2.")).toBeVisible();
-    await expect(page.getByText("I've marked that as addressed.", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Marked addressed.", { exact: true })).toHaveCount(0);
     expect(observed.skills).toEqual(["tax-review", null]);
     await page.reload();
     await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeVisible();
@@ -132,12 +139,21 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await panel.getByLabel("Tax year", { exact: true }).fill("2024");
     await panel.getByRole("button", { name: "Save year" }).click();
     await expect(panel.getByRole("button", { name: /Tax review · 2024/u })).toHaveAttribute("aria-expanded", "false");
-    await expect(question.getByText("Is this correct for your 2024 return?")).toBeVisible();
-    await expect(question.getByText("From your 2025 review. Please check whether this still applies.")).toBeVisible();
+    await expect(question.getByText("Confirm this detail")).toBeVisible();
+    await expect(question.getByText("From 2025. Check that this still applies.")).toBeVisible();
     await question.getByRole("button", { name: "Not correct: Wages" }).click();
-    await expect(question.getByRole("status")).toContainText("I won't use that detail.");
+    await expect(question.getByRole("status")).toContainText("Noted. Send the correct information in your next message.");
     expect(observed.requests[3].body.operation).toBe("change_year");
     expect(observed.requests[4].body.operation).toBe("reject_fact");
+    observed.offerLibraryUpdate();
+    await page.reload();
+    await expect(panel.getByRole("button", { name: /Tax review · 2024/u })).toHaveAttribute("aria-expanded", "false");
+    await expect(panel.getByRole("button", { name: "Update IRS library" })).toBeVisible();
+    await expect(panel).not.toContainText("rel_updated_library");
+    await panel.getByRole("button", { name: "Update IRS library" }).click();
+    await expect(panel.getByRole("button", { name: "Update IRS library" })).toHaveCount(0);
+    expect(observed.requests[5].body).toMatchObject({ operation: "update_reference_release", data: { reference_release: "rel_updated_library" } });
+    await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeVisible();
     if (viewport.width <= 1100) await page.locator("#app-mobile-menu-toggle").click();
     await page.locator(".conversation-list .conversation").filter({ hasText: "Ordinary conversation" }).click();
     if (viewport.width > 1100) await expect(page.getByText("Some features degraded", { exact: true }).first()).toBeVisible();

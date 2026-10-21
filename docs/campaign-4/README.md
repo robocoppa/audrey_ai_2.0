@@ -20,14 +20,20 @@ Project deletion beside Edit and interrupted conversation-deletion recovery are
 accepted. The original Cloudflare origin cause was not identified; diagnostics
 are closed. [Navigation](phase-12-sidebar-navigation.md) holds the behavior.
 
-**20D.2 functionality accepted October 21.** Saved cases, proposed/user-confirmed
-facts and the checklist flow passed. Presentation followup is built: compact
-settings with an editable previous-year default, confirmation/missing-information
-choices in the conversation, and no generic degraded-features notice in a selected
-Tax case. Changing the year preserves sources and requires facts/calculations to
-be checked again. Brief visual acceptance is next; completed functionality stays
-closed. Reference-release updates, full foreground review and accuracy remain
-next; background work follows later.
+**20D.2 functionality accepted October 21.** The compact Tax review box now
+contains one pending confirmation or missing-information choice at a time, with
+year and goal under Settings. Internal IDs/checklist details stay hidden. The
+previous completed year is the editable default. A year change retains sources
+and requires facts/calculations to be checked again. The generic degraded notice
+stays hidden in a selected Tax case. Brief visual acceptance is next.
+
+**20D.3a built:** saved cases remain readable if the IRS library changes or is
+unavailable. An explicit owner action adopts the exact available release;
+confirmed personal facts and original passages are retained, while rule evidence
+and related work require rechecking. Models cannot approve the update. Publication
+races show a further update choice, without silently adopting it. No index rerun
+or new library publication is needed to deploy this slice. Full foreground review
+and the known-answer baseline are next; background work follows later.
 [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds the contract.
 
 **MiniMax M3.1 Flash:** configured as an unmeasured cloud draft/research candidate
@@ -65,7 +71,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Saved tax review accepted; presentation followup built |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Saved tax review accepted; compact choices and explicit library updates built |
 
 ## Build queue
 
@@ -82,10 +88,11 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **Current UI followup:** Project header delete/checkmark and interrupted
   chat deletion recovery accepted; Cloudflare diagnostics closed.
 - [x] **20D.2:** saved facts/evidence and deterministic case checklist accepted.
-- [ ] **Tax review presentation:** compact settings, editable year and
-  conversation-based confirmation built; brief visual acceptance next.
-- [ ] **20D.3:** one complete foreground tax review, explicit reference-release
-  updates and a known-answer baseline.
+- [ ] **Tax review presentation:** lean choices inside the settings box and
+  editable year built; brief visual acceptance next.
+- [x] **20D.3a:** explicit reference-library updates with retained evidence and
+  required rechecks; locally verified.
+- [ ] **20D.3b:** one complete foreground tax review and a known-answer baseline.
 - [ ] **20D.4:** durable Private tasks, checkpoints, progress, cancel and resume.
 - [ ] **20D.5:** bounded local evidence verification and targeted repair loops.
 - [ ] **20E:** compare single-pass and extended accuracy before extending defaults.

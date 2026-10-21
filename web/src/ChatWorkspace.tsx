@@ -46,7 +46,6 @@ import { ScrollToLatest } from "./ScrollToLatest";
 import { SwipeConversationRow } from "./SwipeConversationRow";
 import { UploadProgress } from "./UploadProgress";
 import { TaxReview } from "./TaxReview";
-import { TaxReviewQuestions } from "./TaxReviewQuestions";
 import type { TaxCase } from "./taxReviewApi";
 import {
   ApiError,
@@ -2380,18 +2379,6 @@ function AudreyThread({
               AssistantMessage,
             }}
           />
-          {isPrivate && taxCase && !readOnly ? <TaxReviewQuestions
-            key={`${taxCase.id}:${taxCase.tax_year}`}
-            conversationId={conversationId}
-            taxCase={taxCase}
-            answerVersion={activityLedger.answers.size}
-            disabled={modeDisabled || recoveredRunActive || activity.status === "running"}
-            onCaseChange={(value) => {
-              acceptTaxCase(value);
-              setTaxReviewRefresh((current) => current + 1);
-            }}
-            onReload={() => setTaxReviewRefresh((current) => current + 1)}
-          /> : null}
           <ThreadPrimitive.If empty={false}>
             <div className="thread-message-spacer" aria-hidden="true" />
           </ThreadPrimitive.If>
@@ -2414,6 +2401,7 @@ function AudreyThread({
                   active={effectiveSkillId === "tax-review"}
                   disabled={submissionBlocked || activity.status === "running" || recoveredRunActive}
                   refreshVersion={taxReviewRefresh}
+                  answerVersion={activityLedger.answers.size}
                   onExpandedChange={setTaxReviewExpanded}
                   onCaseChange={acceptTaxCase}
                   onSaved={() => setSkillId("tax-review")}

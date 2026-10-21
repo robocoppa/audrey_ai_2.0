@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type FormEvent } from "react";
 
 import { ApiError } from "./api";
+import { TaxReviewQuestions } from "./TaxReviewQuestions";
 import {
   actOnTaxCase,
   defaultTaxYear,
@@ -16,6 +17,7 @@ export function TaxReview({
   active,
   disabled,
   refreshVersion,
+  answerVersion = 0,
   onExpandedChange,
   onCaseChange,
   onSaved,
@@ -25,6 +27,7 @@ export function TaxReview({
   active: boolean;
   disabled: boolean;
   refreshVersion: number;
+  answerVersion?: number;
   onExpandedChange: (expanded: boolean) => void;
   onCaseChange: (value: TaxCase | null) => void;
   onSaved: () => void;
@@ -40,6 +43,8 @@ export function TaxReview({
   const [reloadVersion, setReloadVersion] = useState(0);
   const loadKey = `${conversationId}:${refreshVersion}:${reloadVersion}`;
   const loading = loadedKey !== loadKey;
+  const referenceUpdate = taxCase?.reference_update;
+  const referenceBlocked = referenceUpdate?.status === "update_available" || referenceUpdate?.status === "unavailable";
 
   useEffect(() => {
     const controller = new AbortController();
@@ -64,7 +69,7 @@ export function TaxReview({
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || disabled || loading || loadFailed) return;
+    if (busy || disabled || loading || loadFailed || referenceBlocked) return;
     const taxYear = Number(year);
     if (!/^\d{4}$/u.test(year) || !Number.isInteger(taxYear) || taxYear < 1900 || taxYear > 2100) {
       setError("Enter a tax year from 1900 to 2100.");
@@ -97,8 +102,27 @@ export function TaxReview({
     }
   }
 
+  async function updateLibrary() {
+    if (!taxCase || referenceUpdate?.status !== "update_available" || busy || disabled || loading || loadFailed) return;
+    setBusy(true);
+    setError("");
+    try {
+      const value = await actOnTaxCase(conversationId, taxCase.revision, {
+        operation: "update_reference_release", data: { reference_release: referenceUpdate.release_id },
+      });
+      setTaxCase(value);
+      onCaseChange(value);
+    } catch (reason) {
+      setError("Could not update the IRS library: " + messageOf(reason));
+      // Keep the advertised choice locked until a fresh snapshot is loaded.
+      setLoadFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!expanded && !taxCase) return null;
-  const locked = busy || disabled || loading || loadFailed;
+  const locked = busy || disabled || loading || loadFailed || referenceBlocked;
   const yearChanged = Boolean(taxCase && year !== String(taxCase.tax_year));
   const hasSavedWork = taxCase && [
     taxCase.facts, taxCase.evidence, taxCase.calculations, taxCase.return_items, taxCase.missing_items,
@@ -115,6 +139,29 @@ export function TaxReview({
         <strong>Tax review · {taxCase?.tax_year ?? year}</strong>{" "}
         <span>Settings <svg viewBox="0 0 24 24" aria-hidden="true"><path d={expanded ? "m7 14 5-5 5 5" : "m7 10 5 5 5-5"} /></svg></span>
       </button>
+      <div className="tax-review-body">
+        {referenceBlocked ? <div className="tax-review-library" role="status">
+          <p>{referenceUpdate?.status === "update_available"
+            ? "An updated IRS library is available. Update the library to continue; saved rules and related calculations will need rechecking."
+            : "The IRS library is unavailable. Your saved review is still here; try loading it again before continuing."}</p>
+          {referenceUpdate?.status === "update_available" ? <button type="button"
+            disabled={busy || disabled || loading || loadFailed} onClick={() => void updateLibrary()}>
+            {busy ? "Updating…" : "Update IRS library"}
+          </button> : <button type="button" disabled={busy || disabled || loading}
+            onClick={() => setReloadVersion((current) => current + 1)}>Reload library</button>}
+        </div> : null}
+        {taxCase && !referenceBlocked ? <TaxReviewQuestions
+          key={`${taxCase.id}:${taxCase.tax_year}`}
+          conversationId={conversationId}
+          taxCase={taxCase}
+          answerVersion={answerVersion}
+          disabled={locked}
+          onCaseChange={(value) => {
+            setTaxCase(value);
+            onCaseChange(value);
+          }}
+          onReload={() => setReloadVersion((current) => current + 1)}
+        /> : null}
       {expanded ? <div id={panelId} className="tax-review-content">
         {loading ? <p className="tax-review-note" role="status">Loading settings…</p> : null}
         <form onSubmit={(event) => void save(event)}>
@@ -132,11 +179,12 @@ export function TaxReview({
             <button type="submit" disabled={locked || Boolean(taxCase && !yearChanged)}>{busy ? "Saving…" : taxCase ? "Save year" : "Use Tax review"}</button>
           </div>
         </form>
+      </div> : null}
         {error ? <div className="tax-review-error" role="alert">
           <span>{error}</span>
           <button type="button" disabled={busy || disabled || loading} onClick={() => setReloadVersion((current) => current + 1)}>Reload settings</button>
         </div> : null}
-      </div> : null}
+      </div>
     </section>
   );
 }

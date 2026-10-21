@@ -27,14 +27,18 @@
 .tax-review-toggle:hover { background: var(--surface-raised); }
 .tax-review[data-active="true"] .tax-review-toggle strong { color: var(--text); }
 
-.tax-review-content {
+.tax-review-body {
   display: grid;
   max-height: min(40dvh, 18rem);
-  gap: 0.6rem;
+  gap: 0.65rem;
   overflow-y: auto;
   padding: 0.2rem 0.75rem 0.7rem;
   scrollbar-width: thin;
 }
+
+.tax-review-body:empty { display: none; }
+.tax-review-content { display: grid; gap: 0.6rem; }
+.tax-review-question + .tax-review-content { border-top: 1px solid var(--border); padding-top: 0.65rem; }
 
 .tax-review p { margin: 0; overflow-wrap: anywhere; }
 .tax-review form { display: grid; gap: 0.65rem; }
@@ -72,3 +76,15 @@
 .tax-review button:disabled { opacity: 0.5; cursor: default; }
 .tax-review button:focus-visible, .tax-review input:focus-visible, .tax-review textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tax-review-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.4rem; color: var(--danger); }
+
+.tax-review-library { display: flex; align-items: center; flex-wrap: wrap; gap: 0.55rem; }
+.tax-review-library p { flex: 1 1 16rem; color: var(--text-soft); line-height: 1.5; }
+.tax-review-library button {
+  flex: none;
+  padding: 0.42rem 0.65rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.5rem;
+  background: var(--surface-active);
+  color: var(--text);
+  font: inherit;
+}

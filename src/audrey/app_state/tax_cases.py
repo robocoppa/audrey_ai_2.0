@@ -105,7 +105,15 @@ class ChangeYearPayload(_Payload):
     tax_year: TaxYear
 
 
-class RecordEvidencePayload(_AppendPayload):
+class UpdateReferenceReleasePayload(_Payload):
+    reference_release: Identifier
+
+
+class _RecheckPayload(_AppendPayload):
+    supersedes: EntryIds = Field(default_factory=list)
+
+
+class RecordEvidencePayload(_RecheckPayload):
     claim: Label
     document_id: Identifier
     reference_release: Identifier
@@ -121,7 +129,7 @@ class RecordEvidencePayload(_AppendPayload):
     conflicts_with: EntryIds = Field(default_factory=list)
 
 
-class RecordCalculationPayload(_AppendPayload):
+class RecordCalculationPayload(_RecheckPayload):
     label: Label
     inputs: Annotated[
         dict[Identifier, Annotated[str, Field(min_length=1, max_length=200)]], Field(max_length=100)
@@ -154,7 +162,7 @@ class ResolveMissingItemPayload(_Payload):
     id: Identifier
 
 
-class ProposeReturnItemPayload(_AppendPayload):
+class ProposeReturnItemPayload(_RecheckPayload):
     label: Label
     fact_ids: EntryIds = Field(default_factory=list)
     evidence_ids: EntryIds = Field(default_factory=list)
@@ -173,6 +181,7 @@ OPERATION_MODELS: dict[str, type[_Payload]] = {
     "confirm_fact": ConfirmFactPayload,
     "reject_fact": RejectFactPayload,
     "change_year": ChangeYearPayload,
+    "update_reference_release": UpdateReferenceReleasePayload,
     "record_evidence": RecordEvidencePayload,
     "record_calculation": RecordCalculationPayload,
     "add_missing_item": AddMissingItemPayload,
@@ -310,7 +319,17 @@ class TaxCasesRepository:
             and payload["tax_year_status"] == "verified"
         ):
             raise TaxCaseError("A model cannot verify tax-year applicability.")
-        if operation in {"confirm_fact", "reject_fact", "resolve_missing_item", "change_year"} and actor != "user":
+        if (
+            operation
+            in {
+                "confirm_fact",
+                "reject_fact",
+                "resolve_missing_item",
+                "change_year",
+                "update_reference_release",
+            }
+            and actor != "user"
+        ):
             raise TaxCaseError("This tax case transition requires a user action.")
         return await asyncio.to_thread(
             self._update_sync,
@@ -435,6 +454,22 @@ def _apply_operation(
             entry.update(status="needs_recheck", recheck_for_tax_year=new_year)
         case.update(tax_year=new_year, previous_tax_year=old_year, tax_year_changed_at=_utc_now())
         return True
+    if operation == "update_reference_release":
+        old_release, new_release = case["reference_release"], payload["reference_release"]
+        if old_release == new_release:
+            return False
+        for entry in case["evidence"]:
+            entry.setdefault("case_reference_release", old_release)
+            entry.update(status="needs_recheck", recheck_for_reference_release=new_release)
+        for entry in [*case["calculations"], *case["return_items"]]:
+            entry.setdefault("case_reference_release", old_release)
+            entry.update(status="needs_recheck", recheck_for_reference_release=new_release)
+        case.update(
+            reference_release=new_release,
+            previous_reference_release=old_release,
+            reference_release_changed_at=_utc_now(),
+        )
+        return True
     if operation == "confirm_fact":
         entry = _entry(case["facts"], payload["fact_id"])
         if entry["status"] == "confirmed":
@@ -442,8 +477,12 @@ def _apply_operation(
         if entry["status"] == "rejected":
             raise TaxCaseError("A rejected fact requires a corrected proposal.")
         entry.setdefault("case_tax_year", case["tax_year"])
-        entry.update(status="confirmed", confirmed_at=_utc_now(), confirmed_by="user",
-                     confirmed_tax_year=case["tax_year"])
+        entry.update(
+            status="confirmed",
+            confirmed_at=_utc_now(),
+            confirmed_by="user",
+            confirmed_tax_year=case["tax_year"],
+        )
         return True
     if operation == "reject_fact":
         entry = _entry(case["facts"], payload["fact_id"])
@@ -452,8 +491,12 @@ def _apply_operation(
         entry.setdefault("case_tax_year", case["tax_year"])
         for field in ("confirmed_at", "confirmed_by", "confirmed_tax_year"):
             entry.pop(field, None)
-        entry.update(status="rejected", rejected_at=_utc_now(), rejected_by="user",
-                     rejected_tax_year=case["tax_year"])
+        entry.update(
+            status="rejected",
+            rejected_at=_utc_now(),
+            rejected_by="user",
+            rejected_tax_year=case["tax_year"],
+        )
         return True
     if operation == "resolve_missing_item":
         entry = _entry(case["missing_items"], payload["id"])
@@ -463,6 +506,12 @@ def _apply_operation(
         return True
     category = _APPEND_CATEGORIES[operation]
     entries = case[category]
+    superseded_entries = []
+    for entry_id in payload.get("supersedes", []):
+        previous = _entry(entries, entry_id)
+        if previous.get("status") != "needs_recheck":
+            raise TaxCaseError("Only entries awaiting recheck may be superseded.")
+        superseded_entries.append(previous)
     if operation == "propose_fact" and payload["provenance"] is not None:
         source = payload["provenance"]
         matching = next(
@@ -490,37 +539,78 @@ def _apply_operation(
             raise TaxCaseError("Current reference evidence must use the pinned case release.")
         for evidence_id in payload["conflicts_with"]:
             _entry(case["evidence"], evidence_id)
+        for evidence_id in payload["supersedes"]:
+            if evidence_id in payload["conflicts_with"]:
+                raise TaxCaseError("Conflicting evidence cannot also be superseded.")
     if operation in {"record_calculation", "propose_return_item"}:
         for fact_id in payload["fact_ids"]:
             _entry(case["facts"], fact_id)
         for evidence_id in payload["evidence_ids"]:
-            _entry(case["evidence"], evidence_id)
-    content = {key: value for key, value in payload.items() if key != "operation_key"}
+            evidence = _entry(case["evidence"], evidence_id)
+            if not _current_evidence(case, evidence):
+                raise TaxCaseError("A tax case dependency requires rechecked reference evidence.")
+    content = {
+        key: value for key, value in payload.items() if key not in {"operation_key", "supersedes"}
+    }
     legacy_digest = hashlib.sha256(
         json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     year_scoped = category in {"facts", "calculations", "return_items"}
+    release_scoped = category in {"evidence", "calculations", "return_items"}
     payload_content = dict(content)
     if year_scoped:
         content["case_tax_year"] = case["tax_year"]
+    prior_digest = hashlib.sha256(
+        json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if release_scoped:
+        content["case_reference_release"] = case["reference_release"]
     digest = hashlib.sha256(
         json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     key = payload.get("operation_key")
-    superseded_entries = []
     for entry in entries:
-        same_year = not year_scoped or entry.get("case_tax_year", case["tax_year"]) == case["tax_year"]
-        needs_recheck = category in {"calculations", "return_items"} and entry.get("status") == "needs_recheck"
-        if needs_recheck and all(entry.get(field) == value for field, value in payload_content.items()):
+        same_year = (
+            not year_scoped or entry.get("case_tax_year", case["tax_year"]) == case["tax_year"]
+        )
+        same_release = (
+            not release_scoped
+            or entry.get("case_reference_release", case["reference_release"])
+            == case["reference_release"]
+        )
+        needs_recheck = release_scoped and entry.get("status") == "needs_recheck"
+        equivalent = all(entry.get(field) == value for field, value in payload_content.items())
+        if (
+            needs_recheck
+            and category in {"calculations", "return_items"}
+            and entry.get("recheck_for_reference_release")
+        ):
+            equivalent = all(
+                entry.get(field) == value
+                for field, value in payload_content.items()
+                if field != "evidence_ids"
+            )
+        if needs_recheck and equivalent:
             superseded_entries.append(entry)
         if key is not None and entry.get("operation_key") == key:
-            if entry["operation_digest"] not in {digest, legacy_digest} or not same_year or needs_recheck:
+            if (
+                entry["operation_digest"] not in {digest, prior_digest, legacy_digest}
+                or not same_year
+                or not same_release
+                or needs_recheck
+                or entry.get("supersedes", []) != payload.get("supersedes", [])
+            ):
                 raise TaxCaseConflictError(
-                    "The operation key was already used with different data or a different tax year."
+                    "The operation key was already used with different data or a different review context."
                 )
-            return False
-        if same_year and not needs_recheck and entry["operation_digest"] in {digest, legacy_digest}:
-            return False
+            return _link_superseded(superseded_entries, entry["id"])
+        if (
+            same_year
+            and same_release
+            and not needs_recheck
+            and entry["operation_digest"] in {digest, prior_digest, legacy_digest}
+        ):
+            return _link_superseded(superseded_entries, entry["id"])
     if len(entries) >= MAX_CATEGORY_ENTRIES:
         raise TaxCaseError("The tax case category has reached its entry limit.")
     entry = {
@@ -532,16 +622,54 @@ def _apply_operation(
     }
     if year_scoped:
         entry["case_tax_year"] = case["tax_year"]
+    if release_scoped:
+        entry["case_reference_release"] = case["reference_release"]
     if category in {"facts", "return_items"}:
         entry["status"] = "proposed"
-    elif category == "calculations":
+    elif category in {"calculations", "evidence"}:
         entry["status"] = "recorded"
     elif category == "missing_items":
         entry["status"] = "unresolved"
     entries.append(entry)
-    for previous in superseded_entries:
-        previous["superseded_by"] = entry["id"]
+    _link_superseded(superseded_entries, entry["id"])
     return True
+
+
+def _link_superseded(entries: list[dict[str, Any]], replacement_id: str) -> bool:
+    changed = False
+    for previous in entries:
+        if previous.get("superseded_by") != replacement_id:
+            previous["superseded_by"] = replacement_id
+            changed = True
+    return changed
+
+
+def _terminal_replacement(
+    entry: dict[str, Any], entries: dict[str, dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Follow bounded retained history without treating a stale intermediate as current."""
+    visited = {entry["id"]}
+    replacement = None
+    while entry.get("superseded_by"):
+        replacement_id = entry["superseded_by"]
+        if replacement_id in visited or replacement_id not in entries:
+            return None
+        visited.add(replacement_id)
+        replacement = entry = entries[replacement_id]
+    return replacement
+
+
+def _current_evidence(case: dict[str, Any], entry: dict[str, Any]) -> bool:
+    return (
+        entry.get("status") != "needs_recheck"
+        and not entry.get("superseded_by")
+        and entry.get("case_reference_release", case["reference_release"])
+        == case["reference_release"]
+        and (
+            entry.get("catalog", "current") != "current"
+            or entry.get("reference_release") == case["reference_release"]
+        )
+    )
 
 
 def _entry(entries: list[dict[str, Any]], entry_id: str) -> dict[str, Any]:
@@ -618,6 +746,13 @@ def tax_case_checklist(case: dict[str, Any]) -> dict[str, Any]:
         [] if evidence else ["Read and retain official rule evidence for the return year."]
     )
     for item in evidence:
+        replacement = _terminal_replacement(item, evidence_by_id)
+        if replacement and _current_evidence(case, replacement):
+            continue
+        if not _current_evidence(case, item):
+            rule_issues.append(
+                f"Recheck evidence {item['id']} against the selected reference release."
+            )
         if item.get("tax_year") is None:
             rule_issues.append(f"Tax-year applicability is unknown for evidence {item['id']}.")
         elif item["tax_year"] != case.get("tax_year"):
@@ -666,11 +801,23 @@ def tax_case_checklist(case: dict[str, Any]) -> dict[str, Any]:
     review_items = [*case.get("return_items", []), *case.get("calculations", [])]
     review_items_by_id = {item["id"]: item for item in review_items}
     for item in review_items:
-        replacement = review_items_by_id.get(item.get("superseded_by"), {})
-        if (replacement.get("case_tax_year") == case.get("tax_year")
-                and replacement.get("status") in {"recorded", "proposed"}):
+        replacement = _terminal_replacement(item, review_items_by_id) or {}
+        if (
+            replacement.get("case_tax_year") == case.get("tax_year")
+            and replacement.get("case_reference_release", case.get("reference_release"))
+            == case.get("reference_release")
+            and replacement.get("status") in {"recorded", "proposed"}
+        ):
             continue
-        if item.get("status") == "needs_recheck" or item.get("case_tax_year", case.get("tax_year")) != case.get("tax_year"):
+        if item.get("recheck_for_reference_release") or item.get(
+            "case_reference_release", case.get("reference_release")
+        ) != case.get("reference_release"):
+            dependency_issues.append(
+                f"Recheck item {item['id']} against the selected reference release."
+            )
+        if item.get("recheck_for_tax_year") or item.get(
+            "case_tax_year", case.get("tax_year")
+        ) != case.get("tax_year"):
             dependency_issues.append(
                 f"Recheck item {item['id']} for the selected tax year; its recorded year is {item.get('case_tax_year', 'unknown')}."
             )
@@ -687,6 +834,10 @@ def tax_case_checklist(case: dict[str, Any]) -> dict[str, Any]:
             if evidence_id not in evidence_by_id:
                 dependency_issues.append(
                     f"Item {item['id']} depends on absent evidence {evidence_id}."
+                )
+            elif not _current_evidence(case, evidence_by_id[evidence_id]):
+                dependency_issues.append(
+                    f"Item {item['id']} depends on evidence {evidence_id} that needs rechecking."
                 )
     check("dependencies", "Calculation and proposed return item dependencies", dependency_issues)
     next_steps = [issue for item in checks for issue in item["issues"]]
@@ -716,6 +867,7 @@ __all__ = [
     "ConfirmFactPayload",
     "RejectFactPayload",
     "ChangeYearPayload",
+    "UpdateReferenceReleasePayload",
     "RecordEvidencePayload",
     "RecordCalculationPayload",
     "AddMissingItemPayload",

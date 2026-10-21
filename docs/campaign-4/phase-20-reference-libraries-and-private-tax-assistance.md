@@ -489,8 +489,8 @@ Private, choose Tax review in Tools & skills, choose the federal return year and
 goal, then save. The year defaults to the previous completed calendar year and
 can be changed before or after setup. Settings collapse after saving. The compact
 row contains user choices; record IDs, checksums and checklist internals stay out
-of it. Confirmation/rejection and missing-information choices appear as Audrey
-messages in the conversation. New answers explain practical next steps and keep
+of it. Confirmation/rejection and missing-information choices stay inside this
+same compact box, one item at a time; year and goal expand under Settings. New answers explain practical next steps and keep
 internal IDs/checklist codes in tool calls. The generic degraded-features badge
 is hidden for a selected saved Tax case; actual service/model failures still show.
 Each conversation owns one case; Project membership is derived from its canonical
@@ -513,10 +513,26 @@ This first case is federal-only and covers selected passages. There is no full
 return review, state adapter or background agent yet. Changing the case year retains original source years/passages, resets prior
 confirmations and marks calculations/return proposals for recheck. Explicit
 re-recording preserves the old record and supersedes it with the new review.
-Goal and reference release remain fixed at setup; a changed published release
-blocks work until explicit release updates are added with the foreground workflow. Historical originals are still
-available through ordinary reference tools but are not evidence in this current-
-release case. No collector/index/model rerun is needed.
+The goal remains fixed at setup. Historical originals are still available through
+ordinary reference tools but are not evidence in this current-release case.
+No collector/index/model rerun is needed.
+
+**20D.3a — explicit reference updates (built October 21).** A changed or
+unavailable published library leaves the saved case readable. The box shows only
+the applicable update/reload choice. Work requiring Tax review stays blocked until
+the exact current release is explicitly adopted by the owner. A model cannot
+change that pin. A stale browser target or case revision is refused; a publication
+that changes during the save returns the approved pin with a further update
+choice. No unapproved release is silently adopted.
+
+An update preserves personal facts and confirmations, source revisions and exact
+original passages. Existing rule evidence, calculations and return proposals need
+rechecking. Reopened official passages can explicitly replace stale evidence;
+recalculated work uses the fresh evidence IDs. Superseded originals remain in the
+bounded case history, including across successive updates. A new library release
+does not itself prove that a law changed or that a retained rule applies to the
+return year. Full foreground review and a known-answer accuracy baseline remain
+20D.3b; neither is established by these state-transition checks.
 
 **Tax review** appears in the existing Tools and skills control for a Private
 conversation/Project. It may be selected explicitly; ordinary Private questions

@@ -529,21 +529,46 @@ async def test_year_change_rejects_implicit_or_out_of_range_values(state, tax_ye
         await _update(state, case, "change_year", {"tax_year": tax_year}, actor="user")
 
 
-async def test_year_change_preserves_sources_and_requires_new_confirmation_and_calculation_review(state):
+async def test_year_change_preserves_sources_and_requires_new_confirmation_and_calculation_review(
+    state,
+):
     case = await _create(state)
-    fact_data = _fact(kind="extracted", value="100.00", provenance={
-        "file_id": "file_1", "checksum": "a" * 64, "page": 1,
-        "box": "1", "original_text": "100.00", "normalization": "100.00",
-    })
+    fact_data = _fact(
+        kind="extracted",
+        value="100.00",
+        provenance={
+            "file_id": "file_1",
+            "checksum": "a" * 64,
+            "page": 1,
+            "box": "1",
+            "original_text": "100.00",
+            "normalization": "100.00",
+        },
+    )
     case = await _update(state, case, "propose_fact", fact_data)
     fact_id = case["facts"][0]["id"]
     case = await _update(state, case, "confirm_fact", {"fact_id": fact_id}, actor="user")
     case = await _update(state, case, "record_evidence", _evidence())
-    calc_data = {"label": "Original calculation", "inputs": {"income": "100.00"},
-                 "expression": "income", "rounding": "none", "result": "100",
-                 "fact_ids": [fact_id], "evidence_ids": [case["evidence"][0]["id"]]}
+    calc_data = {
+        "label": "Original calculation",
+        "inputs": {"income": "100.00"},
+        "expression": "income",
+        "rounding": "none",
+        "result": "100",
+        "fact_ids": [fact_id],
+        "evidence_ids": [case["evidence"][0]["id"]],
+    }
     case = await _update(state, case, "record_calculation", calc_data)
-    case = await _update(state, case, "propose_return_item", {"label": "Original return item", "fact_ids": calc_data["fact_ids"], "evidence_ids": calc_data["evidence_ids"]})
+    case = await _update(
+        state,
+        case,
+        "propose_return_item",
+        {
+            "label": "Original return item",
+            "fact_ids": calc_data["fact_ids"],
+            "evidence_ids": calc_data["evidence_ids"],
+        },
+    )
     original = copy.deepcopy(case)
     changed = await _update(state, case, "change_year", {"tax_year": 2024}, actor="user")
     assert changed["files"] == original["files"]
@@ -572,34 +597,46 @@ async def test_year_change_preserves_sources_and_requires_new_confirmation_and_c
     assert fresh["calculations"][-1]["status"] == "recorded"
     assert fresh["calculations"][0]["superseded_by"] == fresh["calculations"][-1]["id"]
     assert fresh["calculations"][0]["case_tax_year"] == 2025
-    assert not any(f"Recheck item {fresh['calculations'][0]['id']} " in issue for issue in tax_case_checklist(fresh)["next_steps"])
+    assert not any(
+        f"Recheck item {fresh['calculations'][0]['id']} " in issue
+        for issue in tax_case_checklist(fresh)["next_steps"]
+    )
     # A return to the original year still requires a fresh review; an old
     # same-year digest must not turn re-recording into a no-op.
     original_year = await _update(state, fresh, "change_year", {"tax_year": 2025}, actor="user")
     checked_again = await _update(state, original_year, "record_calculation", calc_data)
     assert len(checked_again["calculations"]) == 3
     assert checked_again["calculations"][-1]["case_tax_year"] == 2025
-    assert all(item["superseded_by"] == checked_again["calculations"][-1]["id"] for item in checked_again["calculations"][:-1])
+    assert all(
+        item["superseded_by"] == checked_again["calculations"][-1]["id"]
+        for item in checked_again["calculations"][:-1]
+    )
 
 
 async def test_year_change_preserves_origin_for_legacy_records_without_year_fields(state):
     store, _, _, _ = state
     case = await _create(state)
     case = await _update(state, case, "propose_fact", _fact())
-    case = await _update(state, case, "confirm_fact", {"fact_id": case["facts"][0]["id"]}, actor="user")
+    case = await _update(
+        state, case, "confirm_fact", {"fact_id": case["facts"][0]["id"]}, actor="user"
+    )
     import json
 
     case["facts"][0].pop("case_tax_year")
     case["facts"][0].pop("confirmed_tax_year")
     with store._lock:
-        store._conn.execute("UPDATE app_tax_cases SET record_json=? WHERE case_id=?", (json.dumps(case), case["id"]))
+        store._conn.execute(
+            "UPDATE app_tax_cases SET record_json=? WHERE case_id=?", (json.dumps(case), case["id"])
+        )
         store._conn.commit()
     changed = await _update(state, case, "change_year", {"tax_year": 2024}, actor="user")
     assert changed["facts"][0]["case_tax_year"] == 2025
     assert changed["facts"][0]["status"] == "proposed"
 
 
-async def test_rejected_facts_keep_history_and_block_dependencies_without_repeat_confirmation(state):
+async def test_rejected_facts_keep_history_and_block_dependencies_without_repeat_confirmation(
+    state,
+):
     case = await _create(state)
     case = await _update(state, case, "propose_fact", _fact())
     fact = copy.deepcopy(case["facts"][0])
@@ -612,9 +649,325 @@ async def test_rejected_facts_keep_history_and_block_dependencies_without_repeat
     assert await _update(state, case, "reject_fact", {"fact_id": fact["id"]}, actor="user") == case
     with pytest.raises(TaxCaseError, match="corrected proposal"):
         await _update(state, case, "confirm_fact", {"fact_id": fact["id"]}, actor="user")
-    case = await _update(state, case, "propose_return_item", {"label": "Rejected dependency", "fact_ids": [fact["id"]]})
+    case = await _update(
+        state,
+        case,
+        "propose_return_item",
+        {"label": "Rejected dependency", "fact_ids": [fact["id"]]},
+    )
     issues = tax_case_checklist(case)["next_steps"]
     assert not any("User confirmation is needed" in issue for issue in issues)
     assert any("unconfirmed fact" in issue for issue in issues)
     case = await _update(state, case, "change_year", {"tax_year": 2024}, actor="user")
     assert case["facts"][0]["status"] == "rejected"
+
+
+async def _supported_review(state):
+    case = await _create(state)
+    case = await _update(state, case, "propose_fact", _fact())
+    case = await _update(
+        state, case, "confirm_fact", {"fact_id": case["facts"][0]["id"]}, actor="user"
+    )
+    case = await _update(
+        state, case, "record_evidence", _evidence(tax_year_status="verified"), actor="user"
+    )
+    calculation = {
+        "label": "Supported sum",
+        "inputs": {"a": "10"},
+        "expression": "10",
+        "rounding": "none",
+        "result": "10",
+        "fact_ids": [case["facts"][0]["id"]],
+        "evidence_ids": [case["evidence"][0]["id"]],
+    }
+    case = await _update(state, case, "record_calculation", calculation)
+    return_item = {
+        "label": "Supported planning item",
+        "fact_ids": calculation["fact_ids"],
+        "evidence_ids": calculation["evidence_ids"],
+    }
+    case = await _update(state, case, "propose_return_item", return_item)
+    return case, calculation, return_item
+
+
+async def test_reference_update_requires_owner_user_action_revision_and_explicit_pin(state):
+    store, owner, _, conversation = state
+    case = await _create(state)
+    update = {"reference_release": "rel_next"}
+    with pytest.raises(TaxCaseError, match="user action"):
+        await _update(state, case, "update_reference_release", update)
+    assert (
+        await _update(
+            state,
+            case,
+            "update_reference_release",
+            {"reference_release": "rel_current"},
+            actor="user",
+        )
+        == case
+    )
+    other = await _owner(store, "other")
+    with pytest.raises(TaxCaseAccessError):
+        await store.tax_cases.update(
+            user_id=other.user_id,
+            conversation_id=conversation.conversation_id,
+            expected_revision=case["revision"],
+            operation="update_reference_release",
+            data=update,
+            actor="user",
+        )
+    changed = await _update(state, case, "update_reference_release", update, actor="user")
+    assert changed["reference_release"] == "rel_next"
+    assert changed["previous_reference_release"] == "rel_current"
+    assert changed["reference_release_changed_at"]
+    assert changed["revision"] == case["revision"] + 1
+    assert (
+        await _update(state, changed, "update_reference_release", update, actor="user") == changed
+    )
+    with pytest.raises(TaxCaseConflictError):
+        await _update(state, case, "update_reference_release", update, actor="user")
+    assert (
+        await store.tax_cases.get(
+            user_id=owner.user_id, conversation_id=conversation.conversation_id
+        )
+    ) == changed
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {},
+        {"reference_release": ""},
+        {"reference_release": "x" * 201},
+        {"reference_release": 123},
+        {"reference_release": "rel_next", "confirm": True},
+    ],
+)
+def test_reference_update_payload_is_strict_and_bounded(data):
+    with pytest.raises(TaxCaseError):
+        validate_operation("update_reference_release", data)
+
+
+async def test_reference_update_preserves_facts_and_original_evidence_but_blocks_stale_dependencies(
+    state,
+):
+    case, calculation, _ = await _supported_review(state)
+    original = copy.deepcopy(case)
+    case = await _update(
+        state, case, "update_reference_release", {"reference_release": "rel_next"}, actor="user"
+    )
+    assert case["facts"] == original["facts"]
+    assert case["files"] == original["files"] and case["tax_year"] == 2025
+    old_evidence = case["evidence"][0]
+    for field in (
+        "document_id",
+        "reference_release",
+        "revision",
+        "page",
+        "passage",
+        "tax_year",
+        "tax_year_status",
+    ):
+        assert old_evidence[field] == original["evidence"][0][field]
+    for category in ("evidence", "calculations", "return_items"):
+        assert case[category][0]["case_reference_release"] == "rel_current"
+        assert case[category][0]["status"] == "needs_recheck"
+        assert case[category][0]["recheck_for_reference_release"] == "rel_next"
+    issues = tax_case_checklist(case)["next_steps"]
+    assert any("Recheck evidence" in issue for issue in issues)
+    assert any("Recheck item" in issue for issue in issues)
+    for operation, data in (
+        ("record_calculation", calculation),
+        (
+            "propose_return_item",
+            {"label": "Unsafe reuse", "evidence_ids": calculation["evidence_ids"]},
+        ),
+    ):
+        with pytest.raises(TaxCaseError, match="rechecked reference evidence"):
+            await _update(state, case, operation, data)
+    with pytest.raises(TaxCaseError, match="pinned case release"):
+        await _update(state, case, "record_evidence", _evidence())
+
+
+async def test_rechecked_replacement_evidence_and_work_clear_stale_checklist_without_deleting_originals(
+    state,
+):
+    case, calculation, return_item = await _supported_review(state)
+    original = copy.deepcopy(case)
+    case = await _update(
+        state, case, "update_reference_release", {"reference_release": "rel_next"}, actor="user"
+    )
+    evidence_data = _evidence(
+        reference_release="rel_next",
+        revision="new_revision",
+        passage="A changed retained rule passage.",
+        tax_year_status="verified",
+        supersedes=[case["evidence"][0]["id"]],
+    )
+    case = await _update(state, case, "record_evidence", evidence_data, actor="user")
+    fresh_evidence = case["evidence"][-1]
+    assert (
+        fresh_evidence["status"] == "recorded"
+        and fresh_evidence["case_reference_release"] == "rel_next"
+    )
+    assert case["evidence"][0]["superseded_by"] == fresh_evidence["id"]
+    assert case["evidence"][0]["passage"] == original["evidence"][0]["passage"]
+    assert await _update(state, case, "record_evidence", evidence_data, actor="user") == case
+    calculation["evidence_ids"] = return_item["evidence_ids"] = [fresh_evidence["id"]]
+    case = await _update(state, case, "record_calculation", calculation)
+    case = await _update(state, case, "propose_return_item", return_item)
+    for category in ("calculations", "return_items"):
+        assert len(case[category]) == 2
+        assert case[category][0]["superseded_by"] == case[category][-1]["id"]
+        assert case[category][-1]["case_reference_release"] == "rel_next"
+    assert tax_case_checklist(case)["status"] == "ready_for_review"
+    with pytest.raises(TaxCaseError, match="awaiting recheck"):
+        await _update(
+            state,
+            case,
+            "record_evidence",
+            _evidence(reference_release="rel_next", supersedes=[fresh_evidence["id"]]),
+        )
+    with pytest.raises(TaxCaseError, match="dependency"):
+        await _update(
+            state,
+            case,
+            "record_evidence",
+            _evidence(reference_release="rel_next", supersedes=["missing"]),
+        )
+
+
+async def test_reference_roundtrip_requires_fresh_evidence_and_never_resurrects_old_work(state):
+    case, calculation, return_item = await _supported_review(state)
+    original_evidence_id = case["evidence"][0]["id"]
+    for release in ("rel_next", "rel_current"):
+        case = await _update(
+            state, case, "update_reference_release", {"reference_release": release}, actor="user"
+        )
+        assert all(entry["status"] == "needs_recheck" for entry in case["evidence"])
+        with pytest.raises(TaxCaseError, match="rechecked reference evidence"):
+            await _update(state, case, "record_calculation", calculation)
+        case = await _update(
+            state,
+            case,
+            "record_evidence",
+            _evidence(
+                reference_release=release,
+                tax_year_status="verified",
+                supersedes=[item["id"] for item in case["evidence"]],
+            ),
+            actor="user",
+        )
+        calculation["evidence_ids"] = return_item["evidence_ids"] = [case["evidence"][-1]["id"]]
+        case = await _update(state, case, "record_calculation", calculation)
+        case = await _update(state, case, "propose_return_item", return_item)
+        assert tax_case_checklist(case)["status"] == "ready_for_review"
+    assert len(case["evidence"]) == len(case["calculations"]) == len(case["return_items"]) == 3
+    assert case["evidence"][-1]["id"] != original_evidence_id
+    assert case["evidence"][0]["status"] == "needs_recheck"
+    assert case["facts"][0]["status"] == "confirmed"
+
+
+async def test_multi_release_supersession_follows_current_terminal_replacements(state):
+    case, calculation, return_item = await _supported_review(state)
+    for index, release in enumerate(("rel_next", "rel_third"), start=1):
+        case = await _update(
+            state, case, "update_reference_release", {"reference_release": release}, actor="user"
+        )
+        case = await _update(
+            state,
+            case,
+            "record_evidence",
+            _evidence(
+                reference_release=release,
+                revision=str(index),
+                passage=f"A distinct official passage for release {index}.",
+                tax_year_status="verified",
+                supersedes=[case["evidence"][-1]["id"]],
+            ),
+            actor="user",
+        )
+        calculation.update(
+            result=str(10 + index),
+            expression=f"10 + {index}",
+            evidence_ids=[case["evidence"][-1]["id"]],
+            supersedes=[case["calculations"][-1]["id"]],
+        )
+        return_item.update(
+            label=f"Updated planning item {index}",
+            evidence_ids=calculation["evidence_ids"],
+            supersedes=[case["return_items"][-1]["id"]],
+        )
+        case = await _update(state, case, "record_calculation", calculation)
+        case = await _update(state, case, "propose_return_item", return_item)
+        assert tax_case_checklist(case)["status"] == "ready_for_review"
+    assert case["evidence"][0]["superseded_by"] == case["evidence"][1]["id"]
+    assert case["evidence"][1]["superseded_by"] == case["evidence"][2]["id"]
+    assert case["calculations"][0]["result"] == "10"
+    # Malformed persisted history fails safe; a cycle cannot hide the old evidence.
+    case["evidence"][-1]["superseded_by"] = case["evidence"][0]["id"]
+    assert tax_case_checklist(case)["status"] == "needs_information"
+
+
+async def test_legacy_release_records_remain_idempotent_until_explicit_update(state):
+    import hashlib
+    import json
+
+    store, _, _, _ = state
+    case, calculation, _ = await _supported_review(state)
+    for category in ("evidence", "calculations", "return_items"):
+        for entry in case[category]:
+            entry.pop("case_reference_release")
+            entry.pop("supersedes")
+            content = {
+                key: value
+                for key, value in entry.items()
+                if key
+                not in {
+                    "id",
+                    "operation_key",
+                    "operation_digest",
+                    "created_at",
+                    "created_by",
+                    "status",
+                }
+            }
+            entry["operation_digest"] = hashlib.sha256(
+                json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+    with store._lock:
+        store._conn.execute(
+            "UPDATE app_tax_cases SET record_json=? WHERE case_id=?", (json.dumps(case), case["id"])
+        )
+        store._conn.commit()
+    assert (
+        await _update(
+            state, case, "record_evidence", _evidence(tax_year_status="verified"), actor="user"
+        )
+        == case
+    )
+    assert await _update(state, case, "record_calculation", calculation) == case
+    changed = await _update(
+        state, case, "update_reference_release", {"reference_release": "rel_next"}, actor="user"
+    )
+    assert all(
+        item["case_reference_release"] == "rel_current" and item["status"] == "needs_recheck"
+        for item in changed["evidence"]
+    )
+
+
+async def test_operation_key_cannot_change_which_retained_evidence_is_superseded(state):
+    case = await _create(state)
+    case = await _update(state, case, "record_evidence", _evidence(claim="First rule"))
+    case = await _update(state, case, "record_evidence", _evidence(claim="Second rule"))
+    case = await _update(
+        state, case, "update_reference_release", {"reference_release": "rel_next"}, actor="user"
+    )
+    first, second = [item["id"] for item in case["evidence"]]
+    payload = _evidence(
+        reference_release="rel_next", operation_key="fresh-rule", supersedes=[first]
+    )
+    case = await _update(state, case, "record_evidence", payload)
+    with pytest.raises(TaxCaseConflictError, match="operation key"):
+        await _update(state, case, "record_evidence", {**payload, "supersedes": [first, second]})
+    assert "superseded_by" not in case["evidence"][1]

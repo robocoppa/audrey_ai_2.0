@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { TaxReview } from "./TaxReview";
@@ -92,17 +92,19 @@ it.each(["1899", "2101"])("rejects unsupported tax year %s before sending it", a
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-it("keeps the collapsed settings summary free of review questions and technical details", async () => {
+it("shows pending choices inside the settings box while keeping settings and diagnostics collapsed", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ case: fixtures.reviewable })));
   render(<TaxReview {...props()} expanded={false} />);
   expect(await screen.findByRole("button", { name: "Tax review · 2025 Settings" })).toHaveAttribute("aria-expanded", "false");
-  expect(screen.queryByText("Wages", { exact: true })).not.toBeInTheDocument();
-  expect(screen.queryByText(/Reference release|Checklist|SHA-256|evidence|calculations|Planning checklist/u)).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /Confirm|Resolve/u })).not.toBeInTheDocument();
+  const panel = screen.getByRole("region", { name: "Tax review case" });
+  expect(within(panel).getByRole("region", { name: "Tax review choices" })).toBeVisible();
+  expect(within(panel).getByRole("button", { name: "Confirm Wages" })).toBeEnabled();
+  expect(screen.queryByRole("article")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Reference release|Checklist|SHA-256|Planning checklist/u)).not.toBeInTheDocument();
   expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
 });
 
-it("refreshes shared case data without selecting Tax review or displaying findings in settings", async () => {
+it("refreshes case data without selecting Tax review", async () => {
   const updated = { ...taxCase, revision: taxCase.revision + 1 };
   const fetchMock = vi.fn().mockResolvedValueOnce(json({ case: taxCase })).mockResolvedValueOnce(json({ case: updated }));
   vi.stubGlobal("fetch", fetchMock);
@@ -112,7 +114,6 @@ it("refreshes shared case data without selecting Tax review or displaying findin
   view.rerender(<TaxReview {...callbacks} refreshVersion={1} />);
   await waitFor(() => expect(callbacks.onCaseChange).toHaveBeenLastCalledWith(updated));
   expect(callbacks.onSaved).not.toHaveBeenCalled();
-  expect(screen.queryByText("Wages", { exact: true })).not.toBeInTheDocument();
 });
 
 it("keeps save unavailable after unreadable settings and offers a retry", async () => {
@@ -122,4 +123,70 @@ it("keeps save unavailable after unreadable settings and offers a retry", async 
   expect(screen.getByRole("button", { name: "Use Tax review" })).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "Reload settings" }));
   await waitFor(() => expect(screen.getByRole("button", { name: "Use Tax review" })).toBeEnabled());
+});
+
+
+it("updates a choice in the same panel without opening settings or selecting a skill", async () => {
+  const initial = fixtures.reviewable as TaxCase;
+  const updated = { ...initial, revision: initial.revision + 1,
+    facts: initial.facts.map((fact) => ({ ...fact, status: "confirmed" as const })) };
+  const fetchMock = vi.fn().mockResolvedValueOnce(json({ case: initial })).mockResolvedValueOnce(json(updated));
+  vi.stubGlobal("fetch", fetchMock);
+  const callbacks = props();
+  render(<TaxReview {...callbacks} expanded={false} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Confirm Wages" }));
+  await waitFor(() => expect(callbacks.onCaseChange).toHaveBeenLastCalledWith(updated));
+  expect(screen.queryByRole("button", { name: "Confirm Wages" })).not.toBeInTheDocument();
+  expect(callbacks.onSaved).not.toHaveBeenCalled();
+  expect(callbacks.onExpandedChange).not.toHaveBeenCalled();
+});
+
+
+it("offers a library update inside the collapsed box without exposing release IDs", async () => {
+  const initial = { ...taxCase, reference_update: { status: "update_available", release_id: "rel_new" } };
+  const updated = { ...taxCase, revision: taxCase.revision + 1, reference_release: "rel_new", reference_update: { status: "current" } };
+  const fetchMock = vi.fn().mockResolvedValueOnce(json({ case: initial })).mockResolvedValueOnce(json(updated));
+  vi.stubGlobal("fetch", fetchMock);
+  const callbacks = props();
+  render(<TaxReview {...callbacks} expanded={false} />);
+  const panel = await screen.findByRole("region", { name: "Tax review case" });
+  fireEvent.click(await within(panel).findByRole("button", { name: "Update IRS library" }));
+  await waitFor(() => expect(callbacks.onCaseChange).toHaveBeenLastCalledWith(updated));
+  expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+    expected_revision: taxCase.revision, operation: "update_reference_release", data: { reference_release: "rel_new" },
+  });
+  expect(panel).not.toHaveTextContent("rel_new");
+  expect(within(panel).queryByRole("button", { name: "Update IRS library" })).not.toBeInTheDocument();
+  expect(callbacks.onSaved).not.toHaveBeenCalled();
+});
+
+it("keeps saved settings readable during a library outage but pauses year and fact choices", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json({ case: {
+    ...taxCase, reference_update: { status: "unavailable" },
+  } })));
+  render(<TaxReview {...props()} />);
+  expect(await screen.findByText(/The IRS library is unavailable/u)).toBeVisible();
+  expect(screen.getByLabelText("Tax year")).toHaveValue(2025);
+  expect(screen.getByLabelText("Tax year")).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Confirm Wages" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Reload library" })).toBeEnabled();
+});
+
+it("requires reload after a stale library choice and never silently adopts a newer target", async () => {
+  const initial = { ...taxCase, reference_update: { status: "update_available", release_id: "rel_old_choice" } };
+  const latest = { ...initial, reference_update: { status: "update_available", release_id: "rel_new_choice" } };
+  const fetchMock = vi.fn().mockResolvedValueOnce(json({ case: initial }))
+    .mockResolvedValueOnce(json({ detail: "The IRS library changed again. Reload Tax review before updating." }, 409))
+    .mockResolvedValueOnce(json({ case: latest }));
+  vi.stubGlobal("fetch", fetchMock);
+  const callbacks = props();
+  render(<TaxReview {...callbacks} expanded={false} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Update IRS library" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("The IRS library changed again.");
+  expect(screen.getByRole("button", { name: "Update IRS library" })).toBeDisabled();
+  expect(callbacks.onCaseChange).not.toHaveBeenCalledWith(latest);
+  fireEvent.click(screen.getByRole("button", { name: "Reload settings" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Update IRS library" })).toBeEnabled());
+  expect(callbacks.onCaseChange).toHaveBeenLastCalledWith(latest);
+  expect(fetchMock).toHaveBeenCalledTimes(3);
 });
