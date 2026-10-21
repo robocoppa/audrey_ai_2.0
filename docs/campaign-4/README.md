@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 20, 2026.** English user input only. Passed work stays closed.
+**Updated October 21, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -20,11 +20,14 @@ Project deletion beside Edit and interrupted conversation-deletion recovery are
 accepted. The original Cloudflare origin cause was not identified; diagnostics
 are closed. [Navigation](phase-12-sidebar-navigation.md) holds the behavior.
 
-**20D.2 built:** explicit Private Tax review with a saved owner-bound federal case,
-proposed/user-confirmed facts, checked document provenance, exact IRS passages,
-decimal calculations and a deterministic coverage checklist. Browser acceptance
-is next. Ordinary Private remains Automatic. Year/release changes and the full
-foreground review belong to the next slice; durable background work remains later.
+**20D.2 functionality accepted October 21.** Saved cases, proposed/user-confirmed
+facts and the checklist flow passed. Presentation followup is built: compact
+settings with an editable previous-year default, confirmation/missing-information
+choices in the conversation, and no generic degraded-features notice in a selected
+Tax case. Changing the year preserves sources and requires facts/calculations to
+be checked again. Brief visual acceptance is next; completed functionality stays
+closed. Reference-release updates, full foreground review and accuracy remain
+next; background work follows later.
 [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds the contract.
 
 **MiniMax M3.1 Flash:** configured as an unmeasured cloud draft/research candidate
@@ -62,7 +65,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Private retrieval and deletion accepted; saved tax review built |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Saved tax review accepted; presentation followup built |
 
 ## Build queue
 
@@ -78,9 +81,10 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
   and page reads accepted. General tax accuracy remains unverified.
 - [x] **Current UI followup:** Project header delete/checkmark and interrupted
   chat deletion recovery accepted; Cloudflare diagnostics closed.
-- [ ] **20D.2 built; acceptance next:** dedicated `tax_review` tool with saved
-  facts, evidence, missing items and a deterministic case checklist.
-- [ ] **20D.3:** one complete foreground tax review, explicit case year/release
+- [x] **20D.2:** saved facts/evidence and deterministic case checklist accepted.
+- [ ] **Tax review presentation:** compact settings, editable year and
+  conversation-based confirmation built; brief visual acceptance next.
+- [ ] **20D.3:** one complete foreground tax review, explicit reference-release
   updates and a known-answer baseline.
 - [ ] **20D.4:** durable Private tasks, checkpoints, progress, cancel and resume.
 - [ ] **20D.5:** bounded local evidence verification and targeted repair loops.

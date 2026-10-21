@@ -97,6 +97,14 @@ class ConfirmFactPayload(_Payload):
     fact_id: Identifier
 
 
+class RejectFactPayload(_Payload):
+    fact_id: Identifier
+
+
+class ChangeYearPayload(_Payload):
+    tax_year: TaxYear
+
+
 class RecordEvidencePayload(_AppendPayload):
     claim: Label
     document_id: Identifier
@@ -163,6 +171,8 @@ class _CaseCreation(_Payload):
 OPERATION_MODELS: dict[str, type[_Payload]] = {
     "propose_fact": ProposeFactPayload,
     "confirm_fact": ConfirmFactPayload,
+    "reject_fact": RejectFactPayload,
+    "change_year": ChangeYearPayload,
     "record_evidence": RecordEvidencePayload,
     "record_calculation": RecordCalculationPayload,
     "add_missing_item": AddMissingItemPayload,
@@ -300,7 +310,7 @@ class TaxCasesRepository:
             and payload["tax_year_status"] == "verified"
         ):
             raise TaxCaseError("A model cannot verify tax-year applicability.")
-        if operation in {"confirm_fact", "resolve_missing_item"} and actor != "user":
+        if operation in {"confirm_fact", "reject_fact", "resolve_missing_item", "change_year"} and actor != "user":
             raise TaxCaseError("This tax case transition requires a user action.")
         return await asyncio.to_thread(
             self._update_sync,
@@ -410,11 +420,40 @@ class TaxCasesRepository:
 def _apply_operation(
     case: dict[str, Any], operation: str, payload: dict[str, Any], actor: str
 ) -> bool:
+    if operation == "change_year":
+        old_year, new_year = case["tax_year"], payload["tax_year"]
+        if old_year == new_year:
+            return False
+        for entry in case["facts"]:
+            entry.setdefault("case_tax_year", old_year)
+            if entry["status"] == "confirmed":
+                entry["status"] = "proposed"
+                for field in ("confirmed_at", "confirmed_by", "confirmed_tax_year"):
+                    entry.pop(field, None)
+        for entry in [*case["calculations"], *case["return_items"]]:
+            entry.setdefault("case_tax_year", old_year)
+            entry.update(status="needs_recheck", recheck_for_tax_year=new_year)
+        case.update(tax_year=new_year, previous_tax_year=old_year, tax_year_changed_at=_utc_now())
+        return True
     if operation == "confirm_fact":
         entry = _entry(case["facts"], payload["fact_id"])
         if entry["status"] == "confirmed":
             return False
-        entry.update(status="confirmed", confirmed_at=_utc_now(), confirmed_by="user")
+        if entry["status"] == "rejected":
+            raise TaxCaseError("A rejected fact requires a corrected proposal.")
+        entry.setdefault("case_tax_year", case["tax_year"])
+        entry.update(status="confirmed", confirmed_at=_utc_now(), confirmed_by="user",
+                     confirmed_tax_year=case["tax_year"])
+        return True
+    if operation == "reject_fact":
+        entry = _entry(case["facts"], payload["fact_id"])
+        if entry["status"] == "rejected":
+            return False
+        entry.setdefault("case_tax_year", case["tax_year"])
+        for field in ("confirmed_at", "confirmed_by", "confirmed_tax_year"):
+            entry.pop(field, None)
+        entry.update(status="rejected", rejected_at=_utc_now(), rejected_by="user",
+                     rejected_tax_year=case["tax_year"])
         return True
     if operation == "resolve_missing_item":
         entry = _entry(case["missing_items"], payload["id"])
@@ -457,18 +496,30 @@ def _apply_operation(
         for evidence_id in payload["evidence_ids"]:
             _entry(case["evidence"], evidence_id)
     content = {key: value for key, value in payload.items() if key != "operation_key"}
+    legacy_digest = hashlib.sha256(
+        json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    year_scoped = category in {"facts", "calculations", "return_items"}
+    payload_content = dict(content)
+    if year_scoped:
+        content["case_tax_year"] = case["tax_year"]
     digest = hashlib.sha256(
         json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
     key = payload.get("operation_key")
+    superseded_entries = []
     for entry in entries:
+        same_year = not year_scoped or entry.get("case_tax_year", case["tax_year"]) == case["tax_year"]
+        needs_recheck = category in {"calculations", "return_items"} and entry.get("status") == "needs_recheck"
+        if needs_recheck and all(entry.get(field) == value for field, value in payload_content.items()):
+            superseded_entries.append(entry)
         if key is not None and entry.get("operation_key") == key:
-            if entry["operation_digest"] != digest:
+            if entry["operation_digest"] not in {digest, legacy_digest} or not same_year or needs_recheck:
                 raise TaxCaseConflictError(
-                    "The operation key was already used with different data."
+                    "The operation key was already used with different data or a different tax year."
                 )
             return False
-        if entry["operation_digest"] == digest:
+        if same_year and not needs_recheck and entry["operation_digest"] in {digest, legacy_digest}:
             return False
     if len(entries) >= MAX_CATEGORY_ENTRIES:
         raise TaxCaseError("The tax case category has reached its entry limit.")
@@ -479,11 +530,17 @@ def _apply_operation(
         "created_at": _utc_now(),
         "created_by": actor,
     }
+    if year_scoped:
+        entry["case_tax_year"] = case["tax_year"]
     if category in {"facts", "return_items"}:
         entry["status"] = "proposed"
+    elif category == "calculations":
+        entry["status"] = "recorded"
     elif category == "missing_items":
         entry["status"] = "unresolved"
     entries.append(entry)
+    for previous in superseded_entries:
+        previous["superseded_by"] = entry["id"]
     return True
 
 
@@ -537,9 +594,10 @@ def tax_case_checklist(case: dict[str, Any]) -> dict[str, Any]:
     if not case.get("reference_release"):
         scope_issues.append("Pin the official reference release.")
     check("scope", "Return year and scope", scope_issues)
-    fact_issues = [] if facts else ["Record the facts required for this review."]
+    active_facts = [fact for fact in facts if fact.get("status") != "rejected"]
+    fact_issues = [] if active_facts else ["Record the facts required for this review."]
     source_issues = []
-    for fact in facts:
+    for fact in active_facts:
         if fact.get("status") != "confirmed":
             fact_issues.append(f"User confirmation is needed for fact {fact['id']}.")
         if fact.get("kind") == "extracted":
@@ -605,7 +663,17 @@ def tax_case_checklist(case: dict[str, Any]) -> dict[str, Any]:
             files_by_checksum[checksum] = item["file_id"]
     check("duplicate_records", "Duplicate document records", duplicate_issues)
     dependency_issues = []
-    for item in [*case.get("return_items", []), *case.get("calculations", [])]:
+    review_items = [*case.get("return_items", []), *case.get("calculations", [])]
+    review_items_by_id = {item["id"]: item for item in review_items}
+    for item in review_items:
+        replacement = review_items_by_id.get(item.get("superseded_by"), {})
+        if (replacement.get("case_tax_year") == case.get("tax_year")
+                and replacement.get("status") in {"recorded", "proposed"}):
+            continue
+        if item.get("status") == "needs_recheck" or item.get("case_tax_year", case.get("tax_year")) != case.get("tax_year"):
+            dependency_issues.append(
+                f"Recheck item {item['id']} for the selected tax year; its recorded year is {item.get('case_tax_year', 'unknown')}."
+            )
         if not item.get("fact_ids") or not item.get("evidence_ids"):
             dependency_issues.append(
                 f"Link confirmed facts and rule evidence for item {item['id']}."
@@ -646,6 +714,8 @@ __all__ = [
     "FileSelection",
     "ProposeFactPayload",
     "ConfirmFactPayload",
+    "RejectFactPayload",
+    "ChangeYearPayload",
     "RecordEvidencePayload",
     "RecordCalculationPayload",
     "AddMissingItemPayload",

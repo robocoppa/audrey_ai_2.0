@@ -297,3 +297,38 @@ async def test_maximum_input_maps_and_long_dependencies_have_valid_bounded_pages
         seen.append(record["id"])
         offset = restored["next_offset"]
     assert seen == ["tax_calculation_0", "tax_calculation_1"]
+
+
+async def test_owner_year_action_preserves_release_and_model_cannot_change_year(state):
+    case = await _create(state)
+    changed = await state.client.post(state.path + "/actions", json={
+        "operation": "change_year", "expected_revision": case["revision"], "data": {"tax_year": 2024},
+    })
+    assert changed.status_code == 200, changed.text
+    updated = changed.json()
+    assert updated["tax_year"] == 2024 and updated["reference_release"] == case["reference_release"]
+    same = await state.client.post(state.path + "/actions", json={
+        "operation": "change_year", "expected_revision": updated["revision"], "data": {"tax_year": 2024},
+    })
+    assert same.status_code == 200 and same.json()["revision"] == updated["revision"]
+    stale = await state.client.post(state.path + "/actions", json={
+        "operation": "change_year", "expected_revision": case["revision"], "data": {"tax_year": 2023},
+    })
+    assert stale.status_code == 409
+    with pytest.raises(PrivateToolArgumentsError):
+        await _call(state, "change_year", expected_revision=updated["revision"], data={"tax_year": 2023})
+    assert "change_year" not in tax_review_spec("http://custom-tools:8001").parameters["properties"]["operation"]["enum"]
+
+
+async def test_user_can_reject_saved_fact_but_model_cannot(state):
+    case = await _create(state)
+    proposed = await _call(state, "propose_fact", expected_revision=case["revision"], data={"label": "Filing status", "value": "single", "kind": "user_statement"})
+    fact_id = proposed["updated_entry"]["id"]
+    rejected = await state.client.post(state.path + "/actions", json={
+        "operation": "reject_fact", "expected_revision": proposed["revision"], "data": {"fact_id": fact_id},
+    })
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["facts"][0]["status"] == "rejected"
+    assert (await _call(state))["entries"][0]["status"] == "rejected"
+    with pytest.raises(PrivateToolArgumentsError):
+        await _call(state, "reject_fact", expected_revision=rejected.json()["revision"], data={"fact_id": fact_id})

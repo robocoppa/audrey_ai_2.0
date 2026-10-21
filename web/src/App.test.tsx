@@ -1,8 +1,29 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ComponentProps } from "react";
 
 import { App } from "./App";
 import { latestActionFetch } from "./agentTransport";
+
+const workspaceMock = vi.hoisted(() => ({ enabled: false }));
+
+vi.mock("./ChatWorkspace", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./ChatWorkspace")>();
+  return {
+    ...actual,
+    ChatWorkspace: (props: ComponentProps<typeof actual.ChatWorkspace>) => workspaceMock.enabled ? (
+      <>
+        <button type="button" onClick={() => props.onTaxReviewActiveChange?.(true)}>
+          Select Tax review conversation
+        </button>
+        <button type="button" onClick={() => props.onTaxReviewActiveChange?.(false)}>
+          Select ordinary conversation
+        </button>
+        {props.menuActions}
+      </>
+    ) : <actual.ChatWorkspace {...props} />,
+  };
+});
 
 const DEFAULT_PREFERENCES = {
   timezone: "UTC",
@@ -47,9 +68,32 @@ function collectionPayload(path: string) {
   return { items: [], next_cursor: null };
 }
 
+function mockCapabilitySession(health: "degraded" | "unavailable" | "missing") {
+  const fetchMock = vi.fn((path: string) => {
+    if (path === "/api/capabilities" && health === "missing") {
+      return Promise.resolve(new Response(null, { status: 503 }));
+    }
+    const payload = path === "/api/me" ? {
+      id: "usr_example", email: "alice@example.com", display_name: "Alice",
+      role: "user", status: "active", groups: ["users"], auth_provider: "cloudflare_access",
+    } : path === "/api/me/preferences" ? DEFAULT_PREFERENCES
+      : path === "/api/capabilities" ? {
+        status: health, generated_at: "2026-10-21T12:00:00+00:00",
+        chat: { status: health === "unavailable" ? "unavailable" : "available" },
+        tools: { status: "degraded" }, knowledge: { status: "available" },
+      } : collectionPayload(path);
+    return Promise.resolve(new Response(JSON.stringify(payload), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 describe("App", () => {
   afterEach(() => {
     cleanup();
+    workspaceMock.enabled = false;
     vi.useRealTimers();
     vi.unstubAllGlobals();
     window.history.replaceState({}, "", "/");
@@ -353,6 +397,35 @@ describe("App", () => {
       "/api/capabilities",
       expect.objectContaining({ credentials: "same-origin" }),
     );
+  });
+
+  it("hides the generic degraded notice in Tax review and restores it in an ordinary conversation", async () => {
+    workspaceMock.enabled = true;
+    const fetchMock = mockCapabilitySession("degraded");
+    render(<App />);
+
+    const selectTaxReview = await screen.findByRole("button", { name: "Select Tax review conversation" });
+    expect(await screen.findAllByText("Some features degraded")).toHaveLength(2);
+    fireEvent.click(selectTaxReview);
+    expect(screen.queryByText("Some features degraded")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select ordinary conversation" }));
+    expect(screen.getAllByText("Some features degraded")).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/capabilities")).toHaveLength(1);
+  });
+
+  it.each([
+    ["unavailable", "Models offline"],
+    ["missing", "Status unavailable"],
+  ] as const)("keeps %s health visible during Tax review", async (health, label) => {
+    workspaceMock.enabled = true;
+    mockCapabilitySession(health);
+    render(<App />);
+
+    const selectTaxReview = await screen.findByRole("button", { name: "Select Tax review conversation" });
+    expect(await screen.findAllByText(label)).toHaveLength(2);
+    fireEvent.click(selectTaxReview);
+    expect(screen.getAllByText(label)).toHaveLength(2);
   });
 
   it("holds through multiple transient Access bootstrap rejections", async () => {

@@ -484,8 +484,15 @@ OCR/media remain deferred until a case requires them.
 
 #### Tax review tool and case record
 
-**20D.2 built; browser acceptance pending.** Select Private, choose Tax review
-in Tools & skills, explicitly set the federal return year and goal, then save.
+**20D.2 functionality accepted October 21; presentation followup built.** Select
+Private, choose Tax review in Tools & skills, choose the federal return year and
+goal, then save. The year defaults to the previous completed calendar year and
+can be changed before or after setup. Settings collapse after saving. The compact
+row contains user choices; record IDs, checksums and checklist internals stay out
+of it. Confirmation/rejection and missing-information choices appear as Audrey
+messages in the conversation. New answers explain practical next steps and keep
+internal IDs/checklist codes in tool calls. The generic degraded-features badge
+is hidden for a selected saved Tax case; actual service/model failures still show.
 Each conversation owns one case; Project membership is derived from its canonical
 conversation. A saved case does not activate Tax review automatically after reload.
 Automatic Private retains its existing tools and behavior. The additive schema 23
@@ -494,7 +501,8 @@ and cascades on conversation deletion or owner purge.
 
 The in-process tool inspects/checks the case, proposes facts, retains exact IRS
 passages, runs decimal calculations and records missing items/return dependencies.
-Only owner UI actions confirm proposed facts or resolve missing items. Extracted
+Only owner UI actions confirm/reject proposed facts, resolve missing items or
+change the year. Extracted
 facts require a selected Private file, original checksum, exact page/text and
 proposed normalization; a passage check does not validate that normalization.
 Official evidence must match an exact page in the pinned current release.
@@ -502,9 +510,11 @@ Model-supplied tax-year applicability stays proposed/unknown. Checklists report
 coverage, including conflicting/unread material, without certifying tax correctness.
 
 This first case is federal-only and covers selected passages. There is no full
-return review, state adapter or background agent yet. The case year/goal/release
-are fixed at setup; a changed published release blocks case work until explicit
-updates are added with the foreground workflow. Historical originals are still
+return review, state adapter or background agent yet. Changing the case year retains original source years/passages, resets prior
+confirmations and marks calculations/return proposals for recheck. Explicit
+re-recording preserves the old record and supersedes it with the new review.
+Goal and reference release remain fixed at setup; a changed published release
+blocks work until explicit release updates are added with the foreground workflow. Historical originals are still
 available through ordinary reference tools but are not evidence in this current-
 release case. No collector/index/model rerun is needed.
 

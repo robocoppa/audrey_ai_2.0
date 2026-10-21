@@ -1,0 +1,19 @@
+.tax-review-question { flex: 0 0 auto; }
+.tax-question-intro { margin: 0 0 0.8rem; color: var(--text-soft); line-height: 1.6; }
+.tax-question-facts { display: grid; gap: 0.65rem; margin: 0; padding: 0; list-style: none; }
+.tax-question-facts > li { padding: 0.85rem 1rem; border: 1px solid var(--border); border-radius: 0.8rem; background: var(--surface-deep); }
+.tax-question-value { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.4rem 1rem; overflow-wrap: anywhere; }
+.tax-question-value > strong { color: var(--text-soft); font-size: 0.82rem; font-weight: 500; }
+.tax-question-value > span { color: var(--text); font-size: 0.9rem; }
+.tax-question-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.8rem; }
+.tax-question-actions button, .tax-question-error button { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 2.2rem; padding: 0.45rem 0.75rem; border: 1px solid var(--border); border-radius: 0.6rem; background: transparent; color: var(--text-soft); font: inherit; font-size: 0.78rem; cursor: pointer; }
+.tax-question-actions .tax-question-confirm { border-color: var(--border-strong); background: var(--surface-active); color: var(--text); }
+.tax-question-actions button:hover, .tax-question-error button:hover { border-color: var(--accent); background: var(--surface-raised); }
+.tax-question-actions button:disabled, .tax-question-error button:disabled { opacity: 0.5; cursor: default; }
+.tax-question-context, .tax-question-source { margin: 0.55rem 0 0; color: var(--muted); font-size: 0.75rem; line-height: 1.5; }
+.tax-question-source summary { width: fit-content; cursor: pointer; }
+.tax-question-source blockquote { max-height: 9rem; overflow-y: auto; margin: 0.6rem 0 0; padding: 0.4rem 0.8rem; border-left: 2px solid var(--border-strong); color: var(--text-soft); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tax-question-notice { margin: 0.7rem 0 0; color: var(--text-soft); font-size: 0.84rem; }
+.tax-question-error { margin-top: 0.65rem; color: var(--danger); font-size: 0.8rem; }
+.tax-question-error p { margin: 0 0 0.5rem; }
+@media (max-width: 600px) { .tax-question-actions button { min-height: 2.6rem; } .tax-question-facts > li { padding: 0.75rem; } }

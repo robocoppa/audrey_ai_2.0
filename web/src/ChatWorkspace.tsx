@@ -46,6 +46,7 @@ import { ScrollToLatest } from "./ScrollToLatest";
 import { SwipeConversationRow } from "./SwipeConversationRow";
 import { UploadProgress } from "./UploadProgress";
 import { TaxReview } from "./TaxReview";
+import { TaxReviewQuestions } from "./TaxReviewQuestions";
 import type { TaxCase } from "./taxReviewApi";
 import {
   ApiError,
@@ -218,7 +219,9 @@ export function ChatWorkspace({
   mobileNewChatHost,
   menuActions,
   menuFooter,
+  onTaxReviewActiveChange,
 }: {
+  onTaxReviewActiveChange?: (active: boolean) => void;
   navigationOpen: boolean;
   onNavigationOpenChange: (open: boolean) => void;
   mobileMenuHost: HTMLElement | null;
@@ -1162,6 +1165,7 @@ export function ChatWorkspace({
           >
             <ConversationThread
               conversation={opened}
+              onTaxReviewActiveChange={onTaxReviewActiveChange}
               isSelected={opened.id === selectedId}
               focusComposer={composerFocusId === opened.id && opened.id === selectedId && !navigationOpen}
               onComposerFocused={composerFocused}
@@ -1215,7 +1219,9 @@ function ConversationThread({
   onDraftReplaced,
   onRemoveFromView,
   onOpenProject,
+  onTaxReviewActiveChange,
 }: {
+  onTaxReviewActiveChange?: (active: boolean) => void;
   conversation: Conversation;
   isSelected: boolean;
   focusComposer: boolean;
@@ -1633,6 +1639,8 @@ function ConversationThread({
         <AudreyThread
           key={threadRevision}
           conversationId={conversation.id}
+          isSelected={isSelected}
+          onTaxReviewActiveChange={onTaxReviewActiveChange}
           focusComposer={focusComposer}
           onComposerFocused={onComposerFocused}
           projectPicker={projectPicker}
@@ -1671,6 +1679,8 @@ function ConversationThread({
 }
 
 function AudreyThread({
+  isSelected,
+  onTaxReviewActiveChange,
   privateRequired,
   privateLockReason,
   conversationId,
@@ -1693,6 +1703,8 @@ function AudreyThread({
   onRunStarted,
   onRunFinished,
 }: {
+  isSelected: boolean;
+  onTaxReviewActiveChange?: (active: boolean) => void;
   privateRequired: boolean;
   privateLockReason: string;
   conversationId: string;
@@ -1816,6 +1828,16 @@ function AudreyThread({
     : skillId === "tax-review" ? "" : skillId;
   const skillControlValue = isPrivate ? effectiveSkillId === "tax-review" ? "Tax review" : "Automatic" : selectedSkill?.name
     ?? (selectedSkillMode === null ? "Not available" : "Automatic");
+  const taxContextActive = isPrivate && (effectiveSkillId === "tax-review" || taxCase !== null);
+  useEffect(() => {
+    if (!isSelected) return;
+    onTaxReviewActiveChange?.(taxContextActive);
+    return () => onTaxReviewActiveChange?.(false);
+  }, [isSelected, taxContextActive, onTaxReviewActiveChange]);
+  const acceptTaxCase = useCallback((value: TaxCase | null) => {
+    setTaxCase((current) => current && value && current.id === value.id && current.revision > value.revision
+      ? current : value);
+  }, []);
   const supportsFiles = selectedModel.capabilities.includes("files");
   useEffect(() => {
     if (!skillId) return;
@@ -2358,6 +2380,18 @@ function AudreyThread({
               AssistantMessage,
             }}
           />
+          {isPrivate && taxCase && !readOnly ? <TaxReviewQuestions
+            key={`${taxCase.id}:${taxCase.tax_year}`}
+            conversationId={conversationId}
+            taxCase={taxCase}
+            answerVersion={activityLedger.answers.size}
+            disabled={modeDisabled || recoveredRunActive || activity.status === "running"}
+            onCaseChange={(value) => {
+              acceptTaxCase(value);
+              setTaxReviewRefresh((current) => current + 1);
+            }}
+            onReload={() => setTaxReviewRefresh((current) => current + 1)}
+          /> : null}
           <ThreadPrimitive.If empty={false}>
             <div className="thread-message-spacer" aria-hidden="true" />
           </ThreadPrimitive.If>
@@ -2381,7 +2415,7 @@ function AudreyThread({
                   disabled={submissionBlocked || activity.status === "running" || recoveredRunActive}
                   refreshVersion={taxReviewRefresh}
                   onExpandedChange={setTaxReviewExpanded}
-                  onCaseChange={setTaxCase}
+                  onCaseChange={acceptTaxCase}
                   onSaved={() => setSkillId("tax-review")}
                 /> : null}
                 {lastAttempt && (restoredIncomplete || activity.status === "error" || runError) ? (

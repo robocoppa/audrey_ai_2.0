@@ -34,6 +34,9 @@ export interface TaxCalculation {
   result: string;
   fact_ids: string[];
   evidence_ids: string[];
+  case_tax_year?: number;
+  status?: "recorded" | "needs_recheck";
+  recheck_for_tax_year?: number;
 }
 
 export interface TaxFact {
@@ -41,7 +44,9 @@ export interface TaxFact {
   label: string;
   value: unknown;
   kind: string;
-  status: "proposed" | "confirmed";
+  status: "proposed" | "confirmed" | "rejected";
+  case_tax_year?: number;
+  confirmed_tax_year?: number;
   provenance?: TaxFactProvenance | null;
 }
 
@@ -83,6 +88,10 @@ export interface TaxCaseSetup {
   goal: string;
 }
 
+export function defaultTaxYear(now = new Date()): number {
+  return now.getFullYear() - 1;
+}
+
 function casePath(conversationId: string): string {
   return `/api/conversations/${encodeURIComponent(conversationId)}/tax-review`;
 }
@@ -100,6 +109,8 @@ export function saveTaxCase(conversationId: string, setup: TaxCaseSetup): Promis
 }
 
 export type TaxCaseAction =
+  | { operation: "reject_fact"; data: { fact_id: string } }
+  | { operation: "change_year"; data: { tax_year: number } }
   | { operation: "confirm_fact"; data: { fact_id: string } }
   | { operation: "resolve_missing_item"; data: { id: string } };
 

@@ -506,3 +506,115 @@ async def test_schema22_upgrades_additively_preserving_private_conversation(tmp_
         assert upgraded._conn.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         upgraded.close()
+
+
+async def test_year_change_is_explicit_user_only_revision_guarded_and_idempotent(state):
+    case = await _create(state)
+    with pytest.raises(TaxCaseError, match="user action"):
+        await _update(state, case, "change_year", {"tax_year": 2024})
+    unchanged = await _update(state, case, "change_year", {"tax_year": 2025}, actor="user")
+    assert unchanged == case
+    changed = await _update(state, case, "change_year", {"tax_year": 2024}, actor="user")
+    assert changed["tax_year"] == 2024 and changed["revision"] == case["revision"] + 1
+    assert changed["reference_release"] == case["reference_release"]
+    with pytest.raises(TaxCaseConflictError):
+        await _update(state, case, "change_year", {"tax_year": 2023}, actor="user")
+    assert await _update(state, changed, "change_year", {"tax_year": 2024}, actor="user") == changed
+
+
+@pytest.mark.parametrize("tax_year", [True, "2024", 1899, 2101, None])
+async def test_year_change_rejects_implicit_or_out_of_range_values(state, tax_year):
+    case = await _create(state)
+    with pytest.raises(TaxCaseError):
+        await _update(state, case, "change_year", {"tax_year": tax_year}, actor="user")
+
+
+async def test_year_change_preserves_sources_and_requires_new_confirmation_and_calculation_review(state):
+    case = await _create(state)
+    fact_data = _fact(kind="extracted", value="100.00", provenance={
+        "file_id": "file_1", "checksum": "a" * 64, "page": 1,
+        "box": "1", "original_text": "100.00", "normalization": "100.00",
+    })
+    case = await _update(state, case, "propose_fact", fact_data)
+    fact_id = case["facts"][0]["id"]
+    case = await _update(state, case, "confirm_fact", {"fact_id": fact_id}, actor="user")
+    case = await _update(state, case, "record_evidence", _evidence())
+    calc_data = {"label": "Original calculation", "inputs": {"income": "100.00"},
+                 "expression": "income", "rounding": "none", "result": "100",
+                 "fact_ids": [fact_id], "evidence_ids": [case["evidence"][0]["id"]]}
+    case = await _update(state, case, "record_calculation", calc_data)
+    case = await _update(state, case, "propose_return_item", {"label": "Original return item", "fact_ids": calc_data["fact_ids"], "evidence_ids": calc_data["evidence_ids"]})
+    original = copy.deepcopy(case)
+    changed = await _update(state, case, "change_year", {"tax_year": 2024}, actor="user")
+    assert changed["files"] == original["files"]
+    assert changed["evidence"] == original["evidence"]
+    assert changed["reference_release"] == original["reference_release"]
+    fact = changed["facts"][0]
+    assert fact["provenance"] == original["facts"][0]["provenance"]
+    assert fact["case_tax_year"] == 2025 and fact["status"] == "proposed"
+    assert not {"confirmed_at", "confirmed_by", "confirmed_tax_year"}.intersection(fact)
+    for key in ("calculations", "return_items"):
+        assert changed[key][0]["case_tax_year"] == 2025
+        assert changed[key][0]["status"] == "needs_recheck"
+        assert changed[key][0]["recheck_for_tax_year"] == 2024
+    assert changed["calculations"][0]["result"] == original["calculations"][0]["result"]
+    issues = tax_case_checklist(changed)["next_steps"]
+    assert any("confirmation" in issue for issue in issues)
+    assert any("different tax year" in issue for issue in issues)
+    assert any("Recheck item" in issue for issue in issues)
+    reconfirmed = await _update(state, changed, "confirm_fact", {"fact_id": fact_id}, actor="user")
+    assert reconfirmed["facts"][0]["case_tax_year"] == 2025
+    assert reconfirmed["facts"][0]["confirmed_tax_year"] == 2024
+    assert reconfirmed["evidence"][0]["tax_year"] == 2025
+    fresh = await _update(state, reconfirmed, "record_calculation", calc_data)
+    assert len(fresh["calculations"]) == 2
+    assert fresh["calculations"][-1]["case_tax_year"] == 2024
+    assert fresh["calculations"][-1]["status"] == "recorded"
+    assert fresh["calculations"][0]["superseded_by"] == fresh["calculations"][-1]["id"]
+    assert fresh["calculations"][0]["case_tax_year"] == 2025
+    assert not any(f"Recheck item {fresh['calculations'][0]['id']} " in issue for issue in tax_case_checklist(fresh)["next_steps"])
+    # A return to the original year still requires a fresh review; an old
+    # same-year digest must not turn re-recording into a no-op.
+    original_year = await _update(state, fresh, "change_year", {"tax_year": 2025}, actor="user")
+    checked_again = await _update(state, original_year, "record_calculation", calc_data)
+    assert len(checked_again["calculations"]) == 3
+    assert checked_again["calculations"][-1]["case_tax_year"] == 2025
+    assert all(item["superseded_by"] == checked_again["calculations"][-1]["id"] for item in checked_again["calculations"][:-1])
+
+
+async def test_year_change_preserves_origin_for_legacy_records_without_year_fields(state):
+    store, _, _, _ = state
+    case = await _create(state)
+    case = await _update(state, case, "propose_fact", _fact())
+    case = await _update(state, case, "confirm_fact", {"fact_id": case["facts"][0]["id"]}, actor="user")
+    import json
+
+    case["facts"][0].pop("case_tax_year")
+    case["facts"][0].pop("confirmed_tax_year")
+    with store._lock:
+        store._conn.execute("UPDATE app_tax_cases SET record_json=? WHERE case_id=?", (json.dumps(case), case["id"]))
+        store._conn.commit()
+    changed = await _update(state, case, "change_year", {"tax_year": 2024}, actor="user")
+    assert changed["facts"][0]["case_tax_year"] == 2025
+    assert changed["facts"][0]["status"] == "proposed"
+
+
+async def test_rejected_facts_keep_history_and_block_dependencies_without_repeat_confirmation(state):
+    case = await _create(state)
+    case = await _update(state, case, "propose_fact", _fact())
+    fact = copy.deepcopy(case["facts"][0])
+    with pytest.raises(TaxCaseError, match="user action"):
+        await _update(state, case, "reject_fact", {"fact_id": fact["id"]})
+    case = await _update(state, case, "reject_fact", {"fact_id": fact["id"]}, actor="user")
+    rejected = case["facts"][0]
+    assert rejected["status"] == "rejected" and rejected["value"] == fact["value"]
+    assert rejected["rejected_by"] == "user" and rejected["rejected_tax_year"] == 2025
+    assert await _update(state, case, "reject_fact", {"fact_id": fact["id"]}, actor="user") == case
+    with pytest.raises(TaxCaseError, match="corrected proposal"):
+        await _update(state, case, "confirm_fact", {"fact_id": fact["id"]}, actor="user")
+    case = await _update(state, case, "propose_return_item", {"label": "Rejected dependency", "fact_ids": [fact["id"]]})
+    issues = tax_case_checklist(case)["next_steps"]
+    assert not any("User confirmation is needed" in issue for issue in issues)
+    assert any("unconfirmed fact" in issue for issue in issues)
+    case = await _update(state, case, "change_year", {"tax_year": 2024}, actor="user")
+    assert case["facts"][0]["status"] == "rejected"
