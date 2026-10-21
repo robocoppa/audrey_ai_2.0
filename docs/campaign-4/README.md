@@ -32,8 +32,16 @@ unavailable. An explicit owner action adopts the exact available release;
 confirmed personal facts and original passages are retained, while rule evidence
 and related work require rechecking. Models cannot approve the update. Publication
 races show a further update choice, without silently adopting it. No index rerun
-or new library publication is needed to deploy this slice. Full foreground review
-and the known-answer baseline are next; background work follows later.
+or new library publication is needed to deploy this slice.
+
+**20D.3b built:** Start/Continue review runs one local tool writer through the
+normal native run, with stop/reconnect and a ten-minute foreground limit. It saves
+a goal-scoped worksheet with linked facts, official passages, arithmetic and
+explicit limitations. Case edits make an earlier worksheet stale. The compact box
+keeps findings expandable and user confirmations explicit. Selected-file inventory
+is inspectable; it does not prove every page was read. The synthetic native-browser
+baseline is prepared; actual answer-quality acceptance is next. Background work
+follows later.
 [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds the contract.
 
 **MiniMax M3.1 Flash:** configured as an unmeasured cloud draft/research candidate
@@ -71,7 +79,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Saved tax review accepted; compact choices and explicit library updates built |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Saved tax review accepted; foreground worksheet and baseline built |
 
 ## Build queue
 
@@ -92,7 +100,8 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
   editable year built; brief visual acceptance next.
 - [x] **20D.3a:** explicit reference-library updates with retained evidence and
   required rechecks; locally verified.
-- [ ] **20D.3b:** one complete foreground tax review and a known-answer baseline.
+- [ ] **20D.3b:** foreground worksheet flow and known-answer baseline built;
+  native-browser accuracy acceptance next.
 - [ ] **20D.4:** durable Private tasks, checkpoints, progress, cancel and resume.
 - [ ] **20D.5:** bounded local evidence verification and targeted repair loops.
 - [ ] **20E:** compare single-pass and extended accuracy before extending defaults.

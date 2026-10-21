@@ -1,0 +1,20 @@
+SYNTHETIC INCOME STATEMENT - NOT A TAX FORM
+No real person, employer or sensitive identifier is represented.
+
+CURRENT RETURN: 2025
+Tax year: 2025
+Filing status: Single
+Age at the end of 2025: 40
+Can another taxpayer claim this person as a dependent? No
+Blind at the end of 2025? No
+Residency: U.S. citizen for all of 2025
+Return period: Full calendar year
+Deduction choice for this limited worksheet: Basic standard deduction
+
+Synthetic employer: Example Employer
+2025 W-2 box 1 wages, tips and other compensation: 50000.00 USD
+2025 W-2 box 2 federal income tax withheld: 6000.00 USD
+
+PRIOR-YEAR COMPARISON: 2024
+2024 wages: 9000.00 USD
+This comparison is a separate earlier year, not another 2025 wage record.

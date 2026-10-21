@@ -50,6 +50,29 @@ export interface TaxFact {
   provenance?: TaxFactProvenance | null;
 }
 
+export const TAX_REVIEW_PROMPT = "Review my saved tax case. Use the confirmed facts and selected documents, retain official evidence, check the arithmetic, and save a review worksheet. Show unresolved questions rather than guessing.";
+
+export interface TaxReviewWorksheet {
+  summary: string;
+  findings: Array<{
+    label: string;
+    detail: string;
+    fact_ids: string[];
+    evidence_ids: string[];
+    calculation_ids: string[];
+    return_item_ids: string[];
+  }>;
+  next_question: string;
+  status: "needs_input" | "limited_evidence" | "review_saved";
+  stale: boolean;
+  limitations: string[];
+  tax_year: number;
+  reference_release: string;
+  review_revision: number;
+  document_scope?: string;
+  notice?: string;
+}
+
 export interface TaxCase {
   id: string;
   conversation_id: string;
@@ -62,6 +85,7 @@ export interface TaxCase {
     | { status: "current" | "unavailable" }
     | { status: "update_available"; release_id: string };
   revision: number;
+  review?: TaxReviewWorksheet | null;
   checklist_version: number;
   facts: TaxFact[];
   files?: Array<{ file_id: string; checksum: string; revision: string; filename: string }>;

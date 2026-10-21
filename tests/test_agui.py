@@ -247,3 +247,14 @@ def test_agui_cursor_tracks_fanout_parts() -> None:
     assert cursor.consumed(source_sequence=7, part=1)
     assert not cursor.consumed(source_sequence=7, part=2)
     assert not cursor.consumed(source_sequence=8, part=1)
+
+
+def test_tax_review_budget_error_explains_saved_progress_without_private_details():
+    events = []
+    emitter = RunEventEmitter(run_id="run_tax", conversation_id="con_tax", assistant_message_id="msg_tax",
+        mode="local", virtual_model="private", sink=events.append)
+    emitter.terminate_incomplete(status="failed", finish_reason="error", error_code="tax_review_budget_exhausted")
+    adapter = AgUiRunEventAdapter(thread_id="con_tax", run_id="run_tax", assistant_message_id="msg_tax")
+    terminal = dump_agui_event(adapter.adapt(events[-1])[0])
+    assert terminal["code"] == "tax_review_budget_exhausted"
+    assert "time limit" in terminal["message"] and "Saved case entries" in terminal["message"]

@@ -88,3 +88,13 @@
   color: var(--text);
   font: inherit;
 }
+
+.tax-review-start { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.tax-review-start > span { flex: 1 1 12rem; line-height: 1.5; }
+.tax-review-start button { flex: none; padding: 0.42rem 0.65rem; border: 1px solid var(--border-strong); border-radius: 0.5rem; background: var(--surface-active); color: var(--text); font: inherit; }
+.tax-review-worksheet { border-top: 1px solid var(--border); padding-top: 0.6rem; line-height: 1.5; }
+.tax-review-worksheet summary { width: fit-content; color: var(--text-soft); cursor: pointer; }
+.tax-review-worksheet > p, .tax-review-worksheet > ul { margin: 0.55rem 0 0; }
+.tax-review-worksheet ul { display: grid; gap: 0.5rem; padding-left: 1.2rem; }
+.tax-review-worksheet li > strong { font-weight: 550; color: var(--text); }
+.tax-review-worksheet .tax-review-note { font-size: 0.68rem; }

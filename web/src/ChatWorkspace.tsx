@@ -46,7 +46,7 @@ import { ScrollToLatest } from "./ScrollToLatest";
 import { SwipeConversationRow } from "./SwipeConversationRow";
 import { UploadProgress } from "./UploadProgress";
 import { TaxReview } from "./TaxReview";
-import type { TaxCase } from "./taxReviewApi";
+import { TAX_REVIEW_PROMPT, type TaxCase } from "./taxReviewApi";
 import {
   ApiError,
   cancelRun,
@@ -1732,6 +1732,11 @@ function AudreyThread({
   const [taxCase, setTaxCase] = useState<TaxCase | null>(null);
   const [taxReviewExpanded, setTaxReviewExpanded] = useState(false);
   const [taxReviewRefresh, setTaxReviewRefresh] = useState(0);
+  const [queuedTaxReview, setQueuedTaxReview] = useState<object | null>(null);
+  const pendingTaxReviewRef = useRef<object | null>(null);
+  const dispatchedTaxReviewRef = useRef<object | null>(null);
+  // A review uses saved case documents; the user's unsent composer files stay untouched.
+  const preserveComposerAttachmentsRef = useRef(false);
   const [activityLedger, setActivityLedger] = useState<ActivityLedger>({
     activity: IDLE_ACTIVITY,
     answerMessageId: null,
@@ -1807,7 +1812,7 @@ function AudreyThread({
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const userRequestedCancelRef = useRef(false);
   const attachmentBusy = Boolean(uploadingFile) || pendingAttachment !== null;
-  const submissionBlocked = modeDisabled || attachmentBusy || retrying || Boolean(uploadIssue);
+  const submissionBlocked = modeDisabled || attachmentBusy || retrying || Boolean(uploadIssue) || queuedTaxReview !== null;
   const selectedImageCount = selectedAttachments.filter(({ kind }) => kind === "image").length;
   const visibleAttachmentFiles = useMemo(() => {
     const search = attachmentSearch.trim().toLocaleLowerCase();
@@ -1886,21 +1891,21 @@ function AudreyThread({
     }),
     [initialMessages],
   );
+  const fetchAgentAction = useCallback((url: string, init: RequestInit) => latestActionFetch(
+    url, init, preserveComposerAttachmentsRef.current ? [] : attachmentIds, setActiveRunId,
+  ), [attachmentIds]);
   const agent = useMemo(
     () =>
+      // HttpAgent stores this fetch callback; it reads the current request guard only when called, never during render.
+      // eslint-disable-next-line react-hooks/refs
       new HttpAgent({
         url: `/api/agent?model=${encodeURIComponent(modelId)}${
           effectiveSkillId ? `&skill=${encodeURIComponent(effectiveSkillId)}` : ""
         }`,
         threadId: conversationId,
-        fetch: (url, init) => latestActionFetch(
-          url,
-          init,
-          attachmentIds,
-          setActiveRunId,
-        ),
+        fetch: fetchAgentAction,
       }),
-    [attachmentIds, conversationId, modelId, effectiveSkillId],
+    [fetchAgentAction, conversationId, modelId, effectiveSkillId],
   );
   async function changeModel(nextModelId: string) {
     if (attachmentBusy || retrying) return;
@@ -2045,7 +2050,8 @@ function AudreyThread({
         onRunActiveChange(false);
         setRetrying(false);
         setLastAttempt(null);
-        setSelectedAttachments([]);
+        pendingTaxReviewRef.current = null;
+        if (!preserveComposerAttachmentsRef.current) setSelectedAttachments([]);
         setActivity((current) => ({
           ...current,
           status: "complete",
@@ -2055,11 +2061,13 @@ function AudreyThread({
         }));
       },
       onRunErrorEvent: ({ event }) => {
+        setTaxReviewRefresh((current) => current + 1);
         setActiveRunId(null);
         userRequestedCancelRef.current = false;
         onRunActiveChange(false);
         setRetrying(false);
-        setSelectedAttachments([]);
+        pendingTaxReviewRef.current = null;
+        if (!preserveComposerAttachmentsRef.current) setSelectedAttachments([]);
         const cancelled = event.code === "cancelled_by_user" || isAbortMessage(event.message);
         setActivity((current) => ({
           ...current,
@@ -2070,6 +2078,7 @@ function AudreyThread({
         }));
       },
       onRunFailed: ({ error }) => {
+        pendingTaxReviewRef.current = null;
         onRunActiveChange(false);
         setRetrying(false);
         const cancelled = isAbortError(error);
@@ -2091,6 +2100,7 @@ function AudreyThread({
     adapters: { history },
     showThinking: false,
     onError: (reason) => {
+      pendingTaxReviewRef.current = null;
       onRunActiveChange(false);
       setRetrying(false);
       setRunError(reason.message);
@@ -2105,7 +2115,9 @@ function AudreyThread({
       const explicitlyStopped = userRequestedCancelRef.current;
       userRequestedCancelRef.current = false;
       const runId = activeRunId;
-      setSelectedAttachments([]);
+      pendingTaxReviewRef.current = null;
+      setTaxReviewRefresh((current) => current + 1);
+      if (!preserveComposerAttachmentsRef.current) setSelectedAttachments([]);
       setRunError("");
       if (!explicitlyStopped || !runId) {
         onRunActiveChange(false);
@@ -2155,8 +2167,48 @@ function AudreyThread({
     onDraftRestored();
   }, [onDraftRestored, replacementDraft, runtime]);
 
+  function startTaxReview() {
+    if (!taxCase || !isPrivate || readOnly || submissionBlocked || recoveredRunActive
+      || activity.status === "running" || runtime.thread.getState().isRunning || pendingTaxReviewRef.current
+      || ["update_available", "unavailable"].includes(taxCase.reference_update?.status ?? "")) return;
+    const request = {};
+    pendingTaxReviewRef.current = request;
+    preserveComposerAttachmentsRef.current = true;
+    setQueuedTaxReview(request);
+    setLastAttempt(null);
+    setSkillId("tax-review");
+    setActivePicker(null);
+  }
+
+  useEffect(() => {
+    if (!queuedTaxReview || effectiveSkillId !== "tax-review" || dispatchedTaxReviewRef.current === queuedTaxReview) return;
+    // useAgUiRuntime installs the newly selected agent in its effect before this dispatch.
+    const timer = window.setTimeout(() => {
+      if (pendingTaxReviewRef.current !== queuedTaxReview || dispatchedTaxReviewRef.current === queuedTaxReview) return;
+      if (readOnly || modeDisabled || attachmentBusy || retrying || recoveredRunActive || runtime.thread.getState().isRunning) {
+        pendingTaxReviewRef.current = null;
+        setQueuedTaxReview(null);
+        return;
+      }
+      dispatchedTaxReviewRef.current = queuedTaxReview;
+      setRunError("");
+      setActivity({ status: "running", label: "Starting review", detail: "Reviewing your saved tax case", sources: [], models: [], tools: [] });
+      try {
+        runtime.thread.append({ role: "user", content: [{ type: "text", text: TAX_REVIEW_PROMPT }], attachments: [] });
+      } catch (reason) {
+        pendingTaxReviewRef.current = null;
+        setRunError("Could not start review: " + messageOf(reason));
+        setActivity((current) => ({ ...current, status: "error", label: "Run failed" }));
+      } finally {
+        setQueuedTaxReview(null);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [queuedTaxReview, effectiveSkillId, readOnly, modeDisabled, attachmentBusy, retrying, recoveredRunActive, runtime, setActivity]);
+
   async function retryLastQuestion() {
     if (!lastAttempt || retrying || modeDisabled || attachmentBusy || readOnly) return;
+    preserveComposerAttachmentsRef.current = false;
     setRetrying(true);
     setRunError("");
     try {
@@ -2405,7 +2457,9 @@ function AudreyThread({
                   onExpandedChange={setTaxReviewExpanded}
                   onCaseChange={acceptTaxCase}
                   onSaved={() => setSkillId("tax-review")}
+                  onReview={startTaxReview}
                 /> : null}
+                {isPrivate && taxCase && selectedAttachments.length > 0 ? <p className="attachment-status">Tax review uses files already sent here or added to the project. Send newly selected files before reviewing them.</p> : null}
                 {lastAttempt && (restoredIncomplete || activity.status === "error" || runError) ? (
                   <button
                     className="retry-button"
@@ -2475,6 +2529,7 @@ function AudreyThread({
                       event.stopPropagation();
                       return;
                     }
+                    preserveComposerAttachmentsRef.current = false;
                     const text = composerInputRef.current?.value.trim() ?? "";
                     if (text) setLastAttempt({ text, attachmentIds: selectedAttachments.map(({ id }) => id) });
                   }}

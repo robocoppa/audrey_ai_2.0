@@ -17,6 +17,7 @@ from audrey.app_state.tax_cases import (
     TaxCaseConflictError,
     TaxCaseError,
     tax_case_checklist,
+    tax_case_review,
     validate_operation,
 )
 from audrey.identity import Principal
@@ -28,7 +29,9 @@ from audrey.tools.discovery import TOOL_DECLARATIONS, ToolSpec, _resolve_refs
 from audrey.tools.private_dispatch import PrivateToolArgumentsError, PrivateToolHandler
 from audrey.user_data_visibility import remote_personal_reads_blocked
 
-TAX_REVIEW_INSTRUCTION = """Help the user review the selected tax year in plain, conversational language. Keep record IDs, revisions, operation names and checklist labels inside tool calls. Explain the useful result and the next practical step; ask one pertinent question at a time. Group related proposed facts for the user to check through the review controls. Do not ask them to repeat facts already saved or confirmed. An empty saved case means review has not started; do not describe unchecked areas as passed or reviewed. Fetch available official rules yourself rather than asking the user to supply evidence you can read.
+TAX_REVIEW_INSTRUCTION = """Review only the saved case goal, using one local writer. Inspect the case and selected files, propose required facts, then stop for user confirmation before relying on unconfirmed amounts. Retain exact dated official support, compute named-input decimal arithmetic, and save a goal-scoped worksheet with save_review, even when it can only report missing information. Each substantive finding needs saved fact/evidence/calculation IDs; unresolved questions belong in next_question and missing items, not invented findings. Perform only one case mutation per tool-call round, and use the revision returned by the preceding write. You have at most twelve tool rounds in a foreground turn: if the remaining scope needs more work, save the useful partial worksheet and ask the next question. Continue review resumes from saved records; do not repeat completed work. This is a selected-passage review, not certification of a complete tax return. Tax-year applicability remains proposed/unknown unless separately established; never describe the coverage checklist as a legal accuracy check.
+
+Help the user review the selected tax year in plain, conversational language. Keep record IDs, revisions, operation names and checklist labels inside tool calls. Explain the useful result and the next practical step; ask one pertinent question at a time. Group related proposed facts for the user to check through the review controls. Do not ask them to repeat facts already saved or confirmed. An empty saved case means review has not started; do not describe unchecked areas as passed or reviewed. Fetch available official rules yourself rather than asking the user to supply evidence you can read.
 
 Internally, call tax_review inspect first and use its current revision for mutations. Page sections with next_offset so saved entries are not missed. Truncated fields are excerpts; do not claim their full contents have been reviewed. Preserve unknown facts and source conflicts. Save the user's stated facts as proposals; only explicit user controls can confirm or reject them, resolve missing items, change the return year, or update the IRS reference library. Rejected facts must not be used. Facts retain their original case_tax_year; confirmed_tax_year records the year the user checked. Calculations or return items marked needs_recheck must be revisited for the selected year. Do not relabel an old record as applying to the new year. After a reference-library update, reopen the official passages before using old rule evidence. Entries marked needs_recheck are retained history, not current support. Record replacement evidence with supersedes IDs when a prior passage changed, then re-record dependent calculations and return items using the new evidence IDs. Use supersedes IDs for a changed calculation or return item that replaces stale work; keep conflicts unresolved rather than marking them superseded. Do not claim that an updated library means a rule itself changed.
 
@@ -36,7 +39,7 @@ For extracted facts, read the selected Private document with get_file_text and k
 
 _MODEL_OPERATIONS = Literal[
     "inspect", "checklist", "validate", "propose_fact", "record_evidence",
-    "record_calculation", "add_missing_item", "propose_return_item",
+    "record_calculation", "add_missing_item", "propose_return_item", "save_review",
 ]
 _READ_OPERATIONS = frozenset({"inspect", "checklist", "validate"})
 _CATEGORIES = {
@@ -52,7 +55,7 @@ class TaxReviewRequest(BaseModel):
     operation: _MODEL_OPERATIONS
     expected_revision: int | None = Field(default=None, ge=1)
     data: dict[str, Any] = Field(default_factory=dict)
-    section: Literal["facts", "evidence", "calculations", "missing_items", "return_items"] = "facts"
+    section: Literal["facts", "evidence", "calculations", "missing_items", "return_items", "files"] = "facts"
     offset: int = Field(default=0, ge=0, le=100)
     limit: int = Field(default=3, ge=1, le=5)
 
@@ -132,7 +135,7 @@ async def _read_case(
 
 
 def case_response(case: dict) -> dict:
-    return {**case, "checklist": tax_case_checklist(case)}
+    return {**case, "checklist": tax_case_checklist(case), "review": tax_case_review(case)}
 
 
 async def get_tax_case(app: Any, principal: Principal, conversation_id: str) -> dict | None:
@@ -368,7 +371,12 @@ def _tool_result(
             goal=case["goal"][:300], goal_truncated=len(case["goal"]) > 300,
             counts={category: len(case[category]) for category in _CATEGORIES.values()},
         )
-        entries = case[section]
+        result["case"].update(
+            selected_file_count=case.get("selected_file_count", len(case.get("files", []))),
+            files_truncated=case.get("files_truncated", False),
+            document_scope="Selected passages only; listing a file does not establish that all its pages were read.",
+        )
+        entries = case.get("selected_files", case.get("files", [])) if section == "files" else case[section]
         result.update(section=section, offset=offset, total=len(entries), entries=[
             {key: value for key, value in item.items()
              if key not in {"operation_digest", "created_at", "created_by"}}
@@ -408,6 +416,9 @@ def _tool_result(
                 result["notice"] = "This record exceeds the bounded inspection size; only its identity and status are shown. Review the saved case in the browser."
         returned = len(result["entries"])
         result.update(returned=returned, next_offset=offset + returned if offset + returned < len(entries) else None)
+    review = tax_case_review(case)
+    if review is not None:
+        result["review"] = {key: review[key] for key in ("status", "stale", "review_revision")}
     if entry is not None:
         result["updated_entry"] = {
             key: value for key, value in entry.items()
@@ -436,6 +447,26 @@ def make_tax_review_handler(
             if body.operation in _READ_OPERATIONS:
                 if body.data:
                     raise PrivateToolArgumentsError()
+                if body.operation == "inspect":
+                    records = await app.state.application_store.conversations.list_messages(
+                        user_id=principal.user_id, conversation_id=conversation_id,
+                    )
+                    selected = {attachment.file_id: {"file_id": attachment.file_id,
+                        "filename": attachment.filename, "selected_via": "conversation"}
+                        for message in (records or ()) for attachment in message.attachments}
+                    snapshot = await app.state.application_store.projects.snapshot_for_conversation(
+                        user_id=principal.user_id, conversation_id=conversation_id,
+                    )
+                    if snapshot is not None:
+                        for document in snapshot[1]:
+                            selected[document.file_id] = {"file_id": document.file_id,
+                                "selected_via": "project"}
+                            uploads = getattr(app.state, "uploads_db", None)
+                            row = await uploads.get_upload(document.file_id) if uploads is not None else None
+                            if row and row.get("user") == principal.storage_namespace and row.get("private_required"):
+                                selected[document.file_id]["filename"] = str(row["filename"])
+                    case.update(selected_files=list(selected.values())[:100],
+                                selected_file_count=len(selected), files_truncated=len(selected) > 100)
                 return _tool_result(case, operation=body.operation, section=body.section, offset=body.offset, limit=body.limit)
             if body.expected_revision is None:
                 raise PrivateToolArgumentsError()
@@ -468,6 +499,8 @@ def make_tax_review_handler(
                 app, principal, conversation_id, expected_revision=body.expected_revision,
                 operation=body.operation, data=data, actor="model",
             )
+            if body.operation == "save_review":
+                return _tool_result(updated, operation=body.operation)
             entries = updated[_CATEGORIES[body.operation]]
             entry = next((item for item in reversed(entries)
                           if all(item.get(key) == value for key, value in data.items()
@@ -484,7 +517,7 @@ def tax_review_spec(server_url: str) -> ToolSpec:
     declaration = TOOL_DECLARATIONS["tax_review"]
     properties: dict[str, Any] = {}
     descriptions = []
-    for operation in _CATEGORIES:
+    for operation in [*_CATEGORIES, "save_review"]:
         schema = OPERATION_MODELS[operation].model_json_schema(ref_template="#/components/schemas/{model}")
         schema = _resolve_refs(schema, schema.get("$defs", {}))
         fields = schema["properties"]
@@ -493,6 +526,7 @@ def tax_review_spec(server_url: str) -> ToolSpec:
         properties.update(fields)
         required = [key for key in schema.get("required", []) if key not in {"tax_year_status", "result"}]
         descriptions.append(f"{operation} requires {', '.join(required)}.")
+    properties["findings"].update(description="Goal-scoped findings linked to saved facts, evidence, calculations and return items. No certification flag; server derives limitations. Use next_question for missing information.")
     properties["expression"].update(maxLength=512, description="Arithmetic using every named input, e.g. wages - deduction; record constants as named inputs too.")
     properties["rounding"].update(enum=["none", "half_up_cent", "half_even_cent"])
     properties["supersedes"].update(description="IDs of stale entries in this operation's category explicitly replaced by this reread evidence, recalculation or return proposal. Originals are retained; replacement does not verify tax-law correctness or year applicability.")
@@ -501,8 +535,8 @@ def tax_review_spec(server_url: str) -> ToolSpec:
     parameters = {
         "type": "object", "additionalProperties": False,
         "properties": {
-            "operation": {"type": "string", "enum": [*_READ_OPERATIONS, *_CATEGORIES]},
-            "section": {"type": "string", "enum": ["facts", "evidence", "calculations", "missing_items", "return_items"], "default": "facts", "description": "inspect only: section of saved entries to page."},
+            "operation": {"type": "string", "enum": [*_READ_OPERATIONS, *_CATEGORIES, "save_review"]},
+            "section": {"type": "string", "enum": ["facts", "evidence", "calculations", "missing_items", "return_items", "files"], "default": "facts", "description": "inspect only: section of saved entries to page."},
             "offset": {"type": "integer", "minimum": 0, "maximum": 100, "default": 0},
             "limit": {"type": "integer", "minimum": 1, "maximum": 5, "default": 3},
             "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for mutations; obtain it from inspect or the preceding result."},

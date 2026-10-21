@@ -381,6 +381,8 @@ class AgUiRunEventAdapter:
                     ),
                 )
             message = "Run was cancelled." if event.status == "cancelled" else "Run failed."
+            if event.error_code == "tax_review_budget_exhausted":
+                message = "Tax review reached its time limit. Saved case entries are retained; choose Continue review to carry on."
             return (
                 AgUiRunErrorEvent(
                     timestamp=timestamp,

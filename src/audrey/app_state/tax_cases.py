@@ -168,6 +168,21 @@ class ProposeReturnItemPayload(_RecheckPayload):
     evidence_ids: EntryIds = Field(default_factory=list)
 
 
+class ReviewFindingPayload(_Payload):
+    label: Label
+    detail: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+    fact_ids: EntryIds = Field(default_factory=list)
+    evidence_ids: EntryIds = Field(default_factory=list)
+    calculation_ids: EntryIds = Field(default_factory=list)
+    return_item_ids: EntryIds = Field(default_factory=list)
+
+
+class SaveReviewPayload(_Payload):
+    summary: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+    findings: Annotated[list[ReviewFindingPayload], Field(max_length=12)]
+    next_question: Annotated[str, Field(max_length=500)] = ""
+
+
 class _CaseCreation(_Payload):
     tax_year: TaxYear
     jurisdiction: Identifier = "US-federal"
@@ -187,6 +202,7 @@ OPERATION_MODELS: dict[str, type[_Payload]] = {
     "add_missing_item": AddMissingItemPayload,
     "resolve_missing_item": ResolveMissingItemPayload,
     "propose_return_item": ProposeReturnItemPayload,
+    "save_review": SaveReviewPayload,
 }
 _APPEND_CATEGORIES = {
     "propose_fact": "facts",
@@ -439,6 +455,25 @@ class TaxCasesRepository:
 def _apply_operation(
     case: dict[str, Any], operation: str, payload: dict[str, Any], actor: str
 ) -> bool:
+    if operation == "save_review":
+        # Revalidate even an identical report: a later fact rejection, year or
+        # library change must never refresh stale support merely by replaying it.
+        _review_support(case, payload, strict=True)
+        previous = case.get("review")
+        if (
+            previous
+            and previous.get("review_revision") == case["revision"]
+            and all(previous.get(key) == value for key, value in payload.items())
+        ):
+            return False
+        case["review"] = {
+            **payload,
+            "tax_year": case["tax_year"],
+            "reference_release": case["reference_release"],
+            "review_revision": case["revision"] + 1,
+            "saved_at": _utc_now(),
+        }
+        return True
     if operation == "change_year":
         old_year, new_year = case["tax_year"], payload["tax_year"]
         if old_year == new_year:
@@ -696,6 +731,149 @@ def _new_id() -> str:
     return f"tax_{uuid.uuid4().hex}"
 
 
+def _current_review_work(case: dict[str, Any], entry: dict[str, Any]) -> bool:
+    return (
+        entry.get("status") in {"recorded", "proposed"}
+        and not entry.get("superseded_by")
+        and not entry.get("recheck_for_tax_year")
+        and not entry.get("recheck_for_reference_release")
+        and entry.get("case_tax_year", case["tax_year"]) == case["tax_year"]
+        and entry.get("case_reference_release", case["reference_release"])
+        == case["reference_release"]
+    )
+
+
+def _review_support(
+    case: dict[str, Any], review: dict[str, Any], *, strict: bool
+) -> tuple[list[str], list[str]]:
+    """Inspect only retained support; never infer the truth of a written finding."""
+    limitations: list[str] = []
+    needs_input: list[str] = []
+
+    def add(target: list[str], message: str) -> None:
+        if message not in target:
+            target.append(message)
+
+    def unsupported(message: str) -> None:
+        if strict:
+            raise TaxCaseError(message)
+        add(limitations, message)
+
+    records = {
+        field: {entry["id"]: entry for entry in case.get(category, [])}
+        for field, category in (
+            ("fact_ids", "facts"),
+            ("evidence_ids", "evidence"),
+            ("calculation_ids", "calculations"),
+            ("return_item_ids", "return_items"),
+        )
+    }
+    selected = {field: set() for field in records}
+    for finding in review.get("findings", []):
+        if not any(finding.get(field) for field in records):
+            add(limitations, "A finding has no linked saved support.")
+        for field in records:
+            selected[field].update(finding.get(field, []))
+
+    for field in ("calculation_ids", "return_item_ids"):
+        for identifier in sorted(selected[field]):
+            item = records[field].get(identifier)
+            if item is None:
+                unsupported("A review dependency was not found in this case.")
+                continue
+            if not _current_review_work(case, item):
+                unsupported("A review dependency requires rechecked calculations or return items.")
+            for dependency in ("fact_ids", "evidence_ids"):
+                selected[dependency].update(item.get(dependency, []))
+                if not item.get(dependency):
+                    add(
+                        limitations,
+                        "A saved calculation or return item lacks linked facts or official evidence.",
+                    )
+
+    for identifier in sorted(selected["fact_ids"]):
+        fact = records["fact_ids"].get(identifier)
+        if fact is None:
+            unsupported("A review dependency was not found in this case.")
+        elif fact.get("status") == "rejected":
+            unsupported("A review cannot use a rejected fact as support.")
+        elif fact.get("status") != "confirmed":
+            add(needs_input, "Some saved facts still need your confirmation.")
+
+    evidence_count = 0
+    for identifier in sorted(selected["evidence_ids"]):
+        evidence = records["evidence_ids"].get(identifier)
+        if evidence is None:
+            unsupported("A review dependency was not found in this case.")
+            continue
+        evidence_count += 1
+        if not _current_evidence(case, evidence):
+            unsupported("A review dependency requires rechecked reference evidence.")
+        if evidence.get("tax_year") is None:
+            add(
+                limitations,
+                "Tax-year applicability is unknown for some retained official evidence.",
+            )
+        elif evidence.get("tax_year") != case["tax_year"]:
+            add(limitations, "Some retained official evidence applies to a different tax year.")
+        if evidence.get("tax_year_status") != "verified":
+            add(
+                limitations,
+                "Tax-year applicability has not been verified for some retained official evidence.",
+            )
+        if evidence.get("jurisdiction") != case.get("jurisdiction"):
+            add(limitations, "Some retained official evidence concerns a different jurisdiction.")
+        if evidence.get("conflicts_with"):
+            add(limitations, "Conflicting official evidence remains unresolved.")
+        if not all(
+            evidence.get(key)
+            for key in ("document_id", "revision", "page", "passage", "reference_release")
+        ):
+            add(limitations, "Some retained official evidence is incomplete.")
+    if not evidence_count:
+        add(limitations, "No official rule passages are linked to this review.")
+    if not selected["fact_ids"]:
+        add(limitations, "No saved facts are linked to this review.")
+    if any(item.get("status") == "proposed" for item in case.get("facts", [])):
+        add(needs_input, "Some saved facts still need your confirmation.")
+    if any(item.get("status") != "resolved" for item in case.get("missing_items", [])):
+        add(needs_input, "Some requested information has not been addressed.")
+    if any(item.get("unread_pages") for item in case.get("files", [])):
+        add(needs_input, "Some document pages still need to be read or clarified.")
+    if review.get("next_question"):
+        add(needs_input, "A follow-up question remains for you.")
+    return needs_input, limitations
+
+
+def tax_case_review(case: dict[str, Any]) -> dict[str, Any] | None:
+    """Expose a saved goal-scoped worksheet without certifying tax correctness."""
+    review = case.get("review")
+    if not review:
+        return None
+    needs_input, limitations = _review_support(case, review, strict=False)
+    stale = (
+        review.get("review_revision") != case.get("revision")
+        or review.get("tax_year") != case.get("tax_year")
+        or review.get("reference_release") != case.get("reference_release")
+    )
+    if stale:
+        limitations.insert(
+            0, "Saved information changed after this review. Ask Audrey to refresh it."
+        )
+    return {
+        **review,
+        "status": "needs_input"
+        if needs_input
+        else "limited_evidence"
+        if limitations
+        else "review_saved",
+        "stale": stale,
+        "limitations": [*needs_input, *limitations],
+        "document_scope": "Selected passages only. Remaining document pages have not been fully reviewed.",
+        "notice": "This saved review does not establish that a tax return is complete or legally correct.",
+    }
+
+
 def tax_case_checklist(case: dict[str, Any]) -> dict[str, Any]:
     """Describe versioned coverage gaps without deciding tax correctness."""
     facts = case.get("facts", [])
@@ -873,8 +1051,11 @@ __all__ = [
     "AddMissingItemPayload",
     "ResolveMissingItemPayload",
     "ProposeReturnItemPayload",
+    "ReviewFindingPayload",
+    "SaveReviewPayload",
     "OPERATION_MODELS",
     "validate_operation",
     "tax_case_checklist",
+    "tax_case_review",
     "validate_tax_case",
 ]

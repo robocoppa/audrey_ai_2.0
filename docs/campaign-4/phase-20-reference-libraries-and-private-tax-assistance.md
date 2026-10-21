@@ -479,7 +479,7 @@ The main plan owns the remaining queue; no temporary smoke document is retained.
 The [main build queue](README.md#build-queue) owns status and order. The contracts
 below cover the dedicated tax-review tool and reusable Private task runner,
 with tax assistance as the first workflow. The saved case/tool foundation is built;
-foreground review and the task runner remain queued.
+foreground worksheet review is built; its accuracy acceptance and the task runner remain queued.
 OCR/media remain deferred until a case requires them.
 
 #### Tax review tool and case record
@@ -509,8 +509,7 @@ Official evidence must match an exact page in the pinned current release.
 Model-supplied tax-year applicability stays proposed/unknown. Checklists report
 coverage, including conflicting/unread material, without certifying tax correctness.
 
-This first case is federal-only and covers selected passages. There is no full
-return review, state adapter or background agent yet. Changing the case year retains original source years/passages, resets prior
+This first case is federal-only and covers selected passages. There is no complete-return certification, state adapter or background agent. Changing the case year retains original source years/passages, resets prior
 confirmations and marks calculations/return proposals for recheck. Explicit
 re-recording preserves the old record and supersedes it with the new review.
 The goal remains fixed at setup. Historical originals are still available through
@@ -531,8 +530,44 @@ rechecking. Reopened official passages can explicitly replace stale evidence;
 recalculated work uses the fresh evidence IDs. Superseded originals remain in the
 bounded case history, including across successive updates. A new library release
 does not itself prove that a law changed or that a retained rule applies to the
-return year. Full foreground review and a known-answer accuracy baseline remain
-20D.3b; neither is established by these state-transition checks.
+return year. These state-transition checks do not establish tax accuracy.
+
+**20D.3b — foreground worksheet (built October 21).** Start/Continue review sends
+a visible native user turn with explicit Tax review selected. It uses the existing
+highest-priority verified local tool model as one case writer, with twelve tool
+rounds and a ten-minute foreground deadline. Ordinary Private retains its existing
+panel configuration. The full saved goal is supplied as data; inspect can page the
+canonical selected-file inventory, including Project references without extracted
+facts. A listing establishes selection, not complete reading. Newly chosen unsent
+files stay in the composer; send them in a chat turn before reviewing them.
+
+The native run retains normal Stop, browser reconnect and canonical message
+persistence. Deadline/cancellation retains committed case entries; another review
+continues from that state. Server restart still interrupts execution: restart-
+resumable tasks are 20D.4. There is no background worker in this slice.
+
+The model saves a bounded worksheet with a summary, linked findings and the next
+question. The server checks all dependency IDs and rejects rejected facts or stale
+support. It derives needs-input/evidence-limited status without letting the model
+certify tax correctness. Confirmations, missing items and changed year/library
+remain explicit user choices. Meaningful case changes invalidate the saved
+worksheet; no-op retries do not. Original evidence stays retained. Worksheets are
+covered by the existing case backup/purge and deletion rules in schema23.
+
+The compact Tax review box shows the applicable Start/Continue choice and saved
+status, with worksheet details collapsed. Expanded findings include retained IRS
+passages, recorded calculation results and limitations. Tax-year applicability is
+still proposed/unknown under this tool contract; the new worksheet does not turn
+that into verified law or imply every document page has been checked.
+
+One [synthetic upload](../../evals/fixtures/tax-review-2025-single.txt) and its
+[source-checked baseline](../../evals/cases/tax_review_baseline.json) exercise the
+native flow. It separates 2025 wages/withholding from a 2024 comparison, pauses for
+fact confirmation, retains official deduction evidence and checks the requested
+wages-minus-deduction arithmetic. Expected values stay outside the upload. This
+is a manual native-browser baseline using the existing workflow, not a new probe
+runner. Its answer-quality result is not yet measured; source/plumbing checks do
+not close the known tax-accuracy cases in this phase or certify a return.
 
 **Tax review** appears in the existing Tools and skills control for a Private
 conversation/Project. It may be selected explicitly; ordinary Private questions

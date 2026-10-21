@@ -21,6 +21,7 @@ export function TaxReview({
   onExpandedChange,
   onCaseChange,
   onSaved,
+  onReview,
 }: {
   conversationId: string;
   expanded: boolean;
@@ -31,6 +32,7 @@ export function TaxReview({
   onExpandedChange: (expanded: boolean) => void;
   onCaseChange: (value: TaxCase | null) => void;
   onSaved: () => void;
+  onReview?: () => void;
 }) {
   const panelId = useId();
   const [taxCase, setTaxCase] = useState<TaxCase | null>(null);
@@ -140,6 +142,16 @@ export function TaxReview({
         <span>Settings <svg viewBox="0 0 24 24" aria-hidden="true"><path d={expanded ? "m7 14 5-5 5 5" : "m7 10 5 5 5-5"} /></svg></span>
       </button>
       <div className="tax-review-body">
+        {taxCase ? <div className="tax-review-start">
+          <span className="tax-review-note">{taxCase.review
+            ? taxCase.review.stale ? "Review needs updating"
+              : taxCase.review.status === "needs_input" ? "Review saved · Your input is needed"
+                : taxCase.review.status === "limited_evidence" ? "Review saved · Evidence is limited" : "Review saved"
+            : "Check your saved information and supporting rules."}</span>
+          <button type="button" disabled={locked || !onReview} onClick={onReview}>
+            {taxCase.review ? "Continue review" : "Start review"}
+          </button>
+        </div> : null}
         {referenceBlocked ? <div className="tax-review-library" role="status">
           <p>{referenceUpdate?.status === "update_available"
             ? "An updated IRS library is available. Update the library to continue; saved rules and related calculations will need rechecking."
@@ -180,6 +192,23 @@ export function TaxReview({
           </div>
         </form>
       </div> : null}
+        {taxCase?.review ? <details className="tax-review-worksheet">
+          <summary>Review worksheet</summary>
+          <p>{taxCase.review.summary}</p>
+          {taxCase.review.findings.length ? <ul>{taxCase.review.findings.map((finding, index) => <li key={index}>
+            <strong>{finding.label}</strong><p>{finding.detail}</p>
+            {finding.evidence_ids.map((id) => taxCase.evidence.find((evidence) => evidence.id === id)).filter((item) => item !== undefined)
+              .map((evidence) => <details className="tax-question-source" key={evidence.id}>
+                <summary>IRS source · Page {evidence.page}{evidence.section ? ` · ${evidence.section}` : ""}</summary>
+                <blockquote>{evidence.passage}</blockquote>
+              </details>)}
+            {finding.calculation_ids.map((id) => taxCase.calculations.find((calculation) => calculation.id === id)).filter((item) => item !== undefined)
+              .map((calculation) => <p className="tax-review-note" key={calculation.id}>{calculation.label}: {calculation.expression} = {calculation.result}</p>)}
+          </li>)}</ul> : null}
+          <p className="tax-review-note">{taxCase.review.document_scope ?? "Selected passages only; this is not a complete return review."}</p>
+          {taxCase.review.next_question ? <p>{taxCase.review.next_question}</p> : null}
+          {taxCase.review.limitations.length ? <ul className="tax-review-note">{taxCase.review.limitations.map((limitation, index) => <li key={index}>{limitation}</li>)}</ul> : null}
+        </details> : null}
         {error ? <div className="tax-review-error" role="alert">
           <span>{error}</span>
           <button type="button" disabled={busy || disabled || loading} onClick={() => setReloadVersion((current) => current + 1)}>Reload settings</button>

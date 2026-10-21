@@ -44,6 +44,8 @@ async def test_case_tool_has_no_ordinary_http_execution_even_with_forged_spec():
 
 def _enable(state):
     original = state.env.runtime
+    writer = state.app.state.cfg.raw["model_registry"]["general"][0]["name"]
+    state.app.state.cfg.raw["fast_path"] = {"tool_capable_models": [writer]}
     policy = ProcessingPolicy(
         local_models=original.policy.local_models,
         ollama_base_url=original.policy.ollama_base_url,
@@ -88,6 +90,9 @@ async def test_selected_case_tool_executes_locally_and_persists_unconfirmed_prop
         assert execution_app.state.tools.get("tax_review") is not None
         assert "tax_review" in model_tools.names()
         assert kwargs["skill_instruction"]
+        assert _payload.model == "audrey_fast"
+        assert len(execution_app.state.registry.candidates("general")) == 1
+        assert execution_app.state.cfg.raw["agentic"]["react"]["max_rounds"] == 12
         result = await dispatch_one(execution_app.state.archive_http, model_tools, {
             "function": {"name": "tax_review", "arguments": {
                 "operation": "propose_fact", "expected_revision": case["revision"],
@@ -195,3 +200,54 @@ async def test_local_case_failure_payload_is_classified_as_failed_tool(native):
                 "function": {"name": "tax_review", "arguments": {"operation": "inspect"}},
             }, max_result_chars=6000, timeout_s=2, user_id=state.owner.storage_namespace)
     assert result.is_error and json.loads(result.content)["error"] == "case_changed"
+
+
+async def test_tax_review_timeout_is_terminal_and_retains_case(native, monkeypatch):
+    import asyncio
+
+    from audrey.routes.app import runs
+
+    state = native
+    _enable(state)
+    async def prepare(_app, *, tax_review=False):
+        return replace(state.env.runtime, tax_review=tax_review)
+    monkeypatch.setattr(runs, "prepare_native_private_runtime", prepare)
+    monkeypatch.setattr(runs, "_TAX_REVIEW_TIMEOUT_S", 0.2)
+    conversation = await _conversation(state)
+    case = await state.store.tax_cases.create(user_id=state.owner.user_id,
+        conversation_id=conversation["id"], tax_year=2025, goal="Review", reference_release=_RELEASE)
+    async def stream(app, _payload, _messages, _options, *, event_context, model_tools, **_kwargs):
+        result = await dispatch_one(app.state.archive_http, model_tools, {"function": {
+            "name": "tax_review", "arguments": {"operation": "add_missing_item", "expected_revision": case["revision"],
+                "data": {"label": "Confirm available income records"}},
+        }}, max_result_chars=6000, timeout_s=2, user_id=state.owner.storage_namespace)
+        assert not result.is_error
+        await asyncio.sleep(20)
+        yield "unreachable"
+    state.manager._stream_factory = stream
+    response = await state.client.post(f"/api/conversations/{conversation['id']}/runs", json={"content": "Review", "skill": "tax-review"})
+    assert response.status_code == 202, response.text
+    await _settle(state, response.json()["id"])
+    run = await state.store.conversations.get_run(user_id=state.owner.user_id, run_id=response.json()["id"])
+    assert run.status == "failed" and run.error_code == "tax_review_budget_exhausted"
+    saved = await state.store.tax_cases.get(user_id=state.owner.user_id, conversation_id=conversation["id"])
+    assert saved["missing_items"][0]["label"] == "Confirm available income records"
+    assert state.app.state.cfg.raw.get("agentic", {}).get("react", {}).get("max_rounds") != 12
+
+
+async def test_tax_case_inspect_accepts_real_project_file_records(native):
+    from test_private_project_runs import _ready_project
+
+    from audrey.processing_policy import processing_scope
+    from audrey.tax_review import make_tax_review_handler
+
+    state = native
+    _, conversation_id, file_id = await _ready_project(state)
+    _enable(state)
+    await state.store.tax_cases.create(user_id=state.owner.user_id, conversation_id=conversation_id,
+        tax_year=2025, goal="Read selected files", reference_release=_RELEASE)
+    with processing_scope(state.env.runtime.policy):
+        handler = make_tax_review_handler(app=state.app, principal=state.owner, conversation_id=conversation_id)
+        result = await handler({"operation": "inspect", "section": "files"})
+    assert result["entries"] == [{"file_id": file_id, "selected_via": "project", "filename": "invoice.txt"}]
+    assert result["case"]["selected_file_count"] == 1

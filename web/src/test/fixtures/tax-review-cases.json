@@ -572,5 +572,154 @@
       "document_scope": "Selected passages only. Remaining document pages have not been fully reviewed.",
       "notice": "Review readiness describes recorded evidence coverage. It does not establish that a tax return is complete or legally correct."
     }
+  },
+  "reviewed": {
+    "calculations": [],
+    "checklist_version": 1,
+    "conversation_id": "con_f09e6f57936b49489a4ed5b598a5bfcb",
+    "created_at": "2026-10-21T03:32:30.863523+00:00",
+    "evidence": [
+      {
+        "catalog": "current",
+        "claim": "Review the dated deduction rule",
+        "conflicts_with": [],
+        "created_at": "2026-10-21T03:32:30.866963+00:00",
+        "created_by": "model",
+        "document_id": "pub-17",
+        "id": "tax_2ea6cf5fe493453194124910ff2b5292",
+        "jurisdiction": "US-federal",
+        "offset": 0,
+        "operation_digest": "7c0c36241a95b86c96d24eeeb10dadf032cb1aad004fad5d2edf16bf8d6e51c1",
+        "operation_key": null,
+        "page": 3,
+        "passage": "A retained official passage for this test fixture.",
+        "reference_release": "rel_irs_pinned",
+        "revision": "2025",
+        "section": "",
+        "tax_year": 2025,
+        "tax_year_status": "proposed"
+      }
+    ],
+    "facts": [
+      {
+        "confirmed_at": "2026-10-21T03:32:30.869971+00:00",
+        "confirmed_by": "user",
+        "created_at": "2026-10-21T03:32:30.865380+00:00",
+        "created_by": "model",
+        "id": "tax_9f6b5119eb7a4c499be863fab8c13917",
+        "kind": "user_statement",
+        "label": "Wages",
+        "operation_digest": "86b74fe1274cdd03caab838cc3d3d92b976f6ec204ebceaabcbdf611656925eb",
+        "operation_key": null,
+        "provenance": null,
+        "status": "confirmed",
+        "value": "55000.00"
+      }
+    ],
+    "files": [],
+    "goal": "Review deductions",
+    "id": "tax_4f869f24076942b6910236f80aad459c",
+    "jurisdiction": "US-federal",
+    "missing_items": [
+      {
+        "created_at": "2026-10-21T03:32:30.868476+00:00",
+        "created_by": "model",
+        "id": "tax_bbbf5ace4bbd4ad0b4fe3c9ac3469a43",
+        "label": "W-2 box 1",
+        "operation_digest": "91e18004b43eab3f92610f16c84c23bfc8bfb9b42e69e5156aba31df68f76296",
+        "operation_key": null,
+        "status": "resolved",
+        "resolved_at": "2026-10-21T03:32:30.871543+00:00",
+        "resolved_by": "user"
+      }
+    ],
+    "project_id": "proj_29ea442708524986abd9b6467161356a",
+    "reference_release": "rel_irs_pinned",
+    "return_items": [],
+    "revision": 7,
+    "tax_year": 2025,
+    "updated_at": "2026-10-21T03:32:30.871559+00:00",
+    "checklist": {
+      "checklist_version": 1,
+      "status": "needs_information",
+      "checks": [
+        {
+          "id": "scope",
+          "label": "Return year and scope",
+          "status": "passed",
+          "issues": []
+        },
+        {
+          "id": "facts",
+          "label": "User confirmation of facts",
+          "status": "passed",
+          "issues": []
+        },
+        {
+          "id": "fact_sources",
+          "label": "Fact provenance",
+          "status": "passed",
+          "issues": []
+        },
+        {
+          "id": "rule_evidence",
+          "label": "Dated official rule evidence",
+          "status": "needs_information",
+          "issues": [
+            "Tax-year applicability requires verification for evidence tax_2ea6cf5fe493453194124910ff2b5292."
+          ]
+        },
+        {
+          "id": "missing_items",
+          "label": "Missing records and uncertain pages",
+          "status": "passed",
+          "issues": []
+        },
+        {
+          "id": "duplicate_records",
+          "label": "Duplicate document records",
+          "status": "passed",
+          "issues": []
+        },
+        {
+          "id": "dependencies",
+          "label": "Calculation and proposed return item dependencies",
+          "status": "passed",
+          "issues": []
+        }
+      ],
+      "next_steps": [
+        "Tax-year applicability requires verification for evidence tax_2ea6cf5fe493453194124910ff2b5292."
+      ],
+      "document_scope": "Selected passages only. Remaining document pages have not been fully reviewed.",
+      "notice": "Review readiness describes recorded evidence coverage. It does not establish that a tax return is complete or legally correct."
+    },
+    "review": {
+      "summary": "Confirmed wages are available. Official rule evidence still needs review.",
+      "findings": [
+        {
+          "label": "Wages",
+          "detail": "The user confirmed the proposed wages.",
+          "fact_ids": [
+            "tax_9f6b5119eb7a4c499be863fab8c13917"
+          ],
+          "evidence_ids": [],
+          "calculation_ids": [],
+          "return_item_ids": []
+        }
+      ],
+      "next_question": "",
+      "tax_year": 2025,
+      "reference_release": "rel_irs_pinned",
+      "review_revision": 7,
+      "saved_at": "2026-10-21T19:17:35.188219+00:00",
+      "status": "limited_evidence",
+      "stale": false,
+      "limitations": [
+        "No official rule passages are linked to this review."
+      ],
+      "document_scope": "Selected passages only. Remaining document pages have not been fully reviewed.",
+      "notice": "This saved review does not establish that a tax return is complete or legally correct."
+    }
   }
 }

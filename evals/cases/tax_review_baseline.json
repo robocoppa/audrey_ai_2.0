@@ -1,0 +1,124 @@
+{
+  "schema": 1,
+  "language": "en",
+  "synthetic": true,
+  "status": "not_run",
+  "scope": "One native-browser planning worksheet; no live model result or complete-return accuracy claim.",
+  "label_policy": {
+    "created_at": "2026-10-21",
+    "review": "Coding-assistant source check; not independently adjudicated by a tax professional.",
+    "runner": "Existing native browser: upload, Start review, confirm proposed facts, Continue review.",
+    "expected_answers_are_upload_content": false,
+    "future_comparison": "Keep the exact fixture, goal, confirmed facts, model identities and pinned IRS release identical for matched single-pass and extended reviews."
+  },
+  "sources": [
+    {
+      "id": "irs-p501-2025",
+      "url": "https://www.irs.gov/pub/irs-pdf/p501.pdf",
+      "web_url": "https://www.irs.gov/publications/p501",
+      "title": "Publication 501 (2025)",
+      "verified_at": "2026-10-21",
+      "year_location": {
+        "pdf_page": 1,
+        "note": "The cover explicitly identifies 2025 returns; the posting date is not the year basis."
+      },
+      "amount_location": {
+        "pdf_page": 25,
+        "section": "Table 6",
+        "note": "The single-filer row gives the regular amount; the footnote sends older, blind or dependent taxpayers to different tables."
+      }
+    },
+    {
+      "id": "irs-i1040-2025",
+      "url": "https://www.irs.gov/instructions/i1040gi",
+      "title": "2025 Form 1040 instructions",
+      "verified_at": "2026-10-21",
+      "section": "What is new: increased standard deduction",
+      "note": "Independent official publication cross-check of the 2025 single-filer amount. A retained equivalent exact passage is acceptable."
+    },
+    {
+      "id": "irs-rev-proc-2025-32",
+      "url": "https://www.irs.gov/irb/2025-45_IRB",
+      "title": "Revenue Procedure 2025-32",
+      "verified_at": "2026-10-21",
+      "section": "Section 3.01",
+      "note": "Expressly replaces the earlier 2025 standard-deduction amounts. Reviewer background only; this baseline does not require a bulletin index."
+    }
+  ],
+  "cases": [
+    {
+      "id": "tax-review-2025-single-basic-worksheet",
+      "fixture": "evals/fixtures/tax-review-2025-single.txt",
+      "fixture_sha256": "f98cc06a0d782124322f91372a9095d49b1c9dd16a4e58b4b0cba0e98f1c360a",
+      "tax_year": 2025,
+      "jurisdiction": "US-federal",
+      "model": "private",
+      "skill": "tax-review",
+      "goal": "Review the uploaded synthetic 2025 income statement. Propose the filing facts, wages and federal withholding for my confirmation; keep the 2024 comparison separate. After I confirm the facts, find the 2025 basic standard deduction in the owned IRS library and calculate 2025 wages minus that deduction. Keep withholding separate. This is a limited planning worksheet, not a request for actual tax liability, a refund calculation or filing a return.",
+      "manual_sequence": [
+        "Open a new Private conversation, choose Tax review, set 2025 and paste this goal.",
+        "Upload the fixture text file and send: Read this synthetic document, propose the required facts, save a partial review, and wait for my confirmation.",
+        "Check that the necessary extracted facts are proposed and require your confirmation; the model must not confirm them.",
+        "Confirm accurate proposals in the Tax review box, then choose Start review or Continue review. If a bounded pass leaves more proposals, confirm those and continue.",
+        "Check the saved worksheet, source passages and calculator result against expected outcomes, then refresh once to check persistence."
+      ],
+      "expected": {
+        "facts": {
+          "filing_status": "single",
+          "age_at_year_end": 40,
+          "claimable_as_dependent": false,
+          "blind": false,
+          "residency": "U.S. citizen for all of 2025",
+          "return_period": "full calendar year",
+          "deduction_choice": "basic standard deduction",
+          "w2_box_1_wages_usd": "50000.00",
+          "w2_box_2_withholding_usd": "6000.00"
+        },
+        "prior_year_exclusion": {
+          "tax_year": 2024,
+          "wages_usd": "9000.00",
+          "included_in_2025_wages": false
+        },
+        "rule": {
+          "tax_year": 2025,
+          "basic_standard_deduction_usd": "15750.00",
+          "require_exact_retained_irs_passage": true,
+          "require_source_return_year_basis": true,
+          "accepted_source_ids": [
+            "irs-p501-2025",
+            "irs-i1040-2025"
+          ],
+          "rejected_outdated_deduction_usd": "15000.00",
+          "saved_tax_year_status": "proposed"
+        },
+        "calculation": {
+          "label": "2025 wages minus basic standard deduction",
+          "inputs": {
+            "wages": "50000.00",
+            "deduction": "15750.00"
+          },
+          "expression": "wages - deduction",
+          "rounding": "half_up_cent",
+          "result": "34250.00",
+          "meaning": "Requested arithmetic only; not tax liability, refund, or certification of taxable income on a complete return."
+        },
+        "confirmation_boundary": "Facts begin proposed. Pause for explicit user confirmation; Continue review may use only confirmed facts for supported findings.",
+        "worksheet_boundary": "Findings remain proposals; source-year applicability remains proposed or unknown under the current tool contract. Show that limitation and selected-passage scope. Do not claim the whole return was checked.",
+        "must_not": [
+          "Add 2024 wages to 2025 wages or report 59000.00 as 2025 wages.",
+          "Subtract federal withholding when calculating wages minus the standard deduction.",
+          "Obtain the deduction from this uploaded fixture rather than official retained IRS evidence.",
+          "Claim verified tax-year applicability, complete tax correctness, a refund or a final amount owed."
+        ]
+      },
+      "capture_for_future_comparison": [
+        "fixture_sha256",
+        "case goal and confirmed facts",
+        "pinned reference release and source revisions/pages",
+        "generation and embedding model identities",
+        "saved worksheet and limitations",
+        "wall time, tokens and tool calls"
+      ]
+    }
+  ]
+}

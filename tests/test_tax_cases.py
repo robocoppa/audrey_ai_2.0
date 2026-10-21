@@ -14,6 +14,7 @@ from audrey.app_state.tax_cases import (
     TaxCaseConflictError,
     TaxCaseError,
     tax_case_checklist,
+    tax_case_review,
     validate_operation,
     validate_tax_case,
 )
@@ -971,3 +972,256 @@ async def test_operation_key_cannot_change_which_retained_evidence_is_superseded
     with pytest.raises(TaxCaseConflictError, match="operation key"):
         await _update(state, case, "record_evidence", {**payload, "supersedes": [first, second]})
     assert "superseded_by" not in case["evidence"][1]
+
+
+def _saved_review_payload(case, **changes):
+    return {
+        "summary": "The recorded filing-status detail and selected rule passage are ready to discuss.",
+        "findings": [
+            {
+                "label": "Recorded planning result",
+                "detail": "This finding is limited to the records linked here.",
+                "fact_ids": [item["id"] for item in case["facts"] if item["status"] != "rejected"],
+                "evidence_ids": [item["id"] for item in case["evidence"]],
+                "calculation_ids": [item["id"] for item in case["calculations"]],
+                "return_item_ids": [item["id"] for item in case["return_items"]],
+            }
+        ],
+        "next_question": "",
+        **changes,
+    }
+
+
+async def test_saved_review_is_revision_bound_idempotent_and_survives_reopen(state):
+    store, owner, _, conversation = state
+    case, _, _ = await _supported_review(state)
+    assert tax_case_review(case) is None
+    payload = _saved_review_payload(case)
+    previous_revision = case["revision"]
+    case = await _update(state, case, "save_review", payload)
+    assert case["revision"] == previous_revision + 1
+    assert case["review"]["review_revision"] == case["revision"]
+    assert case["review"]["tax_year"] == 2025
+    assert case["review"]["reference_release"] == "rel_current"
+    view = tax_case_review(case)
+    assert view["status"] == "review_saved" and view["stale"] is False
+    assert view["limitations"] == []
+    assert "Selected passages only" in view["document_scope"]
+    assert "does not establish" in view["notice"]
+    assert await _update(state, case, "save_review", payload) == case
+    reopened = ApplicationStore(store.path)
+    try:
+        current = await reopened.tax_cases.get(
+            user_id=owner.user_id, conversation_id=conversation.conversation_id
+        )
+        assert current == case and tax_case_review(current) == view
+    finally:
+        reopened.close()
+    with pytest.raises(TaxCaseConflictError):
+        await store.tax_cases.update(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            expected_revision=previous_revision,
+            operation="save_review",
+            data=payload,
+        )
+
+
+async def test_changed_information_stales_review_and_identical_payload_requires_refresh(state):
+    case, _, _ = await _supported_review(state)
+    payload = _saved_review_payload(case)
+    case = await _update(state, case, "save_review", payload)
+    old_review = copy.deepcopy(case["review"])
+    # A true no-op does not stale the existing report.
+    same = await _update(
+        state, case, "confirm_fact", {"fact_id": case["facts"][0]["id"]}, actor="user"
+    )
+    assert same == case and tax_case_review(same)["stale"] is False
+    changed = await _update(state, case, "add_missing_item", {"label": "One additional statement"})
+    assert changed["review"] == old_review
+    assert tax_case_review(changed)["stale"] is True
+    assert tax_case_review(changed)["status"] == "needs_input"
+    refreshed = await _update(state, changed, "save_review", payload)
+    assert refreshed["revision"] == changed["revision"] + 1
+    assert refreshed["review"]["review_revision"] == refreshed["revision"]
+    assert tax_case_review(refreshed)["stale"] is False
+    assert tax_case_review(refreshed)["status"] == "needs_input"
+
+
+@pytest.mark.parametrize(
+    "field", ["fact_ids", "evidence_ids", "calculation_ids", "return_item_ids"]
+)
+async def test_review_references_must_belong_to_the_same_case_and_failure_is_atomic(state, field):
+    store, owner, _, conversation = state
+    case, _, _ = await _supported_review(state)
+    case = await _update(state, case, "save_review", _saved_review_payload(case))
+    other_conversation = await store.conversations.create(
+        user_id=owner.user_id, private_required=True
+    )
+    other = await store.tax_cases.create(
+        user_id=owner.user_id,
+        conversation_id=other_conversation.conversation_id,
+        tax_year=2025,
+        goal="Other review",
+        reference_release="rel_current",
+    )
+    other = await store.tax_cases.update(
+        user_id=owner.user_id,
+        conversation_id=other_conversation.conversation_id,
+        expected_revision=other["revision"],
+        operation="propose_fact",
+        data=_fact(),
+    )
+    payload = _saved_review_payload(case)
+    payload["findings"][0][field] = [other["facts"][0]["id"]]
+    with pytest.raises(TaxCaseError, match="not found in this case"):
+        await _update(state, case, "save_review", payload)
+    assert (
+        await store.tax_cases.get(
+            user_id=owner.user_id, conversation_id=conversation.conversation_id
+        )
+        == case
+    )
+
+
+async def test_saved_review_cannot_refresh_using_rejected_nested_fact_support(state):
+    store, owner, _, conversation = state
+    case, _, _ = await _supported_review(state)
+    payload = _saved_review_payload(case)
+    # The rejected dependency is nested through saved work, not directly listed.
+    payload["findings"][0]["fact_ids"] = []
+    case = await _update(state, case, "save_review", payload)
+    case = await _update(
+        state, case, "reject_fact", {"fact_id": case["facts"][0]["id"]}, actor="user"
+    )
+    old_review = copy.deepcopy(case["review"])
+    with pytest.raises(TaxCaseError, match="rejected fact"):
+        await _update(state, case, "save_review", payload)
+    current = await store.tax_cases.get(
+        user_id=owner.user_id, conversation_id=conversation.conversation_id
+    )
+    assert current == case and current["review"] == old_review
+    assert tax_case_review(current)["stale"] is True
+    assert any("rejected fact" in line for line in tax_case_review(current)["limitations"])
+
+
+@pytest.mark.parametrize("field", ["evidence_ids", "calculation_ids", "return_item_ids"])
+async def test_review_cannot_reuse_support_after_library_change(state, field):
+    case, _, _ = await _supported_review(state)
+    payload = _saved_review_payload(case)
+    payload["findings"][0] = {
+        "label": "One retained dependency",
+        "detail": "The dependency needs to be current.",
+        field: payload["findings"][0][field],
+    }
+    case = await _update(state, case, "save_review", payload)
+    case = await _update(
+        state, case, "update_reference_release", {"reference_release": "rel_next"}, actor="user"
+    )
+    assert tax_case_review(case)["stale"] is True
+    with pytest.raises(TaxCaseError, match="rechecked"):
+        await _update(state, case, "save_review", payload)
+
+
+async def test_year_change_preserves_report_but_stale_work_cannot_refresh_it(state):
+    case, _, _ = await _supported_review(state)
+    payload = _saved_review_payload(case)
+    case = await _update(state, case, "save_review", payload)
+    original = copy.deepcopy(case["review"])
+    case = await _update(state, case, "change_year", {"tax_year": 2024}, actor="user")
+    assert case["review"] == original and tax_case_review(case)["stale"] is True
+    with pytest.raises(TaxCaseError, match="rechecked"):
+        await _update(state, case, "save_review", payload)
+
+
+@pytest.mark.parametrize(
+    "changes, message",
+    [
+        ({"tax_year": None}, "unknown"),
+        ({"tax_year": 2024, "tax_year_status": "verified"}, "different tax year"),
+        ({"tax_year_status": "proposed"}, "not been verified"),
+        (
+            {"jurisdiction": "Other-jurisdiction", "tax_year_status": "verified"},
+            "different jurisdiction",
+        ),
+    ],
+)
+async def test_uncertain_rule_applicability_is_preserved_as_review_limitation(
+    state, changes, message
+):
+    case = await _create(state)
+    case = await _update(state, case, "propose_fact", _fact())
+    case = await _update(
+        state, case, "confirm_fact", {"fact_id": case["facts"][0]["id"]}, actor="user"
+    )
+    case = await _update(state, case, "record_evidence", _evidence(**changes), actor="user")
+    case = await _update(state, case, "save_review", _saved_review_payload(case))
+    view = tax_case_review(case)
+    assert view["status"] == "limited_evidence" and view["stale"] is False
+    assert any(message in limitation for limitation in view["limitations"])
+
+
+async def test_proposed_facts_questions_and_missing_support_never_imply_completed_review(state):
+    case = await _create(state)
+    case = await _update(
+        state,
+        case,
+        "save_review",
+        {"summary": "There are no saved records to review yet.", "findings": []},
+    )
+    view = tax_case_review(case)
+    assert view["status"] == "limited_evidence"
+    assert any("No official rule passages" in line for line in view["limitations"])
+    assert any("No saved facts" in line for line in view["limitations"])
+    case = await _update(state, case, "propose_fact", _fact())
+    case = await _update(
+        state,
+        case,
+        "save_review",
+        _saved_review_payload(case, next_question="Could you confirm your filing status?"),
+    )
+    view = tax_case_review(case)
+    assert view["status"] == "needs_input"
+    assert any("confirmation" in line for line in view["limitations"])
+    assert view["next_question"] == "Could you confirm your filing status?"
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"summary": ""},
+        {"summary": "x" * 2001},
+        {"findings": [{}] * 13},
+        {"next_question": "x" * 501},
+        {"status": "correct"},
+        {"findings": [{"label": "x" * 501, "detail": "Detail"}]},
+        {"findings": [{"label": "Label", "detail": "x" * 2001}]},
+        {"findings": [{"label": "Label", "detail": "Detail", "fact_ids": ["x"] * 101}]},
+        {"findings": [{"label": "Label", "detail": "Detail", "verified": True}]},
+    ],
+)
+def test_review_payload_bounds_cannot_be_overridden(changes):
+    with pytest.raises(TaxCaseError):
+        validate_operation(
+            "save_review", {"summary": "A recorded review.", "findings": [], **changes}
+        )
+
+
+async def test_oversized_review_does_not_erase_prior_report_or_partial_case_update(state):
+    store, owner, _, conversation = state
+    case, _, _ = await _supported_review(state)
+    payload = _saved_review_payload(case)
+    case = await _update(state, case, "save_review", payload)
+    finding = payload["findings"][0]
+    finding.update(label="l" * 500, detail="d" * 2000)
+    for field in ("fact_ids", "evidence_ids", "calculation_ids", "return_item_ids"):
+        finding[field] = finding[field] * 100
+    payload["findings"] = [copy.deepcopy(finding) for _ in range(12)]
+    with pytest.raises(TaxCaseError, match="storage limit"):
+        await _update(state, case, "save_review", payload)
+    assert (
+        await store.tax_cases.get(
+            user_id=owner.user_id, conversation_id=conversation.conversation_id
+        )
+        == case
+    )

@@ -190,3 +190,54 @@ it("requires reload after a stale library choice and never silently adopts a new
   expect(callbacks.onCaseChange).toHaveBeenLastCalledWith(latest);
   expect(fetchMock).toHaveBeenCalledTimes(3);
 });
+
+
+it("offers review of an unfinished case without confirming its proposed facts", async () => {
+  const fetchMock = vi.fn().mockResolvedValueOnce(json({ case: taxCase }));
+  vi.stubGlobal("fetch", fetchMock);
+  const callbacks = { ...props(), onReview: vi.fn() };
+  render(<TaxReview {...callbacks} expanded={false} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Start review" }));
+  expect(callbacks.onReview).toHaveBeenCalledOnce();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(callbacks.onSaved).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Confirm Wages" })).toBeEnabled();
+});
+
+it.each(["update_available", "unavailable"] as const)("pauses review when the IRS library is %s", async (status) => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json({ case: { ...taxCase,
+    reference_update: { status, ...(status === "update_available" ? { release_id: "rel_new" } : {}) },
+  } })));
+  render(<TaxReview {...props()} onReview={vi.fn()} expanded={false} />);
+  expect(await screen.findByRole("button", { name: "Start review" })).toBeDisabled();
+});
+
+it("keeps the saved worksheet available on demand and warns when it needs updating", async () => {
+  const saved = { ...taxCase, calculations: [{ id: "calc_private", label: "Adjusted total", expression: "1250 * 1.08", result: "1350" }], review: {
+    summary: "The arithmetic is consistent. Filing information is incomplete.",
+    findings: [{ label: "Adjustment", detail: "An eight-percent adjustment is recorded.", fact_ids: [], evidence_ids: [], calculation_ids: ["calc_private"], return_item_ids: [] }],
+    next_question: "Did you receive any other income?", status: "needs_input", stale: true,
+    limitations: ["This review does not cover state taxes."], tax_year: 2025, reference_release: "rel_hidden", review_revision: 3,
+  } };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json({ case: saved })));
+  render(<TaxReview {...props()} onReview={vi.fn()} expanded={false} />);
+  expect(await screen.findByRole("button", { name: "Continue review" })).toBeEnabled();
+  expect(screen.getByText("Review needs updating")).toBeVisible();
+  const details = screen.getByText("Review worksheet").closest("details")!;
+  expect(details).not.toHaveAttribute("open");
+  fireEvent.click(screen.getByText("Review worksheet"));
+  expect(screen.getByText(saved.review.summary)).toBeVisible();
+  expect(screen.getByText("Adjusted total: 1250 * 1.08 = 1350")).toBeVisible();
+  expect(screen.getByText(saved.review.next_question)).toBeVisible();
+  expect(screen.getByText(saved.review.limitations[0])).toBeVisible();
+  expect(screen.getByRole("region", { name: "Tax review case" })).not.toHaveTextContent(/rel_hidden|calc_private|review_revision/u);
+});
+
+it("keeps review unavailable during an active run or upload", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json({ case: taxCase })));
+  const onReview = vi.fn();
+  render(<TaxReview {...props()} onReview={onReview} disabled expanded={false} />);
+  expect(await screen.findByRole("button", { name: "Start review" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Start review" }));
+  expect(onReview).not.toHaveBeenCalled();
+});

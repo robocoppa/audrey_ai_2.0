@@ -456,3 +456,56 @@ async def test_model_cannot_update_reference_release(state):
             "reference_release": case["reference_release"],
         })
     assert "update_reference_release" not in tax_review_spec("http://custom-tools:8001").parameters["properties"]["operation"]["enum"]
+
+
+async def test_saved_review_is_owned_and_invalidated_after_fact_confirmation(state):
+    case = await _create(state)
+    fact = await _call(state, "propose_fact", expected_revision=case["revision"], data={
+        "label": "Wages", "value": "50000", "kind": "user_statement",
+    })
+    result = await _call(state, "save_review", expected_revision=fact["revision"], data={
+        "summary": "Wages need confirmation before calculation.", "findings": [{
+            "label": "Proposed wages", "detail": "The stated wages remain a proposal.",
+            "fact_ids": [fact["updated_entry"]["id"]],
+        }], "next_question": "Are the wages correct?",
+    })
+    assert "error" not in result, result
+    assert result["review"]["status"] == "needs_input" and not result["review"]["stale"]
+    review = (await state.client.get(state.path)).json()["case"]["review"]
+    assert review["summary"] == "Wages need confirmation before calculation."
+    assert review["limitations"] and "Selected passages only" in review["document_scope"]
+    confirmed = await state.client.post(state.path + "/actions", json={
+        "operation": "confirm_fact", "expected_revision": result["revision"],
+        "data": {"fact_id": fact["updated_entry"]["id"]},
+    })
+    assert confirmed.status_code == 200 and confirmed.json()["review"]["stale"]
+    invalid = await _call(state, "save_review", expected_revision=confirmed.json()["revision"], data={
+        "summary": "Forged support", "findings": [{"label": "Foreign", "detail": "Unsupported", "fact_ids": ["foreign_id"]}],
+    })
+    assert invalid["status"] == 422
+    assert (await state.client.get(state.path)).json()["case"]["review"]["summary"] == review["summary"]
+
+
+async def test_inspect_lists_canonical_selected_documents_before_extraction(state):
+    from unittest.mock import AsyncMock
+
+    from audrey.app_state.records import ProjectFileRecord
+
+    original = state.store.projects.snapshot_for_conversation
+    state.store.projects.snapshot_for_conversation = AsyncMock(return_value=(None, [ProjectFileRecord(project_id="project", file_id="selected_id", added_at="2026-10-21")]))
+    try:
+        await _create(state)
+        result = await _call(state, section="files")
+    finally:
+        state.store.projects.snapshot_for_conversation = original
+    assert result["entries"] == [{"file_id": "selected_id", "selected_via": "project"}]
+    assert result["case"]["selected_file_count"] == 1
+    assert "listing a file does not establish" in result["case"]["document_scope"]
+
+
+def test_review_schema_exposes_saved_worksheet_without_certification():
+    spec = tax_review_spec("http://custom-tools:8001")
+    assert "save_review" in spec.parameters["properties"]["operation"]["enum"]
+    properties = spec.parameters["properties"]["data"]["properties"]
+    assert {"summary", "findings", "next_question"}.issubset(properties)
+    assert not {"verified", "complete", "correct"}.intersection(properties)

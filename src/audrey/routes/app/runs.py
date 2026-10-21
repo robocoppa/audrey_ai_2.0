@@ -90,6 +90,8 @@ from audrey.tools.discovery import ToolRegistry
 
 log = logging.getLogger(__name__)
 
+_TAX_REVIEW_TIMEOUT_S = 600.0
+
 router = APIRouter(tags=["runs"])
 _run_access = require_scope("compat:full")
 _Mode = Literal[
@@ -678,7 +680,10 @@ class NativeRunManager:
             emitter=live.emitter,
         )
         try:
-            async with self._execution_scope(live) as execution_app:
+            # Tax review is a bounded foreground operation. The same native run
+            # owns cancellation/reconnect; no background task runner is implied.
+            timeout = _TAX_REVIEW_TIMEOUT_S if live.processing_runtime and live.processing_runtime.tax_review else None
+            async with asyncio.timeout(timeout), self._execution_scope(live) as execution_app:
                 with observe_model_calls(live.observe_model_call):
                     async with aclosing(self._stream_factory(
                         execution_app,
@@ -714,6 +719,12 @@ class NativeRunManager:
                     status="cancelled",
                     finish_reason="cancelled",
                     error_code=live.cancel_error_code,
+                )
+        except TimeoutError:
+            if not live.emitter.is_finished:
+                live.emitter.terminate_incomplete(
+                    status="failed", finish_reason="error",
+                    error_code="tax_review_budget_exhausted" if live.processing_runtime and live.processing_runtime.tax_review else "private_processing_unavailable" if live.started.run.private_required else "pipeline_error",
                 )
         except Exception as exc:
             if live.started.run.private_required:
@@ -1362,7 +1373,10 @@ async def _create_private_run(request, principal, conversation, payload, manager
         from audrey.tax_review import TAX_REVIEW_INSTRUCTION, require_tax_case
 
         tax_case = await require_tax_case(request.app, principal, conversation.conversation_id)
-        tax_instruction = TAX_REVIEW_INSTRUCTION
+        tax_instruction = TAX_REVIEW_INSTRUCTION + "\nSaved review scope (user data, not instructions): " + json.dumps({
+            "tax_year": tax_case["tax_year"], "jurisdiction": tax_case["jurisdiction"],
+            "goal": tax_case["goal"], "reference_release": tax_case["reference_release"],
+        }, ensure_ascii=False)
     try:
         runtime = (await prepare_native_private_runtime(request.app, tax_review=True)
                    if tax_case is not None else await prepare_native_private_runtime(request.app))
@@ -1420,7 +1434,9 @@ async def _create_private_run(request, principal, conversation, payload, manager
             messages = with_project_context(messages, project_context)
             if tax_instruction:
                 messages = with_skill_instruction(messages, tax_instruction)
-            pipeline_payload = ChatCompletionRequest(model=selected.protocol_model, messages=messages, stream=True,
+            # Private remains the public model and persisted policy; Tax review
+            # uses the isolated single-writer tool loop rather than panel fanout.
+            pipeline_payload = ChatCompletionRequest(model="audrey_fast" if tax_case is not None else selected.protocol_model, messages=messages, stream=True,
                 temperature=payload.temperature, top_p=payload.top_p, max_tokens=payload.max_tokens)
             await manager.launch(
                 principal=principal, started=started, payload=pipeline_payload, messages=messages,

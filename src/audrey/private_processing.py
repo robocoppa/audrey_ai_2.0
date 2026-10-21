@@ -159,6 +159,28 @@ def private_configuration(cfg: Any, policy: ProcessingPolicy) -> Any:
     return isolated
 
 
+def _tax_review_configuration(cfg: Any) -> Any:
+    """Use one existing verified tool writer, never a parallel tax case panel.
+
+    cfg is already the per-operation deep copy. Ordinary Private and the shared
+    configuration retain their existing pools, budgets and routing behavior.
+    """
+    raw = cfg.raw
+    capable = set((raw.get("fast_path") or {}).get("tool_capable_models") or [])
+    candidates = [entry for entry in (raw.get("model_registry") or {}).get("general", [])
+                  if entry["name"] in capable]
+    if not candidates:
+        raise ProcessingPolicyError("private_processing_unavailable")
+    writer = max(candidates, key=lambda entry: int(entry.get("priority", 0)))
+    raw["model_registry"] = {task: [deepcopy(writer)] for task in ("code", "reasoning", "general", "vl")}
+    raw.setdefault("agentic", {}).setdefault("react", {}).update(
+        max_rounds=12, compress_after_round=4, compress_keep_last=8,
+    )
+    raw["agentic"].setdefault("escalation", {})["enabled"] = False
+    raw["agentic"].setdefault("reflection", {})["enabled"] = False
+    return cfg
+
+
 async def prepare_native_private_runtime(app: Any, *, tax_review: bool = False) -> PrivateProcessingRuntime:
     """Prepare the explicit native Private workflow from deployment settings."""
     cfg = app.state.cfg
@@ -241,6 +263,8 @@ class PrivateProcessingRuntime:
         with processing_scope(self.policy):
             async with AsyncExitStack() as stack:
                 cfg = private_configuration(app.state.cfg, self.policy)
+                if self.tax_review:
+                    cfg = _tax_review_configuration(cfg)
                 timeout = float(cfg.timeouts.get("medium", 180))
                 ollama = OllamaClient(
                     self.policy.ollama_base_url, default_timeout_s=timeout,

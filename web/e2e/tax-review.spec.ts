@@ -1,8 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-import type { TaxCase } from "../src/taxReviewApi";
+import { TAX_REVIEW_PROMPT, type TaxCase } from "../src/taxReviewApi";
 // Generated through the real repository operations and checklist serializer.
 import fixtures from "../src/test/fixtures/tax-review-cases.json" with { type: "json" };
+import fileFixture from "../src/test/fixtures/tax-review-files.json" with { type: "json" };
 
 function fixtureCase(state: keyof typeof fixtures): TaxCase {
   return { ...fixtures[state], conversation_id: ID, project_id: null } as TaxCase;
@@ -18,8 +19,10 @@ async function json(route: Route, body: unknown, status = 200) {
 
 async function mockTaxApi(page: Page) {
   let taxCase: TaxCase | null = null;
+  let saveReviewNext = false;
   const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
   const skills: Array<string | null> = [];
+  const agentBodies: Array<Record<string, unknown>> = [];
   const conversation = {
     id: ID, title: "Private tax review", private_required: true, default_mode: "local", default_model_id: "private",
     project_id: null, created_at: DATE, updated_at: DATE, last_message_at: null as string | null, archived_at: null,
@@ -34,6 +37,7 @@ async function mockTaxApi(page: Page) {
     if (path === "/api/models") return json(route, { items: ["auto", "private"].map((id) => ({ id, label: id === "private" ? "Private" : "Auto", description: "Audrey workflow", kind: "workflow", mode: id === "private" ? "local" : "auto", presentation: "local", capabilities: ["text", "files", "tools"], enabled: true, audience: "users", visibility: "public", roles: ["users"], portrait_url: "" })) });
     if (path === "/api/skills") return json(route, { enabled: true, status: "ready", items: [] });
     if (path === "/api/capabilities") return json(route, { status: "degraded", generated_at: DATE, chat: { status: "available" }, tools: { status: "degraded" }, knowledge: { status: "available" }, skills: { status: "available" } });
+    if (path === "/api/files") return json(route, fileFixture);
     if (path === "/api/projects") return json(route, { items: [], next_cursor: null });
     if (path === "/api/conversations") return json(route, request.method() === "POST" ? conversation : { items: [conversation, ordinary], next_cursor: null });
     if (path === `/api/conversations/${ID}`) return json(route, conversation);
@@ -65,10 +69,11 @@ async function mockTaxApi(page: Page) {
       return json(route, taxCase);
     }
     if (path === "/api/agent") {
+      agentBodies.push(request.postDataJSON());
       conversation.last_message_at = DATE;
       skills.push(url.searchParams.get("skill"));
       const runId = "run_tax_" + skills.length;
-      if (taxCase && url.searchParams.get("skill") === "tax-review") taxCase = fixtureCase("proposed");
+      if (taxCase && url.searchParams.get("skill") === "tax-review") taxCase = fixtureCase(saveReviewNext ? "reviewed" : "proposed");
       const messageId = "msg_" + runId;
       const events = [
         { type: "RUN_STARTED", threadId: ID, runId },
@@ -82,7 +87,7 @@ async function mockTaxApi(page: Page) {
     if (path.startsWith("/api/runs/run_tax_")) return json(route, { id: path.split("/").at(-1), conversation_id: ID, status: "succeeded", title_pending: false });
     await route.abort("failed");
   });
-  return { requests, skills, offerLibraryUpdate() {
+  return { requests, skills, agentBodies, saveReviewOnNextTurn() { saveReviewNext = true; }, offerLibraryUpdate() {
     if (!taxCase) throw new Error("Create the case before offering a library update.");
     taxCase = { ...taxCase, reference_update: { status: "update_available", release_id: "rel_updated_library" } };
   } };
@@ -110,9 +115,11 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     const composer = page.getByRole("textbox", { name: "Ask Audrey" });
     await expect(composer).toBeInViewport();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
-    await composer.fill("Review my case.");
-    await composer.press("Enter");
+    await composer.fill("An unsent question to keep.");
+    await panel.getByRole("button", { name: "Start review" }).click();
     await expect(page.getByText("Review findings saved 1.")).toBeVisible();
+    await expect(composer).toHaveValue("An unsent question to keep.");
+    expect(JSON.stringify(observed.agentBodies[0])).toContain(TAX_REVIEW_PROMPT);
     const question = panel.getByRole("region", { name: "Tax review choices" });
     await expect(question.getByText("Confirm this detail")).toBeVisible();
     await expect(question.getByText("55000.00", { exact: true })).toBeVisible();
@@ -132,7 +139,23 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await expect(page.getByText("Review findings saved 2.")).toBeVisible();
     await expect(page.getByText("Marked addressed.", { exact: true })).toHaveCount(0);
     expect(observed.skills).toEqual(["tax-review", null]);
+    observed.saveReviewOnNextTurn();
+    await page.getByRole("button", { name: "Add files", exact: true }).click();
+    const files = page.getByRole("region", { name: "Choose attachments" });
+    await files.getByRole("button", { name: /unsent-private.txt/u }).click();
+    await files.getByRole("button", { name: "Hide attachment picker" }).click();
+    await composer.fill("Keep this draft and its file.");
+    await panel.getByRole("button", { name: "Start review" }).click();
+    await expect(page.getByText("Review findings saved 3.")).toBeVisible();
+    await expect(composer).toHaveValue("Keep this draft and its file.");
+    await expect(page.getByRole("button", { name: "Remove attachment unsent-private.txt" })).toBeVisible();
+    expect(observed.skills).toEqual(["tax-review", null, "tax-review"]);
+    expect(observed.agentBodies[2]).not.toHaveProperty("attachmentIds");
+    await expect(panel.getByRole("button", { name: "Continue review" })).toBeVisible();
+    await panel.getByText("Review worksheet", { exact: true }).click();
+    await expect(panel.getByText(fixtures.reviewed.review.summary, { exact: true })).toBeVisible();
     await page.reload();
+    await expect(panel.getByRole("button", { name: "Continue review" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeVisible();
     await expect(page.getByText("Some features degraded", { exact: true })).toHaveCount(0);
     await panel.getByRole("button", { name: /Tax review · 2025/u }).click();
