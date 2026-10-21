@@ -13,13 +13,9 @@ vi.mock("./ChatWorkspace", async (importOriginal) => {
     ...actual,
     ChatWorkspace: (props: ComponentProps<typeof actual.ChatWorkspace>) => workspaceMock.enabled ? (
       <>
-        <button type="button" onClick={() => props.onTaxReviewActiveChange?.(true)}>
-          Select Tax review conversation
-        </button>
-        <button type="button" onClick={() => props.onTaxReviewActiveChange?.(false)}>
-          Select ordinary conversation
-        </button>
+        <span>Workspace ready</span>
         {props.menuActions}
+        {props.menuFooter}
       </>
     ) : <actual.ChatWorkspace {...props} />,
   };
@@ -80,7 +76,7 @@ function mockCapabilitySession(health: "degraded" | "unavailable" | "missing") {
       : path === "/api/capabilities" ? {
         status: health, generated_at: "2026-10-21T12:00:00+00:00",
         chat: { status: health === "unavailable" ? "unavailable" : "available" },
-        tools: { status: "degraded" }, knowledge: { status: "available" },
+        tools: { status: "available" }, knowledge: { status: "degraded" },
       } : collectionPayload(path);
     return Promise.resolve(new Response(JSON.stringify(payload), {
       status: 200, headers: { "Content-Type": "application/json" },
@@ -358,7 +354,7 @@ describe("App", () => {
     },
   );
 
-  it("reports degraded capabilities without blocking the workspace", async () => {
+  it("keeps degraded capabilities out of the workspace header", async () => {
     const fetchMock = vi.fn().mockImplementation((path: string) => {
       const payload = path === "/api/me"
         ? {
@@ -391,41 +387,38 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Some features degraded")).toBeVisible();
-    expect(screen.getByLabelText("Signed in user")).toBeVisible();
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(await screen.findByLabelText("Signed in user")).toBeVisible();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/capabilities",
       expect.objectContaining({ credentials: "same-origin" }),
-    );
+    ));
+    expect(screen.queryByText("Some features degraded")).not.toBeInTheDocument();
   });
 
-  it("hides the generic degraded notice in Tax review and restores it in an ordinary conversation", async () => {
+  it("omits generic degradation from all native session surfaces", async () => {
     workspaceMock.enabled = true;
     const fetchMock = mockCapabilitySession("degraded");
     render(<App />);
 
-    const selectTaxReview = await screen.findByRole("button", { name: "Select Tax review conversation" });
-    expect(await screen.findAllByText("Some features degraded")).toHaveLength(2);
-    fireEvent.click(selectTaxReview);
+    expect(await screen.findByText("Workspace ready")).toBeVisible();
+    await waitFor(() => expect(fetchMock.mock.calls.some(([path]) => path === "/api/capabilities")).toBe(true));
+    expect(screen.getByRole("group", { name: "Session controls" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Menu actions" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Account actions" })).toBeInTheDocument();
     expect(screen.queryByText("Some features degraded")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Select ordinary conversation" }));
-    expect(screen.getAllByText("Some features degraded")).toHaveLength(2);
-    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/capabilities")).toHaveLength(1);
+    expect(screen.queryByTitle(/Knowledge:/)).not.toBeInTheDocument();
   });
 
   it.each([
     ["unavailable", "Models offline"],
     ["missing", "Status unavailable"],
-  ] as const)("keeps %s health visible during Tax review", async (health, label) => {
+  ] as const)("keeps %s health visible", async (health, label) => {
     workspaceMock.enabled = true;
     mockCapabilitySession(health);
     render(<App />);
 
-    const selectTaxReview = await screen.findByRole("button", { name: "Select Tax review conversation" });
+    expect(await screen.findByText("Workspace ready")).toBeVisible();
     expect(await screen.findAllByText(label)).toHaveLength(2);
-    fireEvent.click(selectTaxReview);
-    expect(screen.getAllByText(label)).toHaveLength(2);
   });
 
   it("holds through multiple transient Access bootstrap rejections", async () => {

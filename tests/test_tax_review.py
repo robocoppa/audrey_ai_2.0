@@ -136,6 +136,34 @@ async def test_only_owner_action_confirms_proposal_and_model_cannot_confirm(stat
     assert stale["error"] == "case_changed" and stale["status"] == 409
 
 
+async def test_grouped_fact_confirmation_is_explicit_owner_action_and_hidden_from_model(state):
+    case = await _create(state)
+    identifiers = []
+    for number in range(2):
+        proposal = await _call(state, "propose_fact", expected_revision=case["revision"], data={
+            "label": f"Fact {number}", "value": "single", "kind": "user_statement",
+        })
+        identifiers.append(proposal["updated_entry"]["id"])
+        case["revision"] = proposal["revision"]
+    with pytest.raises(PrivateToolArgumentsError):
+        await _call(state, "confirm_facts", expected_revision=case["revision"], data={"fact_ids": identifiers})
+    assert "confirm_facts" not in tax_review_spec("http://custom-tools:8001").parameters["properties"]["operation"]["enum"]
+    body = {"operation": "confirm_facts", "expected_revision": case["revision"], "data": {"fact_ids": identifiers}}
+    response = await state.client.post(state.path + "/actions", json=body)
+    assert response.status_code == 200, response.text
+    confirmed = response.json()
+    assert confirmed["revision"] == case["revision"] + 1
+    assert all(fact["status"] == "confirmed" for fact in confirmed["facts"])
+    assert (await state.client.post(state.path + "/actions", json=body)).status_code == 409
+    body["expected_revision"] = confirmed["revision"]
+    assert (await state.client.post(state.path + "/actions", json=body)).json()["revision"] == confirmed["revision"]
+    state.current[0] = await state.store.resolve_external_identity(
+        provider="test", subject="group-other", email="group-other@example.com", display_name="Other",
+        role="user", auth_method="test",
+    )
+    assert (await state.client.post(state.path + "/actions", json=body)).status_code == 404
+
+
 async def test_browser_actions_cannot_append_model_data(state):
     await _create(state)
     response = await state.client.post(state.path + "/actions", json={"operation": "propose_fact", "expected_revision": 1, "data": {"label": "Unreviewed", "value": "1", "kind": "user_statement"}})
@@ -152,6 +180,16 @@ async def test_evidence_is_reread_from_actual_pdf_and_year_remains_proposed(stat
     assert entry["tax_year"] == 2025 and entry["tax_year_status"] == "proposed"
     rule = next(item for item in case["checklist"]["checks"] if item["id"] == "rule_evidence")
     assert rule["status"] == "needs_information"
+    # Model-facing coverage keeps unresolved work without repeating empty checks.
+    model_checks = written["checklist"]["checks"]
+    assert any(item["id"] == "rule_evidence" for item in model_checks)
+    assert all(item["issue_count"] > 0 for item in model_checks)
+    assert {item["id"] for item in model_checks} == {
+        item["id"] for item in case["checklist"]["checks"] if item["issues"]
+    }
+    # Compaction must not turn a bookkeeping warning into verified applicability.
+    inspected = await _call(state, section="evidence")
+    assert inspected["entries"][0]["tax_year_status"] == "proposed"
 
 
 @pytest.mark.parametrize("changes", [

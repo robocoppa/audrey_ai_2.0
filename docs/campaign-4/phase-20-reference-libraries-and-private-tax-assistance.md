@@ -479,7 +479,8 @@ The main plan owns the remaining queue; no temporary smoke document is retained.
 The [main build queue](README.md#build-queue) owns status and order. The contracts
 below cover the dedicated tax-review tool and reusable Private task runner,
 with tax assistance as the first workflow. The saved case/tool foundation is built;
-foreground worksheet review is built; its accuracy acceptance and the task runner remain queued.
+foreground worksheet review has a limited user-reported numerical pass; broader
+accuracy acceptance and the task runner remain queued.
 OCR/media remain deferred until a case requires them.
 
 #### Tax review tool and case record
@@ -487,12 +488,19 @@ OCR/media remain deferred until a case requires them.
 **20D.2 functionality accepted October 21; presentation followup built.** Select
 Private, choose Tax review in Tools & skills, choose the federal return year and
 goal, then save. The year defaults to the previous completed calendar year and
-can be changed before or after setup. Settings collapse after saving. The compact
-row contains user choices; record IDs, checksums and checklist internals stay out
-of it. Confirmation/rejection and missing-information choices stay inside this
-same compact box, one item at a time; year and goal expand under Settings. New answers explain practical next steps and keep
-internal IDs/checklist codes in tool calls. The generic degraded-features badge
-is hidden for a selected saved Tax case; actual service/model failures still show.
+can be changed before or after setup. Settings open in a dialog bounded by the
+visible screen and collapse after saving. The compact box retains settings,
+Start/Continue and collapsed findings. Essential confirmation/rejection and
+missing-information choices appear in the conversation; related facts can be
+confirmed together. After the owner saves a choice, a visible native user reply
+informs Audrey and starts the next review automatically. Unsent composer text and
+attachments remain untouched; a failed or stale save sends no reply. Only the
+owner can approve facts. Record IDs, checksums and passing checklist rows stay
+internal. Audrey handles official-source verification herself and asks only for
+facts or decisions the user can supply. The generic degraded-features badge is
+removed throughout chat, including new chat after deletion; actual service/model
+outage indicators remain. Local backend/UI and responsive browser checks passed;
+targeted live acceptance is pending.
 Each conversation owns one case; Project membership is derived from its canonical
 conversation. A saved case does not activate Tax review automatically after reload.
 Automatic Private retains its existing tools and behavior. The additive schema 23
@@ -566,8 +574,11 @@ native flow. It separates 2025 wages/withholding from a 2024 comparison, pauses 
 fact confirmation, retains official deduction evidence and checks the requested
 wages-minus-deduction arithmetic. Expected values stay outside the upload. This
 is a manual native-browser baseline using the existing workflow, not a new probe
-runner. Its answer-quality result is not yet measured; source/plumbing checks do
-not close the known tax-accuracy cases in this phase or certify a return.
+runner. The user-reported answer passed the requested numerical/separation check:
+$50,000 wages minus a $15,750 deduction gave $34,250; $6,000 withholding stayed
+separate and $9,000 of prior-year wages was excluded. An official deduction passage
+was retained. This limited pass does not independently verify legal applicability,
+close the known tax-accuracy cases in this phase or certify a complete return.
 
 **Tax review** appears in the existing Tools and skills control for a Private
 conversation/Project. It may be selected explicitly; ordinary Private questions

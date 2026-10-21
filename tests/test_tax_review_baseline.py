@@ -14,7 +14,6 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_manual_tax_baseline_is_frozen_without_uploading_the_expected_answer():
     manifest = json.loads((ROOT / "evals/cases/tax_review_baseline.json").read_text())
     assert manifest["language"] == "en" and manifest["synthetic"] is True
-    assert manifest["status"] == "not_run"
     assert len(manifest["cases"]) == 1
     case = manifest["cases"][0]
     raw = (ROOT / case["fixture"]).read_bytes()

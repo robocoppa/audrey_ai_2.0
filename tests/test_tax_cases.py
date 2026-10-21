@@ -261,6 +261,65 @@ async def test_only_user_actions_confirm_facts_and_resolve_missing_records(state
     assert case["missing_items"][0]["status"] == "resolved"
 
 
+async def test_grouped_confirmation_is_user_only_one_revision_and_idempotent(state):
+    case = await _create(state)
+    for number in range(3):
+        case = await _update(state, case, "propose_fact", _fact(label=f"Fact {number}"))
+    identifiers = [fact["id"] for fact in case["facts"]]
+    case = await _update(state, case, "confirm_fact", {"fact_id": identifiers[0]}, actor="user")
+    already_confirmed = copy.deepcopy(case["facts"][0])
+    data = {"fact_ids": identifiers}
+    with pytest.raises(TaxCaseError, match="user action"):
+        await _update(state, case, "confirm_facts", data)
+    confirmed = await _update(state, case, "confirm_facts", data, actor="user")
+    assert confirmed["revision"] == case["revision"] + 1
+    assert confirmed["facts"][0] == already_confirmed
+    assert all(fact["status"] == "confirmed" for fact in confirmed["facts"])
+    assert all(fact["confirmed_by"] == "user" for fact in confirmed["facts"])
+    assert all(fact["confirmed_tax_year"] == 2025 for fact in confirmed["facts"])
+    assert confirmed["facts"][1]["confirmed_at"] == confirmed["facts"][2]["confirmed_at"]
+    assert await _update(state, confirmed, "confirm_facts", data, actor="user") == confirmed
+    with pytest.raises(TaxCaseConflictError):
+        await _update(state, case, "confirm_facts", data, actor="user")
+
+
+@pytest.mark.parametrize("invalid", ["missing", "foreign", "rejected"])
+async def test_grouped_confirmation_validates_whole_selection_before_changes(state, invalid):
+    store, owner, _, conversation = state
+    case = await _create(state)
+    case = await _update(state, case, "propose_fact", _fact())
+    identifier = "not_a_case_fact"
+    if invalid == "foreign":
+        other = await _owner(store, "other")
+        other_conversation = await store.conversations.create(user_id=other.user_id, private_required=True)
+        foreign = await store.tax_cases.create(
+            user_id=other.user_id, conversation_id=other_conversation.conversation_id,
+            tax_year=2025, goal="Other case", reference_release="rel_current",
+        )
+        foreign = await store.tax_cases.update(
+            user_id=other.user_id, conversation_id=other_conversation.conversation_id,
+            expected_revision=foreign["revision"], operation="propose_fact", data=_fact(),
+        )
+        identifier = foreign["facts"][0]["id"]
+    elif invalid == "rejected":
+        case = await _update(state, case, "propose_fact", _fact(label="Rejected fact"))
+        identifier = case["facts"][1]["id"]
+        case = await _update(state, case, "reject_fact", {"fact_id": identifier}, actor="user")
+    with pytest.raises(TaxCaseError):
+        await _update(state, case, "confirm_facts", {
+            "fact_ids": [case["facts"][0]["id"], identifier],
+        }, actor="user")
+    assert await store.tax_cases.get(
+        user_id=owner.user_id, conversation_id=conversation.conversation_id,
+    ) == case
+
+
+@pytest.mark.parametrize("identifiers", [[], ["same", "same"], ["same", " same "], [str(index) for index in range(101)], ["x" * 201], [1]])
+def test_grouped_confirmation_ids_are_nonempty_unique_and_bounded(identifiers):
+    with pytest.raises(TaxCaseError):
+        validate_operation("confirm_facts", {"fact_ids": identifiers})
+
+
 async def test_append_operations_are_idempotent_and_operation_keys_cannot_change_data(state):
     case = await _create(state)
     case = await _update(state, case, "propose_fact", _fact(operation_key="first"))

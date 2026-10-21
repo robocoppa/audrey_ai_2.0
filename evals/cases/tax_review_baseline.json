@@ -2,12 +2,11 @@
   "schema": 1,
   "language": "en",
   "synthetic": true,
-  "status": "not_run",
-  "scope": "One native-browser planning worksheet; no live model result or complete-return accuracy claim.",
+  "scope": "One synthetic native-browser planning worksheet; not a complete-return accuracy assessment.",
   "label_policy": {
     "created_at": "2026-10-21",
     "review": "Coding-assistant source check; not independently adjudicated by a tax professional.",
-    "runner": "Existing native browser: upload, Start review, confirm proposed facts, Continue review.",
+    "runner": "Existing native browser: upload, Start review, confirm proposed facts in the conversation; accepted choices automatically continue review.",
     "expected_answers_are_upload_content": false,
     "future_comparison": "Keep the exact fixture, goal, confirmed facts, model identities and pinned IRS release identical for matched single-pass and extended reviews."
   },
@@ -59,7 +58,7 @@
         "Open a new Private conversation, choose Tax review, set 2025 and paste this goal.",
         "Upload the fixture text file and send: Read this synthetic document, propose the required facts, save a partial review, and wait for my confirmation.",
         "Check that the necessary extracted facts are proposed and require your confirmation; the model must not confirm them.",
-        "Confirm accurate proposals in the Tax review box, then choose Start review or Continue review. If a bounded pass leaves more proposals, confirm those and continue.",
+        "Confirm accurate proposals in the conversation. The saved choice sends your reply and automatically continues the review; additional necessary proposals can be reviewed the same way.",
         "Check the saved worksheet, source passages and calculator result against expected outcomes, then refresh once to check persistence."
       ],
       "expected": {
@@ -102,7 +101,7 @@
           "result": "34250.00",
           "meaning": "Requested arithmetic only; not tax liability, refund, or certification of taxable income on a complete return."
         },
-        "confirmation_boundary": "Facts begin proposed. Pause for explicit user confirmation; Continue review may use only confirmed facts for supported findings.",
+        "confirmation_boundary": "Facts begin proposed. Pause for explicit user confirmation; the automatic follow-up may use only confirmed facts for supported findings.",
         "worksheet_boundary": "Findings remain proposals; source-year applicability remains proposed or unknown under the current tool contract. Show that limitation and selected-passage scope. Do not claim the whole return was checked.",
         "must_not": [
           "Add 2024 wages to 2025 wages or report 59000.00 as 2025 wages.",

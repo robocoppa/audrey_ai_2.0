@@ -256,11 +256,14 @@ test("a saved Private conversation stays locked after reopening", async ({ page 
 
 test("deleting the selected Private conversation opens a fresh draft instead of an older chat", async ({ page }) => {
   const observed = await mockPrivateApi(page, { initialPrivate: true, saved: true, older: true });
+  await page.route("**/api/capabilities", (route) => json(route, { status: "degraded", generated_at: DATE,
+    chat: { status: "available" }, tools: { status: "available" }, knowledge: { status: "degraded" }, skills: { status: "available" } }));
   await page.goto("./");
   await expect(page.getByText("Saved answer.")).toBeVisible();
   await page.getByRole("button", { name: "Delete conversation", exact: true }).click();
   await page.getByRole("button", { name: "Confirm delete conversation", exact: true }).click();
   await expect(page.getByRole("heading", { name: "New conversation", exact: true })).toBeVisible();
+  await expect(page.getByText("Some features degraded", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Audrey model", exact: true })).toContainText("Auto");
   await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toBeFocused();
   await expect(page.getByText("Saved answer.")).toHaveCount(0);

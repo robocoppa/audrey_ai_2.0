@@ -136,6 +136,7 @@ export function saveTaxCase(conversationId: string, setup: TaxCaseSetup): Promis
 }
 
 export type TaxCaseAction =
+  | { operation: "confirm_facts"; data: { fact_ids: string[] } }
   | { operation: "reject_fact"; data: { fact_id: string } }
   | { operation: "change_year"; data: { tax_year: number } }
   | { operation: "update_reference_release"; data: { reference_release: string } }

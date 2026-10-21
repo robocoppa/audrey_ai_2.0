@@ -38,7 +38,6 @@
 
 .tax-review-body:empty { display: none; }
 .tax-review-content { display: grid; gap: 0.6rem; }
-.tax-review-question + .tax-review-content { border-top: 1px solid var(--border); padding-top: 0.65rem; }
 
 .tax-review p { margin: 0; overflow-wrap: anywhere; }
 .tax-review form { display: grid; gap: 0.65rem; }
@@ -98,3 +97,44 @@
 .tax-review-worksheet ul { display: grid; gap: 0.5rem; padding-left: 1.2rem; }
 .tax-review-worksheet li > strong { font-weight: 550; color: var(--text); }
 .tax-review-worksheet .tax-review-note { font-size: 0.68rem; }
+
+/* Settings use the top layer instead of growing the sticky composer offscreen. */
+.tax-review-dialog {
+  position: fixed;
+  inset: auto;
+  top: var(--tax-dialog-top, 50dvh);
+  left: var(--tax-dialog-left, 50vw);
+  width: min(28rem, var(--tax-dialog-width, calc(100vw - 1.5rem)));
+  max-width: none;
+  max-height: var(--tax-dialog-height, calc(100dvh - 1.5rem));
+  box-sizing: border-box;
+  margin: 0;
+  padding: 1rem;
+  transform: translate(-50%, -50%);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.85rem;
+  background: var(--surface-deep);
+  box-shadow: var(--shadow-md);
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+.tax-review-dialog::backdrop { background: rgb(3 10 21 / 65%); }
+.tax-review-dialog-header { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; margin-bottom: 0.85rem; }
+.tax-review-dialog-header h2 { margin: 0; color: var(--text); font-size: 0.9rem; font-weight: 550; outline: none; }
+.tax-review-dialog-header > button { display: inline-grid; flex: none; place-items: center; width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--border); border-radius: 0.5rem; background: transparent; color: var(--text-soft); }
+.tax-review-dialog-header > button:hover { border-color: var(--accent); background: var(--surface-raised); }
+.tax-review-dialog-header svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.tax-review-dialog .tax-review-content { gap: 0.8rem; }
+.tax-review-dialog .tax-review-fields { align-items: center; }
+.tax-review-dialog .tax-review-fields label { width: 7rem; }
+.tax-review-dialog .tax-review-jurisdiction { padding: 1.2rem 0 0; }
+.tax-review-dialog textarea { min-height: 4.5rem; max-height: 8rem; }
+.tax-review-dialog .tax-review-error { margin-top: 0.75rem; }
+@media (max-width: 600px) {
+  .tax-review-dialog { padding: 0.9rem; }
+  .tax-review-dialog input, .tax-review-dialog textarea { font-size: 1rem; }
+  .tax-review-dialog-header > button, .tax-review-dialog .tax-review-actions button { min-height: 2.5rem; }
+}

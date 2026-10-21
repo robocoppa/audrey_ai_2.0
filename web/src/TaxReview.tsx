@@ -1,7 +1,6 @@
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 
 import { ApiError } from "./api";
-import { TaxReviewQuestions } from "./TaxReviewQuestions";
 import {
   actOnTaxCase,
   defaultTaxYear,
@@ -17,7 +16,6 @@ export function TaxReview({
   active,
   disabled,
   refreshVersion,
-  answerVersion = 0,
   onExpandedChange,
   onCaseChange,
   onSaved,
@@ -28,13 +26,14 @@ export function TaxReview({
   active: boolean;
   disabled: boolean;
   refreshVersion: number;
-  answerVersion?: number;
   onExpandedChange: (expanded: boolean) => void;
   onCaseChange: (value: TaxCase | null) => void;
   onSaved: () => void;
   onReview?: () => void;
 }) {
   const panelId = useId();
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const [taxCase, setTaxCase] = useState<TaxCase | null>(null);
   const [year, setYear] = useState(() => String(defaultTaxYear()));
   const [goal, setGoal] = useState("");
@@ -68,6 +67,37 @@ export function TaxReview({
     });
     return () => controller.abort();
   }, [conversationId, loadKey, onCaseChange]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const viewport = window.visualViewport;
+    function fit() {
+      if (!dialog) return;
+      const left = viewport?.offsetLeft ?? 0;
+      const top = viewport?.offsetTop ?? 0;
+      const width = viewport?.width ?? window.innerWidth;
+      const height = viewport?.height ?? window.innerHeight;
+      dialog.style.setProperty("--tax-dialog-left", `${left + width / 2}px`);
+      dialog.style.setProperty("--tax-dialog-top", `${top + height / 2}px`);
+      dialog.style.setProperty("--tax-dialog-width", `${Math.max(0, width - 24)}px`);
+      dialog.style.setProperty("--tax-dialog-height", `${Math.max(0, height - 24)}px`);
+    }
+    fit();
+    dialog.showModal();
+    // Start on the heading so opening settings does not summon a mobile keyboard.
+    titleRef.current?.focus();
+    window.addEventListener("resize", fit);
+    viewport?.addEventListener("resize", fit);
+    viewport?.addEventListener("scroll", fit);
+    return () => {
+      window.removeEventListener("resize", fit);
+      viewport?.removeEventListener("resize", fit);
+      viewport?.removeEventListener("scroll", fit);
+      dialog.close();
+    };
+  }, [expanded]);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -162,19 +192,26 @@ export function TaxReview({
           </button> : <button type="button" disabled={busy || disabled || loading}
             onClick={() => setReloadVersion((current) => current + 1)}>Reload library</button>}
         </div> : null}
-        {taxCase && !referenceBlocked ? <TaxReviewQuestions
-          key={`${taxCase.id}:${taxCase.tax_year}`}
-          conversationId={conversationId}
-          taxCase={taxCase}
-          answerVersion={answerVersion}
-          disabled={locked}
-          onCaseChange={(value) => {
-            setTaxCase(value);
-            onCaseChange(value);
-          }}
-          onReload={() => setReloadVersion((current) => current + 1)}
-        /> : null}
-      {expanded ? <div id={panelId} className="tax-review-content">
+      {expanded ? <dialog
+        ref={dialogRef}
+        id={panelId}
+        className="tax-review-dialog"
+        aria-labelledby={`${panelId}-title`}
+        onCancel={(event) => { event.preventDefault(); onExpandedChange(false); }}
+        onClick={(event) => {
+          if (event.target !== event.currentTarget) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          if (event.clientX < bounds.left || event.clientX > bounds.right
+            || event.clientY < bounds.top || event.clientY > bounds.bottom) onExpandedChange(false);
+        }}
+      >
+        <header className="tax-review-dialog-header">
+          <h2 ref={titleRef} id={`${panelId}-title`} tabIndex={-1} autoFocus>Tax review settings</h2>
+          <button type="button" aria-label="Close Tax review settings" onClick={() => onExpandedChange(false)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg>
+          </button>
+        </header>
+        <div className="tax-review-content">
         {loading ? <p className="tax-review-note" role="status">Loading settings…</p> : null}
         <form onSubmit={(event) => void save(event)}>
           <div className="tax-review-fields">
@@ -191,7 +228,12 @@ export function TaxReview({
             <button type="submit" disabled={locked || Boolean(taxCase && !yearChanged)}>{busy ? "Saving…" : taxCase ? "Save year" : "Use Tax review"}</button>
           </div>
         </form>
-      </div> : null}
+        </div>
+        {error ? <div className="tax-review-error" role="alert">
+          <span>{error}</span>
+          <button type="button" disabled={busy || disabled || loading} onClick={() => setReloadVersion((current) => current + 1)}>Reload settings</button>
+        </div> : null}
+      </dialog> : null}
         {taxCase?.review ? <details className="tax-review-worksheet">
           <summary>Review worksheet</summary>
           <p>{taxCase.review.summary}</p>
@@ -209,7 +251,7 @@ export function TaxReview({
           {taxCase.review.next_question ? <p>{taxCase.review.next_question}</p> : null}
           {taxCase.review.limitations.length ? <ul className="tax-review-note">{taxCase.review.limitations.map((limitation, index) => <li key={index}>{limitation}</li>)}</ul> : null}
         </details> : null}
-        {error ? <div className="tax-review-error" role="alert">
+        {!expanded && error ? <div className="tax-review-error" role="alert">
           <span>{error}</span>
           <button type="button" disabled={busy || disabled || loading} onClick={() => setReloadVersion((current) => current + 1)}>Reload settings</button>
         </div> : null}

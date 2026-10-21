@@ -20,12 +20,15 @@ Project deletion beside Edit and interrupted conversation-deletion recovery are
 accepted. The original Cloudflare origin cause was not identified; diagnostics
 are closed. [Navigation](phase-12-sidebar-navigation.md) holds the behavior.
 
-**20D.2 functionality accepted October 21.** The compact Tax review box now
-contains one pending confirmation or missing-information choice at a time, with
-year and goal under Settings. Internal IDs/checklist details stay hidden. The
-previous completed year is the editable default. A year change retains sources
-and requires facts/calculations to be checked again. The generic degraded notice
-stays hidden in a selected Tax case. Brief visual acceptance is next.
+**20D.2 functionality accepted October 21; UI followup built.** Tax review
+settings open in a dialog bounded by the visible screen; the previous completed
+year remains the editable default. Essential choices appear together in the
+conversation. A saved choice becomes a visible user reply and Audrey continues
+automatically, preserving unsent text and attachments. The compact box retains
+settings and collapsed findings. Internal IDs/passing checklist rows stay hidden;
+Audrey handles source verification herself. The generic degraded badge is removed
+throughout chat, including after deletion; actual outage indicators remain.
+Local backend/UI and responsive browser checks passed; live acceptance is pending.
 
 **20D.3a built:** saved cases remain readable if the IRS library changes or is
 unavailable. An explicit owner action adopts the exact available release;
@@ -39,9 +42,10 @@ normal native run, with stop/reconnect and a ten-minute foreground limit. It sav
 a goal-scoped worksheet with linked facts, official passages, arithmetic and
 explicit limitations. Case edits make an earlier worksheet stale. The compact box
 keeps findings expandable and user confirmations explicit. Selected-file inventory
-is inspectable; it does not prove every page was read. The synthetic native-browser
-baseline is prepared; actual answer-quality acceptance is next. Background work
-follows later.
+is inspectable; it does not prove every page was read. The user-reported synthetic
+baseline passed the requested arithmetic and year/withholding separation, with an
+official passage retained. This limited pass does not establish legal accuracy or
+certify a complete return. Broader accuracy and background work follow later.
 [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds the contract.
 
 **MiniMax M3.1 Flash:** configured as an unmeasured cloud draft/research candidate
@@ -96,12 +100,12 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **Current UI followup:** Project header delete/checkmark and interrupted
   chat deletion recovery accepted; Cloudflare diagnostics closed.
 - [x] **20D.2:** saved facts/evidence and deterministic case checklist accepted.
-- [ ] **Tax review presentation:** lean choices inside the settings box and
-  editable year built; brief visual acceptance next.
+- [ ] **Tax review presentation:** bounded settings, grouped conversational
+  choices and automatic follow-up locally verified; targeted live acceptance pending.
 - [x] **20D.3a:** explicit reference-library updates with retained evidence and
   required rechecks; locally verified.
-- [ ] **20D.3b:** foreground worksheet flow and known-answer baseline built;
-  native-browser accuracy acceptance next.
+- [ ] **20D.3b:** foreground worksheet built; limited numerical/separation
+  baseline reported passed. Broader answer accuracy remains open.
 - [ ] **20D.4:** durable Private tasks, checkpoints, progress, cancel and resume.
 - [ ] **20D.5:** bounded local evidence verification and targeted repair loops.
 - [ ] **20E:** compare single-pass and extended accuracy before extending defaults.

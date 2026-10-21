@@ -97,6 +97,17 @@ class ConfirmFactPayload(_Payload):
     fact_id: Identifier
 
 
+class ConfirmFactsPayload(_Payload):
+    fact_ids: EntryIds = Field(min_length=1)
+
+    @field_validator("fact_ids")
+    @classmethod
+    def unique_fact_ids(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("fact IDs must be unique")
+        return value
+
+
 class RejectFactPayload(_Payload):
     fact_id: Identifier
 
@@ -194,6 +205,7 @@ class _CaseCreation(_Payload):
 OPERATION_MODELS: dict[str, type[_Payload]] = {
     "propose_fact": ProposeFactPayload,
     "confirm_fact": ConfirmFactPayload,
+    "confirm_facts": ConfirmFactsPayload,
     "reject_fact": RejectFactPayload,
     "change_year": ChangeYearPayload,
     "update_reference_release": UpdateReferenceReleasePayload,
@@ -339,6 +351,7 @@ class TaxCasesRepository:
             operation
             in {
                 "confirm_fact",
+                "confirm_facts",
                 "reject_fact",
                 "resolve_missing_item",
                 "change_year",
@@ -505,19 +518,24 @@ def _apply_operation(
             reference_release_changed_at=_utc_now(),
         )
         return True
-    if operation == "confirm_fact":
-        entry = _entry(case["facts"], payload["fact_id"])
-        if entry["status"] == "confirmed":
-            return False
-        if entry["status"] == "rejected":
+    if operation in {"confirm_fact", "confirm_facts"}:
+        identifiers = [payload["fact_id"]] if operation == "confirm_fact" else payload["fact_ids"]
+        # Validate the entire selection before changing any proposed fact.
+        entries = [_entry(case["facts"], identifier) for identifier in identifiers]
+        if any(entry["status"] == "rejected" for entry in entries):
             raise TaxCaseError("A rejected fact requires a corrected proposal.")
-        entry.setdefault("case_tax_year", case["tax_year"])
-        entry.update(
-            status="confirmed",
-            confirmed_at=_utc_now(),
-            confirmed_by="user",
-            confirmed_tax_year=case["tax_year"],
-        )
+        pending = [entry for entry in entries if entry["status"] != "confirmed"]
+        if not pending:
+            return False
+        confirmed_at = _utc_now()
+        for entry in pending:
+            entry.setdefault("case_tax_year", case["tax_year"])
+            entry.update(
+                status="confirmed",
+                confirmed_at=confirmed_at,
+                confirmed_by="user",
+                confirmed_tax_year=case["tax_year"],
+            )
         return True
     if operation == "reject_fact":
         entry = _entry(case["facts"], payload["fact_id"])

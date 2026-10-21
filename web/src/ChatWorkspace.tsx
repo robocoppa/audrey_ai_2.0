@@ -46,6 +46,7 @@ import { ScrollToLatest } from "./ScrollToLatest";
 import { SwipeConversationRow } from "./SwipeConversationRow";
 import { UploadProgress } from "./UploadProgress";
 import { TaxReview } from "./TaxReview";
+import { TaxReviewQuestions } from "./TaxReviewQuestions";
 import { TAX_REVIEW_PROMPT, type TaxCase } from "./taxReviewApi";
 import {
   ApiError,
@@ -218,9 +219,7 @@ export function ChatWorkspace({
   mobileNewChatHost,
   menuActions,
   menuFooter,
-  onTaxReviewActiveChange,
 }: {
-  onTaxReviewActiveChange?: (active: boolean) => void;
   navigationOpen: boolean;
   onNavigationOpenChange: (open: boolean) => void;
   mobileMenuHost: HTMLElement | null;
@@ -1164,7 +1163,6 @@ export function ChatWorkspace({
           >
             <ConversationThread
               conversation={opened}
-              onTaxReviewActiveChange={onTaxReviewActiveChange}
               isSelected={opened.id === selectedId}
               focusComposer={composerFocusId === opened.id && opened.id === selectedId && !navigationOpen}
               onComposerFocused={composerFocused}
@@ -1218,9 +1216,7 @@ function ConversationThread({
   onDraftReplaced,
   onRemoveFromView,
   onOpenProject,
-  onTaxReviewActiveChange,
 }: {
-  onTaxReviewActiveChange?: (active: boolean) => void;
   conversation: Conversation;
   isSelected: boolean;
   focusComposer: boolean;
@@ -1638,8 +1634,6 @@ function ConversationThread({
         <AudreyThread
           key={threadRevision}
           conversationId={conversation.id}
-          isSelected={isSelected}
-          onTaxReviewActiveChange={onTaxReviewActiveChange}
           focusComposer={focusComposer}
           onComposerFocused={onComposerFocused}
           projectPicker={projectPicker}
@@ -1678,8 +1672,6 @@ function ConversationThread({
 }
 
 function AudreyThread({
-  isSelected,
-  onTaxReviewActiveChange,
   privateRequired,
   privateLockReason,
   conversationId,
@@ -1702,8 +1694,6 @@ function AudreyThread({
   onRunStarted,
   onRunFinished,
 }: {
-  isSelected: boolean;
-  onTaxReviewActiveChange?: (active: boolean) => void;
   privateRequired: boolean;
   privateLockReason: string;
   conversationId: string;
@@ -1732,7 +1722,7 @@ function AudreyThread({
   const [taxCase, setTaxCase] = useState<TaxCase | null>(null);
   const [taxReviewExpanded, setTaxReviewExpanded] = useState(false);
   const [taxReviewRefresh, setTaxReviewRefresh] = useState(0);
-  const [queuedTaxReview, setQueuedTaxReview] = useState<object | null>(null);
+  const [queuedTaxReview, setQueuedTaxReview] = useState<{ text: string } | null>(null);
   const pendingTaxReviewRef = useRef<object | null>(null);
   const dispatchedTaxReviewRef = useRef<object | null>(null);
   // A review uses saved case documents; the user's unsent composer files stay untouched.
@@ -1832,12 +1822,6 @@ function AudreyThread({
     : skillId === "tax-review" ? "" : skillId;
   const skillControlValue = isPrivate ? effectiveSkillId === "tax-review" ? "Tax review" : "Automatic" : selectedSkill?.name
     ?? (selectedSkillMode === null ? "Not available" : "Automatic");
-  const taxContextActive = isPrivate && (effectiveSkillId === "tax-review" || taxCase !== null);
-  useEffect(() => {
-    if (!isSelected) return;
-    onTaxReviewActiveChange?.(taxContextActive);
-    return () => onTaxReviewActiveChange?.(false);
-  }, [isSelected, taxContextActive, onTaxReviewActiveChange]);
   const acceptTaxCase = useCallback((value: TaxCase | null) => {
     setTaxCase((current) => current && value && current.id === value.id && current.revision > value.revision
       ? current : value);
@@ -2050,7 +2034,7 @@ function AudreyThread({
         onRunActiveChange(false);
         setRetrying(false);
         setLastAttempt(null);
-        pendingTaxReviewRef.current = null;
+        if (pendingTaxReviewRef.current === dispatchedTaxReviewRef.current) pendingTaxReviewRef.current = null;
         if (!preserveComposerAttachmentsRef.current) setSelectedAttachments([]);
         setActivity((current) => ({
           ...current,
@@ -2066,7 +2050,7 @@ function AudreyThread({
         userRequestedCancelRef.current = false;
         onRunActiveChange(false);
         setRetrying(false);
-        pendingTaxReviewRef.current = null;
+        if (pendingTaxReviewRef.current === dispatchedTaxReviewRef.current) pendingTaxReviewRef.current = null;
         if (!preserveComposerAttachmentsRef.current) setSelectedAttachments([]);
         const cancelled = event.code === "cancelled_by_user" || isAbortMessage(event.message);
         setActivity((current) => ({
@@ -2078,7 +2062,7 @@ function AudreyThread({
         }));
       },
       onRunFailed: ({ error }) => {
-        pendingTaxReviewRef.current = null;
+        if (pendingTaxReviewRef.current === dispatchedTaxReviewRef.current) pendingTaxReviewRef.current = null;
         onRunActiveChange(false);
         setRetrying(false);
         const cancelled = isAbortError(error);
@@ -2100,7 +2084,7 @@ function AudreyThread({
     adapters: { history },
     showThinking: false,
     onError: (reason) => {
-      pendingTaxReviewRef.current = null;
+      if (pendingTaxReviewRef.current === dispatchedTaxReviewRef.current) pendingTaxReviewRef.current = null;
       onRunActiveChange(false);
       setRetrying(false);
       setRunError(reason.message);
@@ -2115,7 +2099,7 @@ function AudreyThread({
       const explicitlyStopped = userRequestedCancelRef.current;
       userRequestedCancelRef.current = false;
       const runId = activeRunId;
-      pendingTaxReviewRef.current = null;
+      if (pendingTaxReviewRef.current === dispatchedTaxReviewRef.current) pendingTaxReviewRef.current = null;
       setTaxReviewRefresh((current) => current + 1);
       if (!preserveComposerAttachmentsRef.current) setSelectedAttachments([]);
       setRunError("");
@@ -2167,11 +2151,12 @@ function AudreyThread({
     onDraftRestored();
   }, [onDraftRestored, replacementDraft, runtime]);
 
-  function startTaxReview() {
-    if (!taxCase || !isPrivate || readOnly || submissionBlocked || recoveredRunActive
-      || activity.status === "running" || runtime.thread.getState().isRunning || pendingTaxReviewRef.current
+  function startTaxReview(text = TAX_REVIEW_PROMPT) {
+    if (!taxCase || !isPrivate || readOnly || pendingTaxReviewRef.current
       || ["update_available", "unavailable"].includes(taxCase.reference_update?.status ?? "")) return;
-    const request = {};
+    if (text === TAX_REVIEW_PROMPT && (submissionBlocked || recoveredRunActive
+      || activity.status === "running" || runtime.thread.getState().isRunning)) return;
+    const request = { text };
     pendingTaxReviewRef.current = request;
     preserveComposerAttachmentsRef.current = true;
     setQueuedTaxReview(request);
@@ -2181,20 +2166,17 @@ function AudreyThread({
   }
 
   useEffect(() => {
-    if (!queuedTaxReview || effectiveSkillId !== "tax-review" || dispatchedTaxReviewRef.current === queuedTaxReview) return;
+    if (!queuedTaxReview || effectiveSkillId !== "tax-review" || dispatchedTaxReviewRef.current === queuedTaxReview
+      || readOnly || modeDisabled || attachmentBusy || retrying || recoveredRunActive || activity.status === "running") return;
     // useAgUiRuntime installs the newly selected agent in its effect before this dispatch.
     const timer = window.setTimeout(() => {
       if (pendingTaxReviewRef.current !== queuedTaxReview || dispatchedTaxReviewRef.current === queuedTaxReview) return;
-      if (readOnly || modeDisabled || attachmentBusy || retrying || recoveredRunActive || runtime.thread.getState().isRunning) {
-        pendingTaxReviewRef.current = null;
-        setQueuedTaxReview(null);
-        return;
-      }
+      if (runtime.thread.getState().isRunning) return;
       dispatchedTaxReviewRef.current = queuedTaxReview;
       setRunError("");
       setActivity({ status: "running", label: "Starting review", detail: "Reviewing your saved tax case", sources: [], models: [], tools: [] });
       try {
-        runtime.thread.append({ role: "user", content: [{ type: "text", text: TAX_REVIEW_PROMPT }], attachments: [] });
+        runtime.thread.append({ role: "user", content: [{ type: "text", text: queuedTaxReview.text }], attachments: [] });
       } catch (reason) {
         pendingTaxReviewRef.current = null;
         setRunError("Could not start review: " + messageOf(reason));
@@ -2204,7 +2186,7 @@ function AudreyThread({
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [queuedTaxReview, effectiveSkillId, readOnly, modeDisabled, attachmentBusy, retrying, recoveredRunActive, runtime, setActivity]);
+  }, [queuedTaxReview, effectiveSkillId, readOnly, modeDisabled, attachmentBusy, retrying, recoveredRunActive, activity.status, runtime, setActivity]);
 
   async function retryLastQuestion() {
     if (!lastAttempt || retrying || modeDisabled || attachmentBusy || readOnly) return;
@@ -2431,6 +2413,17 @@ function AudreyThread({
               AssistantMessage,
             }}
           />
+          {isPrivate && taxCase && !readOnly ? <TaxReviewQuestions
+            key={`${taxCase.id}:${taxCase.tax_year}`}
+            conversationId={conversationId}
+            taxCase={taxCase}
+            answerVersion={activityLedger.answers.size}
+            disabled={submissionBlocked || recoveredRunActive || activity.status === "running"
+              || ["update_available", "unavailable"].includes(taxCase.reference_update?.status ?? "")}
+            onCaseChange={(value) => { acceptTaxCase(value); setTaxReviewRefresh((current) => current + 1); }}
+            onReload={() => setTaxReviewRefresh((current) => current + 1)}
+            onChoice={(_value, feedback) => startTaxReview(feedback)}
+          /> : null}
           <ThreadPrimitive.If empty={false}>
             <div className="thread-message-spacer" aria-hidden="true" />
           </ThreadPrimitive.If>
@@ -2453,11 +2446,10 @@ function AudreyThread({
                   active={effectiveSkillId === "tax-review"}
                   disabled={submissionBlocked || activity.status === "running" || recoveredRunActive}
                   refreshVersion={taxReviewRefresh}
-                  answerVersion={activityLedger.answers.size}
                   onExpandedChange={setTaxReviewExpanded}
                   onCaseChange={acceptTaxCase}
                   onSaved={() => setSkillId("tax-review")}
-                  onReview={startTaxReview}
+                  onReview={() => startTaxReview()}
                 /> : null}
                 {isPrivate && taxCase && selectedAttachments.length > 0 ? <p className="attachment-status">Tax review uses files already sent here or added to the project. Send newly selected files before reviewing them.</p> : null}
                 {lastAttempt && (restoredIncomplete || activity.status === "error" || runError) ? (

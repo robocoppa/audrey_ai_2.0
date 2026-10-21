@@ -71,7 +71,6 @@ export function App() {
   const [session, setSession] = useState<SessionState>({ status: "loading" });
   const [capabilityHealth, setCapabilityHealth] = useState<CapabilityHealth | null>(null);
   const [healthUnavailable, setHealthUnavailable] = useState(false);
-  const [taxReviewActive, setTaxReviewActive] = useState(false);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [sessionRevision, setSessionRevision] = useState(0);
   const [filesOpen, setFilesOpen] = useState(false);
@@ -207,7 +206,6 @@ export function App() {
     user: session.user,
     capabilityHealth,
     healthUnavailable,
-    hideDegradedNotice: taxReviewActive,
     onOpenFiles: () => {
       setNavigationOpen(false);
       setFilesOpen(true);
@@ -259,7 +257,6 @@ export function App() {
             skills={session.skills}
             navigationOpen={navigationOpen}
             onNavigationOpenChange={setNavigationOpen}
-            onTaxReviewActiveChange={setTaxReviewActive}
             mobileMenuHost={mobileMenuHost}
             mobileNewChatHost={mobileNewChatHost}
             menuActions={<SessionActions {...sessionActions} variant="drawer" />}
@@ -414,7 +411,6 @@ function SessionActions({
   user,
   capabilityHealth,
   healthUnavailable,
-  hideDegradedNotice,
   variant,
   onOpenFiles,
   onOpenSettings,
@@ -424,7 +420,6 @@ function SessionActions({
   user: CurrentUser;
   capabilityHealth: CapabilityHealth | null;
   healthUnavailable: boolean;
-  hideDegradedNotice: boolean;
   variant: "header" | "drawer" | "footer";
   onOpenFiles: () => void;
   onOpenSettings: () => void;
@@ -445,10 +440,6 @@ function SessionActions({
       {variant !== "footer" && (capabilityHealth?.status === "unavailable" ? (
         <span className="capability-badge capability-badge-unavailable" role="status" title={healthDetails}>
           Models offline
-        </span>
-      ) : capabilityHealth?.status === "degraded" && !hideDegradedNotice ? (
-        <span className="capability-badge" role="status" title={healthDetails}>
-          Some features degraded
         </span>
       ) : healthUnavailable ? (
         <span className="capability-badge" role="status">

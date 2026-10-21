@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { TaxReview } from "./TaxReview";
 import { defaultTaxYear, type TaxCase } from "./taxReviewApi";
@@ -16,6 +16,12 @@ function json(body: unknown, status = 200) {
 function props() {
   return { conversationId: "con_private", expanded: true, active: false, disabled: false, refreshVersion: 0, onExpandedChange: vi.fn(), onCaseChange: vi.fn(), onSaved: vi.fn() };
 }
+
+beforeEach(() => {
+  // jsdom does not implement the native dialog lifecycle.
+  HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) { this.open = true; });
+  HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) { this.open = false; });
+});
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -92,14 +98,13 @@ it.each(["1899", "2101"])("rejects unsupported tax year %s before sending it", a
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-it("shows pending choices inside the settings box while keeping settings and diagnostics collapsed", async () => {
+it("keeps fact decisions in the conversation while settings stay collapsed", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ case: fixtures.reviewable })));
   render(<TaxReview {...props()} expanded={false} />);
   expect(await screen.findByRole("button", { name: "Tax review · 2025 Settings" })).toHaveAttribute("aria-expanded", "false");
   const panel = screen.getByRole("region", { name: "Tax review case" });
-  expect(within(panel).getByRole("region", { name: "Tax review choices" })).toBeVisible();
-  expect(within(panel).getByRole("button", { name: "Confirm Wages" })).toBeEnabled();
-  expect(screen.queryByRole("article")).not.toBeInTheDocument();
+  expect(within(panel).queryByRole("region", { name: "Tax review choices" })).not.toBeInTheDocument();
+  expect(within(panel).queryByRole("button", { name: "Confirm Wages" })).not.toBeInTheDocument();
   expect(screen.queryByText(/Reference release|Checklist|SHA-256|Planning checklist/u)).not.toBeInTheDocument();
   expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
 });
@@ -125,21 +130,6 @@ it("keeps save unavailable after unreadable settings and offers a retry", async 
   await waitFor(() => expect(screen.getByRole("button", { name: "Use Tax review" })).toBeEnabled());
 });
 
-
-it("updates a choice in the same panel without opening settings or selecting a skill", async () => {
-  const initial = fixtures.reviewable as TaxCase;
-  const updated = { ...initial, revision: initial.revision + 1,
-    facts: initial.facts.map((fact) => ({ ...fact, status: "confirmed" as const })) };
-  const fetchMock = vi.fn().mockResolvedValueOnce(json({ case: initial })).mockResolvedValueOnce(json(updated));
-  vi.stubGlobal("fetch", fetchMock);
-  const callbacks = props();
-  render(<TaxReview {...callbacks} expanded={false} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Confirm Wages" }));
-  await waitFor(() => expect(callbacks.onCaseChange).toHaveBeenLastCalledWith(updated));
-  expect(screen.queryByRole("button", { name: "Confirm Wages" })).not.toBeInTheDocument();
-  expect(callbacks.onSaved).not.toHaveBeenCalled();
-  expect(callbacks.onExpandedChange).not.toHaveBeenCalled();
-});
 
 
 it("offers a library update inside the collapsed box without exposing release IDs", async () => {
@@ -201,7 +191,7 @@ it("offers review of an unfinished case without confirming its proposed facts", 
   expect(callbacks.onReview).toHaveBeenCalledOnce();
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(callbacks.onSaved).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: "Confirm Wages" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Confirm Wages" })).not.toBeInTheDocument();
 });
 
 it.each(["update_available", "unavailable"] as const)("pauses review when the IRS library is %s", async (status) => {
@@ -240,4 +230,38 @@ it("keeps review unavailable during an active run or upload", async () => {
   expect(await screen.findByRole("button", { name: "Start review" })).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "Start review" }));
   expect(onReview).not.toHaveBeenCalled();
+});
+
+it("opens settings independently of the composer and closes without saving", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(json({ case: null }));
+  vi.stubGlobal("fetch", fetchMock);
+  const callbacks = props();
+  render(<TaxReview {...callbacks} />);
+  const dialog = screen.getByRole("dialog", { name: "Tax review settings" });
+  expect(dialog).toHaveAttribute("open");
+  expect(screen.getByRole("heading", { name: "Tax review settings" })).toHaveFocus();
+  expect(screen.getByLabelText("Review goal")).not.toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "Close Tax review settings" }));
+  expect(callbacks.onExpandedChange).toHaveBeenCalledWith(false);
+  expect(callbacks.onSaved).not.toHaveBeenCalled();
+  fireEvent(dialog, new Event("cancel", { cancelable: true }));
+  expect(callbacks.onExpandedChange).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(callbacks.onCaseChange).toHaveBeenCalledWith(null));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it("fits settings to the visible viewport when a mobile keyboard reduces it", async () => {
+  const viewport = Object.assign(new EventTarget(), { width: 390, height: 844, offsetLeft: 0, offsetTop: 0 });
+  vi.stubGlobal("visualViewport", viewport);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ case: null })));
+  render(<TaxReview {...props()} />);
+  const dialog = screen.getByRole("dialog", { name: "Tax review settings" });
+  expect(dialog.style.getPropertyValue("--tax-dialog-width")).toBe("366px");
+  expect(dialog.style.getPropertyValue("--tax-dialog-height")).toBe("820px");
+  viewport.height = 340;
+  viewport.offsetTop = 30;
+  viewport.dispatchEvent(new Event("resize"));
+  expect(dialog.style.getPropertyValue("--tax-dialog-height")).toBe("316px");
+  expect(dialog.style.getPropertyValue("--tax-dialog-top")).toBe("200px");
+  await waitFor(() => expect(screen.getByLabelText("Tax year")).toBeEnabled());
 });
