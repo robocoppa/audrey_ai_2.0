@@ -331,3 +331,60 @@ for (const saved of [false, true]) {
     await expect(rows.nth(1)).toContainText("More recent ordinary chat");
   });
 }
+
+
+test("a lost delete acknowledgement opens a fresh focused chat after canonical verification", async ({ page }) => {
+  await mockPrivateApi(page, { initialPrivate: true, saved: true, older: true });
+  const requests: string[] = [];
+  let removed = false;
+  await page.route(`**/api/conversations/${ID}`, async (route) => {
+    const method = route.request().method();
+    requests.push(method);
+    if (method === "DELETE") {
+      removed = true;
+      return route.fulfill({ status: 520, contentType: "text/html", body: "<html>Unknown origin error</html>" });
+    }
+    if (method === "GET" && removed) return json(route, { detail: "Conversation not found." }, 404);
+    return route.fallback();
+  });
+  await page.goto("./");
+  await expect(page.getByText("Saved answer.")).toBeVisible();
+  await page.getByRole("button", { name: "Delete conversation", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm delete conversation", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "New conversation", exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toBeFocused();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  const history = page.getByRole("navigation", { name: "Conversation history" });
+  await expect(history.getByRole("button", { name: /^Private browser check/u })).toHaveCount(0);
+  await expect(history.getByRole("button", { name: /^An older chat/u })).toBeVisible();
+  expect(requests).toEqual(["DELETE", "GET"]);
+});
+
+test("a failed delete retains the conversation and identifies the failed action and HTTP status", async ({ page }) => {
+  await mockPrivateApi(page, { initialPrivate: true, saved: true, older: true });
+  const requests: string[] = [];
+  let creates = 0;
+  await page.route("**/api/conversations", async (route) => {
+    if (route.request().method() === "POST") creates += 1;
+    return route.fallback();
+  });
+  await page.route(`**/api/conversations/${ID}`, async (route) => {
+    const method = route.request().method();
+    requests.push(method);
+    if (method === "DELETE") return json(route, { detail: "Unexpected origin response." }, 520);
+    return route.fallback();
+  });
+  await page.goto("./");
+  await expect(page.getByText("Saved answer.")).toBeVisible();
+  await page.getByRole("textbox", { name: "Ask Audrey" }).fill("Keep my unsent question.");
+  await page.getByRole("button", { name: "Delete conversation", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm delete conversation", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not delete conversation (HTTP 520): Unexpected origin response.");
+  await expect(page.getByRole("heading", { name: "Private browser check", exact: true })).toBeVisible();
+  await expect(page.getByText("Saved answer.")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toHaveValue("Keep my unsent question.");
+  await expect(page.getByRole("button", { name: "Delete conversation", exact: true })).toBeEnabled();
+  await expect(page.getByRole("navigation", { name: "Conversation history" }).getByRole("button", { name: /^Private browser check/u })).toBeVisible();
+  expect(requests).toEqual(["DELETE", "GET"]);
+  expect(creates).toBe(0);
+});

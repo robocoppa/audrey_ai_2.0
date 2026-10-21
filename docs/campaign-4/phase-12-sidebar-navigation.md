@@ -11,6 +11,12 @@ Deleting the selected conversation removes its cached thread and opens a fresh
 focused draft. It does not select an older chat or expose a stale deleted-ID
 error. A later navigation wins if the replacement draft is still being created.
 Deleting an unselected sidebar chat preserves the currently open conversation.
+If a conversation DELETE receives a server/proxy error or loses its transport
+response, the browser checks that same owned ID once, with a five-second
+deadline. Only the canonical API's explicit not-found response confirms deletion; an existing chat, failed check,
+authentication refusal or generic proxy 404 preserves the original failure.
+DELETE and new-chat POST are never automatically repeated. Other errors identify
+the failed action and HTTP status without adding request queries or chat contents.
 
 The desktop sidebar starts with one full-width **New conversation** action.
 Workspace, the sidebar username, and the old Files/+ New pair are removed.

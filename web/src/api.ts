@@ -914,14 +914,18 @@ export async function deleteConversation(conversationId: string): Promise<void> 
       // A proxy can lose the acknowledgement after the server commits deletion.
       // Verify the result once; never repeat the destructive request or infer
       // success from an unavailable check, a generic proxy 404, or an auth error.
+      const verificationAbort = new AbortController();
+      const deadline = globalThis.setTimeout(() => verificationAbort.abort(), 5_000);
       try {
-        await getConversation(conversationId);
+        await getConversation(conversationId, verificationAbort.signal);
       } catch (verification) {
         if (
           verification instanceof ApiError
           && verification.status === 404
           && verification.message === "Conversation not found."
         ) return;
+      } finally {
+        globalThis.clearTimeout(deadline);
       }
     }
     throw reason;

@@ -16,9 +16,13 @@ Private portrait, activity-sorted history and Automatic tools presentation are
 accepted. The reference count repair is accepted: the latest Private comparison
 completed content search and page reads. Accuracy remains open; retrieved pages
 did not prevent outdated deduction figures and a wrong credit cutoff year.
-Project deletion beside Edit with checkmark confirmation is built. The residual
-Cloudflare error after Private chat deletion awaits request/status diagnostics;
-its cause is not established.
+Project deletion beside Edit with checkmark confirmation is built. Conversation
+deletion now verifies completion after an interrupted upstream response; only an
+explicit canonical not-found result permits navigation as success. Errors name
+the failed action and HTTP status. Live acceptance remains; the Cloudflare origin
+cause is not established. Both supplied access-log checks contain no failed API
+request; they do not identify the original failure. The next normal deletion
+checks recovery, with action/status text available if the error recurs.
 [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds the
 privacy contract; [navigation](phase-12-sidebar-navigation.md) holds deletion.
 
@@ -72,7 +76,8 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **Reference request repair:** oversized counts bounded; content search
   and page reads accepted. General tax accuracy remains unverified.
 - [ ] **Current UI followup:** Project delete beside Edit with checkmark
-  confirmation; resolve residual Cloudflare error after Private chat deletion.
+  confirmation and verified recovery after interrupted chat deletion; check the
+  browser flow and identify any remaining Cloudflare failure.
 - [ ] **20D.2:** dedicated `tax_review` tool with saved facts, evidence, missing
   items and a deterministic case checklist.
 - [ ] **20D.3:** one complete foreground tax review and a known-answer baseline.
