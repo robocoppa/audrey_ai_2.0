@@ -485,7 +485,7 @@ OCR/media remain deferred until a case requires them.
 
 #### Tax review tool and case record
 
-**20D.2 functionality accepted October 21; presentation followup built.** Select
+**20D.2 and presentation followup accepted October 21.** Select
 Private, choose Tax review in Tools & skills, choose the federal return year and
 goal, then save. The year defaults to the previous completed calendar year and
 can be changed before or after setup. Settings open in a dialog bounded by the
@@ -499,8 +499,8 @@ owner can approve facts. Record IDs, checksums and passing checklist rows stay
 internal. Audrey handles official-source verification herself and asks only for
 facts or decisions the user can supply. The generic degraded-features badge is
 removed throughout chat, including new chat after deletion; actual service/model
-outage indicators remain. Local backend/UI and responsive browser checks passed;
-targeted live acceptance is pending.
+outage indicators remain. The user moved on after the targeted presentation
+handoff; no repeated presentation check is queued.
 Each conversation owns one case; Project membership is derived from its canonical
 conversation. A saved case does not activate Tax review automatically after reload.
 Automatic Private retains its existing tools and behavior. The additive schema 23
@@ -617,19 +617,41 @@ unresolved; they do not establish that a rule or obligation does not exist.
 
 #### Longer-running Private execution
 
-The reusable core runs typed stages, with a tax adapter supplying the checklist
-and evidence checks. Existing native runs persist messages/results and support
-browser reconnect; they are not restart-resumable tasks. Add a small owner-scoped
-SQLite task/checkpoint repository. Reuse upload lease/fencing patterns, existing
-fair GPU scheduling, PrivateProcessingRuntime, reference/file handlers and native
-progress disclosures. Retired document-authoring job tables stay retired.
+**20D.4a built — checkpoint authority.** Additive schema 24 stores tasks in the
+application database. Each task belongs to one owner, Private conversation and tax
+case; one queued/running/waiting/paused task can exist per conversation. States,
+committed stage, linked case findings, usage and explicit stop reasons persist.
+Checkpoints contain work products, not reasoning traces. Existing application
+backup/restore includes them; conversation/account deletion and owner purge cascade
+them without touching another owner.
 
-Persist queued/running/waiting-for-user/paused/completed/cancelled/failed states,
-last committed stage and structured findings. Store work products and source
-citations, not private chain-of-thought. A worker lease prevents concurrent
-execution; revision/fencing checks reject stale results. Checkpoint mutations
-and final message delivery are idempotent. Renewing a lease requires live work;
-a watchdog records a safe timeout instead of leaving a run stuck forever.
+Claims are serialized across SQLite connections. Each grants a new expiring lease
+and fence; stale revisions, expired/replaced leases and late writes after owner
+pause/cancel are refused. An identical checkpoint retry is a no-op after a lost
+reply. Renewal requires new observed progress. Limits bound steps, active execution
+time, generated tokens and tool calls; over-budget results stay partial. Explicit
+expired-lease recovery pauses abandoned attempts without launching work.
+
+The repository pins the case revision, tax year, library release, selected-file
+bindings, Project instructions/file membership and server-supplied model/policy
+digests. Changed bindings block old work; explicit resume with fresh validation
+clears a stale checkpoint while retaining spent budget and case evidence. A Project
+rename alone does not invalidate work. Active owner, deletion/purge, Private context
+and support-ID ownership are checked on reads and mutations.
+
+No worker, task endpoint, startup scheduling or browser task controls are enabled
+in this foundation. **20D.4b is next:** construct the verified local runtime, check
+live model/file/reference availability, fence case mutations and deliver results
+idempotently through the native conversation. A stored digest alone does not prove
+local execution or current source availability. Existing foreground review remains
+the user-facing path until that integration passes its own acceptance.
+
+The remaining runner uses typed stages with a tax adapter supplying the checklist
+and evidence checks. Reuse the existing fair GPU scheduler,
+PrivateProcessingRuntime, reference/file handlers and native progress disclosures.
+Native runs persist presentation; task checkpoints own recovery. Retired
+document-authoring job tables stay retired. Final message delivery must be
+idempotent, and a watchdog must pause abandoned attempts with a specific reason.
 
 On restart, recover to a safe checkpoint and revalidate owner/access, cancellation,
 Private policy, installed model digests, file revisions and the reference release

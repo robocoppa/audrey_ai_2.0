@@ -115,7 +115,7 @@ async def test_schema_21_upgrade_preserves_existing_state_without_claiming_priva
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 23
+        assert upgraded.schema_version == 24
         after = await upgraded.conversations.get(
             user_id=owner.user_id, conversation_id="con_existing",
         )

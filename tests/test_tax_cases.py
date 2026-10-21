@@ -97,7 +97,7 @@ async def test_schema23_case_survives_reopen_and_conversation_is_single_case(sta
         is None
     )
     created = await _create(state)
-    assert store.schema_version == 23
+    assert store.schema_version == 24
     assert created["project_id"] == project.project_id
     assert created["conversation_id"] == conversation.conversation_id
     assert created["revision"] == 1 and created["checklist_version"] == 1
@@ -547,12 +547,13 @@ async def test_schema22_upgrades_additively_preserving_private_conversation(tmp_
     conversation = await store.conversations.create(user_id=owner.user_id, private_required=True)
     store.close()
     with sqlite3.connect(path) as connection:
+        connection.execute("DROP TABLE app_private_tasks")
         connection.execute("DROP TABLE app_tax_cases")
-        connection.execute("DELETE FROM app_schema_migrations WHERE version=23")
+        connection.execute("DELETE FROM app_schema_migrations WHERE version IN (23, 24)")
         connection.commit()
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 23
+        assert upgraded.schema_version == 24
         retained = await upgraded.conversations.get(
             user_id=owner.user_id, conversation_id=conversation.conversation_id
         )

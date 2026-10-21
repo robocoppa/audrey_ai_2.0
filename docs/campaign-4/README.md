@@ -20,7 +20,7 @@ Project deletion beside Edit and interrupted conversation-deletion recovery are
 accepted. The original Cloudflare origin cause was not identified; diagnostics
 are closed. [Navigation](phase-12-sidebar-navigation.md) holds the behavior.
 
-**20D.2 functionality accepted October 21; UI followup built.** Tax review
+**20D.2 and UI followup accepted October 21.** Tax review
 settings open in a dialog bounded by the visible screen; the previous completed
 year remains the editable default. Essential choices appear together in the
 conversation. A saved choice becomes a visible user reply and Audrey continues
@@ -28,7 +28,7 @@ automatically, preserving unsent text and attachments. The compact box retains
 settings and collapsed findings. Internal IDs/passing checklist rows stay hidden;
 Audrey handles source verification herself. The generic degraded badge is removed
 throughout chat, including after deletion; actual outage indicators remain.
-Local backend/UI and responsive browser checks passed; live acceptance is pending.
+The user moved on after the targeted presentation handoff; keep this flow closed.
 
 **20D.3a built:** saved cases remain readable if the IRS library changes or is
 unavailable. An explicit owner action adopts the exact available release;
@@ -37,8 +37,8 @@ and related work require rechecking. Models cannot approve the update. Publicati
 races show a further update choice, without silently adopting it. No index rerun
 or new library publication is needed to deploy this slice.
 
-**20D.3b built:** Start/Continue review runs one local tool writer through the
-normal native run, with stop/reconnect and a ten-minute foreground limit. It saves
+**20D.3b accepted for the limited worksheet:** Start/Continue review runs one
+local tool writer through the normal native run, with stop/reconnect and a ten-minute foreground limit. It saves
 a goal-scoped worksheet with linked facts, official passages, arithmetic and
 explicit limitations. Case edits make an earlier worksheet stale. The compact box
 keeps findings expandable and user confirmations explicit. Selected-file inventory
@@ -47,6 +47,14 @@ baseline passed the requested arithmetic and year/withholding separation, with a
 official passage retained. This limited pass does not establish legal accuracy or
 certify a complete return. Broader accuracy and background work follow later.
 [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds the contract.
+
+**20D.4a built:** SQLite task/checkpoint foundation, with one active task per
+Private conversation, expiring worker leases, revision/fence checks and replay-safe
+checkpoints. Pause/cancel prevent late task writes; changed case/source/Project or
+model/policy bindings require revalidation. Resource accounting and partial-work
+stop reasons survive restart and existing backup/restore. This is internal storage:
+no worker, endpoint, background generation or new browser control is enabled yet.
+Next is 20D.4b: connect bounded local steps and native progress/control to this store.
 
 **MiniMax M3.1 Flash:** configured as an unmeasured cloud draft/research candidate
 in mixed, Cloud and selected Research panels. Kimi K3 stays first, panel worker
@@ -83,7 +91,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Saved tax review accepted; foreground worksheet and baseline built |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Foreground worksheet accepted; durable checkpoints built |
 
 ## Build queue
 
@@ -100,13 +108,15 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **Current UI followup:** Project header delete/checkmark and interrupted
   chat deletion recovery accepted; Cloudflare diagnostics closed.
 - [x] **20D.2:** saved facts/evidence and deterministic case checklist accepted.
-- [ ] **Tax review presentation:** bounded settings, grouped conversational
-  choices and automatic follow-up locally verified; targeted live acceptance pending.
+- [x] **Tax review presentation:** bounded settings, grouped conversational
+  choices and automatic follow-up accepted.
 - [x] **20D.3a:** explicit reference-library updates with retained evidence and
   required rechecks; locally verified.
-- [ ] **20D.3b:** foreground worksheet built; limited numerical/separation
-  baseline reported passed. Broader answer accuracy remains open.
-- [ ] **20D.4:** durable Private tasks, checkpoints, progress, cancel and resume.
+- [x] **20D.3b:** foreground worksheet and limited numerical/separation baseline.
+  Broader accuracy continues in 20D.5/20E.
+- [x] **20D.4a:** durable owner-scoped task/checkpoint storage and recovery fences.
+- [ ] **20D.4b:** bounded local worker, native progress, pause/cancel/resume and
+  safe result delivery across restarts.
 - [ ] **20D.5:** bounded local evidence verification and targeted repair loops.
 - [ ] **20E:** compare single-pass and extended accuracy before extending defaults.
 

@@ -1034,6 +1034,38 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON app_tax_cases(user_id, conversation_id);
         """,
     ),
+    (
+        24,
+        """
+        CREATE TABLE IF NOT EXISTS app_private_tasks (
+          task_id          TEXT PRIMARY KEY,
+          conversation_id  TEXT NOT NULL,
+          user_id          TEXT NOT NULL,
+          case_id          TEXT NOT NULL,
+          status           TEXT NOT NULL CHECK (status IN (
+                             'queued', 'running', 'waiting_for_user', 'paused',
+                             'completed', 'cancelled', 'failed'
+                           )),
+          revision         INTEGER NOT NULL CHECK (revision >= 1),
+          fence            INTEGER NOT NULL CHECK (fence >= 0),
+          lease_token      TEXT NOT NULL DEFAULT '',
+          lease_expires_at TEXT,
+          record_json      TEXT NOT NULL CHECK (length(CAST(record_json AS BLOB)) <= 131072),
+          created_at       TEXT NOT NULL,
+          updated_at       TEXT NOT NULL,
+          FOREIGN KEY (conversation_id, user_id)
+            REFERENCES app_conversations(conversation_id, user_id) ON DELETE CASCADE,
+          FOREIGN KEY (case_id) REFERENCES app_tax_cases(case_id) ON DELETE CASCADE
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_app_private_tasks_active_conversation
+          ON app_private_tasks(conversation_id)
+          WHERE status IN ('queued', 'running', 'waiting_for_user', 'paused');
+        CREATE INDEX IF NOT EXISTS idx_app_private_tasks_owner_created
+          ON app_private_tasks(user_id, created_at DESC, task_id DESC);
+        CREATE INDEX IF NOT EXISTS idx_app_private_tasks_claim
+          ON app_private_tasks(status, lease_expires_at, created_at, task_id);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL"]
