@@ -355,13 +355,38 @@ export function ProjectHome({
             className="project-primary-button"
             type="button"
             onClick={() => void startConversation()}
-            disabled={creatingConversation}
+            disabled={creatingConversation || deleting}
           >
             {creatingConversation ? "Creating…" : "New conversation in project"}
           </button>
-          <button type="button" onClick={() => setEditing((current) => !current)}>
-            {editing ? "Close edit" : "Edit project"}
-          </button>
+          <div className="project-management-actions">
+            <button type="button" onClick={() => setEditing((current) => !current)} disabled={deleting}>
+              {editing ? "Close edit" : "Edit project"}
+            </button>
+            <button
+              className={confirmingDelete ? "danger-button confirming-delete" : "danger-button"}
+              type="button"
+              aria-label={confirmingDelete ? "Confirm delete project" : "Delete project"}
+              aria-pressed={confirmingDelete}
+              title={confirmingDelete
+                ? "Click again to delete project. Conversations and files will be kept."
+                : "Conversations and files will be kept. Conversations return to your chat history with their processing setting unchanged."}
+              onClick={() => {
+                if (confirmingDelete) {
+                  void removeProject();
+                } else {
+                  setConfirmingDelete(true);
+                }
+              }}
+              onBlur={() => setConfirmingDelete(false)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setConfirmingDelete(false);
+              }}
+              disabled={deleting}
+            >
+              {deleting ? "Deleting…" : confirmingDelete ? "✓" : "Delete project"}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -498,26 +523,6 @@ export function ProjectHome({
           ) : null}
         </section>
       </div>
-
-      <section className="project-danger-zone" aria-labelledby="delete-project-title">
-        <div>
-          <h2 id="delete-project-title">Delete project</h2>
-          <p>Conversations and files will be kept. Conversations return to your chat history with their processing setting unchanged.</p>
-        </div>
-        {confirmingDelete ? (
-          <div className="project-delete-confirmation" role="alert">
-            <span>Delete <strong>{project.name}</strong>?</span>
-            <button type="button" onClick={() => setConfirmingDelete(false)} disabled={deleting}>Cancel</button>
-            <button className="danger-button confirming-delete" type="button" onClick={() => void removeProject()} disabled={deleting}>
-              {deleting ? "Deleting…" : "Confirm delete project"}
-            </button>
-          </div>
-        ) : (
-          <button className="danger-button" type="button" onClick={() => setConfirmingDelete(true)}>
-            Delete project
-          </button>
-        )}
-      </section>
 
       {filesOpen ? (
         <ProjectFilePicker

@@ -46,6 +46,7 @@ import { ScrollToLatest } from "./ScrollToLatest";
 import { SwipeConversationRow } from "./SwipeConversationRow";
 import { UploadProgress } from "./UploadProgress";
 import {
+  ApiError,
   cancelRun,
   createConversation,
   deleteConversation,
@@ -398,7 +399,7 @@ export function ChatWorkspace({
         if (limits) setProjectLimits(limits);
       })
       .catch((reason: unknown) => {
-        if (active) setProjectsError(messageOf(reason));
+        if (active) setProjectsError(actionError("Could not load projects", reason));
       })
       .finally(() => {
         if (active) setProjectsLoading(false);
@@ -436,7 +437,7 @@ export function ChatWorkspace({
         if (filePage.limits) setProjectLimits(filePage.limits);
       })
       .catch((reason: unknown) => {
-        if (active) setProjectError(messageOf(reason));
+        if (active) setProjectError(actionError("Could not open project", reason));
       })
       .finally(() => {
         if (!active) return;
@@ -497,7 +498,7 @@ export function ChatWorkspace({
         }
       })
       .catch((reason: unknown) => {
-        if (active) setError(messageOf(reason));
+        if (active) setError(actionError("Could not load conversation history", reason));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -580,7 +581,9 @@ export function ChatWorkspace({
       if (focusComposer) setComposerFocusId(conversation.id);
       closeNavigation();
     } catch (reason) {
-      if (!preserveNavigation || navigationRevisionRef.current === expectedNavigation) setError(messageOf(reason));
+      if (!preserveNavigation || navigationRevisionRef.current === expectedNavigation) {
+        setError(actionError("Could not open a new conversation", reason));
+      }
     } finally {
       setCreating(false);
     }
@@ -726,7 +729,7 @@ export function ChatWorkspace({
       setConfirmDeleteId(null);
       removeFromCurrentViewRef.current(conversationId, true, true);
     } catch (reason) {
-      setError(messageOf(reason));
+      setError(actionError("Could not delete conversation", reason));
     } finally {
       setDeletingId(null);
     }
@@ -748,7 +751,7 @@ export function ChatWorkspace({
       setNextCursor(page.next_cursor);
     } catch (reason) {
       if (listKeyRef.current === expectedKey) {
-        setError(messageOf(reason));
+        setError(actionError("Could not load older conversations", reason));
       }
     } finally {
       setLoadingMore(false);
@@ -1498,7 +1501,7 @@ function ConversationThread({
       await deleteConversation(conversation.id);
       onRemoveFromView(conversation.id, true, true);
     } catch (reason) {
-      setMutationError(messageOf(reason));
+      setMutationError(actionError("Could not delete conversation", reason));
       setConfirmingDelete(false);
     } finally {
       setMutation(null);
@@ -3546,6 +3549,11 @@ function modelDetails(models: AudreyModel[], modelId: string) {
     portrait: model.id === "private" ? privatePortrait
       : model.portrait_url || MODEL_PORTRAITS[model.presentation] || autoPortrait,
   };
+}
+
+function actionError(action: string, reason: unknown): string {
+  const status = reason instanceof ApiError ? ` (HTTP ${reason.status})` : "";
+  return `${action}${status}: ${messageOf(reason)}`;
 }
 
 function messageOf(reason: unknown): string {

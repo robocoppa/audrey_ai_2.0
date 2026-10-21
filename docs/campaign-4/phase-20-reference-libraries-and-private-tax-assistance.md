@@ -468,7 +468,8 @@ the same
 search/catalog maximums. Invalid identity, scope, page/year, types and unknown
 fields retain normal validation; no count repair changes the requested library
 or edition. Native HTTP APIs keep their strict limits. Tool validation feedback
-uses fixed messages without arguments or exception contents. Only current-
+uses fixed messages without arguments or exception contents. The Private content-
+search/page-read retry is accepted; this does not establish tax-answer accuracy. Only current-
 catalog search is published; retained earlier editions do not imply a prior
 search index.
 The main plan owns the remaining queue; no temporary smoke document is retained.
@@ -594,7 +595,12 @@ per-child bonuses. These expectations come from
 [Publication 1321 (2025), PDF page 4](https://www.irs.gov/pub/irs-access/p1321_accessible.pdf),
 [IRS 2025 deduction guidance](https://www.irs.gov/forms-pubs/how-to-update-withholding-to-account-for-tax-law-changes-for-2025)
 and [IRS EITC tables](https://www.irs.gov/credits-deductions/individuals/earned-income-tax-credit/earned-income-and-earned-income-tax-credit-eitc-tables).
-A prompt or plumbing fix alone does not close this accuracy case.
+A subsequent successful retrieval still repeated the pre-law 2025 deduction
+amounts and put the section 30C refueling-credit cutoff a year early. Include
+wrong-year changes and pre-amendment values in the same comparison case: the
+[IRS termination table](https://www.irs.gov/newsroom/faqs-for-modification-of-sections-25c-25d-25e-30c-30d-45l-45w-and-179d-under-public-law-119-21-139-stat-72-july-4-2025-commonly-known-as-the-one-big-beautiful-bill-obbb)
+sets that cutoff at June 30, 2026. A prompt or plumbing fix alone does not close
+this accuracy case.
 
 Official design references: [IRS document-gathering guidance](https://www.irs.gov/filing/gather-your-documents)
 for the inventory/interview, [Publication 17 overview](https://www.irs.gov/forms-pubs/about-publication-17)

@@ -4272,6 +4272,9 @@ test("creates and manages a personal project without losing conversations or fil
   ];
   const projectFiles = new Map<string, Array<Record<string, unknown>>>();
   let projectConversationSequence = 0;
+  let releaseDelete = () => {};
+  const deleteGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
+  let deleteRequests = 0;
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -4312,6 +4315,8 @@ test("creates and manages a personal project without losing conversations or fil
         return json(route, project);
       }
       if (method === "DELETE") {
+        deleteRequests += 1;
+        await deleteGate;
         projects.splice(projects.indexOf(project), 1);
         for (const conversation of conversations) {
           if (conversation.project_id === projectId) conversation.project_id = null;
@@ -4435,9 +4440,18 @@ test("creates and manages a personal project without losing conversations or fil
 
   const projectSidebar = page.getByRole("region", { name: "Projects" });
   await projectSidebar.getByRole("button", { name: "Renamed launch", exact: true }).click();
-  await page.getByRole("button", { name: "Delete project" }).click();
-  await expect(page.getByText("Conversations and files will be kept.")).toBeVisible();
-  await page.getByRole("button", { name: "Confirm delete project" }).click();
+  const projectActions = page.locator(".project-home-header .project-management-actions");
+  const deleteProject = projectActions.getByRole("button", { name: "Delete project", exact: true });
+  await expect(deleteProject).toHaveAccessibleDescription(/Conversations and files will be kept/u);
+  await deleteProject.click();
+  const confirmDelete = projectActions.getByRole("button", { name: "Confirm delete project", exact: true });
+  await expect(confirmDelete).toHaveText("✓");
+  expect(deleteRequests).toBe(0);
+  await confirmDelete.click();
+  await expect.poll(() => deleteRequests).toBe(1);
+  await expect(projectActions.getByRole("button", { name: "Edit project", exact: true })).toBeDisabled();
+  await expect(projectActions.getByRole("button").filter({ hasText: "Deleting…" })).toBeDisabled();
+  releaseDelete();
   await expect(projectSidebar.getByRole("button", { name: "Renamed launch", exact: true })).toHaveCount(0);
   expect(conversations.every(({ project_id }) => project_id === null)).toBe(true);
   expect(readyFiles).toHaveLength(2);

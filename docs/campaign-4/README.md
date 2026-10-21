@@ -12,12 +12,13 @@ they are not ongoing task lists.
 **20D.1 accepted October 20:** Private Projects, protected uploads/context,
 refresh/isolation and new Private model choices passed. Delete-to-new-chat,
 model switching before the first message and the MiniMax addition are accepted.
-Private portrait and activity-sorted history are now accepted. Its Tools and
-skills control says Automatic. The tax comparison retry failed: saved Private
-calls requested search top_k values of 8/6/6 against a maximum of 5. Some catalog
-lookups succeeded; every failed lookup supplied an explicit limit whose value
-was redacted. The current repair bounds result counts and provides safe
-feedback for invalid arguments. No new answer-prompt change or reindex is requested.
+Private portrait, activity-sorted history and Automatic tools presentation are
+accepted. The reference count repair is accepted: the latest Private comparison
+completed content search and page reads. Accuracy remains open; retrieved pages
+did not prevent outdated deduction figures and a wrong credit cutoff year.
+Project deletion beside Edit with checkmark confirmation is built. The residual
+Cloudflare error after Private chat deletion awaits request/status diagnostics;
+its cause is not established.
 [Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds the
 privacy contract; [navigation](phase-12-sidebar-navigation.md) holds deletion.
 
@@ -56,7 +57,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Private UI accepted; reference result-count repair; tax review next |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Private retrieval accepted; project/delete followup; tax review next |
 
 ## Build queue
 
@@ -68,8 +69,10 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **Private chat followup:** delete-to-new-chat, model switching before the
   first message and MiniMax cloud configuration accepted.
 - [x] **Private UI:** unused Audrey portrait and activity-sorted history accepted.
-- [ ] **Current repair:** bounded reference result counts and useful validation
-  feedback; retry the failed comparison with the actual source tools working.
+- [x] **Reference request repair:** oversized counts bounded; content search
+  and page reads accepted. General tax accuracy remains unverified.
+- [ ] **Current UI followup:** Project delete beside Edit with checkmark
+  confirmation; resolve residual Cloudflare error after Private chat deletion.
 - [ ] **20D.2:** dedicated `tax_review` tool with saved facts, evidence, missing
   items and a deterministic case checklist.
 - [ ] **20D.3:** one complete foreground tax review and a known-answer baseline.

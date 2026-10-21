@@ -42,6 +42,14 @@ Project CRUD, conversation creation/listing, move/ungroup, file selection/remova
 
 The sidebar has compact collapsible Projects. Project home provides instructions, conversations, file management, and clear non-destructive deletion confirmation. Ordinary search/history and New conversation remain available.
 
+### Project deletion control
+
+Delete project sits beside Edit project in the Project header. Its first click
+arms a checkmark confirmation with an accessible Confirm delete project label;
+Escape or leaving the control cancels it. Pending deletion disables the controls.
+The action's accessible help explains that files and conversations are retained.
+The two actions share dimensions and remain paired in compact layouts.
+
 ## Upload and processing
 
 Project home offers **Upload file to project** and **Choose from My Files**

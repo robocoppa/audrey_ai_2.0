@@ -5120,7 +5120,6 @@ a:focus-visible {
 
 .project-dialog-actions,
 .project-home-actions,
-.project-delete-confirmation,
 .project-picker-footer {
   display: flex;
   align-items: center;
@@ -5131,13 +5130,52 @@ a:focus-visible {
 .project-dialog-actions button,
 .project-home-actions button,
 .project-manage-files,
-.project-danger-zone button,
 .project-picker-footer button {
   padding: 0.55rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: 0.58rem;
   background: transparent;
   color: var(--muted);
+}
+
+.project-home-actions {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.project-management-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.project-home-actions button {
+  min-height: 2.75rem;
+  border-radius: 0.65rem;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.project-management-actions button {
+  min-width: 8.5rem;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+}
+
+.project-management-actions button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--surface-active);
+}
+
+.project-management-actions .danger-button {
+  border-color: rgb(255 145 164 / 30%);
+  background: rgb(255 145 164 / 6%);
+}
+
+.project-management-actions .danger-button:hover:not(:disabled),
+.project-management-actions .confirming-delete {
+  border-color: rgb(255 145 164 / 56%);
+  background: rgb(255 145 164 / 12%);
 }
 
 .project-primary-button {
@@ -5194,8 +5232,7 @@ a:focus-visible {
   margin-top: 1rem;
 }
 
-.project-panel,
-.project-danger-zone {
+.project-panel {
   border: 1px solid var(--border);
   border-radius: 0.9rem;
   background: rgb(9 20 37 / 54%);
@@ -5347,32 +5384,6 @@ a:focus-visible {
   font-size: 0.7rem;
 }
 
-.project-danger-zone {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-top: 1rem;
-  padding: 1rem;
-  border-color: rgb(255 145 164 / 24%);
-}
-
-.project-danger-zone h2 {
-  font-size: 0.9rem;
-}
-
-.project-danger-zone p {
-  margin: 0.25rem 0 0;
-  color: var(--muted);
-  font-size: 0.74rem;
-}
-
-.project-delete-confirmation {
-  flex-wrap: wrap;
-  color: var(--danger);
-  font-size: 0.74rem;
-}
-
 .project-file-backdrop {
   z-index: 80;
 }
@@ -5507,17 +5518,29 @@ a:focus-visible {
     padding: 1rem;
   }
 
-  .project-home-header,
-  .project-danger-zone {
+  .project-home-header {
     align-items: stretch;
     flex-direction: column;
   }
 
   .project-home-actions,
-  .project-dialog-actions,
-  .project-delete-confirmation {
+  .project-dialog-actions {
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .project-home-actions,
+  .project-management-actions {
+    width: 100%;
+  }
+
+  .project-home-actions > button {
+    width: 100%;
+  }
+
+  .project-management-actions button {
+    flex: 1;
+    min-width: 0;
   }
 
   .project-home-grid {

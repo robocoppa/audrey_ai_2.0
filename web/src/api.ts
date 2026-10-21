@@ -903,9 +903,29 @@ export function updateConversation(
 }
 
 export async function deleteConversation(conversationId: string): Promise<void> {
-  await apiResponse(`/api/conversations/${encodeURIComponent(conversationId)}`, {
-    method: "DELETE",
-  });
+  try {
+    await apiResponse(`/api/conversations/${encodeURIComponent(conversationId)}`, {
+      method: "DELETE",
+    });
+  } catch (reason) {
+    const interrupted = reason instanceof TypeError && reason.name !== "AbortError";
+    const upstreamFailure = reason instanceof ApiError && reason.status >= 500 && reason.status < 600;
+    if (interrupted || upstreamFailure) {
+      // A proxy can lose the acknowledgement after the server commits deletion.
+      // Verify the result once; never repeat the destructive request or infer
+      // success from an unavailable check, a generic proxy 404, or an auth error.
+      try {
+        await getConversation(conversationId);
+      } catch (verification) {
+        if (
+          verification instanceof ApiError
+          && verification.status === 404
+          && verification.message === "Conversation not found."
+        ) return;
+      }
+    }
+    throw reason;
+  }
 }
 
 export async function discardEmptyConversation(conversationId: string): Promise<void> {
