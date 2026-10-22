@@ -31,6 +31,8 @@ from audrey.user_data_visibility import remote_personal_reads_blocked
 
 TAX_REVIEW_INSTRUCTION = """Review only the saved case goal, using one local writer. Inspect the case and selected files, propose required facts, then stop for user confirmation before relying on unconfirmed amounts. Retain exact dated official support, compute named-input decimal arithmetic, and save a goal-scoped worksheet with save_review, even when it can only report missing information. Each substantive finding needs saved fact/evidence/calculation IDs inside tool calls. Use next_question only for a user-supplied fact or choice needed to complete the saved goal; leave it empty when no user answer is needed. Preserve substantive missing information rather than inventing findings. Perform only one case mutation per tool-call round, and use the revision returned by the preceding write. You have at most twelve tool rounds in a foreground turn: if the remaining scope needs more work, save the useful partial worksheet and state what still needs review. Continue review resumes from saved records; do not repeat completed work. This is a selected-passage review, not certification of a complete tax return. Tax-year applicability remains proposed/unknown unless separately established; never describe the coverage checklist as a legal accuracy check.
 
+Before your final answer, save_review checks substantive worksheet findings against reread evidence with a separate local assessment. If its result requests repair, fix only the flagged claims/support and save once more. The attempt permits at most two checks within the same time/token budget. A limited or unresolved assessment means partial work: explain the limitation and do not repeat disputed claims as facts. Owner confirmations remain separate; a model assessment never verifies tax-law correctness or changes year applicability. Save useful partial findings even when confirmation or evidence is missing.
+
 Help the user review the selected tax year in plain, conversational language. Keep record IDs, revisions, operation names, checklist labels and passing-check summaries inside tool calls. Explain the useful result and only material limitations. Ask one pertinent question only when the user's answer is needed for the saved goal. A bounded arithmetic goal does not require asking whether its result is final taxable income or whether to expand into a complete return. Group related proposed facts for the user to check through the review controls. Do not ask them to repeat facts already saved or confirmed. An empty saved case means review has not started; do not describe unchecked areas as passed or reviewed.
 
 Fetch and read available official rules yourself. Source verification is Audrey's work, not a user confirmation task: do not ask the user to resolve a catalog metadata gap or authorize another available page read. A catalog's unknown applicability does not establish that a retained passage lacks an explicit tax year. Distinguish what the exact passage states from what the catalog or tool has independently verified. If the relevant year is unclear, read the publication's year statement and the relevant rule passage before saving the useful scoped result. Preserve proposed/unknown status and any remaining material limitation; never promote that status yourself or claim independently verified law. A bookkeeping warning alone does not create a user decision or next_question.
@@ -189,6 +191,7 @@ async def create_tax_case(
 async def _update(
     app: Any, principal: Principal, conversation_id: str, *, expected_revision: int,
     operation: str, data: dict, actor: Literal["model", "user"],
+    verification: dict | None = None,
 ) -> dict:
     case = await _read_case(app, principal, conversation_id)
     if case is None:
@@ -197,6 +200,7 @@ async def _update(
         result = await app.state.application_store.tax_cases.update(
             user_id=principal.user_id, conversation_id=conversation_id,
             expected_revision=expected_revision, operation=operation, data=data, actor=actor,
+            **({"verification": verification} if verification is not None else {}),
         )
     except TaxCaseConflictError:
         raise _error(409, "The Tax review case changed. Inspect it and use its current revision.") from None
@@ -429,12 +433,86 @@ def _tool_result(
     return result
 
 
+class _WorksheetVerification:
+    """Two bounded checks in one native attempt; the writer repairs their findings."""
+
+    def __init__(self) -> None:
+        self.attempts = 0
+        self.previous_input: str | None = None
+        self.stopped = False
+
+    async def assess(self, app: Any, principal: Principal, case: dict, candidate: dict) -> dict:
+        from audrey.app_state.private_tasks import current_private_task_lease
+        from audrey.tax_verification import (
+            candidate_digest,
+            limited_verification,
+            verify_review,
+        )
+
+        lease = current_private_task_lease()
+        if lease is None:
+            raise ProcessingPolicyError("private_tool_not_allowed")
+        await lease.verify()
+        # A revision/timestamp bump is not new evidence. A corrected finding is
+        # useful input, even when it can use the same supporting passages.
+        signature = candidate_digest({
+            "candidate": candidate,
+            **{key: case[key] for key in ("facts", "evidence", "calculations", "return_items")},
+        })
+        repeated = self.previous_input == signature
+        if self.stopped or self.attempts >= 2 or repeated:
+            self.stopped = True
+            return limited_verification(
+                case, candidate, attempt=max(1, self.attempts),
+                stop_reason="no_new_evidence" if repeated else "verification_limit",
+                reason="The evidence check stopped without resolving all findings. Treat this worksheet as partial.",
+            )
+        self.attempts += 1
+        self.previous_input = signature
+
+        async def reread(evidence: dict) -> dict:
+            await lease.verify()
+            result = await _verified_evidence(app, case, evidence)
+            await lease.verify()
+            return result
+
+        assessment = await verify_review(
+            app, case, candidate, reread=reread, attempt=self.attempts,
+            user_id=principal.storage_namespace,
+        )
+        await lease.verify()
+        if self.attempts == 2 and assessment["status"] == "needs_repair":
+            assessment = {**assessment, "status": "limited", "stop_reason": "verification_limit"}
+        if assessment["status"] == "limited":
+            self.stopped = True
+        return assessment
+
+
+def _verification_feedback(result: dict, verification: dict) -> dict:
+    result["verification"] = verification
+    if verification["status"] == "needs_repair":
+        result["repair"] = (
+            "Repair only the flagged findings or their linked support, then save_review once more. "
+            "Read additional official passages only where needed; retain confirmed facts and unrelated work. "
+            "Do not repeat disputed statements in the final answer."
+        )
+    elif verification["status"] == "limited":
+        result["repair"] = (
+            "Stop verification for this attempt. Explain the useful saved work and unresolved findings plainly. "
+            "Do not present unchecked or disputed findings as established, ask the user to verify source metadata, "
+            "or claim a complete or legally correct return."
+        )
+    return result
+
+
 def make_tax_review_handler(
     *, app: Any, principal: Principal, conversation_id: str,
 ) -> PrivateToolHandler:
     policy = current_processing_policy()
     if policy is None or "tax_review" not in policy.allowed_tools:
         raise ProcessingPolicyError("private_tool_not_allowed")
+
+    verification_session = _WorksheetVerification()
 
     async def handler(arguments: dict[str, Any]) -> dict:
         if current_processing_policy() is not policy:
@@ -472,6 +550,8 @@ def make_tax_review_handler(
                 return _tool_result(case, operation=body.operation, section=body.section, offset=body.offset, limit=body.limit)
             if body.expected_revision is None:
                 raise PrivateToolArgumentsError()
+            if body.expected_revision != case["revision"]:
+                raise _error(409, "The Tax review case changed. Inspect its current revision.")
             raw = dict(body.data)
             if body.operation == "record_evidence":
                 if "tax_year_status" in raw:
@@ -497,12 +577,26 @@ def make_tax_review_handler(
                 data = await _verified_evidence(app, case, data)
             elif body.operation == "record_calculation":
                 data = _calculation(data)
+            verification = None
+            if body.operation == "save_review":
+                from audrey.app_state.private_tasks import current_private_task_lease
+
+                if current_private_task_lease() is not None:
+                    previous = case.get("review") or {}
+                    if (previous.get("review_revision") == case["revision"]
+                            and all(previous.get(key) == value for key, value in data.items())
+                            and (previous.get("verification") or {}).get("status") == "checked"):
+                        return _verification_feedback(
+                            _tool_result(case, operation=body.operation), previous["verification"],
+                        )
+                    verification = await verification_session.assess(app, principal, case, data)
             updated = await _update(
                 app, principal, conversation_id, expected_revision=body.expected_revision,
-                operation=body.operation, data=data, actor="model",
+                operation=body.operation, data=data, actor="model", verification=verification,
             )
             if body.operation == "save_review":
-                return _tool_result(updated, operation=body.operation)
+                result = _tool_result(updated, operation=body.operation)
+                return _verification_feedback(result, verification) if verification is not None else result
             entries = updated[_CATEGORIES[body.operation]]
             entry = next((item for item in reversed(entries)
                           if all(item.get(key) == value for key, value in data.items()

@@ -337,12 +337,34 @@ class TaxCasesRepository:
         operation: str,
         data: dict[str, Any],
         actor: Literal["model", "user"] = "model",
+        verification: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if type(expected_revision) is not int or expected_revision < 1:
             raise TaxCaseError("A positive expected revision is required.")
         if actor not in {"model", "user"}:
             raise TaxCaseError("Unsupported tax case actor.")
         payload = validate_operation(operation, data)
+        verified_report = None
+        if verification is not None:
+            if operation != "save_review" or actor != "model":
+                raise TaxCaseError("Only a model worksheet save may retain trusted verification.")
+            # This argument is supplied by the bound service, never by the model's
+            # operation payload. Import lazily because the checker validates the
+            # candidate with this module's SaveReviewPayload schema.
+            from audrey.tax_verification import ReviewVerification, candidate_digest
+
+            try:
+                report = ReviewVerification.model_validate(verification)
+            except ValidationError as exc:
+                raise TaxCaseError("Invalid worksheet verification report.") from exc
+            if (
+                report.case_revision != expected_revision
+                or report.candidate_sha256 != candidate_digest(payload)
+                or sorted(finding.finding_index for finding in report.findings)
+                != list(range(len(payload["findings"])))
+            ):
+                raise TaxCaseError("Worksheet verification does not match this candidate revision.")
+            verified_report = report.model_dump(mode="json")
         if (
             operation == "record_evidence"
             and actor == "model"
@@ -370,6 +392,7 @@ class TaxCasesRepository:
             operation,
             payload,
             actor,
+            verified_report,
         )
 
     def _update_sync(
@@ -380,6 +403,7 @@ class TaxCasesRepository:
         operation: str,
         payload: dict[str, Any],
         actor: str,
+        verification: dict[str, Any] | None,
     ) -> dict[str, Any]:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
@@ -393,11 +417,16 @@ class TaxCasesRepository:
                     raise TaxCaseConflictError("The tax case changed; reload its current revision.")
                 try:
                     task_write = guard_tax_case_write(
-                        self._conn, user_id=user_id, conversation_id=conversation_id, actor=actor,
+                        self._conn,
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        actor=actor,
                     )
                 except PrivateTaskError:
-                    raise TaxCaseConflictError("The Private task lease or inputs changed.") from None
-                changed = _apply_operation(case, operation, payload, actor)
+                    raise TaxCaseConflictError(
+                        "The Private task lease or inputs changed."
+                    ) from None
+                changed = _apply_operation(case, operation, payload, actor, verification)
                 if changed:
                     case["revision"] += 1
                     case["updated_at"] = _utc_now()
@@ -486,7 +515,11 @@ class TaxCasesRepository:
 
 
 def _apply_operation(
-    case: dict[str, Any], operation: str, payload: dict[str, Any], actor: str
+    case: dict[str, Any],
+    operation: str,
+    payload: dict[str, Any],
+    actor: str,
+    verification: dict[str, Any] | None = None,
 ) -> bool:
     if operation == "save_review":
         # Revalidate even an identical report: a later fact rejection, year or
@@ -497,6 +530,7 @@ def _apply_operation(
             previous
             and previous.get("review_revision") == case["revision"]
             and all(previous.get(key) == value for key, value in payload.items())
+            and previous.get("verification") == verification
         ):
             return False
         case["review"] = {
@@ -506,6 +540,8 @@ def _apply_operation(
             "review_revision": case["revision"] + 1,
             "saved_at": _utc_now(),
         }
+        if verification is not None:
+            case["review"]["verification"] = verification
         return True
     if operation == "change_year":
         old_year, new_year = case["tax_year"], payload["tax_year"]
@@ -898,8 +934,21 @@ def tax_case_review(case: dict[str, Any]) -> dict[str, Any] | None:
         limitations.insert(
             0, "Saved information changed after this review. Ask Audrey to refresh it."
         )
+    projected = dict(review)
+    verification = review.get("verification")
+    if verification is not None:
+        # Keep the retained report intact; a changed case cannot make an old
+        # assessment look current merely because its candidate text is unchanged.
+        projected["verification"] = {**verification, "stale": stale}
+        if verification.get("status") != "checked":
+            limitations.append(_verification_limitation(verification))
+            for finding in verification.get("findings", []):
+                if finding.get("verdict") != "supported" and finding.get("reason"):
+                    message = f"Finding {finding['finding_index'] + 1}: {finding['reason']}"
+                    if message not in limitations:
+                        limitations.append(message)
     return {
-        **review,
+        **projected,
         "status": "needs_input"
         if needs_input
         else "limited_evidence"
@@ -910,6 +959,20 @@ def tax_case_review(case: dict[str, Any]) -> dict[str, Any] | None:
         "document_scope": "Selected passages only. Remaining document pages have not been fully reviewed.",
         "notice": "This saved review does not establish that a tax return is complete or legally correct.",
     }
+
+
+def _verification_limitation(verification: dict[str, Any]) -> str:
+    reasons = {
+        "needs_user_input": "Worksheet checking needs additional information from you.",
+        "evidence_gap": "Some worksheet findings lack sufficient saved evidence.",
+        "reviewer_unavailable": "The local worksheet check could not finish.",
+        "verification_limit": "Worksheet checking reached its bounded review limit.",
+        "no_new_evidence": "Further worksheet checking found no additional saved evidence.",
+    }
+    return reasons.get(
+        verification.get("stop_reason"),
+        "Some worksheet findings could not be confirmed from saved evidence.",
+    )
 
 
 def tax_case_checklist(case: dict[str, Any]) -> dict[str, Any]:

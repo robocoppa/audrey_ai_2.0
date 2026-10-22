@@ -479,8 +479,8 @@ The main plan owns the remaining queue; no temporary smoke document is retained.
 The [main build queue](README.md#build-queue) owns status and order. The contracts
 below cover the dedicated tax-review tool and reusable Private task runner,
 with tax assistance as the first workflow. The saved case/tool foundation is built;
-foreground worksheet review has a limited user-reported numerical pass; broader
-accuracy acceptance and the task runner remain queued.
+foreground worksheet review has a limited user-reported numerical pass. Saved
+execution and bounded evidence checks are built; broader accuracy evaluation remains queued.
 OCR/media remain deferred until a case requires them.
 
 #### Tax review tool and case record
@@ -714,36 +714,49 @@ shutdown after commit and replay are idempotent. Startup replays committed resul
 before generic run recovery, then fences/pauses unfinished tasks. It never launches
 model work automatically. Explicit resume revalidates current authority and inputs
 and starts a new native attempt linked to the same task. Already committed source
-findings stay saved; verification/repair passes remain 20D.5. Local lifecycle and
-responsive checks passed; deployed browser acceptance is pending.
+findings stay saved. The user advanced past the lifecycle handoff October 22;
+no repeat lifecycle check is queued.
 
-The remaining runner uses typed stages with a tax adapter supplying the checklist
-and evidence checks. Reuse the existing fair GPU scheduler,
-PrivateProcessingRuntime, reference/file handlers and native progress disclosures.
-Native runs persist presentation; task checkpoints own recovery. Retired
-document-authoring job tables stay retired. Final message delivery must be
-idempotent, and a watchdog must pause abandoned attempts with a specific reason.
+**20D.5 built — bounded evidence checking and targeted repair.** Each native
+worksheet save checks only its linked facts, calculations, return items and
+official passages. Deterministic checks catch missing/stale support, conflicting
+or wrong-year evidence, rejected facts and unreproducible decimal arithmetic.
+Distinct supporting passages are reopened against exact pinned document/revision,
+page and offset. This is selected-passage checking, not full document coverage.
 
-On restart, recover to a safe checkpoint and revalidate owner/access, cancellation,
-Private policy, installed model digests, file revisions and the reference release
-before any model/tool call. Changed evidence invalidates dependent findings and
-requires their recheck. Revocation/purge/cancel stops subsequent work and prevents
-late commits. Saved case/task data and recovery state participate in owner purge
-and the existing local backup/restore path.
+One structured read-only assessment uses the existing verified local writer model
+and fair GPU gate. It checks the worksheet summary, each finding's conditions,
+year and amounts against complete supplied support. Instructions in source text
+remain untrusted data. The complete request is bounded to 24 KB and twelve
+source reads; larger work stays explicitly limited rather than silently clipping
+support. Every finding requires exactly one assessment. Malformed, incomplete or
+truncated replies cannot pass. Missing user facts skip this extra model call.
 
-Start with sequential local stages sharing the existing GPU gate, releasing it
-between steps so interactive chat can proceed. Initial operator-configured limits
-cover wall time, generated tokens, tool calls and review passes. A provisional
-10-minute budget and two verification passes are starting settings to measure,
-not accuracy promises; longer limits can be requested for a specific task.
-No extra model download or model promotion is part of this plan.
+The writer receives specific failed findings through save_review feedback, then
+repairs only those claims or their saved support. One recheck is allowed, within
+the same twelve-round attempt, ten-minute task time and durable generated-token
+budget. Unchanged failed input or exhausted checks stop further verification in
+that attempt. No new scheduler, download, cloud fallback or parallel panel is
+introduced. Measured unusable output remains a limited worksheet; authority,
+cancellation and unknown-usage failures retain the existing task pause boundary.
 
-A reviewer reopens the original evidence and checks specific claims, conditions,
-amounts and missing topics. Use a different installed local model when useful,
-then repair only the failed parts. Agreement between models is not proof.
-Stop when checks complete, the user must supply facts, source coverage is
-insufficient/conflicting, two rounds yield no new evidence, the budget expires,
-or the user cancels. Report the exact stop reason and partial findings.
+A strict server-supplied report binds the exact validated worksheet digest and
+case revision and commits beside it under existing task fences. Failed findings
+are retained as partial work if the process stops before repair. Models and
+browser actions cannot inject assessments, approve personal facts or promote
+source tax-year status. A case edit invalidates the current assessment. Only a
+current checked worksheet can finish a native task; unresolved checks remain
+paused or wait for the owner's needed facts. Model agreement does not prove
+legal correctness. The initial checker intentionally uses the same installed
+writer; a different reviewer requires evidence of benefit in 20E.
+
+The result uses the existing findings/limitations and Models/Tools/Sources
+disclosures. No new dialog or user approval is added. Backend-only deployment;
+the targeted browser check continues an existing confirmed synthetic worksheet,
+checks its linked rules/arithmetic and verifies saved findings after refresh.
+No new upload, reindex, source collection or migration is required. Local checks
+prove plumbing and boundaries; deployed behavior and answer quality still need
+their separate acceptance.
 
 #### Accuracy and visible user flow
 

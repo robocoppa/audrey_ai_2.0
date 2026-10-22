@@ -739,8 +739,10 @@ class NativeRunManager:
                           for item in case["facts"]) or (
                 review is not None and review["status"] == "needs_input"
             )
+            verification = (review or {}).get("verification") or {}
             outcome = "waiting_for_user" if waiting else (
-                "completed" if review is not None and not review["stale"] else "paused"
+                "completed" if review is not None and not review["stale"]
+                and verification.get("status") == "checked" else "paused"
             )
             usage = live.latest_usage
             delivery = {
@@ -756,7 +758,7 @@ class NativeRunManager:
             checkpoint = {
                 "stage": "review" if review is not None else "facts" if waiting else "inspect",
                 "summary": "Saved review needs your input." if waiting else (
-                    "Review worksheet saved." if outcome == "completed" else "Partial review saved."
+                    "Review worksheet saved." if outcome == "completed" else "Partial review saved; evidence checks remain unresolved."
                 ),
             }
             for support_field, category in (

@@ -1006,6 +1006,11 @@ _TASK_LEASE: ContextVar[PrivateTaskLease | None] = ContextVar(
 )
 
 
+def current_private_task_lease() -> PrivateTaskLease | None:
+    """Return the owning scope; callers must verify its live lease before work."""
+    return _TASK_LEASE.get()
+
+
 @contextmanager
 def private_task_scope(
     repository: PrivateTasksRepository, task: dict

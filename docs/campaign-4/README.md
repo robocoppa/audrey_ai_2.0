@@ -69,7 +69,7 @@ Permission changes are checked again inside case-write transactions. Explicit
 resume revalidates inputs and retains spent resources; stale checkpoints cannot
 start work.
 
-**20D.4b.2b built; browser acceptance pending:** native Tax review turns create
+**20D.4b.2b complete; user advanced past the lifecycle handoff October 22:** native Tax review turns create
 or explicitly resume a saved task through the existing run manager and fair GPU
 queue. One compact progress row provides Pause/Resume/Cancel; normal Stop cancels
 the task. Refresh retains saved progress; review controls preserve unsent drafts.
@@ -77,9 +77,16 @@ Each attempt remains one
 bounded local writer; generated-token usage is observed before output is accepted.
 Checkpoint and final-answer outbox commit together, and delivery reuses the
 original native message. Restart replays committed results, pauses unfinished
-work and requires explicit resume with fresh validation. No automatic restart
-generation or extra verification passes are enabled. **Next: 20D.5**, targeted
-local evidence checking and repair after this lifecycle passes in the browser.
+work and requires explicit resume with fresh validation. Restart never launches
+model work. No repeat lifecycle check is queued.
+
+**20D.5 built; browser acceptance pending:** saving a native worksheet reopens
+linked official passages and checks its summary/findings with the verified local
+model. Focused repair gets at most one recheck within the existing task budgets.
+Assessments bind the exact worksheet and case revision; unresolved work stays
+partial and later case edits make checks stale. Owner confirmation and proposed
+source applicability remain separate. No model, config, schema or index change.
+**Next: 20E**, matched accuracy evaluation after the targeted browser check.
 
 **Notices and settings polish built:** Tax review shows a brief filing caution;
 Private shows local server processing/storage with expandable privacy details.
@@ -122,7 +129,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Foreground worksheet accepted; durable checkpoints built |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Saved reviews and bounded evidence checks built; accuracy evaluation next |
 
 ## Build queue
 
@@ -152,8 +159,9 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
   exact source pins, permission fencing and explicit revalidated resume.
 - [x] **Tax/Private notices:** concise disclaimers and settings-button polish.
 - [x] **20D.4b.2b built:** native saved reviews, progress/control, safe restart
-  recovery and idempotent delivery. Manual lifecycle acceptance is pending.
-- [ ] **20D.5:** bounded local evidence verification and targeted repair loops.
+  recovery and idempotent delivery; user moved on from the lifecycle handoff.
+- [x] **20D.5 built:** bounded local evidence checking and targeted repair;
+  browser acceptance pending.
 - [ ] **20E:** compare single-pass and extended accuracy before extending defaults.
 
 Tax year/jurisdiction and reference release belong to the case record; 20D.1 does
