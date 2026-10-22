@@ -1,0 +1,35 @@
+.conversation-with-toolbox { display: grid; min-width: 0; min-height: 0; height: 100%; grid-template-columns: minmax(0, 1fr); overflow: hidden; }
+.conversation-with-toolbox[data-toolbox-open="true"] { grid-template-columns: minmax(0, 1fr) clamp(18rem, 26vw, 22rem); }
+.conversation-thread-slot > .conversation-with-toolbox { grid-row: 2; }
+.conversation-toolbox-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.conversation-toolbox-main > .thread-root { flex: 1; min-height: 0; height: auto; }
+.conversation-toolbox-toolbar { display: flex; flex: none; justify-content: flex-end; padding: 0.35rem 1rem; }
+.conversation-toolbox-toolbar > button { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 2rem; padding: 0.25rem 0.65rem; border: 1px solid var(--border); border-radius: 0.55rem; background: var(--surface-deep); color: var(--text-soft); font: inherit; font-size: 0.73rem; cursor: pointer; }
+.conversation-toolbox-toolbar > button:hover { border-color: var(--accent); background: var(--surface-raised); }
+.conversation-toolbox { display: flex; min-width: 0; min-height: 0; flex-direction: column; border: 0; border-left: 1px solid var(--border); background: var(--surface-deep); color: var(--text-soft); }
+.conversation-toolbox[hidden] { display: none; }
+.conversation-toolbox-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.8rem 0.9rem; border-bottom: 1px solid var(--border); }
+.conversation-toolbox-header h2 { display: flex; align-items: center; gap: 0.5rem; margin: 0; font-size: 0.84rem; font-weight: 600; color: var(--text); }
+.conversation-toolbox svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.conversation-toolbox-toolbar svg { width: 0.9rem; height: 0.9rem; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.conversation-toolbox-header button { display: grid; place-items: center; flex: none; width: 2rem; height: 2rem; padding: 0; border: 1px solid transparent; border-radius: 0.5rem; background: transparent; color: var(--muted); cursor: pointer; }
+.conversation-toolbox-header button:hover { border-color: var(--border-strong); background: var(--surface-raised); color: var(--text); }
+.conversation-toolbox-content { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 0.75rem; }
+.conversation-toolbox-drawer { position: fixed; inset: 0 0 0 auto; box-sizing: border-box; width: min(24rem, calc(100vw - 1.25rem)); max-width: none; height: 100dvh; max-height: 100dvh; margin: 0; padding: 0; box-shadow: -1rem 0 3rem rgb(0 0 0 / 25%); }
+.conversation-toolbox-drawer:not([open]) { display: none; }
+.conversation-toolbox-drawer::backdrop { background: rgb(3 10 21 / 58%); }
+@media (max-width: 900px) {
+  .conversation-toolbox-toolbar { padding: 0.3rem 0.8rem; }
+  .conversation-toolbox-header { padding-top: max(0.8rem, env(safe-area-inset-top)); }
+  .conversation-toolbox-header button { min-width: 2.5rem; min-height: 2.5rem; }
+  .conversation-toolbox-content { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+.conversation-toolbox .tax-review[data-presentation="toolbox"] { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.conversation-toolbox .tax-review[data-presentation="toolbox"] .tax-review-body { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
+.conversation-toolbox .tax-review-body > * { flex-shrink: 0; }
+.conversation-toolbox .tax-review-body > .tax-review-question { flex: 1 1 auto; min-height: 7rem; }
+.conversation-toolbox .tax-review-inline-settings { max-height: 60%; overflow-y: auto; flex-shrink: 1; }
+.conversation-toolbox .tax-review-worksheet { max-height: 35%; overflow-y: auto; flex-shrink: 1; }
+
+.toolbox-pending-count { display: inline-grid; min-width: 1.1rem; height: 1.1rem; padding-inline: 0.2rem; place-items: center; border-radius: 1rem; background: var(--surface-active); color: var(--accent); font-size: 0.65rem; }

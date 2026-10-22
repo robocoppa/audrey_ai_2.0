@@ -46,6 +46,7 @@ import { ScrollToLatest } from "./ScrollToLatest";
 import { SwipeConversationRow } from "./SwipeConversationRow";
 import { UploadProgress } from "./UploadProgress";
 import { TaxReview } from "./TaxReview";
+import { ConversationToolbox } from "./ConversationToolbox";
 import { PrivateTaskProgress } from "./PrivateTaskProgress";
 import type { PrivateTask } from "./privateTasksApi";
 import { PrivateModeNotice } from "./PrivateModeNotice";
@@ -1262,6 +1263,7 @@ function ConversationThread({
   const [runActive, setRunActive] = useState(false);
   const [recoveredRunId, setRecoveredRunId] = useState<string | null>(null);
   const [durableReviewPresent, setDurableReviewPresent] = useState(false);
+  const [toolboxDismissed, setToolboxDismissed] = useState(() => window.matchMedia?.("(max-width: 900px)").matches ?? false);
   const [recoveryError, setRecoveryError] = useState("");
   const [stoppingRecovered, setStoppingRecovered] = useState(false);
   const [threadRevision, setThreadRevision] = useState(0);
@@ -1659,6 +1661,8 @@ function ConversationThread({
           readOnly={archived}
           modeDisabled={runActive || mutation !== null}
           recoveredRunActive={recoveredRunId !== null}
+          toolboxDismissed={toolboxDismissed}
+          onToolboxDismissedChange={setToolboxDismissed}
           onDurableReviewPresenceChange={setDurableReviewPresent}
           onModelChange={changeModel}
           onRunActiveChange={setRunActive}
@@ -1694,6 +1698,8 @@ function AudreyThread({
   readOnly,
   modeDisabled,
   recoveredRunActive,
+  toolboxDismissed,
+  onToolboxDismissedChange: setToolboxDismissed,
   onDurableReviewPresenceChange,
   onModelChange,
   onRunActiveChange,
@@ -1717,6 +1723,8 @@ function AudreyThread({
   readOnly: boolean;
   modeDisabled: boolean;
   recoveredRunActive: boolean;
+  toolboxDismissed: boolean;
+  onToolboxDismissedChange: (dismissed: boolean) => void;
   onDurableReviewPresenceChange: (present: boolean) => void;
   onModelChange: (modelId: string, draft: ComposerDraft) => Promise<boolean>;
   onRunActiveChange: (active: boolean) => void;
@@ -2423,12 +2431,57 @@ function AudreyThread({
     };
   }, [pendingId, pendingStatus, runtime]);
 
+  const toolboxContent = isPrivate ? <TaxReview
+        presentation="toolbox"
+        conversationId={conversationId}
+        expanded={taxReviewExpanded}
+        active={effectiveSkillId === "tax-review"}
+        disabled={readOnly || submissionBlocked || activity.status === "running" || recoveredRunActive}
+        refreshVersion={taxReviewRefresh}
+        onExpandedChange={setTaxReviewExpanded}
+        onCaseChange={acceptTaxCase}
+        onSaved={() => { setSkillId("tax-review"); setToolboxDismissed(false); }}
+        onReview={() => startTaxReview()}
+        taskControls={taxCase ? <PrivateTaskProgress
+          key={conversationId}
+          conversationId={conversationId}
+          refreshVersion={taxReviewRefresh}
+          disabled={submissionBlocked || activity.status === "running" || recoveredRunActive
+            || ["update_available", "unavailable"].includes(taxCase.reference_update?.status ?? "")}
+          readOnly={readOnly}
+          hasReview={Boolean(taxCase.review)}
+          onReview={() => startTaxReview()}
+          onChanged={() => setTaxReviewRefresh((current) => current + 1)}
+          onTaskChange={acceptPrivateTask}
+        /> : undefined}
+      >
+        {isPrivate && taxCase ? <TaxReviewQuestions
+          key={`${taxCase.id}:${taxCase.tax_year}`}
+          conversationId={conversationId}
+          taxCase={taxCase}
+          answerVersion={activityLedger.answers.size}
+          disabled={readOnly || submissionBlocked || recoveredRunActive || activity.status === "running"
+            || ["update_available", "unavailable"].includes(taxCase.reference_update?.status ?? "")}
+          onCaseChange={(value) => { acceptTaxCase(value); setTaxReviewRefresh((current) => current + 1); }}
+          onReload={() => setTaxReviewRefresh((current) => current + 1)}
+          onChoice={(_value, feedback) => startTaxReview(feedback)}
+        /> : null}
+      </TaxReview> : null;
+
   return (
     <ComposerPickerContext.Provider value={{ activePicker, setActivePicker }}>
     <SavedSourcesContext.Provider value={savedSources}>
       <SavedModelsContext.Provider value={savedModels}>
       <SavedToolsContext.Provider value={savedTools}>
         <AssistantRuntimeProvider runtime={runtime}>
+      <ConversationToolbox
+        available={isPrivate && Boolean(taxCase || taxReviewExpanded)}
+        open={!toolboxDismissed}
+        pendingCount={taxCase ? taxCase.facts.filter(({ status }) => status === "proposed").length
+          + taxCase.missing_items.filter(({ status }) => status !== "resolved").length : 0}
+        onOpenChange={(open) => setToolboxDismissed(!open)}
+        content={toolboxContent}
+      >
       <ThreadPrimitive.Root className="thread-root">
         <ThreadPrimitive.Viewport className="thread-viewport">
           <ThreadPrimitive.Messages
@@ -2437,17 +2490,6 @@ function AudreyThread({
               AssistantMessage,
             }}
           />
-          {isPrivate && taxCase && !readOnly ? <TaxReviewQuestions
-            key={`${taxCase.id}:${taxCase.tax_year}`}
-            conversationId={conversationId}
-            taxCase={taxCase}
-            answerVersion={activityLedger.answers.size}
-            disabled={submissionBlocked || recoveredRunActive || activity.status === "running"
-              || ["update_available", "unavailable"].includes(taxCase.reference_update?.status ?? "")}
-            onCaseChange={(value) => { acceptTaxCase(value); setTaxReviewRefresh((current) => current + 1); }}
-            onReload={() => setTaxReviewRefresh((current) => current + 1)}
-            onChoice={(_value, feedback) => startTaxReview(feedback)}
-          /> : null}
           <ThreadPrimitive.If empty={false}>
             <div className="thread-message-spacer" aria-hidden="true" />
           </ThreadPrimitive.If>
@@ -2464,28 +2506,6 @@ function AudreyThread({
                 {((showProgress && activity.status !== "complete") || activity.status === "error") ? (
                   <RunActivityStatus activity={activity} error={runError} />
                 ) : null}
-                {isPrivate ? <TaxReview
-                  conversationId={conversationId}
-                  expanded={taxReviewExpanded}
-                  active={effectiveSkillId === "tax-review"}
-                  disabled={submissionBlocked || activity.status === "running" || recoveredRunActive}
-                  refreshVersion={taxReviewRefresh}
-                  onExpandedChange={setTaxReviewExpanded}
-                  onCaseChange={acceptTaxCase}
-                  onSaved={() => setSkillId("tax-review")}
-                  onReview={() => startTaxReview()}
-                  taskControls={taxCase ? <PrivateTaskProgress
-                    key={conversationId}
-                    conversationId={conversationId}
-                    refreshVersion={taxReviewRefresh}
-                    disabled={submissionBlocked || activity.status === "running" || recoveredRunActive
-                      || ["update_available", "unavailable"].includes(taxCase.reference_update?.status ?? "")}
-                    hasReview={Boolean(taxCase.review)}
-                    onReview={() => startTaxReview()}
-                    onChanged={() => setTaxReviewRefresh((current) => current + 1)}
-                    onTaskChange={acceptPrivateTask}
-                  /> : undefined}
-                /> : null}
                 {isPrivate && taxCase && selectedAttachments.length > 0 ? <p className="attachment-status">Tax review uses files already sent here or added to the project. Send newly selected files before reviewing them.</p> : null}
                 {lastAttempt && !durableRetryHandled && (restoredIncomplete || activity.status === "error" || runError) ? (
                   <button
@@ -2810,6 +2830,7 @@ function AudreyThread({
                         onClick={() => {
                           if (taxCase) setSkillId("tax-review");
                           setTaxReviewExpanded(true);
+                          setToolboxDismissed(false);
                           setActivePicker(null);
                         }}
                       >
@@ -2842,6 +2863,7 @@ function AudreyThread({
           </ThreadPrimitive.ViewportFooter>
         </ThreadPrimitive.Viewport>
       </ThreadPrimitive.Root>
+      </ConversationToolbox>
         </AssistantRuntimeProvider>
       </SavedToolsContext.Provider>
       </SavedModelsContext.Provider>

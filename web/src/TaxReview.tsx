@@ -19,8 +19,9 @@ export function TaxReview({
   onExpandedChange,
   onCaseChange,
   onSaved,
-  onReview,
   taskControls,
+  presentation = "dialog",
+  children,
 }: {
   conversationId: string;
   expanded: boolean;
@@ -32,6 +33,8 @@ export function TaxReview({
   onSaved: () => void;
   onReview?: () => void;
   taskControls?: ReactNode;
+  presentation?: "dialog" | "toolbox";
+  children?: ReactNode;
 }) {
   const panelId = useId();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -71,7 +74,7 @@ export function TaxReview({
   }, [conversationId, loadKey, onCaseChange]);
 
   useEffect(() => {
-    if (!expanded) return;
+    if (!expanded || presentation === "toolbox") return;
     const dialog = dialogRef.current;
     if (!dialog) return;
     const viewport = window.visualViewport;
@@ -99,7 +102,7 @@ export function TaxReview({
       viewport?.removeEventListener("scroll", fit);
       dialog.close();
     };
-  }, [expanded]);
+  }, [expanded, presentation]);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -161,62 +164,9 @@ export function TaxReview({
   const hasSavedWork = taxCase && [
     taxCase.facts, taxCase.evidence, taxCase.calculations, taxCase.return_items, taxCase.missing_items,
   ].some((items) => items.length > 0);
-  return (
-    <section className="tax-review" aria-label="Tax review case" data-active={active}>
-      <button
-        type="button"
-        className="tax-review-toggle"
-        aria-haspopup="dialog"
-        aria-expanded={expanded}
-        aria-controls={expanded ? panelId : undefined}
-        onClick={() => onExpandedChange(!expanded)}
-      >
-        <strong>Tax review · {taxCase?.tax_year ?? year}</strong>{" "}
-        <span>Settings</span>
-      </button>
-      <div className="tax-review-body">
-        {!expanded ? <p className="tax-review-disclaimer">Tax review can make mistakes. Check the sources and figures before filing; Audrey does not prepare or file your return.</p> : null}
-        {taxCase ? taskControls ?? <div className="tax-review-start">
-          <span className="tax-review-note">{taxCase.review
-            ? taxCase.review.stale ? "Review needs updating"
-              : taxCase.review.status === "needs_input" ? "Review saved · Your input is needed"
-                : taxCase.review.status === "limited_evidence" ? "Review saved · Evidence is limited" : "Review saved"
-            : "Check your saved information and supporting rules."}</span>
-          <button type="button" disabled={locked || !onReview} onClick={onReview}>
-            {taxCase.review ? "Continue review" : "Start review"}
-          </button>
-        </div> : null}
-        {referenceBlocked ? <div className="tax-review-library" role="status">
-          <p>{referenceUpdate?.status === "update_available"
-            ? "An updated IRS library is available. Update the library to continue; saved rules and related calculations will need rechecking."
-            : "The IRS library is unavailable. Your saved review is still here; try loading it again before continuing."}</p>
-          {referenceUpdate?.status === "update_available" ? <button type="button"
-            disabled={busy || disabled || loading || loadFailed} onClick={() => void updateLibrary()}>
-            {busy ? "Updating…" : "Update IRS library"}
-          </button> : <button type="button" disabled={busy || disabled || loading}
-            onClick={() => setReloadVersion((current) => current + 1)}>Reload library</button>}
-        </div> : null}
-      {expanded ? <dialog
-        ref={dialogRef}
-        id={panelId}
-        className="tax-review-dialog"
-        aria-labelledby={`${panelId}-title`}
-        onCancel={(event) => { event.preventDefault(); onExpandedChange(false); }}
-        onClick={(event) => {
-          if (event.target !== event.currentTarget) return;
-          const bounds = event.currentTarget.getBoundingClientRect();
-          if (event.clientX < bounds.left || event.clientX > bounds.right
-            || event.clientY < bounds.top || event.clientY > bounds.bottom) onExpandedChange(false);
-        }}
-      >
-        <header className="tax-review-dialog-header">
-          <h2 ref={titleRef} id={`${panelId}-title`} tabIndex={-1} autoFocus>Tax review settings</h2>
-          <button type="button" aria-label="Close Tax review settings" onClick={() => onExpandedChange(false)}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg>
-          </button>
-        </header>
+  const settings = <>
         <div className="tax-review-content">
-        <p className="tax-review-disclaimer">Tax review can make mistakes. Check the sources and figures before filing; Audrey does not prepare or file your return.</p>
+        {presentation === "dialog" ? <p className="tax-review-disclaimer">Tax review can make mistakes. Check the sources and figures before filing; Audrey does not prepare or file your return.</p> : null}
         {loading ? <p className="tax-review-note" role="status">Loading settings…</p> : null}
         <form onSubmit={(event) => void save(event)}>
           <div className="tax-review-fields">
@@ -238,7 +188,64 @@ export function TaxReview({
           <span>{error}</span>
           <button type="button" disabled={busy || disabled || loading} onClick={() => setReloadVersion((current) => current + 1)}>Reload settings</button>
         </div> : null}
+  </>;
+  return (
+    <section className="tax-review" aria-label="Tax review case" data-active={active} data-presentation={presentation}>
+      <button
+        type="button"
+        className="tax-review-toggle"
+        aria-haspopup={presentation === "dialog" ? "dialog" : undefined}
+        aria-expanded={expanded}
+        aria-controls={expanded ? panelId : undefined}
+        onClick={() => onExpandedChange(!expanded)}
+      >
+        <strong>Tax review · {taxCase?.tax_year ?? year}</strong>{" "}
+        <span>Settings</span>
+      </button>
+      <div className="tax-review-body">
+        {!expanded || presentation === "toolbox" ? <p className="tax-review-disclaimer">Tax review can make mistakes. Check the sources and figures before filing; Audrey does not prepare or file your return.</p> : null}
+        {taxCase ? taskControls ?? <div className="tax-review-start">
+          <span className="tax-review-note">{taxCase.review
+            ? taxCase.review.stale ? "Review needs updating"
+              : taxCase.review.status === "needs_input" ? "Review saved · Your input is needed"
+                : taxCase.review.status === "limited_evidence" ? "Review saved · Evidence is limited" : "Review saved"
+            : "Check your saved information and supporting rules."}</span>
+        </div> : null}
+        {referenceBlocked ? <div className="tax-review-library" role="status">
+          <p>{referenceUpdate?.status === "update_available"
+            ? "An updated IRS library is available. Update the library to continue; saved rules and related calculations will need rechecking."
+            : "The IRS library is unavailable. Your saved review is still here; try loading it again before continuing."}</p>
+          {referenceUpdate?.status === "update_available" ? <button type="button"
+            disabled={busy || disabled || loading || loadFailed} onClick={() => void updateLibrary()}>
+            {busy ? "Updating…" : "Update IRS library"}
+          </button> : <button type="button" disabled={busy || disabled || loading}
+            onClick={() => setReloadVersion((current) => current + 1)}>Reload library</button>}
+        </div> : null}
+      {expanded && presentation === "toolbox" ? <div id={panelId} className="tax-review-inline-settings" role="region" aria-label="Tax review settings">
+        {settings}
+      </div> : null}
+      {expanded && presentation === "dialog" ? <dialog
+        ref={dialogRef}
+        id={panelId}
+        className="tax-review-dialog"
+        aria-labelledby={`${panelId}-title`}
+        onCancel={(event) => { event.preventDefault(); onExpandedChange(false); }}
+        onClick={(event) => {
+          if (event.target !== event.currentTarget) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          if (event.clientX < bounds.left || event.clientX > bounds.right
+            || event.clientY < bounds.top || event.clientY > bounds.bottom) onExpandedChange(false);
+        }}
+      >
+        <header className="tax-review-dialog-header">
+          <h2 ref={titleRef} id={`${panelId}-title`} tabIndex={-1} autoFocus>Tax review settings</h2>
+          <button type="button" aria-label="Close Tax review settings" onClick={() => onExpandedChange(false)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6" /></svg>
+          </button>
+        </header>
+        {settings}
       </dialog> : null}
+        {children}
         {taxCase?.review ? <details className="tax-review-worksheet">
           <summary>Review worksheet</summary>
           <p>{taxCase.review.summary}</p>

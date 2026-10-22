@@ -33,7 +33,7 @@ TAX_REVIEW_INSTRUCTION = """Review only the saved case goal, using one local wri
 
 Before your final answer, save_review checks substantive worksheet findings against reread evidence with a separate local assessment. If its result requests repair, fix only the flagged claims/support and save once more. The attempt permits at most two checks within the same time/token budget. A limited or unresolved assessment means partial work: explain the limitation and do not repeat disputed claims as facts. Owner confirmations remain separate; a model assessment never verifies tax-law correctness or changes year applicability. Save useful partial findings even when confirmation or evidence is missing.
 
-Help the user review the selected tax year in plain, conversational language. Keep record IDs, revisions, operation names, checklist labels and passing-check summaries inside tool calls. Explain the useful result and only material limitations. Ask one pertinent question only when the user's answer is needed for the saved goal. A bounded arithmetic goal does not require asking whether its result is final taxable income or whether to expand into a complete return. Group related proposed facts for the user to check through the review controls. Do not ask them to repeat facts already saved or confirmed. An empty saved case means review has not started; do not describe unchecked areas as passed or reviewed.
+Help the user review the selected tax year in plain, conversational language. Keep record IDs, revisions, operation names, checklist labels and passing-check summaries inside tool calls. Explain the useful result and only material limitations. Ask one pertinent question only when the user's answer is needed for the saved goal. A bounded arithmetic goal does not require asking whether its result is final taxable income or whether to expand into a complete return. Group related proposed facts for the user to check through the review controls. Do not ask them to repeat facts already saved or confirmed. An empty saved case means review has not started; do not describe unchecked areas as passed or reviewed. Do not add a generic Continue review instruction when no user answer is needed; the user can send the next request in chat.
 
 Fetch and read available official rules yourself. Source verification is Audrey's work, not a user confirmation task: do not ask the user to resolve a catalog metadata gap or authorize another available page read. A catalog's unknown applicability does not establish that a retained passage lacks an explicit tax year. Distinguish what the exact passage states from what the catalog or tool has independently verified. If the relevant year is unclear, read the publication's year statement and the relevant rule passage before saving the useful scoped result. Preserve proposed/unknown status and any remaining material limitation; never promote that status yourself or claim independently verified law. A bookkeeping warning alone does not create a user decision or next_question.
 
@@ -425,6 +425,21 @@ def _tool_result(
     review = tax_case_review(case)
     if review is not None:
         result["review"] = {key: review[key] for key in ("status", "stale", "review_revision")}
+    if operation == "save_review":
+        # This is the writer's last tool result before final prose. Keep the
+        # presentation rule here too: a derived coverage status is not itself
+        # a request for another user decision or proof of legal correctness.
+        result["response_guidance"] = (
+            "Give the useful saved result in plain language, then only material limitations. "
+            "Keep revisions, record IDs, operation names, checklist labels and passing-check summaries out of the answer. "
+            "Ask only for an actually missing user fact or choice; a derived needs_input or limited_evidence status "
+            "alone does not create a question. Group proposed facts in the review controls. "
+            "Do not ask the user to resolve catalog metadata, authorize another available source read, or click Continue review. "
+            "If a retained passage explicitly states the selected tax year, describe that stated year separately from "
+            "its still-unverified applicability status; do not say that catalog metadata makes the passage undated. "
+            "Retain substantive missing information and any material source conflict, without promoting applicability "
+            "or claiming independent legal verification."
+        )
     if entry is not None:
         result["updated_entry"] = {
             key: value for key, value in entry.items()
@@ -622,7 +637,8 @@ def tax_review_spec(server_url: str) -> ToolSpec:
         properties.update(fields)
         required = [key for key in schema.get("required", []) if key not in {"tax_year_status", "result"}]
         descriptions.append(f"{operation} requires {', '.join(required)}.")
-    properties["findings"].update(description="Goal-scoped findings linked to saved facts, evidence, calculations and return items. No certification flag; server derives limitations. Use next_question for missing information.")
+    properties["findings"].update(description="Goal-scoped findings linked to saved facts, evidence, calculations and return items. No certification flag; server derives limitations. Use next_question only for a missing user-supplied fact or choice.")
+    properties["next_question"].update(description="One question only when a missing user-supplied fact or choice is necessary for the saved goal; otherwise leave empty. Source reads and catalog applicability gaps are Audrey's work, not user decisions.")
     properties["expression"].update(maxLength=512, description="Arithmetic using every named input, e.g. wages - deduction; record constants as named inputs too.")
     properties["rounding"].update(enum=["none", "half_up_cent", "half_even_cent"])
     properties["supersedes"].update(description="IDs of stale entries in this operation's category explicitly replaced by this reread evidence, recalculation or return proposal. Originals are retained; replacement does not verify tax-law correctness or year applicability.")

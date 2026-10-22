@@ -37,10 +37,10 @@ and related work require rechecking. Models cannot approve the update. Publicati
 races show a further update choice, without silently adopting it. No index rerun
 or new library publication is needed to deploy this slice.
 
-**20D.3b accepted for the limited worksheet:** Start/Continue review runs one
+**20D.3b accepted for the limited worksheet:** a Tax review chat prompt runs one
 local tool writer through the normal native run, with stop/reconnect and a ten-minute foreground limit. It saves
 a goal-scoped worksheet with linked facts, official passages, arithmetic and
-explicit limitations. Case edits make an earlier worksheet stale. The compact box
+explicit limitations. Case edits make an earlier worksheet stale. The Toolbox
 keeps findings expandable and user confirmations explicit. Selected-file inventory
 is inspectable; it does not prove every page was read. The user-reported synthetic
 baseline passed the requested arithmetic and year/withholding separation, with an
@@ -86,7 +86,15 @@ model. Focused repair gets at most one recheck within the existing task budgets.
 Assessments bind the exact worksheet and case revision; unresolved work stays
 partial and later case edits make checks stale. Owner confirmation and proposed
 source applicability remain separate. No model, config, schema or index change.
-**Next: 20E**, matched accuracy evaluation after the targeted browser check.
+**Toolbox followup built:** Tax review settings, progress and choices now live in
+a right sidebar; compact screens use a dismissible right drawer. Confirmed,
+rejected and resolved choices remain above the current prompt and survive refresh
+from saved case records. Idle Start/Continue buttons are removed: ordinary chat
+prompts drive work. Pause/Cancel and interruption Resume remain. The saved-choice
+feedback still informs Audrey without consuming unsent text/files. Response
+guidance keeps internal bookkeeping out of the final answer; applicability and
+source-conflict checks retain their existing authority. Browser acceptance is
+pending. **Next: 20E**, matched accuracy evaluation after that targeted check.
 
 **Notices and settings polish built:** Tax review shows a brief filing caution;
 Private shows local server processing/storage with expandable privacy details.
@@ -161,7 +169,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **20D.4b.2b built:** native saved reviews, progress/control, safe restart
   recovery and idempotent delivery; user moved on from the lifecycle handoff.
 - [x] **20D.5 built:** bounded local evidence checking and targeted repair;
-  browser acceptance pending.
+  Toolbox presentation followup built; browser acceptance pending.
 - [ ] **20E:** compare single-pass and extended accuracy before extending defaults.
 
 Tax year/jurisdiction and reference release belong to the case record; 20D.1 does

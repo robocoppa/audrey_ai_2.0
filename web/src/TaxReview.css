@@ -95,7 +95,6 @@
 
 .tax-review-start { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; }
 .tax-review-start > span { flex: 1 1 12rem; line-height: 1.5; }
-.tax-review-start button { flex: none; padding: 0.42rem 0.65rem; border: 1px solid var(--border-strong); border-radius: 0.5rem; background: var(--surface-active); color: var(--text); font: inherit; }
 .tax-review-worksheet { border-top: 1px solid var(--border); padding-top: 0.6rem; line-height: 1.5; }
 .tax-review-worksheet summary { width: fit-content; color: var(--text-soft); cursor: pointer; }
 .tax-review-worksheet > p, .tax-review-worksheet > ul { margin: 0.55rem 0 0; }
@@ -142,4 +141,18 @@
   .tax-review-dialog { padding: 0.9rem; }
   .tax-review-dialog input, .tax-review-dialog textarea { font-size: 1rem; }
   .tax-review-dialog-header > button, .tax-review-dialog .tax-review-actions button { min-height: 2.5rem; }
+}
+
+/* The Toolbox owns scrolling; its compact settings stay in the rail. */
+.tax-review[data-presentation="toolbox"] { margin: 0; border: 0; border-radius: 0; background: transparent; }
+.tax-review[data-presentation="toolbox"] .tax-review-toggle { width: 100%; margin: 0; padding: 0.65rem 0.7rem; }
+.tax-review[data-presentation="toolbox"] .tax-review-body { max-height: none; overflow: visible; padding: 0.7rem 0.15rem 0; gap: 0.8rem; }
+.tax-review-inline-settings { padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.6rem; background: var(--surface-deep); }
+.tax-review-inline-settings .tax-review-fields { justify-content: space-between; gap: 0.5rem; }
+.tax-review-inline-settings .tax-review-fields label { width: 7.5rem; }
+.tax-review-inline-settings textarea { min-height: 4.5rem; max-height: 8rem; }
+.tax-review-inline-settings .tax-review-error { margin-top: 0.65rem; }
+@media (max-width: 600px) {
+  .tax-review-inline-settings input, .tax-review-inline-settings textarea { font-size: 1rem; }
+  .tax-review-inline-settings .tax-review-actions button { min-height: 2.5rem; }
 }

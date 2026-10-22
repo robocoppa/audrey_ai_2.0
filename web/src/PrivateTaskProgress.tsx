@@ -12,6 +12,7 @@ function taskLabel(task: PrivateTask): string {
     case "cancelled": return "Review stopped · Saved work is retained";
     case "failed": return "Review could not finish · Saved work is retained";
     case "paused":
+      if (task.stop_reason === "worker_paused") return "Review saved · Some findings remain unresolved";
       if (task.stop_reason === "budget_exhausted") return "Review limit reached · Saved work is retained";
       if (task.stop_reason === "server_restart" || task.stop_reason === "lease_expired") return "Review paused after a restart · Saved work is retained";
       if (task.stop_reason === "inputs_changed") return "Review paused · Your information changed";
@@ -21,7 +22,7 @@ function taskLabel(task: PrivateTask): string {
 }
 
 export function PrivateTaskProgress({
-  conversationId, refreshVersion, disabled, readOnly = false, hasReview, onReview, onChanged, onTaskChange,
+  conversationId, refreshVersion, disabled, readOnly = false, onReview, onChanged, onTaskChange,
 }: {
   conversationId: string;
   refreshVersion: number;
@@ -95,7 +96,10 @@ export function PrivateTaskProgress({
   const loading = !snapshot.loaded || snapshot.conversationId !== conversationId;
   const active = task?.status === "queued" || task?.status === "running";
   const paused = task?.status === "paused";
-  const resumable = paused && task.stop_reason !== "budget_exhausted";
+  const resumable = paused && [
+    "owner_paused", "worker_stopped", "server_restart", "lease_expired",
+    "step_timeout", "step_failed", "admission_failed",
+  ].includes(task.stop_reason);
 
   async function act(action: "pause" | "cancel") {
     if (!task || busyRef.current || readOnly || loadError) return;
@@ -128,17 +132,15 @@ export function PrivateTaskProgress({
     <div className="private-task-row">
       <span role="status" className="private-task-label">
         {active ? <span className="private-task-spinner" aria-hidden="true" /> : null}
-        {loading ? "Loading saved review…" : task ? taskLabel(task) : "Check your saved information and supporting rules."}
+        {loading ? "Loading saved review…" : task ? taskLabel(task) : "Ready for your question."}
       </span>
-      {!readOnly && !loading && !loadError ? <div className="private-task-actions">
+      {!readOnly && !loading && !loadError && (active || resumable) ? <div className="private-task-actions">
         {active ? <>
           <button type="button" disabled={busy} onClick={() => void act("pause")}>Pause</button>
           <button type="button" disabled={busy} onClick={() => void act("cancel")}>Cancel</button>
         </> : <>
-          {(!paused || resumable) ? <button type="button" disabled={busy || disabled} onClick={onReview}>
-            {resumable ? "Resume review" : task || hasReview ? "Continue review" : "Start review"}
-          </button> : null}
-          {paused || task?.status === "waiting_for_user" ? <button type="button" disabled={busy} onClick={() => void act("cancel")}>Cancel</button> : null}
+          {resumable ? <button type="button" disabled={busy || disabled} onClick={onReview}>Resume review</button> : null}
+          {resumable ? <button type="button" disabled={busy} onClick={() => void act("cancel")}>Cancel</button> : null}
         </>}
       </div> : null}
     </div>

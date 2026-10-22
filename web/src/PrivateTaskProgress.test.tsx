@@ -39,7 +39,7 @@ it("loads saved task before offering generation and resumes only after an explic
 
 it("pauses an active native review with the current saved revision even while generation is disabled", async () => {
   vi.mocked(getPrivateTask).mockResolvedValue({ task: task() });
-  vi.mocked(actOnPrivateTask).mockResolvedValue({ task: task({ revision: 8, status: "paused" }) });
+  vi.mocked(actOnPrivateTask).mockResolvedValue({ task: task({ revision: 8, status: "paused", stop_reason: "owner_paused" }) });
   const callbacks = props();
   render(<PrivateTaskProgress {...callbacks} disabled />);
   fireEvent.click(await screen.findByRole("button", { name: "Pause" }));
@@ -67,14 +67,35 @@ it("keeps spent-budget work readable without a restart or resume button", async 
   expect(screen.queryByRole("button", { name: /Resume|Start|Continue/u })).not.toBeInTheDocument();
 });
 
-it("uses the normal review callback after input is saved and offers only one continue control", async () => {
-  vi.mocked(getPrivateTask).mockResolvedValue({ task: task({ status: "waiting_for_user" }) });
+it.each([
+  ["completed", ""], ["waiting_for_user", ""], ["paused", "worker_paused"],
+  ["paused", "budget_exhausted"], ["cancelled", "owner_cancelled"],
+] as const)("keeps %s %s work readable without an idle generation button", async (status, stop_reason) => {
+  vi.mocked(getPrivateTask).mockResolvedValue({ task: task({ status, stop_reason }) });
   const callbacks = props();
   render(<PrivateTaskProgress {...callbacks} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Continue review" }));
-  expect(callbacks.onReview).toHaveBeenCalledOnce();
-  expect(screen.getAllByRole("button", { name: "Continue review" })).toHaveLength(1);
-  expect(screen.queryByRole("button", { name: "Start review" })).not.toBeInTheDocument();
+  await waitFor(() => expect(getPrivateTask).toHaveBeenCalledOnce());
+  await waitFor(() => expect(screen.getByRole("status")).not.toHaveTextContent("Loading"));
+  expect(screen.queryByRole("button", { name: /Start|Continue|Resume/u })).not.toBeInTheDocument();
+  expect(callbacks.onReview).not.toHaveBeenCalled();
+});
+
+it.each(["owner_paused", "worker_stopped", "server_restart", "lease_expired", "step_timeout", "step_failed", "admission_failed"])(
+  "offers explicit resume only after interruption %s", async (stop_reason) => {
+    vi.mocked(getPrivateTask).mockResolvedValue({ task: task({ status: "paused", stop_reason }) });
+    const callbacks = props();
+    render(<PrivateTaskProgress {...callbacks} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Resume review" }));
+    expect(callbacks.onReview).toHaveBeenCalledOnce();
+  },
+);
+
+it("does not offer review generation when no saved task exists", async () => {
+  const callbacks = props();
+  render(<PrivateTaskProgress {...callbacks} />);
+  expect(await screen.findByText("Ready for your question.")).toBeVisible();
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  expect(callbacks.onReview).not.toHaveBeenCalled();
 });
 
 it("polls serially and refreshes saved case data when the task finishes", async () => {
@@ -96,7 +117,7 @@ it("polls serially and refreshes saved case data when the task finishes", async 
 it("ignores out-of-order refresh results and aborts the superseded read", async () => {
   let oldResolve!: (value: { task: PrivateTask }) => void;
   vi.mocked(getPrivateTask).mockReturnValueOnce(new Promise((resolve) => { oldResolve = resolve; }))
-    .mockResolvedValue({ task: task({ status: "paused" }) });
+    .mockResolvedValue({ task: task({ status: "paused", stop_reason: "server_restart" }) });
   const callbacks = props();
   const view = render(<PrivateTaskProgress {...callbacks} />);
   const signal = vi.mocked(getPrivateTask).mock.calls[0][1];
@@ -115,7 +136,8 @@ it("offers a controlled retry on read failure without falling back to duplicate 
   expect(screen.queryByRole("button", { name: "Start review" })).not.toBeInTheDocument();
   expect(screen.getByRole("alert")).not.toHaveTextContent("private backend details");
   fireEvent.click(screen.getByRole("button", { name: "Reload progress" }));
-  expect(await screen.findByRole("button", { name: "Start review" })).toBeEnabled();
+  expect(await screen.findByText("Ready for your question.")).toBeVisible();
+  expect(screen.queryByRole("button", { name: /Start|Continue/u })).not.toBeInTheDocument();
 });
 
 it("keeps task controls unavailable on read-only archived views", async () => {

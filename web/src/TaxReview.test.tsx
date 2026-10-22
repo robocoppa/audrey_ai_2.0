@@ -182,24 +182,25 @@ it("requires reload after a stale library choice and never silently adopts a new
 });
 
 
-it("offers review of an unfinished case without confirming its proposed facts", async () => {
+it("shows an unfinished case without starting generation or offering an idle continue button", async () => {
   const fetchMock = vi.fn().mockResolvedValueOnce(json({ case: taxCase }));
   vi.stubGlobal("fetch", fetchMock);
   const callbacks = { ...props(), onReview: vi.fn() };
   render(<TaxReview {...callbacks} expanded={false} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Start review" }));
-  expect(callbacks.onReview).toHaveBeenCalledOnce();
+  expect(await screen.findByText("Check your saved information and supporting rules.")).toBeVisible();
+  expect(screen.queryByRole("button", { name: /Start|Continue/u })).not.toBeInTheDocument();
+  expect(callbacks.onReview).not.toHaveBeenCalled();
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(callbacks.onSaved).not.toHaveBeenCalled();
-  expect(screen.queryByRole("button", { name: "Confirm Wages" })).not.toBeInTheDocument();
 });
 
-it.each(["update_available", "unavailable"] as const)("pauses review when the IRS library is %s", async (status) => {
+it.each(["update_available", "unavailable"] as const)("does not offer idle review generation when the IRS library is %s", async (status) => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json({ case: { ...taxCase,
     reference_update: { status, ...(status === "update_available" ? { release_id: "rel_new" } : {}) },
   } })));
   render(<TaxReview {...props()} onReview={vi.fn()} expanded={false} />);
-  expect(await screen.findByRole("button", { name: "Start review" })).toBeDisabled();
+  expect(await screen.findByRole("button", { name: /Update IRS library|Reload library/u })).toBeVisible();
+  expect(screen.queryByRole("button", { name: /Start|Continue/u })).not.toBeInTheDocument();
 });
 
 it("keeps the saved worksheet available on demand and warns when it needs updating", async () => {
@@ -211,8 +212,8 @@ it("keeps the saved worksheet available on demand and warns when it needs updati
   } };
   vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json({ case: saved })));
   render(<TaxReview {...props()} onReview={vi.fn()} expanded={false} />);
-  expect(await screen.findByRole("button", { name: "Continue review" })).toBeEnabled();
-  expect(screen.getByText("Review needs updating")).toBeVisible();
+  expect(await screen.findByText("Review needs updating")).toBeVisible();
+  expect(screen.queryByRole("button", { name: /Start|Continue/u })).not.toBeInTheDocument();
   const details = screen.getByText("Review worksheet").closest("details")!;
   expect(details).not.toHaveAttribute("open");
   fireEvent.click(screen.getByText("Review worksheet"));
@@ -223,12 +224,14 @@ it("keeps the saved worksheet available on demand and warns when it needs updati
   expect(screen.getByRole("region", { name: "Tax review case" })).not.toHaveTextContent(/rel_hidden|calc_private|review_revision/u);
 });
 
-it("keeps review unavailable during an active run or upload", async () => {
+it("disables settings mutations during an active run or upload", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json({ case: taxCase })));
   const onReview = vi.fn();
-  render(<TaxReview {...props()} onReview={onReview} disabled expanded={false} />);
-  expect(await screen.findByRole("button", { name: "Start review" })).toBeDisabled();
-  fireEvent.click(screen.getByRole("button", { name: "Start review" }));
+  render(<TaxReview {...props()} onReview={onReview} disabled />);
+  await waitFor(() => expect(screen.getByLabelText("Tax year")).toHaveValue(2025));
+  expect(screen.getByLabelText("Tax year")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Save year" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: /Start|Continue/u })).not.toBeInTheDocument();
   expect(onReview).not.toHaveBeenCalled();
 });
 
@@ -264,4 +267,33 @@ it("fits settings to the visible viewport when a mobile keyboard reduces it", as
   expect(dialog.style.getPropertyValue("--tax-dialog-height")).toBe("316px");
   expect(dialog.style.getPropertyValue("--tax-dialog-top")).toBe("200px");
   await waitFor(() => expect(screen.getByLabelText("Tax year")).toBeEnabled());
+});
+
+
+it("keeps Toolbox setup inline, preserves the disclaimer, and displays supplied choices", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json({ case: fixtures.reviewable })));
+  const callbacks = props();
+  render(<TaxReview {...callbacks} presentation="toolbox"><section aria-label="Tax review choices">Your saved choices</section></TaxReview>);
+  await waitFor(() => expect(screen.getByLabelText("Tax year")).toHaveValue(2025));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(HTMLDialogElement.prototype.showModal).not.toHaveBeenCalled();
+  expect(screen.getByText(/Tax review can make mistakes/u)).toBeVisible();
+  expect(screen.getByRole("region", { name: "Tax review choices" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Tax review · 2025 Settings" })).not.toHaveAttribute("aria-haspopup");
+  expect(screen.getByLabelText("Tax year")).not.toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "Tax review · 2025 Settings" }));
+  expect(callbacks.onExpandedChange).toHaveBeenCalledWith(false);
+});
+
+it("creates a Tax review from the inline Toolbox setup without opening a popup", async () => {
+  const fetchMock = vi.fn().mockResolvedValueOnce(json({ case: null })).mockResolvedValueOnce(json(fixtures.created));
+  vi.stubGlobal("fetch", fetchMock);
+  const callbacks = props();
+  render(<TaxReview {...callbacks} presentation="toolbox" />);
+  await waitFor(() => expect(screen.getByLabelText("Review goal")).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("Review goal"), { target: { value: "Review deductions" } });
+  fireEvent.click(screen.getByRole("button", { name: "Use Tax review" }));
+  await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledOnce());
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
 });

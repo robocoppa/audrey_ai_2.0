@@ -47,6 +47,10 @@ export interface TaxFact {
   status: "proposed" | "confirmed" | "rejected";
   case_tax_year?: number;
   confirmed_tax_year?: number;
+  confirmed_at?: string;
+  rejected_tax_year?: number;
+  rejected_at?: string;
+  created_at?: string;
   provenance?: TaxFactProvenance | null;
 }
 
@@ -91,7 +95,7 @@ export interface TaxCase {
   files?: Array<{ file_id: string; checksum: string; revision: string; filename: string }>;
   evidence: TaxEvidence[];
   calculations: TaxCalculation[];
-  missing_items: Array<{ id: string; label: string; status: "unresolved" | "resolved" }>;
+  missing_items: Array<{ id: string; label: string; status: "unresolved" | "resolved"; resolved_at?: string; created_at?: string }>;
   return_items: unknown[];
   checklist: {
     status: "needs_information" | "ready_for_review";

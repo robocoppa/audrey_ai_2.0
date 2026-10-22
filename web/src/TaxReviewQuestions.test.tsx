@@ -48,6 +48,7 @@ it("saves a confirmation with the current revision and changes the question only
   await waitFor(() => expect(onChange).toHaveBeenCalledWith(confirmed));
   expect(screen.getByRole("status")).toHaveTextContent("Confirmed.");
   expect(screen.queryByRole("button", { name: "Confirm Wages" })).not.toBeInTheDocument();
+  expect(screen.getByRole("list", { name: "Previous choices" })).toHaveTextContent("ConfirmedWages55000.00");
 });
 
 it("records Not correct as a rejection and invites corrected details in chat", async () => {
@@ -60,6 +61,7 @@ it("records Not correct as a rejection and invites corrected details in chat", a
   expect(await screen.findByRole("status")).toHaveTextContent("Noted.");
   expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ expected_revision: proposed.revision, operation: "reject_fact", data: { fact_id: factId } });
   expect(screen.queryByRole("button", { name: "Confirm Wages" })).not.toBeInTheDocument();
+  expect(screen.getByRole("list", { name: "Previous choices" })).toHaveTextContent("Not correctWages55000.00");
 });
 
 it("requires refreshed details after a revision conflict without accepting the fact", async () => {
@@ -100,6 +102,7 @@ it("keeps missing-item decisions concise and records explicit resolution", async
   expect(screen.getByText("Could you help with this?")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Mark Year-end income statement addressed" }));
   expect(await screen.findByRole("status")).toHaveTextContent("Marked addressed.");
+  expect(screen.getByRole("list", { name: "Previous choices" })).toHaveTextContent("AddressedYear-end income statement");
   expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ expected_revision: initial.revision, operation: "resolve_missing_item", data: { id: "missing_statement" } });
 });
 
@@ -180,4 +183,108 @@ it("caps each confirmation to the visible group", async () => {
   expect(screen.queryByText("Fact 10", { exact: true })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Confirm these details" }));
   await waitFor(() => expect(JSON.parse(fetchMock.mock.calls[0][1].body).data.fact_ids).toHaveLength(10));
+});
+
+it("keeps confirmed and rejected answers above the next prompt", () => {
+  const initial: TaxCase = { ...proposed, facts: [
+    { ...proposed.facts[0], status: "confirmed", confirmed_at: "2026-10-22T10:00:00Z" },
+    { ...proposed.facts[0], id: "old_status", label: "Filing status", value: "Married", status: "rejected", rejected_at: "2026-10-22T10:01:00Z" },
+    { ...proposed.facts[0], id: "new_status", label: "Corrected filing status", value: "Single", status: "proposed" },
+  ] };
+  render(<Harness initial={initial} />);
+  const history = screen.getByRole("list", { name: "Previous choices" });
+  expect(history).toHaveTextContent("ConfirmedWages55000.00");
+  expect(history).toHaveTextContent("Not correctFiling statusMarried");
+  expect(history).not.toHaveTextContent("Corrected filing status");
+  expect(screen.getByRole("button", { name: "Confirm Corrected filing status" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Confirm Wages" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Audrey", { exact: true })).not.toBeInTheDocument();
+});
+
+it("restores saved choices on refresh without generation or another save", () => {
+  const initial: TaxCase = { ...proposed, facts: proposed.facts.map((fact) => ({
+    ...fact, status: "confirmed", confirmed_at: "2026-10-22T10:00:00Z",
+  })), missing_items: [{ id: "provided", label: "Income statement", status: "resolved", resolved_at: "2026-10-22T10:02:00Z" }] };
+  const fetchMock = vi.fn();
+  const onChoice = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  const view = render(<Harness initial={initial} onChoice={onChoice} />);
+  expect(screen.getByRole("list", { name: "Previous choices" })).toHaveTextContent("Wages");
+  view.unmount();
+  render(<Harness initial={initial} onChoice={onChoice} />);
+  const history = screen.getByRole("list", { name: "Previous choices" });
+  expect(history).toHaveTextContent("AddressedIncome statement");
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(onChoice).not.toHaveBeenCalled();
+});
+
+it("keeps Later visible while showing the next unresolved prompt", () => {
+  const initial: TaxCase = { ...proposed, facts: [], missing_items: [
+    { id: "first", label: "Income statement", status: "unresolved" },
+    { id: "second", label: "Charitable receipts", status: "unresolved" },
+  ] };
+  const onChoice = vi.fn();
+  render(<Harness initial={initial} onChoice={onChoice} />);
+  fireEvent.click(screen.getByRole("button", { name: "Later" }));
+  expect(screen.getByRole("list", { name: "Previous choices" })).toHaveTextContent("LaterIncome statement");
+  expect(screen.getAllByText("Income statement", { exact: true })).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "Mark Charitable receipts addressed" })).toBeEnabled();
+  expect(onChoice).toHaveBeenCalledWith(initial, expect.stringContaining("Leave this item open for later: Income statement"));
+});
+
+it("replaces a deferred card with its saved resolution without a duplicate", () => {
+  const initial: TaxCase = { ...proposed, facts: [], missing_items: [{ id: "first", label: "Income statement", status: "unresolved" }] };
+  const props = { conversationId: "con_private", taxCase: initial, disabled: false, onCaseChange: vi.fn(), onReload: vi.fn() };
+  const view = render(<TaxReviewQuestions {...props} />);
+  fireEvent.click(screen.getByRole("button", { name: "Later" }));
+  view.rerender(<TaxReviewQuestions {...props} taxCase={{ ...initial, revision: initial.revision + 1,
+    missing_items: [{ ...initial.missing_items[0], status: "resolved", resolved_at: "2026-10-22T12:00:00Z" }] }} />);
+  expect(screen.getByRole("list", { name: "Previous choices" })).toHaveTextContent("AddressedIncome statement");
+  expect(screen.queryByText("Later", { exact: true })).not.toBeInTheDocument();
+  expect(screen.getAllByText("Income statement", { exact: true })).toHaveLength(1);
+});
+
+it("orders saved choices chronologically across facts and resolved items", () => {
+  const initial: TaxCase = { ...proposed, facts: [
+    { ...proposed.facts[0], status: "confirmed", confirmed_at: "2026-10-22T10:03:00Z" },
+    { ...proposed.facts[0], id: "old", label: "Filing status", status: "rejected", rejected_at: "2026-10-22T10:01:00Z" },
+  ], missing_items: [{ id: "provided", label: "Income statement", status: "resolved", resolved_at: "2026-10-22T10:02:00Z" }] };
+  render(<Harness initial={initial} />);
+  const cards = screen.getByRole("list", { name: "Previous choices" }).children;
+  expect(cards[0]).toHaveTextContent("Filing status");
+  expect(cards[1]).toHaveTextContent("Income statement");
+  expect(cards[2]).toHaveTextContent("Wages");
+});
+
+it("ignores a pending save after switching conversations or years", async () => {
+  let resolve!: (value: Response) => void;
+  vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise<Response>((done) => { resolve = done; })));
+  const onCaseChange = vi.fn();
+  const onChoice = vi.fn();
+  const props = { conversationId: "con_private", taxCase: proposed, disabled: false, onCaseChange, onReload: vi.fn(), onChoice };
+  const view = render(<TaxReviewQuestions {...props} />);
+  fireEvent.click(screen.getByRole("button", { name: "Confirm Wages" }));
+  view.rerender(<TaxReviewQuestions {...props} conversationId="con_other" taxCase={{ ...proposed, tax_year: 2024 }} />);
+  resolve(json({ ...proposed, facts: proposed.facts.map((fact) => ({ ...fact, status: "confirmed" })) }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Confirm Wages" })).toBeEnabled());
+  expect(onCaseChange).not.toHaveBeenCalled();
+  expect(onChoice).not.toHaveBeenCalled();
+  expect(screen.queryByRole("list", { name: "Previous choices" })).not.toBeInTheDocument();
+});
+
+it("keeps the scroll position while inspecting earlier choices", () => {
+  const initial: TaxCase = { ...proposed, facts: proposed.facts.map((fact) => ({ ...fact, status: "confirmed" })) };
+  const props = { conversationId: "con_private", taxCase: initial, disabled: false, onCaseChange: vi.fn(), onReload: vi.fn() };
+  const view = render(<TaxReviewQuestions {...props} />);
+  const flow = screen.getByRole("list", { name: "Previous choices" }).parentElement!;
+  Object.defineProperties(flow, { scrollHeight: { value: 400, configurable: true }, clientHeight: { value: 100 } });
+  flow.scrollTop = 50;
+  fireEvent.scroll(flow);
+  view.rerender(<TaxReviewQuestions {...props} taxCase={{ ...initial, missing_items: [{ id: "new", label: "Another detail", status: "unresolved" }] }} />);
+  expect(flow.scrollTop).toBe(50);
+  flow.scrollTop = 300;
+  fireEvent.scroll(flow);
+  view.rerender(<TaxReviewQuestions {...props} taxCase={{ ...initial, missing_items: [{ id: "next", label: "Next detail", status: "unresolved" }] }} />);
+  expect(flow.scrollTop).toBe(400);
 });

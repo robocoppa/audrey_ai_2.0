@@ -485,29 +485,40 @@ OCR/media remain deferred until a case requires them.
 
 #### Tax review tool and case record
 
-**20D.2 and presentation followup accepted October 21.** Select
-Private, choose Tax review in Tools & skills, choose the federal return year and
-goal, then save. The year defaults to the previous completed calendar year and
-can be changed before or after setup. Settings open in a dialog bounded by the
-visible screen and collapse after saving. The compact box retains settings,
-Start/Continue and collapsed findings. Essential confirmation/rejection and
-missing-information choices appear in the conversation; related facts can be
-confirmed together. After the owner saves a choice, a visible native user reply
-informs Audrey and starts the next review automatically. Unsent composer text and
-attachments remain untouched; a failed or stale save sends no reply. Only the
-owner can approve facts. Record IDs, checksums and passing checklist rows stay
-internal. Audrey handles official-source verification herself and asks only for
-facts or decisions the user can supply. The generic degraded-features badge is
-removed throughout chat, including new chat after deletion; actual service/model
-outage indicators remain. The user moved on after the targeted presentation
-handoff; no repeated presentation check is queued.
-Tax review has a visible, muted filing caution in settings and the compact box:
-AI may be wrong; verify sources and figures before filing, and Audrey does not
-prepare or file a return. Private has a compact local-processing/server-storage
-notice and expandable detail about trusted server administrators, Cloudflare
-browser transport and current capability limits. Neither notice adds an
-acknowledgement gate. The settings trigger is a bordered dialog button without
-a dropdown arrow; conversation actions scroll above the full composer height.
+**20D.2 foundation accepted October 21; Toolbox presentation updated October 22.**
+Select Private and Tax review in Tools & skills to open the right-side Toolbox.
+Its settings expand inline; choose the federal return year and goal, then save.
+The year defaults to the previous completed calendar year. The Toolbox scrolls
+independently of chat, with saved choices above the current grouped prompt and
+collapsed worksheet findings below. Confirmed/rejected facts and addressed items
+reconstruct from canonical statuses/timestamps after refresh. Later choices remain
+visible for the mounted case. This is a current-case timeline, not a new decision
+audit spanning year changes that reset owner confirmations.
+
+On compact screens the Toolbox is a right-side modal drawer with Escape, close,
+backdrop dismissal and restored trigger focus. It starts closed for a saved case;
+selecting Tax review opens setup. A small pending-count badge makes new choices
+visible without forcing the drawer over the chat. Desktop uses a docked rail.
+Open/closed state survives recovered-run runtime refreshes. Closing the panel does
+not start work or discard current selections. Archived controls are read-only.
+
+No idle Start/Continue action is shown. The user sends a normal chat prompt to
+start or continue work; active Pause/Cancel and genuine interruption Resume remain.
+An explicit saved owner choice sends one visible native user reply and starts the
+next review, preserving unsent composer text and files. A failed/stale save sends
+no reply. Only the owner confirms facts. Internal IDs, revisions and coverage
+checklists stay in tool feedback. Worksheet-save guidance separates an explicit
+source-stated year from unresolved catalog applicability and asks only for needed
+user facts/decisions; it does not promote evidence or silently resolve saved gaps.
+
+The Toolbox retains a muted filing caution: AI can be wrong; check sources and
+figures before filing, and Audrey does not prepare or file a return. Private
+retains its local-processing/server-storage notice and expandable administrator/
+Cloudflare detail. Neither adds an acknowledgement gate. The generic degraded
+badge stays removed; actual outage indicators remain. Deployment for this UI and
+response-guidance followup rebuilds audrey and audrey-ui. Native browser acceptance
+checks the Toolbox, retained choices and absence of idle review buttons; no new
+upload, source collection, index or model change is required.
 
 Each conversation owns one case; Project membership is derived from its canonical
 conversation. A saved case does not activate Tax review automatically after reload.
@@ -548,8 +559,8 @@ bounded case history, including across successive updates. A new library release
 does not itself prove that a law changed or that a retained rule applies to the
 return year. These state-transition checks do not establish tax accuracy.
 
-**20D.3b — worksheet construction.** Start/Continue review sends
-a visible native user turn with explicit Tax review selected. It uses the existing
+**20D.3b — worksheet construction.** A chat prompt with Tax review selected sends
+a visible native user turn. It uses the existing
 highest-priority verified local tool model as one case writer, with twelve tool
 rounds per attempt and the saved task's ten-minute active-work budget. Ordinary Private retains its existing
 panel configuration. The full saved goal is supplied as data; inspect can page the
@@ -570,9 +581,9 @@ remain explicit user choices. Meaningful case changes invalidate the saved
 worksheet; no-op retries do not. Original evidence stays retained. Worksheets are
 covered by the existing case backup/purge and deletion rules in schema23.
 
-The compact Tax review box shows the applicable Start/Continue choice and saved
-status, with worksheet details collapsed. Expanded findings include retained IRS
-passages, recorded calculation results and limitations. Tax-year applicability is
+The Toolbox keeps saved status and worksheet details collapsed when idle.
+Expanded findings include retained IRS passages, recorded calculation results
+and limitations. Tax-year applicability is
 still proposed/unknown under this tool contract; the new worksheet does not turn
 that into verified law or imply every document page has been checked.
 
@@ -750,9 +761,9 @@ paused or wait for the owner's needed facts. Model agreement does not prove
 legal correctness. The initial checker intentionally uses the same installed
 writer; a different reviewer requires evidence of benefit in 20E.
 
-The result uses the existing findings/limitations and Models/Tools/Sources
-disclosures. No new dialog or user approval is added. Backend-only deployment;
-the targeted browser check continues an existing confirmed synthetic worksheet,
+The result uses the Toolbox findings/limitations and existing Models/Tools/Sources
+disclosures. The verification slice adds no user approval. Its targeted browser
+check continues an existing confirmed synthetic worksheet,
 checks its linked rules/arithmetic and verifies saved findings after refresh.
 No new upload, reindex, source collection or migration is required. Local checks
 prove plumbing and boundaries; deployed behavior and answer quality still need
@@ -762,7 +773,7 @@ their separate acceptance.
 
 User flow: select Private → open a tax Project → choose Tax review → specify
 return year and jurisdiction → upload/select documents → review proposed facts
-and the plan → start review. Show one compact progress item such as
+and the plan → send a review prompt. Show one compact Toolbox progress item such as
 “Checking income records · 3 of 8 checks complete,” with expandable current
 findings, missing items and Pause/Resume/Cancel. Keep the existing Models,
 Tool calls and Sources disclosures. Completion is a cited worksheet and a
