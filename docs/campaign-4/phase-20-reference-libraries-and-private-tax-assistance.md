@@ -501,6 +501,14 @@ facts or decisions the user can supply. The generic degraded-features badge is
 removed throughout chat, including new chat after deletion; actual service/model
 outage indicators remain. The user moved on after the targeted presentation
 handoff; no repeated presentation check is queued.
+Tax review has a visible, muted filing caution in settings and the compact box:
+AI may be wrong; verify sources and figures before filing, and Audrey does not
+prepare or file a return. Private has a compact local-processing/server-storage
+notice and expandable detail about trusted server administrators, Cloudflare
+browser transport and current capability limits. Neither notice adds an
+acknowledgement gate. The settings trigger is a bordered dialog button without
+a dropdown arrow; conversation actions scroll above the full composer height.
+
 Each conversation owns one case; Project membership is derived from its canonical
 conversation. A saved case does not activate Tax review automatically after reload.
 Automatic Private retains its existing tools and behavior. The additive schema 23
@@ -639,12 +647,31 @@ clears a stale checkpoint while retaining spent budget and case evidence. A Proj
 rename alone does not invalidate work. Active owner, deletion/purge, Private context
 and support-ID ownership are checked on reads and mutations.
 
-No worker, task endpoint, startup scheduling or browser task controls are enabled
-in this foundation. **20D.4b is next:** construct the verified local runtime, check
-live model/file/reference availability, fence case mutations and deliver results
-idempotently through the native conversation. A stored digest alone does not prove
-local execution or current source availability. Existing foreground review remains
-the user-facing path until that integration passes its own acceptance.
+**20D.4b.1 built — bounded step execution.** A server-owned callback runs inside
+an expiring task scope, the isolated verified Private runtime and owner-bound
+local tool handlers. Each tool boundary checks live admission and lease authority.
+Observed progress renews the lease; a watchdog does not invent progress while a
+model waits. Token/tool costs are written before checkpoint completion, preventing
+crash retries from erasing spent resources. Failed calls are charged; checkpoint
+completion does not count them twice. Step deadlines and revoked authority cancel
+the callback; inherited callbacks lose case-write authority on scope exit.
+
+Tax-case mutations check the active task's owner, conversation, lease, source
+bindings and expected case revision inside the same SQLite transaction. Case
+changes and the task's new expected revision commit together, or both roll back.
+Owner actions in another request retain their existing authority and invalidate
+an in-flight worker's stale case revision. A model cannot turn its scoped write
+into a user confirmation. Abandoned attempts retain partial case/checkpoint work
+and charge observed resources once, with a specific stop reason.
+
+The executor has no startup scheduling, task endpoint or browser controls yet.
+**20D.4b.2 is next:** connect native task admission and prepared server context;
+refresh account/model access, exact model identities, live files and publication
+before work; schedule/recover tasks; and deliver results once through the native
+conversation. The adapter supplies fresh validation and resource observations;
+stored digests or a callback alone do not prove current file/publication access.
+Existing foreground review remains the user-facing path until that integration
+passes its own acceptance.
 
 The remaining runner uses typed stages with a tax adapter supplying the checklist
 and evidence checks. Reuse the existing fair GPU scheduler,

@@ -14,7 +14,10 @@ import json
 import sqlite3
 import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
@@ -33,6 +36,10 @@ class PrivateTaskError(ValueError):
 
 class PrivateTaskConflictError(PrivateTaskError):
     """A revision, lease or pinned input changed."""
+
+
+class PrivateTaskLeaseExpiredError(PrivateTaskConflictError):
+    """An attempt did not report progress before its lease expired."""
 
 
 class PrivateTaskAccessError(PrivateTaskError):
@@ -241,9 +248,10 @@ class PrivateTasksRepository:
             or record["lease_token"] != token
             or type(fence) is not int
             or record["fence"] != fence
-            or self._clock() >= dt.datetime.fromisoformat(record["lease_expires_at"])
         ):
             raise PrivateTaskConflictError("Private task lease is no longer current.")
+        if self._clock() >= dt.datetime.fromisoformat(record["lease_expires_at"]):
+            raise PrivateTaskLeaseExpiredError("Private task lease expired without new progress.")
 
     @staticmethod
     def _clear_lease(record: dict) -> None:
@@ -399,8 +407,10 @@ class PrivateTasksRepository:
         pins: dict,
         progress: int,
         lease_seconds: int = 60,
+        usage: dict | None = None,
     ) -> dict:
         pins = _validated(TaskPins, pins)
+        spent = _validated(TaskUsage, {} if usage is None else usage)
         _positive(progress)
         self._lease_seconds(lease_seconds)
 
@@ -412,6 +422,21 @@ class PrivateTasksRepository:
             if progress <= record["progress"]:
                 raise PrivateTaskConflictError("A lease renewal requires new work progress.")
             self._account_time(record)
+            for key, value in spent.items():
+                record["usage"][key] += value
+            if any(
+                record["usage"][key] > record["limits"][limit]
+                for key, limit in (
+                    ("model_tokens", "max_model_tokens"),
+                    ("tool_calls", "max_tool_calls"),
+                )
+            ):
+                record.update(
+                    status="paused", stop_reason="budget_exhausted", fence=record["fence"] + 1
+                )
+                record["usage"]["steps"] += 1
+                self._clear_lease(record)
+                return self._write(record)
             remaining = record["limits"]["max_wall_seconds"] - record["usage"]["wall_seconds"]
             record.update(
                 progress=progress,
@@ -584,6 +609,64 @@ class PrivateTasksRepository:
 
         return await asyncio.to_thread(self._transaction, work)
 
+    async def abandon(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        lease_token: str,
+        fence: int,
+        reason: str,
+        usage: dict | None = None,
+    ) -> dict | None:
+        """Stop only this attempt, retaining partial work and charging it once.
+
+        This internal cleanup does not authorize reads or execution for a revoked
+        owner. It may stop their abandoned lease without opening the case again.
+        """
+        if reason not in {
+            "step_timeout",
+            "step_failed",
+            "lease_expired",
+            "inputs_changed",
+            "budget_exhausted",
+            "worker_stopped",
+        }:
+            raise PrivateTaskError("Invalid Private task stop reason.")
+        spent = _validated(TaskUsage, {} if usage is None else usage)
+
+        def work():
+            row = self._conn.execute(
+                "SELECT * FROM app_private_tasks WHERE user_id=? AND task_id=?",
+                (user_id, task_id),
+            ).fetchone()
+            if (
+                row is None
+                or row["status"] != "running"
+                or row["lease_token"] != lease_token
+                or row["fence"] != fence
+            ):
+                return None  # Owner cancellation, deletion or a replacement already won.
+            record = json.loads(row["record_json"])
+            record.update(
+                revision=row["revision"],
+                fence=row["fence"] + 1,
+                status="paused",
+                stop_reason=reason,
+            )
+            self._account_time(
+                record, min(self._clock(), dt.datetime.fromisoformat(row["lease_expires_at"]))
+            )
+            record["usage"]["steps"] += 1
+            for key, value in spent.items():
+                record["usage"][key] += value
+            if self._exhausted(record):
+                record["stop_reason"] = "budget_exhausted"
+            self._clear_lease(record)
+            return self._write(record)
+
+        return await asyncio.to_thread(self._transaction, work)
+
     async def recover_expired(self) -> int:
         """Pause abandoned attempts. Calling this never schedules or executes work."""
 
@@ -608,3 +691,76 @@ class PrivateTasksRepository:
             return len(rows)
 
         return await asyncio.to_thread(self._transaction, work)
+
+
+@dataclass(slots=True)
+class PrivateTaskLease:
+    """Server-owned authority shared with tool callbacks and SQLite writes."""
+
+    repository: PrivateTasksRepository
+    user_id: str
+    conversation_id: str
+    task_id: str
+    lease_token: str
+    fence: int
+    pins: dict
+    active: bool = True
+    work_active: bool = True
+
+    def verify_locked(self) -> dict:
+        if not self.active:
+            raise PrivateTaskConflictError("Private task step has ended.")
+        record, case, project_id = self.repository._load(self.user_id, self.task_id)
+        self.repository._lease(record, self.lease_token, self.fence)
+        self.repository._bindings(record, case, project_id, self.pins, record["case_revision"])
+        return record
+
+    async def verify(self) -> dict:
+        return await asyncio.to_thread(self.repository._transaction, self.verify_locked)
+
+
+_TASK_LEASE: ContextVar[PrivateTaskLease | None] = ContextVar(
+    "audrey_private_task_lease", default=None
+)
+
+
+@contextmanager
+def private_task_scope(
+    repository: PrivateTasksRepository, task: dict
+) -> Iterator[PrivateTaskLease]:
+    """Invalidate inherited callbacks when the owning step exits."""
+    if _TASK_LEASE.get() is not None:
+        raise PrivateTaskAccessError("A Private task step cannot replace an active task scope.")
+    lease = PrivateTaskLease(
+        repository,
+        task["user_id"],
+        task["conversation_id"],
+        task["id"],
+        task["lease_token"],
+        task["fence"],
+        json.loads(_encoded(task["pins"])),
+    )
+    token = _TASK_LEASE.set(lease)
+    try:
+        yield lease
+    finally:
+        lease.active = False
+        _TASK_LEASE.reset(token)
+
+
+def guard_tax_case_write(
+    connection: sqlite3.Connection, *, user_id: str, conversation_id: str, actor: str
+) -> tuple[PrivateTaskLease, dict] | None:
+    """Called inside the case transaction, before changing any case record."""
+    lease = _TASK_LEASE.get()
+    if lease is None:
+        return None  # Ordinary foreground/user operations retain their existing authority.
+    if (
+        lease.repository._conn is not connection
+        or not lease.work_active
+        or lease.user_id != user_id
+        or lease.conversation_id != conversation_id
+        or actor != "model"
+    ):
+        raise PrivateTaskAccessError("Private task authority does not match this case write.")
+    return lease, lease.verify_locked()

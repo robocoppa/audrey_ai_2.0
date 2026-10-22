@@ -46,6 +46,7 @@ import { ScrollToLatest } from "./ScrollToLatest";
 import { SwipeConversationRow } from "./SwipeConversationRow";
 import { UploadProgress } from "./UploadProgress";
 import { TaxReview } from "./TaxReview";
+import { PrivateModeNotice } from "./PrivateModeNotice";
 import { TaxReviewQuestions } from "./TaxReviewQuestions";
 import { TAX_REVIEW_PROMPT, type TaxCase } from "./taxReviewApi";
 import {
@@ -2599,9 +2600,7 @@ function AudreyThread({
                   </div>
                 </ComposerPrimitive.Root>
                 {modelChangeNotice ? <p className="attachment-status" role="status">{modelChangeNotice}</p> : null}
-                {isPrivate ? <p className="attachment-status">
-                  Private uses local models and tools. Documents and Private projects only; web, saved memory and media are unavailable. {privateLockReason}
-                </p> : null}
+                {isPrivate ? <PrivateModeNotice lockReason={privateLockReason} /> : null}
                 {attachmentPickerOpen ? (
                   <ComposerPickerPanel
                     className="attachment-picker"

@@ -164,14 +164,16 @@ export function TaxReview({
       <button
         type="button"
         className="tax-review-toggle"
+        aria-haspopup="dialog"
         aria-expanded={expanded}
         aria-controls={expanded ? panelId : undefined}
         onClick={() => onExpandedChange(!expanded)}
       >
         <strong>Tax review · {taxCase?.tax_year ?? year}</strong>{" "}
-        <span>Settings <svg viewBox="0 0 24 24" aria-hidden="true"><path d={expanded ? "m7 14 5-5 5 5" : "m7 10 5 5 5-5"} /></svg></span>
+        <span>Settings</span>
       </button>
       <div className="tax-review-body">
+        {!expanded ? <p className="tax-review-disclaimer">Tax review can make mistakes. Check the sources and figures before filing; Audrey does not prepare or file your return.</p> : null}
         {taxCase ? <div className="tax-review-start">
           <span className="tax-review-note">{taxCase.review
             ? taxCase.review.stale ? "Review needs updating"
@@ -212,6 +214,7 @@ export function TaxReview({
           </button>
         </header>
         <div className="tax-review-content">
+        <p className="tax-review-disclaimer">Tax review can make mistakes. Check the sources and figures before filing; Audrey does not prepare or file your return.</p>
         {loading ? <p className="tax-review-note" role="status">Loading settings…</p> : null}
         <form onSubmit={(event) => void save(event)}>
           <div className="tax-review-fields">

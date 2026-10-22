@@ -10,21 +10,26 @@
 
 .tax-review-toggle {
   display: flex;
-  width: 100%;
+  width: calc(100% - 0.9rem);
+  margin: 0.45rem;
   justify-content: space-between;
   align-items: center;
   gap: 0.7rem;
   padding: 0.55rem 0.75rem;
-  border: 0;
-  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.55rem;
+  background: var(--surface-raised);
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease;
   color: var(--text-soft);
   text-align: left;
 }
 
 .tax-review-toggle strong { font-size: 0.73rem; font-weight: 550; }
 .tax-review-toggle > span { display: inline-flex; align-items: center; gap: 0.2rem; color: var(--muted); font-size: 0.67rem; }
-.tax-review-toggle svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.5; }
-.tax-review-toggle:hover { background: var(--surface-raised); }
+.tax-review-toggle:hover { border-color: var(--accent); background: var(--surface-active); }
+.tax-review-toggle:active { background: var(--surface-active); }
+.tax-review-disclaimer { color: var(--text-soft); font-size: 0.7rem; line-height: 1.5; }
 .tax-review[data-active="true"] .tax-review-toggle strong { color: var(--text); }
 
 .tax-review-body {

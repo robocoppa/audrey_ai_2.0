@@ -492,6 +492,7 @@ a:focus-visible {
   flex-direction: column;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scroll-padding-bottom: var(--composer-dock-height, 12rem);
   padding: 1rem max(1rem, calc((100% - 64rem) / 2));
   scrollbar-gutter: stable;
 }

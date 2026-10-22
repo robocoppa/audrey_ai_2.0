@@ -110,6 +110,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 1280, height: 600
     await page.getByRole("dialog", { name: "Choose how Audrey uses tools" }).getByRole("button", { name: /Tax review/u }).click();
     const settings = page.getByRole("dialog", { name: "Tax review settings" });
     await expect(settings).toBeVisible();
+    await expect(settings.getByText(/Tax review can make mistakes/u)).toBeVisible();
     const bounds = await settings.boundingBox();
     expect(bounds!.y).toBeGreaterThanOrEqual(11);
     expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height - 11);
@@ -119,7 +120,11 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 1280, height: 600
     await settings.getByRole("button", { name: "Use Tax review" }).click();
     await expect(settings).toHaveCount(0);
     const panel = page.getByRole("region", { name: "Tax review case" });
-    await expect(panel.getByRole("button", { name: /Tax review · 2025/u })).toHaveAttribute("aria-expanded", "false");
+    const settingsButton = panel.getByRole("button", { name: /Tax review · 2025/u });
+    await expect(settingsButton).toHaveAttribute("aria-expanded", "false");
+    await expect(settingsButton).toHaveAttribute("aria-haspopup", "dialog");
+    await expect(settingsButton.locator("svg")).toHaveCount(0);
+    await expect(panel.getByText(/Tax review can make mistakes/u)).toBeVisible();
     await expect(page.getByText("Some features degraded", { exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Add files", exact: true }).click();
     const files = page.getByRole("region", { name: "Choose attachments" });

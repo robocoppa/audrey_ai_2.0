@@ -147,7 +147,11 @@ test(`Private keeps local controls, protected documents and upload routing throu
   const observed = await mockPrivateApi(page);
   await page.goto("./");
   await choosePrivate(page);
-  await expect(page.getByText("Private uses local models and tools.", { exact: false })).toBeVisible();
+  const privacy = page.getByRole("complementary", { name: "Private mode privacy" });
+  await expect(privacy.getByText("Local AI processing · Conversations and files are saved on this server.")).toBeVisible();
+  await privacy.getByText("Privacy details", { exact: true }).click();
+  await expect(privacy.getByText(/trusted server administrators/u)).toBeVisible();
+  await privacy.getByText("Privacy details", { exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toBeInViewport();
   await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);

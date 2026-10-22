@@ -41,6 +41,8 @@ export function ScrollToLatest() {
       const viewportStyle = getComputedStyle(viewport);
       const dock = anchorRef.current?.closest<HTMLElement>(".composer-dock");
       const dockStyle = dock ? getComputedStyle(dock) : null;
+      const dockHeight = dock?.getBoundingClientRect().height ?? 0;
+      viewport.style.setProperty("--composer-dock-height", `${Math.ceil(dockHeight + 16)}px`);
       const composerHeight = dock?.querySelector(".composer")?.getBoundingClientRect().height ?? 0;
       const padding = (parseFloat(viewportStyle.paddingTop) || 0)
         + (parseFloat(viewportStyle.paddingBottom) || 0)
@@ -63,6 +65,8 @@ export function ScrollToLatest() {
     resizeObserver?.observe(viewport);
     const composer = viewport.querySelector(".composer");
     if (composer) resizeObserver?.observe(composer);
+    const dock = anchorRef.current?.closest<HTMLElement>(".composer-dock");
+    if (dock) resizeObserver?.observe(dock);
     const mutations = new MutationObserver(scheduleMeasure);
     mutations.observe(viewport, { childList: true, subtree: true, characterData: true });
     window.addEventListener("resize", scheduleMeasure);
@@ -71,6 +75,7 @@ export function ScrollToLatest() {
     return () => {
       if (frame !== null) window.cancelAnimationFrame(frame);
       resizeObserver?.disconnect();
+      viewport.style.removeProperty("--composer-dock-height");
       mutations.disconnect();
       window.removeEventListener("resize", scheduleMeasure);
     };

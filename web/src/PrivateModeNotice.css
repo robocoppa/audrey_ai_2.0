@@ -1,0 +1,11 @@
+.private-mode-notice { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.55rem; margin: 0.35rem 0 0; color: var(--text-soft); font-size: 0.7rem; line-height: 1.5; }
+.private-mode-notice p { margin: 0; }
+.private-mode-notice > p { flex: 1 1 18rem; }
+.private-mode-notice details { min-width: 0; }
+.private-mode-notice summary { width: fit-content; color: var(--muted); cursor: pointer; border-radius: 0.25rem; }
+.private-mode-notice summary:hover { color: var(--text); }
+.private-mode-notice summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.private-mode-notice details[open] { flex-basis: 100%; }
+.private-mode-notice details p { margin-top: 0.35rem; max-width: 70ch; }
+
+.private-mode-notice .private-mode-lock { flex-basis: 100%; color: var(--muted); }

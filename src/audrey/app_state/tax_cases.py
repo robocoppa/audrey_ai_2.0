@@ -27,6 +27,8 @@ from pydantic import (
     model_validator,
 )
 
+from audrey.app_state.private_tasks import PrivateTaskError, guard_tax_case_write
+
 MAX_CASE_BYTES = 128 * 1024
 MAX_CATEGORY_ENTRIES = 100
 CHECKLIST_VERSION = 1
@@ -389,6 +391,12 @@ class TaxCasesRepository:
                 case = self._decode(row, project_id)
                 if case["revision"] != expected_revision:
                     raise TaxCaseConflictError("The tax case changed; reload its current revision.")
+                try:
+                    task_write = guard_tax_case_write(
+                        self._conn, user_id=user_id, conversation_id=conversation_id, actor=actor,
+                    )
+                except PrivateTaskError:
+                    raise TaxCaseConflictError("The Private task lease or inputs changed.") from None
                 changed = _apply_operation(case, operation, payload, actor)
                 if changed:
                     case["revision"] += 1
@@ -411,6 +419,11 @@ class TaxCasesRepository:
                         raise TaxCaseConflictError(
                             "The tax case changed; reload its current revision."
                         )
+                    if task_write is not None:
+                        # Case progress and the task's expected case revision commit together.
+                        lease, task_record = task_write
+                        task_record["case_revision"] = case["revision"]
+                        lease.repository._write(task_record)
                 self._conn.commit()
             except BaseException:
                 if self._conn.in_transaction:
