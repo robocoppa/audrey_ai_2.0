@@ -423,6 +423,13 @@ class TaxCasesRepository:
                         # Case progress and the task's expected case revision commit together.
                         lease, task_record = task_write
                         task_record["case_revision"] = case["revision"]
+                        # A verified extracted fact can add its selected source
+                        # to the case inventory. This is worker progress, not an
+                        # owner changing the selected documents. Keep the source
+                        # refinement in the same transaction as the fact.
+                        task_record["sources"]["files"] = sorted(
+                            case.get("files", []), key=lambda source: source["file_id"]
+                        )
                         lease.repository._write(task_record)
                 self._conn.commit()
             except BaseException:

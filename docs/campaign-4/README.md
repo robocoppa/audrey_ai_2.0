@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 21, 2026.** English user input only. Passed work stays closed.
+**Updated October 22, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -60,15 +60,22 @@ and owned local tools. Tax-case changes and task revision advancement commit
 atomically; cancellation, stale inputs and expired leases refuse late findings.
 Observed token/tool costs persist during the step. An idle lease is not renewed,
 and timeouts or failures retain partial work with a specific stop reason. This
-executor is not scheduled by the application yet. **20D.4b.2 next:** native task
-admission, current-access/file/source validation, progress/control, restart
-scheduling and idempotent result delivery.
+executor is not scheduled by the application yet.
+
+**20D.4b.2a built:** native task admission/preparation refreshes current account
+and Private-model permissions, the case and published IRS release. Exact selected
+originals, extracted text and semantic Project context are pinned by digest.
+Permission changes are checked again inside case-write transactions. Explicit
+resume revalidates inputs and retains spent resources; stale checkpoints cannot
+start work. No endpoint or scheduler is enabled. **20D.4b.2b next:** connect this
+service to native task requests, progress/control, safe restart scheduling and
+idempotent conversation delivery. Existing foreground review remains in use.
 
 **Notices and settings polish built:** Tax review shows a brief filing caution;
 Private shows local server processing/storage with expandable privacy details.
 Settings has a bordered dialog button without a dropdown arrow. Conversation
-scrolling accounts for the complete composer height. Targeted visual acceptance
-is next; no new upload or numerical rerun is needed.
+scrolling accounts for the complete composer height. The user moved on after
+that handoff; no repeat visual check is queued.
 
 **MiniMax M3.1 Flash:** configured as an unmeasured cloud draft/research candidate
 in mixed, Cloud and selected Research panels. Kimi K3 stays first, panel worker
@@ -131,10 +138,11 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **20D.4a:** durable owner-scoped task/checkpoint storage and recovery fences.
 - [x] **20D.4b.1:** bounded step executor, durable resource accounting and atomic
   task/case write fencing.
-- [ ] **20D.4b.2:** native admission, progress/control, restart scheduling and safe
-  result delivery.
-- [ ] **Tax/Private notices:** concise disclaimers and settings-button polish
-  built; brief visual acceptance pending.
+- [x] **20D.4b.2a:** current native owner/model/source admission and preparation,
+  exact source pins, permission fencing and explicit revalidated resume.
+- [x] **Tax/Private notices:** concise disclaimers and settings-button polish.
+- [ ] **20D.4b.2b:** native task endpoints, progress/control, restart scheduling
+  and safe result delivery.
 - [ ] **20D.5:** bounded local evidence verification and targeted repair loops.
 - [ ] **20E:** compare single-pass and extended accuracy before extending defaults.
 

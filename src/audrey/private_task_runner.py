@@ -14,12 +14,16 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppres
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from pydantic import ValidationError
+
 from audrey.app_state.private_tasks import (
+    PrivateTaskAccessError,
     PrivateTaskConflictError,
     PrivateTaskError,
     PrivateTaskLease,
     PrivateTaskLeaseExpiredError,
     PrivateTasksRepository,
+    TaskPins,
     private_task_scope,
 )
 from audrey.tools.private_dispatch import PrivateToolHandler, private_tool_scope
@@ -181,6 +185,8 @@ class PrivateTaskStepRunner:
                         if isinstance(error, PrivateStepBudgetError)
                         else "lease_expired"
                         if isinstance(error, PrivateTaskLeaseExpiredError)
+                        else "access_changed"
+                        if isinstance(error, PrivateTaskAccessError)
                         else "inputs_changed"
                         if isinstance(error, PrivateTaskConflictError)
                         else "step_failed"
@@ -272,10 +278,15 @@ async def prepared_private_step(
     from audrey.private_processing import PrivateProcessingRuntime
     from audrey.tools.private_handlers import make_private_tool_handlers
 
+    try:
+        validated = TaskPins.model_validate(pins).model_dump(mode="json", exclude_none=True)
+    except ValidationError:
+        raise PrivateTaskError("Invalid Private task pins.") from None
     if (
         not isinstance(runtime, PrivateProcessingRuntime)
         or not runtime.tax_review
-        or pins != runtime_task_pins(runtime)
+        or {key: value for key, value in validated.items() if key not in {"input_digest", "access_digest"}}
+        != runtime_task_pins(runtime)
     ):
         raise PrivateTaskError("A verified Tax review runtime with matching pins is required.")
     await guard()
@@ -283,4 +294,4 @@ async def prepared_private_step(
         handlers = make_private_tool_handlers(
             execution_app, principal, tax_conversation_id=conversation_id
         )
-        yield PreparedStep(execution_app, pins, principal.storage_namespace, dict(handlers), guard)
+        yield PreparedStep(execution_app, validated, principal.storage_namespace, dict(handlers), guard)

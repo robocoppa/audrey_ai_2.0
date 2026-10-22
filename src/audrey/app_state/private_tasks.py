@@ -53,6 +53,8 @@ class _Payload(BaseModel):
 class TaskPins(_Payload):
     model_digests: Annotated[dict[Identifier, Digest], Field(min_length=1, max_length=8)]
     policy_digest: Digest
+    input_digest: Digest | None = None
+    access_digest: Digest | None = None
 
 
 class TaskLimits(_Payload):
@@ -79,7 +81,7 @@ class TaskCheckpoint(_Payload):
 
 def _validated(model: type[_Payload], value: Any) -> dict:
     try:
-        return model.model_validate(value).model_dump(mode="json")
+        return model.model_validate(value).model_dump(mode="json", exclude_none=True)
     except ValidationError:
         raise PrivateTaskError("Invalid Private task payload.") from None
 
@@ -121,7 +123,7 @@ class PrivateTasksRepository:
         row = self._conn.execute(
             "SELECT c.private_required,c.archived_at,c.project_id,p.private_required AS project_private,"
             "p.user_id AS project_owner,p.instructions AS project_instructions,"
-            "u.storage_namespace,t.case_id,t.revision,t.record_json "
+            "u.storage_namespace,u.role,t.case_id,t.revision,t.record_json "
             "FROM app_conversations c JOIN app_users u ON u.user_id=c.user_id "
             "JOIN app_tax_cases t ON t.conversation_id=c.conversation_id AND t.user_id=c.user_id "
             "LEFT JOIN app_projects p ON p.project_id=c.project_id "
@@ -140,8 +142,29 @@ class PrivateTasksRepository:
             )
         ):
             raise PrivateTaskAccessError("An active owner and Private case are required.")
+        groups = sorted(item["group_id"] for item in self._conn.execute(
+            "SELECT group_id FROM user_group_memberships WHERE user_id=?", (user_id,)
+        ).fetchall())
+        if row["role"] == "bot" or "bots" in groups:
+            raise PrivateTaskAccessError("An active owner and Private case are required.")
+        policy = self._conn.execute(
+            "SELECT enabled,audience FROM model_access_policies WHERE model_id='private'"
+        ).fetchone()
+        profile = self._conn.execute(
+            "SELECT visibility,roles_json FROM model_publication_profiles WHERE model_id='private'"
+        ).fetchone()
         case = json.loads(row["record_json"])
         case.update(id=row["case_id"], revision=row["revision"])
+        # The native adapter validates effective grants with the shared catalog.
+        # Pin only permission-bearing state here, so a change between its guard
+        # and a final case write cannot adopt the earlier permission decision.
+        case["task_access_digest"] = hashlib.sha256(_encoded({
+            "role": row["role"], "groups": groups, "namespace": row["storage_namespace"],
+            "policy": dict(policy) if policy is not None else None,
+            "profile": {"visibility": profile["visibility"],
+                        "roles": sorted(json.loads(profile["roles_json"]))}
+                       if profile is not None else None,
+        }).encode()).hexdigest()
         project_files = (
             [
                 item["file_id"]
@@ -163,6 +186,18 @@ class PrivateTasksRepository:
             ).encode()
         ).hexdigest()
         return case, row["project_id"]
+
+    async def authorization_digest(self, *, user_id: str, conversation_id: str) -> str:
+        """Snapshot grants for a previously catalog-authorized native task."""
+        return await asyncio.to_thread(
+            self._transaction,
+            lambda: self._case(user_id, conversation_id)[0]["task_access_digest"],
+        )
+
+    @staticmethod
+    def _access_binding(case: dict, pins: dict) -> None:
+        if pins.get("access_digest") is not None and pins["access_digest"] != case["task_access_digest"]:
+            raise PrivateTaskConflictError("Private task owner access changed.")
 
     def _load(self, user_id: str, task_id: str) -> tuple[dict, dict, str | None]:
         row = self._conn.execute(
@@ -208,6 +243,7 @@ class PrivateTasksRepository:
         self, record: dict, case: dict, project_id: str | None, pins: dict, case_revision: int
     ) -> None:
         _positive(case_revision)
+        self._access_binding(case, pins)
         if (
             case["revision"] != case_revision
             or record["pins"] != pins
@@ -298,6 +334,7 @@ class PrivateTasksRepository:
 
         def work():
             case, project_id = self._case(user_id, conversation_id)
+            self._access_binding(case, pins)
             if case["revision"] != expected_case_revision:
                 raise PrivateTaskConflictError("The saved case changed; reload it.")
             now = self._clock().isoformat()
@@ -575,6 +612,7 @@ class PrivateTasksRepository:
             if record["status"] in TERMINAL:
                 raise PrivateTaskConflictError("Private task is already finished.")
             if action == "resume":
+                self._access_binding(case, pins)
                 if record["status"] not in {"paused", "waiting_for_user"}:
                     raise PrivateTaskConflictError("Private task is not paused.")
                 if case["revision"] != expected_case_revision:
@@ -629,6 +667,7 @@ class PrivateTasksRepository:
             "step_failed",
             "lease_expired",
             "inputs_changed",
+            "access_changed",
             "budget_exhausted",
             "worker_stopped",
         }:

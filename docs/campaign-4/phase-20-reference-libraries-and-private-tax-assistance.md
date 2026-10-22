@@ -664,14 +664,31 @@ an in-flight worker's stale case revision. A model cannot turn its scoped write
 into a user confirmation. Abandoned attempts retain partial case/checkpoint work
 and charge observed resources once, with a specific stop reason.
 
-The executor has no startup scheduling, task endpoint or browser controls yet.
-**20D.4b.2 is next:** connect native task admission and prepared server context;
-refresh account/model access, exact model identities, live files and publication
-before work; schedule/recover tasks; and deliver results once through the native
-conversation. The adapter supplies fresh validation and resource observations;
-stored digests or a callback alone do not prove current file/publication access.
-Existing foreground review remains the user-facing path until that integration
-passes its own acceptance.
+**20D.4b.2a built — native admission and preparation.** A trusted service reloads
+the current account, groups and Private-model grant without replaying a login or
+granting token scopes. It requires the active owned Private case and current IRS
+publication. Preparation verifies the installed local runtime and binds all selected
+conversation/Project documents, original and extracted-text checksums, Project
+instructions, tax year and publication. Repeated checks use file-operation locks
+and cached filesystem identity; changed files are rehashed. No generation,
+embedding or vector search is needed for admission. Project renaming alone does
+not invalidate useful work.
+
+Native task pins include input and permission digests. A database permission change
+between tool admission and its eventual case write is refused inside the case
+transaction. A verified extracted fact can refine the source inventory atomically
+without invalidating its own lease. Explicit resume validates current inputs,
+clears a changed checkpoint and retains already spent resources. Original checksum
+conflicts with saved case provenance remain blocked. Existing internal tasks
+without the new native pins cannot be claimed by this native preparer until
+explicitly revalidated.
+
+The executor and admission service have no startup scheduling, task endpoint or
+browser controls yet. **20D.4b.2b is next:** connect native task requests and prepared
+server context, schedule/recover tasks, show progress/control and deliver results
+once through the native conversation. The adapter must supply observed model
+usage and guard each model dispatch. Existing foreground review remains the
+user-facing path until that integration passes its own acceptance.
 
 The remaining runner uses typed stages with a tax adapter supplying the checklist
 and evidence checks. Reuse the existing fair GPU scheduler,

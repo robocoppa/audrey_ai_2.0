@@ -549,6 +549,29 @@ class ApplicationStore:
             (provider, subject),
         ).fetchone()
 
+    async def get_principal(self, *, user_id: str) -> Principal | None:
+        """Read current account authority for existing server-owned work.
+
+        This does not authenticate a request, grant token scopes or record a
+        login. Workers must still validate active status, model access and the
+        owner-bound work they are continuing.
+        """
+        return await asyncio.to_thread(self._get_principal_sync, user_id)
+
+    def _get_principal_sync(self, user_id: str) -> Principal | None:
+        user_id = _required(user_id, "user id")
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT u.user_id,u.storage_namespace,u.current_email,u.display_name,"
+                "u.role,u.status,'internal' AS provider,'' AS subject,"
+                "COALESCE((SELECT group_concat(m.group_id, ',') "
+                "FROM user_group_memberships m WHERE m.user_id=u.user_id), '') AS groups_csv "
+                "FROM app_users u WHERE u.user_id=? AND NOT EXISTS("
+                "SELECT 1 FROM account_deletion_requests d WHERE d.user_id=u.user_id)",
+                (user_id,),
+            ).fetchone()
+        return _principal_from_row(row, auth_method="private_task") if row is not None else None
+
     async def update_display_name(
         self,
         *,
