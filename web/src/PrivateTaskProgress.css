@@ -1,0 +1,11 @@
+.private-task-progress { display: grid; gap: 0.45rem; font-size: 0.7rem; }
+.private-task-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.private-task-label { display: flex; align-items: center; gap: 0.45rem; flex: 1 1 12rem; min-width: 0; color: var(--text-soft); line-height: 1.5; }
+.private-task-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.private-task-progress button { flex: none; padding: 0.42rem 0.65rem; border: 1px solid var(--border-strong); border-radius: 0.5rem; background: var(--surface-active); color: var(--text); font: inherit; cursor: pointer; }
+.private-task-progress button:hover { border-color: var(--accent); }
+.private-task-spinner { flex: none; width: 0.7rem; height: 0.7rem; border: 1.5px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: private-task-spin 1.1s linear infinite; }
+.private-task-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.45rem; color: var(--danger); }
+@keyframes private-task-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .private-task-spinner { animation: none; } }
+@media (max-width: 600px) { .private-task-progress button { min-height: 2.5rem; } }

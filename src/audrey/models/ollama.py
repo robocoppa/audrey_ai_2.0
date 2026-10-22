@@ -13,10 +13,11 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Never
 
 import httpx
 
@@ -49,6 +50,144 @@ _TAGS_TIMEOUT_S = 5.0
 
 class OllamaError(Exception):
     """Raised for Ollama HTTP, transport, or response parsing failures."""
+
+
+class GenerationUsageError(OllamaError):
+    """A scoped task cannot establish generation authority or measured usage."""
+
+
+@dataclass
+class _GenerationBudget:
+    check: Callable[[], Awaitable[int]]
+    record: Callable[[int], Awaitable[None]]
+    progress: Callable[[], Awaitable[None]] | None = None
+    active: bool = True
+    failure: GenerationUsageError | None = None
+
+    def require_active(self) -> None:
+        if not self.active:
+            raise GenerationUsageError("generation_budget_scope_expired")
+        if self.failure is not None:
+            raise self.failure
+
+    def mark_failure(self, reason: str) -> None:
+        if self.failure is None:
+            self.failure = GenerationUsageError(reason)
+
+    def refuse(self, reason: str) -> Never:
+        self.mark_failure(reason)
+        assert self.failure is not None
+        raise self.failure
+
+
+_generation_budget: ContextVar[_GenerationBudget | None] = ContextVar(
+    "audrey_generation_budget", default=None,
+)
+
+
+@contextmanager
+def generation_budget(
+    check: Callable[[], Awaitable[int]],
+    record: Callable[[int], Awaitable[None]],
+    *,
+    progress: Callable[[], Awaitable[None]] | None = None,
+) -> Iterator[None]:
+    """Bind task authority and observed output usage to local generation only.
+
+    ``check`` revalidates live authority and returns the remaining generated-token
+    allowance immediately before each content request. ``record`` persists the
+    provider's terminal ``eval_count`` before a result reaches its consumer.
+    Missing usage is unknown, never an invented zero. Embedding requests and
+    ordinary generation outside this scope retain their existing behavior.
+    Optional ``progress`` reports actual streamed output at most once per second,
+    plus its first output and terminal; it never estimates generated tokens.
+    """
+    if _generation_budget.get() is not None:
+        raise GenerationUsageError("generation_budget_scope_already_bound")
+    budget = _GenerationBudget(check, record, progress)
+    token = _generation_budget.set(budget)
+    try:
+        yield
+        # Existing model fallbacks may catch OllamaError. Unknown task usage
+        # must still stop the step even if a caller substituted fallback text.
+        if budget.failure is not None:
+            raise budget.failure
+    finally:
+        # Child asyncio tasks inherit the same object. Resetting only this
+        # context would leave their copied ContextVar authorized after exit.
+        budget.active = False
+        _generation_budget.reset(token)
+
+
+async def _budget_options(options: dict[str, Any] | None) -> dict[str, Any] | None:
+    budget = _generation_budget.get()
+    if budget is None:
+        return options
+    budget.require_active()
+    remaining = await budget.check()
+    budget.require_active()
+    if type(remaining) is not int or remaining <= 0:
+        budget.refuse("generation_budget_exhausted")
+    bounded = dict(options or {})
+    requested = bounded.get("num_predict")
+    bounded["num_predict"] = (
+        min(requested, remaining)
+        if type(requested) is int and requested > 0 else remaining
+    )
+    return bounded
+
+
+class _BudgetObservation:
+    """Account one terminal before a streaming consumer can close the iterator."""
+
+    def __init__(self) -> None:
+        self.budget = _generation_budget.get()
+        self.recorded = False
+        self.last_progress: float | None = None
+
+    async def progress(self, body: dict[str, Any], *, terminal: bool = False) -> None:
+        if self.budget is None or self.budget.progress is None:
+            return
+        self.budget.require_active()
+        message = body.get("message")
+        meaningful = isinstance(message, dict) and (
+            any(isinstance(message.get(key), str) and message[key] for key in ("content", "thinking"))
+            or (isinstance(message.get("tool_calls"), list) and bool(message["tool_calls"]))
+        )
+        if not terminal and not meaningful:
+            return
+        now = time.monotonic()
+        if terminal or self.last_progress is None or now - self.last_progress >= 1:
+            await self.budget.progress()
+            self.budget.require_active()
+            self.last_progress = now
+
+    async def finish(self, body: dict[str, Any]) -> None:
+        if self.budget is None or self.recorded:
+            return
+        self.budget.require_active()
+        count = body.get("eval_count")
+        if body.get("done") is not True or type(count) is not int or not 0 <= count <= 2**63 - 1:
+            self.budget.refuse("generation_usage_unavailable")
+        # If persistence fails the caller must stop; it cannot return uncounted
+        # output as a successful step or retry this terminal as a second call.
+        self.recorded = True
+        try:
+            await self.progress(body, terminal=True)
+            await self.budget.record(count)
+        except BaseException:
+            self.budget.mark_failure("generation_usage_unavailable")
+            raise
+
+    def incomplete(self) -> None:
+        if self.budget is not None and not self.recorded:
+            # Preserve active provider errors/cancellation. If a fallback swallows
+            # one, scope exit must still refuse to finish an uncounted task.
+            self.budget.mark_failure("generation_usage_unavailable")
+
+    def require_terminal(self) -> None:
+        if self.budget is not None and not self.recorded:
+            self.budget.refuse("generation_usage_unavailable")
 
 
 @contextmanager
@@ -494,7 +633,6 @@ class OllamaClient:
         reasoning that was then discarded.
         """
         await self._check_processing_policy(model)
-        _report_model_call(model)
         payload: dict[str, Any] = {
             "model": model,
             "messages": _to_ollama_messages(messages),
@@ -508,6 +646,11 @@ class OllamaClient:
             payload["format"] = format
         if think is not None:
             payload["think"] = think
+        bounded_options = await _budget_options(options)
+        if bounded_options:
+            payload["options"] = bounded_options
+        _report_model_call(model)
+        budget_observation = _BudgetObservation()
         observation = _GenerationObservation(model)
         try:
             try:
@@ -523,6 +666,7 @@ class OllamaClient:
                 raise OllamaError(f"POST /api/chat transport error: {type(e).__name__}: {e}") from e
             self._raise_for_status(r, "/api/chat")
             body = self._json_object(r, "/api/chat")
+            await budget_observation.finish(body)
             if current_processing_policy() is not None and body.get("error"):
                 raise ProcessingPolicyError("private_model_unavailable")
             confirmed = body.get("done") is True
@@ -533,6 +677,7 @@ class OllamaClient:
             observation.finish("cancelled")
             raise
         finally:
+            budget_observation.incomplete()
             observation.finish("error")
 
     async def chat_stream(
@@ -569,7 +714,6 @@ class OllamaClient:
         now fails if they drift.
         """
         await self._check_processing_policy(model)
-        _report_model_call(model)
         payload: dict[str, Any] = {
             "model": model,
             "messages": _to_ollama_messages(messages),
@@ -584,6 +728,11 @@ class OllamaClient:
         if think is not None:
             payload["think"] = think
         timeout = httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT
+        bounded_options = await _budget_options(options)
+        if bounded_options:
+            payload["options"] = bounded_options
+        _report_model_call(model)
+        budget_observation = _BudgetObservation()
         observation = _GenerationObservation(model)
         try:
             async with self._client.stream("POST", "/api/chat", json=payload, timeout=timeout) as r:
@@ -605,6 +754,11 @@ class OllamaClient:
                             raise ProcessingPolicyError("private_model_unavailable") from None
                         log.warning("Ollama returned non-JSON line: %r", line[:120])
                         continue
+                    if isinstance(chunk, dict):
+                        if chunk.get("done") is True:
+                            await budget_observation.finish(chunk)
+                        else:
+                            await budget_observation.progress(chunk)
                     if current_processing_policy() is not None and (
                         not isinstance(chunk, dict) or chunk.get("error")
                     ):
@@ -620,6 +774,7 @@ class OllamaClient:
                             # errors; higher layers own answer truncation status.
                             observation.finish("ok", chunk)
                     yield chunk
+                budget_observation.require_terminal()
         except (asyncio.CancelledError, GeneratorExit):
             observation.finish("cancelled")
             raise
@@ -630,6 +785,7 @@ class OllamaClient:
         finally:
             # EOF without a terminal, transport failure, or an unhandled
             # exception cannot become a successful model call.
+            budget_observation.incomplete()
             observation.finish("error")
 
     # ─── Embeddings ─────────────────────────────────────────────────────

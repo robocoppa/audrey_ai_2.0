@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import stat
+from dataclasses import replace
 from types import SimpleNamespace
 
 import httpx
@@ -50,11 +51,12 @@ async def native(document_setup, tmp_path, monkeypatch):  # noqa: F811 - importe
     app.dependency_overrides[require_principal] = lambda: owner
     captured = []
 
-    async def prepare(_app):
-        return env.runtime
+    async def prepare(_app, *, tax_review=False):
+        return replace(env.runtime, tax_review=tax_review)
 
     monkeypatch.setattr(runs, "prepare_native_private_runtime", prepare)
     monkeypatch.setattr(private_files, "prepare_native_private_runtime", prepare)
+    monkeypatch.setattr("audrey.private_task_admission.prepare_native_private_runtime", prepare)
 
     async def stream(execution_app, _payload, messages, _options, *, event_context, **_kw):
         captured.append(messages)

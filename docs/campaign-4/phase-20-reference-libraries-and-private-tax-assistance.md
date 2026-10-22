@@ -548,10 +548,10 @@ bounded case history, including across successive updates. A new library release
 does not itself prove that a law changed or that a retained rule applies to the
 return year. These state-transition checks do not establish tax accuracy.
 
-**20D.3b — foreground worksheet (built October 21).** Start/Continue review sends
+**20D.3b — worksheet construction.** Start/Continue review sends
 a visible native user turn with explicit Tax review selected. It uses the existing
 highest-priority verified local tool model as one case writer, with twelve tool
-rounds and a ten-minute foreground deadline. Ordinary Private retains its existing
+rounds per attempt and the saved task's ten-minute active-work budget. Ordinary Private retains its existing
 panel configuration. The full saved goal is supplied as data; inspect can page the
 canonical selected-file inventory, including Project references without extracted
 facts. A listing establishes selection, not complete reading. Newly chosen unsent
@@ -559,8 +559,8 @@ files stay in the composer; send them in a chat turn before reviewing them.
 
 The native run retains normal Stop, browser reconnect and canonical message
 persistence. Deadline/cancellation retains committed case entries; another review
-continues from that state. Server restart still interrupts execution: restart-
-resumable tasks are 20D.4. There is no background worker in this slice.
+continues from that state. Saved task execution, controls and safe restart recovery
+are described below.
 
 The model saves a bounded worksheet with a summary, linked findings and the next
 question. The server checks all dependency IDs and rejects rejected facts or stale
@@ -683,12 +683,39 @@ conflicts with saved case provenance remain blocked. Existing internal tasks
 without the new native pins cannot be claimed by this native preparer until
 explicitly revalidated.
 
-The executor and admission service have no startup scheduling, task endpoint or
-browser controls yet. **20D.4b.2b is next:** connect native task requests and prepared
-server context, schedule/recover tasks, show progress/control and deliver results
-once through the native conversation. The adapter must supply observed model
-usage and guard each model dispatch. Existing foreground review remains the
-user-facing path until that integration passes its own acceptance.
+**20D.4b.2b built — native saved reviews.** Explicit native Tax review turns
+create or resume a task, bind it to the owned canonical run and use the existing
+native run manager and fair GPU queue. They retain the ordinary visible user turn,
+stream, tool/model/source disclosures and fact-confirmation feedback. Each attempt
+uses the same single local writer. Ordinary Private and compatibility requests do
+not enter this task flow. Admission failure leaves a stopped native row and pauses
+an unclaimed task, so retry cannot remain stuck behind abandoned queued work.
+
+The compact review row loads its saved status before offering Start/Resume and
+polls without overlapping requests. Pause/Cancel stay available while the native
+run is active; Resume is explicit and keeps unsent text/files and spent budgets.
+Normal Stop cancels the durable task. Budget exhaustion retains partial work and
+does not offer Resume with a fresh budget. No extra modal or passing checklist is
+added. Duplicate recovered-run/retry controls are suppressed when the task row
+owns recovery, keeping controls accessible on short desktop and mobile screens.
+
+A scoped generation hook checks admission immediately before every model content
+request and caps the provider's generation limit to remaining task tokens. Exact
+terminal generated-token counts are durably recorded before accepting output;
+actual stream output renews progress without estimating tokens from characters.
+Missing/unmeasurable usage or swallowed provider failures cannot become successful
+task completion. Cancellation before provider terminal may leave unknown partial
+generation; active-time, tool and step limits remain in force and saved measured
+usage is retained.
+
+Checkpoint and bounded native-answer outbox commit in one transaction. Delivery
+finishes the original native message, never a new message. Lost acknowledgements,
+shutdown after commit and replay are idempotent. Startup replays committed results
+before generic run recovery, then fences/pauses unfinished tasks. It never launches
+model work automatically. Explicit resume revalidates current authority and inputs
+and starts a new native attempt linked to the same task. Already committed source
+findings stay saved; verification/repair passes remain 20D.5. Local lifecycle and
+responsive checks passed; deployed browser acceptance is pending.
 
 The remaining runner uses typed stages with a tax adapter supplying the checklist
 and evidence checks. Reuse the existing fair GPU scheduler,

@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+import type { PrivateTask } from "../src/privateTasksApi";
 import { TAX_REVIEW_PROMPT, type TaxCase } from "../src/taxReviewApi";
 // Generated through the real repository operations and checklist serializer.
 import fixtures from "../src/test/fixtures/tax-review-cases.json" with { type: "json" };
@@ -17,8 +18,14 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-async function mockTaxApi(page: Page) {
-  let taxCase: TaxCase | null = null;
+async function mockTaxApi(page: Page, options: { savedTask?: boolean } = {}) {
+  let taxCase: TaxCase | null = options.savedTask ? fixtureCase("created") : null;
+  let privateTask: PrivateTask | null = options.savedTask ? {
+    id: "task_saved_review", conversation_id: ID, revision: 7, status: "running", stop_reason: "",
+    progress: 1, updated_at: DATE, native_run_id: "run_tax_saved",
+    usage: { steps: 1, wall_seconds: 30, model_tokens: 100, tool_calls: 2 },
+    limits: { max_steps: 24, max_wall_seconds: 600, max_model_tokens: 32000, max_tool_calls: 64 },
+  } : null;
 
   const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
   const skills: Array<string | null> = [];
@@ -42,7 +49,19 @@ async function mockTaxApi(page: Page) {
     if (path === "/api/conversations") return json(route, request.method() === "POST" ? conversation : { items: [conversation, ordinary], next_cursor: null });
     if (path === `/api/conversations/${ID}`) return json(route, conversation);
     if (path === `/api/conversations/${OTHER}`) return json(route, ordinary);
-    if (path.endsWith("/messages")) return json(route, { items: [], next_cursor: null });
+    if (path.endsWith("/messages")) return json(route, { items: options.savedTask ? [
+      { id: "msg_tax_saved_user", run_id: "run_tax_saved", sequence: 1, role: "user", status: "completed", content: TAX_REVIEW_PROMPT, created_at: DATE, updated_at: DATE, attachments: [] },
+      { id: "msg_tax_saved_assistant", run_id: "run_tax_saved", sequence: 2, role: "assistant", status: privateTask?.status === "running" ? "in_progress" : "incomplete", content: "Saved review checkpoint.", created_at: DATE, updated_at: DATE, attachments: [] },
+    ] : [], next_cursor: null });
+    if (path === `/api/conversations/${ID}/private-task`) return json(route, { task: privateTask });
+    if (path === "/api/private-tasks/task_saved_review/actions") {
+      const body = request.postDataJSON();
+      requests.push({ path, body });
+      if (!privateTask || body.expected_revision !== privateTask.revision) return json(route, { detail: "Review changed; reload it." }, 409);
+      privateTask = { ...privateTask, revision: privateTask.revision + 1,
+        status: body.action === "pause" ? "paused" : "cancelled", stop_reason: "user_requested" };
+      return json(route, { task: privateTask });
+    }
     if (path === `/api/conversations/${ID}/tax-review`) {
       if (request.method() === "GET") return json(route, { case: taxCase });
       const body = request.postDataJSON();
@@ -81,6 +100,8 @@ async function mockTaxApi(page: Page) {
         if (last.startsWith("I confirm these details")) taxCase = fixtureCase("group_reviewed");
         else if (!last.startsWith("The saved ")) taxCase = fixtureCase("group_proposed");
       }
+      if (privateTask) privateTask = { ...privateTask, revision: privateTask.revision + 1,
+        status: "completed", stop_reason: "", native_run_id: runId };
       const messageId = "msg_" + runId;
       const events = [
         { type: "RUN_STARTED", threadId: ID, runId },
@@ -91,7 +112,10 @@ async function mockTaxApi(page: Page) {
       ];
       return route.fulfill({ status: 200, contentType: "text/event-stream", body: events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") });
     }
-    if (path.startsWith("/api/runs/run_tax_")) return json(route, { id: path.split("/").at(-1), conversation_id: ID, status: "succeeded", title_pending: false });
+    if (path.startsWith("/api/runs/run_tax_")) return json(route, { id: path.split("/").at(-1), conversation_id: ID,
+      status: options.savedTask && privateTask?.status === "running" ? "running"
+        : options.savedTask && privateTask?.status === "paused" ? "cancelled" : "succeeded",
+      error_code: privateTask?.status === "paused" ? "private_task_paused" : "", title_pending: false });
     await route.abort("failed");
   });
   return { requests, skills, agentBodies, offerLibraryUpdate() {
@@ -160,6 +184,45 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 1280, height: 600
     await expect(settings).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(settings).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+  });
+}
+
+
+for (const viewport of [{ width: 1280, height: 600 }, { width: 390, height: 667 }]) {
+  test(`Saved Private review pauses, reloads and resumes at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.clock.setFixedTime(new Date(DATE));
+    const observed = await mockTaxApi(page, { savedTask: true });
+    await page.goto("./");
+    const panel = page.getByRole("region", { name: "Tax review case" });
+    const progress = panel.getByLabel("Saved review progress");
+    await expect(progress.getByRole("status")).toHaveText("Audrey is reviewing your saved information");
+    await expect(progress.getByRole("button", { name: "Pause", exact: true })).toBeInViewport();
+    await expect(progress.getByRole("button", { name: "Cancel", exact: true })).toBeInViewport();
+    await expect(panel.getByRole("button", { name: /Start review|Continue review/u })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Retry last question" })).toHaveCount(0);
+    await progress.getByRole("button", { name: "Pause", exact: true }).click();
+    await expect(progress.getByRole("status")).toHaveText("Review paused · Saved work is retained");
+    await expect(progress.getByRole("button", { name: "Resume review" })).toBeEnabled();
+    expect(observed.requests[0]).toEqual({ path: "/api/private-tasks/task_saved_review/actions",
+      body: { expected_revision: 7, action: "pause" } });
+    expect(observed.agentBodies).toHaveLength(0);
+    await page.reload();
+    await expect(progress.getByRole("button", { name: "Resume review" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Retry last question" })).toHaveCount(0);
+    await expect(page.getByText("Run failed", { exact: true })).toHaveCount(0);
+    expect(observed.agentBodies).toHaveLength(0);
+    const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+    await composer.fill("Keep this unsent draft while the review resumes.");
+    await progress.getByRole("button", { name: "Resume review" }).click();
+    await expect(page.getByText("Review findings saved 1.")).toBeVisible();
+    await expect(progress.getByRole("status")).toHaveText("Review saved");
+    expect(observed.skills).toEqual(["tax-review"]);
+    expect(JSON.stringify(observed.agentBodies[0])).toContain(TAX_REVIEW_PROMPT);
+    expect(JSON.stringify(observed.agentBodies[0])).not.toContain("Keep this unsent draft");
+    await expect(composer).toHaveValue("Keep this unsent draft while the review resumes.");
+    await expect(panel.getByRole("button", { name: "Continue review" })).toHaveCount(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
   });
 }

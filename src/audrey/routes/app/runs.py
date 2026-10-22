@@ -10,7 +10,7 @@ import logging
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import aclosing, asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -32,6 +32,7 @@ from audrey.app_state import (
     StartedRun,
     ToolCallSnapshot,
 )
+from audrey.app_state.private_tasks import PrivateTaskError
 from audrey.auth import require_scope
 from audrey.conversation_titles import ConversationTitleGenerator
 from audrey.identity import Principal
@@ -234,6 +235,10 @@ class _LiveRun:
     pending_source_events: list[SourceSnapshot] = field(default_factory=list)
     observed_model_call_count: int = 0
     processing_runtime: PrivateProcessingRuntime | None = None
+    private_task_id: str | None = None
+    private_task_revision: int | None = None
+    defer_terminal: bool = False
+    deferred_terminal: RunFinishedEvent | None = None
 
     def observe_model_call(self, raw_model: str) -> None:
         model = str(raw_model).strip()[:200]
@@ -280,6 +285,9 @@ class _LiveRun:
         )
 
     def publish(self, event: RunEvent) -> None:
+        if isinstance(event, RunFinishedEvent) and self.defer_terminal:
+            self.deferred_terminal = event
+            return
         expected = self.events[-1].sequence + 1 if self.events else 1
         if event.run_id != self.started.run.run_id or event.sequence != expected:
             raise RuntimeError("native run event identity or sequence is invalid")
@@ -338,6 +346,22 @@ class _LiveRun:
         previous = self.changed
         self.changed = asyncio.Event()
         previous.set()
+
+    def release_terminal(self) -> None:
+        self.defer_terminal = False
+        event, self.deferred_terminal = self.deferred_terminal, None
+        if event is not None:
+            self.publish(event)
+
+    def fail_terminal(self, *, status: str, finish_reason: str, error_code: str) -> None:
+        if self.deferred_terminal is not None:
+            self.deferred_terminal = self.deferred_terminal.model_copy(update={
+                "status": status, "finish_reason": finish_reason, "error_code": error_code,
+            })
+        elif not self.emitter.is_finished:
+            self.emitter.terminate_incomplete(
+                status=status, finish_reason=finish_reason, error_code=error_code,
+            )
 
     @property
     def terminal_event(self) -> RunFinishedEvent | None:
@@ -515,6 +539,8 @@ class NativeRunManager:
         self._lock = asyncio.Lock()
         self._title_tasks: dict[str, asyncio.Task[None]] = {}
         self._stopping = False
+        from audrey.private_reviews import NativePrivateReviews
+        self.private_reviews = NativePrivateReviews(app, self)
 
     async def launch(
         self,
@@ -532,6 +558,7 @@ class NativeRunManager:
         initial_sources: tuple[SourceSnapshot, ...] = (),
         generate_title: bool = False,
         processing_runtime: PrivateProcessingRuntime | None = None,
+        private_task_id: str | None = None,
     ) -> None:
         # A task must carry its own durable restriction and exact policy. An
         # ambient request ContextVar alone is not authority for a later run.
@@ -546,6 +573,12 @@ class NativeRunManager:
                 pass
         elif processing_runtime is not None or current_processing_policy() is not None:
             raise ProcessingPolicyError("private_processing_unavailable")
+        if private_task_id is not None:
+            task = await self._store.private_tasks.get(user_id=principal.user_id, task_id=private_task_id)
+            if (task is None or task["status"] != "queued"
+                    or task.get("native_run_id") != started.run.run_id
+                    or not protected or processing_runtime is None or not processing_runtime.tax_review):
+                raise PrivateTaskError("The saved Private review does not match this native run.")
         live: _LiveRun
         live = _LiveRun(
             owner_user_id=principal.user_id,
@@ -565,6 +598,9 @@ class NativeRunManager:
             observed_sources=list(initial_sources),
             pending_source_events=list(initial_sources),
             processing_runtime=processing_runtime,
+            private_task_id=private_task_id,
+            private_task_revision=task["revision"] if private_task_id is not None else None,
+            defer_terminal=private_task_id is not None,
         )
         live.emitter.set_sink(live.publish)
         async with self._lock:
@@ -659,6 +695,105 @@ class NativeRunManager:
         finally:
             self._title_tasks.pop(live.started.run.run_id, None)
 
+    async def _execute_private_task(
+        self, live, payload, messages, options, routing_messages, selected_model,
+        skill_instruction, resolved_skill,
+    ) -> None:
+        from audrey.app_state.private_tasks import PrivateTaskError
+        from audrey.app_state.tax_cases import tax_case_review
+        from audrey.models.ollama import generation_budget
+        from audrey.private_reviews import replay_private_deliveries
+        from audrey.private_task_runner import PrivateTaskStepRunner, StepResult
+
+        context = RunEventContext(
+            run_id=live.started.run.run_id,
+            conversation_id=live.started.conversation.conversation_id,
+            assistant_message_id=live.started.assistant_message.message_id,
+            mode=live.started.run.mode, sink=live.publish, emitter=live.emitter,
+        )
+
+        async def work(execution_app, step):
+            with generation_budget(step.remaining_tokens, step.tokens_used, progress=step.progress):
+                async with asyncio.timeout(_TAX_REVIEW_TIMEOUT_S), aclosing(self._stream_factory(
+                    execution_app, payload, messages, options, user_id=live.storage_namespace,
+                    conversation_id=live.started.conversation.conversation_id,
+                    user_turn_text=live.started.user_message.content, event_context=context,
+                    routing_messages=routing_messages, selected_model=selected_model,
+                    skill_instruction=skill_instruction, resolved_skill=resolved_skill,
+                    model_tools=execution_app.state.tools,
+                )) as frames:
+                    async for _frame in frames:
+                        live.flush_pending_model_events()
+                        live.flush_pending_source_events()
+            terminal = live.deferred_terminal
+            if terminal is None or terminal.status != "succeeded":
+                raise PrivateTaskError("Private review did not finish this attempt.")
+            case = await self._store.tax_cases.get(
+                user_id=live.owner_user_id, conversation_id=live.started.conversation.conversation_id,
+            )
+            if case is None:
+                raise PrivateTaskError("The saved Private case is unavailable.")
+            review = tax_case_review(case)
+            waiting = any(item["status"] == "proposed"
+                          and item.get("case_tax_year", case["tax_year"]) == case["tax_year"]
+                          for item in case["facts"]) or (
+                review is not None and review["status"] == "needs_input"
+            )
+            outcome = "waiting_for_user" if waiting else (
+                "completed" if review is not None and not review["stale"] else "paused"
+            )
+            usage = live.latest_usage
+            delivery = {
+                "outcome": terminal.status, "assistant_content": "".join(live.answer_parts),
+                "finish_reason": terminal.finish_reason, "error_code": terminal.error_code,
+                "virtual_model": terminal.virtual_model, "concrete_model": terminal.concrete_model,
+                "prompt_tokens": usage.prompt_tokens if usage is not None else 0,
+                "completion_tokens": usage.completion_tokens if usage is not None else 0,
+                "sources": [asdict(item) for item in live.observed_sources],
+                "tool_calls": [asdict(item) for item in live.observed_tool_calls.values()],
+                "models": [asdict(item) for item in live.model_snapshots],
+            }
+            checkpoint = {
+                "stage": "review" if review is not None else "facts" if waiting else "inspect",
+                "summary": "Saved review needs your input." if waiting else (
+                    "Review worksheet saved." if outcome == "completed" else "Partial review saved."
+                ),
+            }
+            for support_field, category in (
+                ("fact_ids", "facts"), ("evidence_ids", "evidence"),
+                ("calculation_ids", "calculations"), ("return_item_ids", "return_items"),
+                ("missing_item_ids", "missing_items"),
+            ):
+                checkpoint[support_field] = [item["id"] for item in case[category]]
+            return StepResult(checkpoint, outcome, delivery=delivery)
+
+        runner = PrivateTaskStepRunner(self._store.private_tasks, self.private_reviews.admission.prepare)
+        with observe_model_calls(live.observe_model_call):
+            await runner.execute(user_id=live.owner_user_id, task_id=live.private_task_id, work=work)
+        # The outbox and checkpoint already committed together. Delivery uses
+        # the original native message, with no new model call or duplicate reply.
+        try:
+            await replay_private_deliveries(self._store, task_id=live.private_task_id)
+        except Exception:  # noqa: BLE001 - keep committed private output; no provider diagnostics
+            # The checkpoint/outbox already committed. A delivery or ack retry
+            # must not replace that result with a cancellation. Native terminal
+            # persistence still retries below; startup replays any pending outbox.
+            log.warning("private review delivery pending run_id=%s", live.started.run.run_id)
+
+    async def _fail_uncommitted(self, live: _LiveRun, *, status: str,
+                                finish_reason: str, error_code: str) -> None:
+        if live.private_task_id is not None:
+            committed = await self._store.private_tasks.committed_delivery(
+                user_id=live.owner_user_id, task_id=live.private_task_id,
+                run_id=live.started.run.run_id,
+            )
+            if committed is not None:
+                # Cleanup or shutdown can be cancelled after checkpoint commit.
+                # The saved result is already authoritative and must not be
+                # replaced with a cancelled native row before outbox replay.
+                return
+        live.fail_terminal(status=status, finish_reason=finish_reason, error_code=error_code)
+
     async def _execute(
         self,
         live: _LiveRun,
@@ -680,69 +815,75 @@ class NativeRunManager:
             emitter=live.emitter,
         )
         try:
-            # Tax review is a bounded foreground operation. The same native run
-            # owns cancellation/reconnect; no background task runner is implied.
-            timeout = _TAX_REVIEW_TIMEOUT_S if live.processing_runtime and live.processing_runtime.tax_review else None
-            async with asyncio.timeout(timeout), self._execution_scope(live) as execution_app:
-                with observe_model_calls(live.observe_model_call):
-                    async with aclosing(self._stream_factory(
-                        execution_app,
-                        payload,
-                        messages,
-                        options,
-                        user_id=live.storage_namespace,
-                        conversation_id=live.started.conversation.conversation_id,
-                        user_turn_text=live.started.user_message.content,
-                        event_context=context,
-                        routing_messages=routing_messages,
-                        selected_model=selected_model,
-                        skill_instruction=skill_instruction,
-                        resolved_skill=resolved_skill,
-                        model_tools=(
-                            model_tools.restrict(live.processing_runtime.policy.allowed_tools)
-                            if model_tools is not None and live.processing_runtime is not None
-                            else model_tools
-                        ),
-                    )) as frames:
-                        async for _frame in frames:
-                            live.flush_pending_model_events()
-                            live.flush_pending_source_events()
-                            # A pipeline can have post-answer cleanup after its terminal
-                            # frame. Persist the canonical answer before that cleanup so a
-                            # reloaded browser does not keep seeing a running row while
-                            # the model has visibly finished.
-                            if live.emitter.is_finished:
-                                await self._settle_terminal(live)
+            if live.private_task_id is not None:
+                await self._execute_private_task(
+                    live, payload, messages, options, routing_messages, selected_model,
+                    skill_instruction, resolved_skill,
+                )
+            else:
+                # Tax review is a bounded foreground operation. The same native run
+                # owns cancellation/reconnect; no background task runner is implied.
+                timeout = _TAX_REVIEW_TIMEOUT_S if live.processing_runtime and live.processing_runtime.tax_review else None
+                async with asyncio.timeout(timeout), self._execution_scope(live) as execution_app:
+                    with observe_model_calls(live.observe_model_call):
+                        async with aclosing(self._stream_factory(
+                            execution_app,
+                            payload,
+                            messages,
+                            options,
+                            user_id=live.storage_namespace,
+                            conversation_id=live.started.conversation.conversation_id,
+                            user_turn_text=live.started.user_message.content,
+                            event_context=context,
+                            routing_messages=routing_messages,
+                            selected_model=selected_model,
+                            skill_instruction=skill_instruction,
+                            resolved_skill=resolved_skill,
+                            model_tools=(
+                                model_tools.restrict(live.processing_runtime.policy.allowed_tools)
+                                if model_tools is not None and live.processing_runtime is not None
+                                else model_tools
+                            ),
+                        )) as frames:
+                            async for _frame in frames:
+                                live.flush_pending_model_events()
+                                live.flush_pending_source_events()
+                                # A pipeline can have post-answer cleanup after its terminal
+                                # frame. Persist the canonical answer before that cleanup so a
+                                # reloaded browser does not keep seeing a running row while
+                                # the model has visibly finished.
+                                if live.emitter.is_finished:
+                                    await self._settle_terminal(live)
         except asyncio.CancelledError:
-            if not live.emitter.is_finished:
-                live.emitter.terminate_incomplete(
-                    status="cancelled",
-                    finish_reason="cancelled",
-                    error_code=live.cancel_error_code,
-                )
+            await self._fail_uncommitted(live, status="cancelled", finish_reason="cancelled", error_code=live.cancel_error_code)
         except TimeoutError:
-            if not live.emitter.is_finished:
-                live.emitter.terminate_incomplete(
-                    status="failed", finish_reason="error",
-                    error_code="tax_review_budget_exhausted" if live.processing_runtime and live.processing_runtime.tax_review else "private_processing_unavailable" if live.started.run.private_required else "pipeline_error",
-                )
+            await self._fail_uncommitted(
+                live,
+                status="cancelled" if live.private_task_id else "failed", finish_reason="error",
+                error_code="private_task_paused" if live.private_task_id else "tax_review_budget_exhausted"
+                if live.processing_runtime and live.processing_runtime.tax_review else "private_processing_unavailable"
+                if live.started.run.private_required else "pipeline_error",
+            )
         except Exception as exc:
             if live.started.run.private_required:
-                # Exception text/tracebacks may contain private prompts or tool
-                # output. Only stable codes and the server run ID leave here.
                 code = exc.code if isinstance(exc, ProcessingPolicyError) else "private_processing_unavailable"
                 log.warning("private run unavailable run_id=%s code=%s", live.started.run.run_id, code)
             else:
                 code = "pipeline_error"
                 log.exception("native run failed run_id=%s", live.started.run.run_id)
-            if not live.emitter.is_finished:
-                live.emitter.terminate_incomplete(
-                    status="failed",
-                    finish_reason="error",
-                    error_code=code,
-                )
+            await self._fail_uncommitted(
+                live,
+                status="cancelled" if live.private_task_id else "failed", finish_reason="error",
+                error_code="private_task_paused" if live.private_task_id else code,
+            )
         finally:
             try:
+                if live.private_task_id is not None:
+                    await self._store.private_tasks.stop_unclaimed(
+                        user_id=live.owner_user_id, task_id=live.private_task_id,
+                        expected_revision=live.private_task_revision,
+                    )
+                live.release_terminal()
                 await self._settle_terminal(live)
             finally:
                 await self._retain_completed(live)
@@ -797,6 +938,8 @@ class NativeRunManager:
             if finished is not None and self._archive_wake is not None:
                 self._archive_wake()
         except RunAlreadyTerminalError:
+            if live.private_task_id is not None:
+                return
             log.warning(
                 "native run terminal row was already finalized run_id=%s",
                 live.started.run.run_id,
@@ -863,26 +1006,30 @@ class NativeRunManager:
                 yield None
 
     async def cancel(self, *, user_id: str, run_id: str) -> RunRecord | None:
+        from audrey.app_state.private_tasks import PrivateTaskError
+        try:
+            task = await self._store.private_tasks.get_for_run(user_id=user_id, run_id=run_id)
+            if task is not None:
+                await self.private_reviews.control(
+                    user_id=user_id, task_id=task["id"], expected_revision=task["revision"], action="cancel",
+                )
+                return await self._store.conversations.get_run(user_id=user_id, run_id=run_id)
+        except PrivateTaskError:
+            pass  # Native Stop retains cleanup authority after access revocation.
+        return await self.interrupt_private_run(user_id=user_id, run_id=run_id, error_code="cancelled_by_user")
+
+    async def interrupt_private_run(self, *, user_id: str, run_id: str, error_code: str) -> RunRecord | None:
         async with self._lock:
             live = self._runs.get(run_id)
         if live is None or live.owner_user_id != user_id:
-            return await self._store.conversations.get_run(
-                user_id=user_id,
-                run_id=run_id,
-            )
+            return await self._store.conversations.get_run(user_id=user_id, run_id=run_id)
         task = live.task
-        if not live.emitter.is_finished:
-            live.cancel_error_code = "cancelled_by_user"
+        if live.terminal_event is None:
+            live.cancel_error_code = error_code
             if task is not None and not task.done():
                 task.cancel()
-            # Cancellation cleanup may include provider or child-task teardown.
-            # Make the owner-visible run terminal first so Stop never waits on it.
-            if not live.emitter.is_finished:
-                live.emitter.terminate_incomplete(
-                    status="cancelled",
-                    finish_reason="cancelled",
-                    error_code=live.cancel_error_code,
-                )
+            live.fail_terminal(status="cancelled", finish_reason="cancelled", error_code=error_code)
+            live.release_terminal()
         await self._settle_terminal(live)
         return await self._store.conversations.get_run(user_id=user_id, run_id=run_id)
 
@@ -898,7 +1045,20 @@ class NativeRunManager:
                 if live.task is not None and not live.task.done()
             ]
         for live in active:
-            live.cancel_error_code = "server_shutdown"
+            if live.private_task_id is not None:
+                from audrey.app_state.private_tasks import PrivateTaskError
+                try:
+                    task = await self._store.private_tasks.get(
+                        user_id=live.owner_user_id, task_id=live.private_task_id,
+                    )
+                    if task and task["status"] in {"running", "queued"}:
+                        await self._store.private_tasks.control(
+                            user_id=live.owner_user_id, task_id=task["id"],
+                            expected_revision=task["revision"], action="pause",
+                        )
+                except PrivateTaskError:
+                    pass
+            live.cancel_error_code = "private_task_paused" if live.private_task_id else "server_shutdown"
             assert live.task is not None
             live.task.cancel()
         if active:
@@ -1377,7 +1537,12 @@ async def _create_private_run(request, principal, conversation, payload, manager
             "tax_year": tax_case["tax_year"], "jurisdiction": tax_case["jurisdiction"],
             "goal": tax_case["goal"], "reference_release": tax_case["reference_release"],
         }, ensure_ascii=False)
+    started = None
+    saved_task = None
+    launched = False
     try:
+        if tax_case is not None:
+            await manager.private_reviews.ensure_available(principal.user_id, conversation.conversation_id)
         runtime = (await prepare_native_private_runtime(request.app, tax_review=True)
                    if tax_case is not None else await prepare_native_private_runtime(request.app))
         async with runtime.scope(request.app) as execution_app:
@@ -1426,6 +1591,20 @@ async def _create_private_run(request, principal, conversation, payload, manager
             )
             if started is None:
                 raise HTTPException(status_code=404, detail="Conversation not found.")
+            if tax_case is not None:
+                try:
+                    saved_task = await manager.private_reviews.admit(
+                        user_id=principal.user_id, conversation_id=conversation.conversation_id,
+                        expected_case_revision=tax_case["revision"], run_id=started.run.run_id,
+                    )
+                except Exception:
+                    # A durable question must never be left with a running row
+                    # when admission failed before generation could launch.
+                    await store.conversations.finish_run(
+                        user_id=principal.user_id, run_id=started.run.run_id, outcome="failed",
+                        assistant_content="", error_code="private_task_admission_unavailable",
+                    )
+                    raise
             records = await store.conversations.list_messages(user_id=principal.user_id, conversation_id=conversation.conversation_id)
             routing_messages = _history_messages(started, records or (), {})
             messages = [user_preferences_system_message(preferences), {
@@ -1443,9 +1622,13 @@ async def _create_private_run(request, principal, conversation, payload, manager
                 options=_options_from_request(pipeline_payload), routing_messages=routing_messages,
                 selected_model=selected, model_tools=execution_app.state.tools,
                 skill_instruction=tax_instruction, processing_runtime=runtime,
+                private_task_id=saved_task["id"] if saved_task is not None else None,
                 initial_sources=project_context.sources if project_context is not None else (),
                 generate_title=started.user_message.sequence_no == 1,
             )
+            launched = True
+    except PrivateTaskError:
+        raise HTTPException(status_code=409, detail="The saved review changed or cannot continue. Reload Tax review before trying again.") from None
     except ProcessingPolicyError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
     except ProjectContextUnavailableError:
@@ -1454,6 +1637,19 @@ async def _create_private_run(request, principal, conversation, payload, manager
         raise HTTPException(status_code=409, detail=str(exc)) from None
     except InvalidApplicationStateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+    finally:
+        if started is not None and not launched:
+            if saved_task is not None:
+                await store.private_tasks.stop_unclaimed(
+                    user_id=principal.user_id, task_id=saved_task["id"],
+                    expected_revision=saved_task["revision"],
+                )
+            current = await store.conversations.get_run(user_id=principal.user_id, run_id=started.run.run_id)
+            if current is not None and current.status == "running":
+                await store.conversations.finish_run(
+                    user_id=principal.user_id, run_id=started.run.run_id, outcome="failed",
+                    assistant_content="", error_code="private_task_admission_unavailable",
+                )
     base = _run_response(started.run, title_pending=manager.title_pending(started.run.run_id)).model_dump()
     return RunCreateResponse(**base, user_message_id=started.user_message.message_id,
         assistant_message_id=started.assistant_message.message_id,

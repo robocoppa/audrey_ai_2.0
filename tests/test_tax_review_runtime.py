@@ -229,7 +229,9 @@ async def test_tax_review_timeout_is_terminal_and_retains_case(native, monkeypat
     assert response.status_code == 202, response.text
     await _settle(state, response.json()["id"])
     run = await state.store.conversations.get_run(user_id=state.owner.user_id, run_id=response.json()["id"])
-    assert run.status == "failed" and run.error_code == "tax_review_budget_exhausted"
+    assert run.status == "cancelled" and run.error_code == "private_task_paused"
+    task = await state.store.private_tasks.get_for_run(user_id=state.owner.user_id, run_id=run.run_id)
+    assert task["status"] == "paused" and task["stop_reason"] == "step_timeout"
     saved = await state.store.tax_cases.get(user_id=state.owner.user_id, conversation_id=conversation["id"])
     assert saved["missing_items"][0]["label"] == "Confirm available income records"
     assert state.app.state.cfg.raw.get("agentic", {}).get("react", {}).get("max_rounds") != 12

@@ -52,24 +52,34 @@ certify a complete return. Broader accuracy and background work follow later.
 Private conversation, expiring worker leases, revision/fence checks and replay-safe
 checkpoints. Pause/cancel prevent late task writes; changed case/source/Project or
 model/policy bindings require revalidation. Resource accounting and partial-work
-stop reasons survive restart and existing backup/restore. This is internal storage:
-no worker, endpoint, background generation or new browser control is enabled yet.
+stop reasons survive restart and existing backup/restore. Native integration is
+built below; browser acceptance remains pending.
 
 **20D.4b.1 built:** one bounded leased step can use the verified Private runtime
 and owned local tools. Tax-case changes and task revision advancement commit
 atomically; cancellation, stale inputs and expired leases refuse late findings.
 Observed token/tool costs persist during the step. An idle lease is not renewed,
 and timeouts or failures retain partial work with a specific stop reason. This
-executor is not scheduled by the application yet.
+executor now runs through the existing native run manager.
 
 **20D.4b.2a built:** native task admission/preparation refreshes current account
 and Private-model permissions, the case and published IRS release. Exact selected
 originals, extracted text and semantic Project context are pinned by digest.
 Permission changes are checked again inside case-write transactions. Explicit
 resume revalidates inputs and retains spent resources; stale checkpoints cannot
-start work. No endpoint or scheduler is enabled. **20D.4b.2b next:** connect this
-service to native task requests, progress/control, safe restart scheduling and
-idempotent conversation delivery. Existing foreground review remains in use.
+start work.
+
+**20D.4b.2b built; browser acceptance pending:** native Tax review turns create
+or explicitly resume a saved task through the existing run manager and fair GPU
+queue. One compact progress row provides Pause/Resume/Cancel; normal Stop cancels
+the task. Refresh retains saved progress; review controls preserve unsent drafts.
+Each attempt remains one
+bounded local writer; generated-token usage is observed before output is accepted.
+Checkpoint and final-answer outbox commit together, and delivery reuses the
+original native message. Restart replays committed results, pauses unfinished
+work and requires explicit resume with fresh validation. No automatic restart
+generation or extra verification passes are enabled. **Next: 20D.5**, targeted
+local evidence checking and repair after this lifecycle passes in the browser.
 
 **Notices and settings polish built:** Tax review shows a brief filing caution;
 Private shows local server processing/storage with expandable privacy details.
@@ -141,8 +151,8 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **20D.4b.2a:** current native owner/model/source admission and preparation,
   exact source pins, permission fencing and explicit revalidated resume.
 - [x] **Tax/Private notices:** concise disclaimers and settings-button polish.
-- [ ] **20D.4b.2b:** native task endpoints, progress/control, restart scheduling
-  and safe result delivery.
+- [x] **20D.4b.2b built:** native saved reviews, progress/control, safe restart
+  recovery and idempotent delivery. Manual lifecycle acceptance is pending.
 - [ ] **20D.5:** bounded local evidence verification and targeted repair loops.
 - [ ] **20E:** compare single-pass and extended accuracy before extending defaults.
 

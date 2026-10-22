@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { ApiError } from "./api";
 import {
@@ -20,6 +20,7 @@ export function TaxReview({
   onCaseChange,
   onSaved,
   onReview,
+  taskControls,
 }: {
   conversationId: string;
   expanded: boolean;
@@ -30,6 +31,7 @@ export function TaxReview({
   onCaseChange: (value: TaxCase | null) => void;
   onSaved: () => void;
   onReview?: () => void;
+  taskControls?: ReactNode;
 }) {
   const panelId = useId();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -174,7 +176,7 @@ export function TaxReview({
       </button>
       <div className="tax-review-body">
         {!expanded ? <p className="tax-review-disclaimer">Tax review can make mistakes. Check the sources and figures before filing; Audrey does not prepare or file your return.</p> : null}
-        {taxCase ? <div className="tax-review-start">
+        {taxCase ? taskControls ?? <div className="tax-review-start">
           <span className="tax-review-note">{taxCase.review
             ? taxCase.review.stale ? "Review needs updating"
               : taxCase.review.status === "needs_input" ? "Review saved · Your input is needed"

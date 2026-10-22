@@ -26,6 +26,7 @@ from audrey.app_state.private_tasks import (
     TaskPins,
     private_task_scope,
 )
+from audrey.models.ollama import GenerationUsageError
 from audrey.tools.private_dispatch import PrivateToolHandler, private_tool_scope
 
 
@@ -37,6 +38,7 @@ class PrivateStepBudgetError(PrivateTaskError):
 class StepResult:
     checkpoint: dict
     status: Literal["queued", "waiting_for_user", "paused", "completed", "failed"] = "queued"
+    delivery: dict | None = None
 
 
 class PrivateStep:
@@ -84,6 +86,13 @@ class PrivateStep:
             self._reported_tools += spent["tool_calls"]
             if updated["status"] != "running":
                 raise PrivateStepBudgetError("Private task resource budget reached.")
+
+    async def remaining_tokens(self) -> int:
+        await self.check()
+        remaining = self.limits["max_model_tokens"] - self._initial_usage["model_tokens"] - self.model_tokens
+        if remaining <= 0:
+            raise PrivateStepBudgetError("Private task model budget reached.")
+        return remaining
 
     async def tokens_used(self, count: int) -> None:
         if type(count) is not int or not 0 <= count <= 200000 or self.model_tokens + count > 200000:
@@ -174,6 +183,7 @@ class PrivateTaskStepRunner:
                         checkpoint=result.checkpoint,
                         status=result.status,
                         usage=step.usage,
+                        **({"delivery": result.delivery} if result.delivery is not None else {}),
                     )
                 except BaseException as error:
                     reason = (
@@ -189,6 +199,8 @@ class PrivateTaskStepRunner:
                         if isinstance(error, PrivateTaskAccessError)
                         else "inputs_changed"
                         if isinstance(error, PrivateTaskConflictError)
+                        else "usage_unavailable"
+                        if isinstance(error, GenerationUsageError)
                         else "step_failed"
                     )
                     # Do not replace the original failure with a cleanup error.

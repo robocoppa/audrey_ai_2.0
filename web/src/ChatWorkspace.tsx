@@ -46,6 +46,8 @@ import { ScrollToLatest } from "./ScrollToLatest";
 import { SwipeConversationRow } from "./SwipeConversationRow";
 import { UploadProgress } from "./UploadProgress";
 import { TaxReview } from "./TaxReview";
+import { PrivateTaskProgress } from "./PrivateTaskProgress";
+import type { PrivateTask } from "./privateTasksApi";
 import { PrivateModeNotice } from "./PrivateModeNotice";
 import { TaxReviewQuestions } from "./TaxReviewQuestions";
 import { TAX_REVIEW_PROMPT, type TaxCase } from "./taxReviewApi";
@@ -1259,6 +1261,7 @@ function ConversationThread({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [runActive, setRunActive] = useState(false);
   const [recoveredRunId, setRecoveredRunId] = useState<string | null>(null);
+  const [durableReviewPresent, setDurableReviewPresent] = useState(false);
   const [recoveryError, setRecoveryError] = useState("");
   const [stoppingRecovered, setStoppingRecovered] = useState(false);
   const [threadRevision, setThreadRevision] = useState(0);
@@ -1610,7 +1613,7 @@ function ConversationThread({
       <div className="thread-header-shell">
         {!compactNavigation ? conversationHeader : null}
         {mutationError ? <p className="conversation-mutation-error" role="alert">{mutationError}</p> : null}
-        {recoveredRunId ? (
+        {recoveredRunId && !durableReviewPresent ? (
           <div className="recovered-run" role="status" aria-label="Audrey is answering">
             <span className="recovered-run-orb" aria-hidden="true" />
             <div className="recovered-run-copy">
@@ -1656,6 +1659,7 @@ function ConversationThread({
           readOnly={archived}
           modeDisabled={runActive || mutation !== null}
           recoveredRunActive={recoveredRunId !== null}
+          onDurableReviewPresenceChange={setDurableReviewPresent}
           onModelChange={changeModel}
           onRunActiveChange={setRunActive}
           onRunStarted={() => {
@@ -1690,6 +1694,7 @@ function AudreyThread({
   readOnly,
   modeDisabled,
   recoveredRunActive,
+  onDurableReviewPresenceChange,
   onModelChange,
   onRunActiveChange,
   onRunStarted,
@@ -1712,6 +1717,7 @@ function AudreyThread({
   readOnly: boolean;
   modeDisabled: boolean;
   recoveredRunActive: boolean;
+  onDurableReviewPresenceChange: (present: boolean) => void;
   onModelChange: (modelId: string, draft: ComposerDraft) => Promise<boolean>;
   onRunActiveChange: (active: boolean) => void;
   onRunStarted: () => void;
@@ -1721,6 +1727,11 @@ function AudreyThread({
   const [runError, setRunError] = useState("");
   const [skillId, setSkillId] = useState("");
   const [taxCase, setTaxCase] = useState<TaxCase | null>(null);
+  const [privateTask, setPrivateTask] = useState<PrivateTask | null | undefined>(undefined);
+  const acceptPrivateTask = useCallback((task: PrivateTask | null) => {
+    setPrivateTask(task);
+    onDurableReviewPresenceChange(task !== null);
+  }, [onDurableReviewPresenceChange]);
   const [taxReviewExpanded, setTaxReviewExpanded] = useState(false);
   const [taxReviewRefresh, setTaxReviewRefresh] = useState(0);
   const [queuedTaxReview, setQueuedTaxReview] = useState<{ text: string } | null>(null);
@@ -1803,7 +1814,10 @@ function AudreyThread({
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const userRequestedCancelRef = useRef(false);
   const attachmentBusy = Boolean(uploadingFile) || pendingAttachment !== null;
-  const submissionBlocked = modeDisabled || attachmentBusy || retrying || Boolean(uploadIssue) || queuedTaxReview !== null;
+  const durableReviewActive = privateTask?.status === "queued" || privateTask?.status === "running";
+  const durableRetryHandled = Boolean(isPrivate && taxCase && (privateTask === undefined
+    || privateTask && ["queued", "running", "paused", "waiting_for_user"].includes(privateTask.status)));
+  const submissionBlocked = modeDisabled || attachmentBusy || retrying || Boolean(uploadIssue) || queuedTaxReview !== null || durableReviewActive;
   const selectedImageCount = selectedAttachments.filter(({ kind }) => kind === "image").length;
   const visibleAttachmentFiles = useMemo(() => {
     const search = attachmentSearch.trim().toLocaleLowerCase();
@@ -2053,12 +2067,14 @@ function AudreyThread({
         setRetrying(false);
         if (pendingTaxReviewRef.current === dispatchedTaxReviewRef.current) pendingTaxReviewRef.current = null;
         if (!preserveComposerAttachmentsRef.current) setSelectedAttachments([]);
+        const paused = event.code === "private_task_paused";
         const cancelled = event.code === "cancelled_by_user" || isAbortMessage(event.message);
+        if (paused) setRunError("");
         setActivity((current) => ({
           ...current,
-          status: cancelled ? "cancelled" : "error",
-          label: cancelled ? "Stopped" : "Run failed",
-          detail: cancelled ? "Run cancelled" : event.message || "The response did not finish cleanly",
+          status: paused ? "complete" : cancelled ? "cancelled" : "error",
+          label: paused ? "Review paused" : cancelled ? "Stopped" : "Run failed",
+          detail: paused ? "Saved work is retained" : cancelled ? "Run cancelled" : event.message || "The response did not finish cleanly",
           tools: settleRunningTools(current.tools),
         }));
       },
@@ -2066,13 +2082,15 @@ function AudreyThread({
         if (pendingTaxReviewRef.current === dispatchedTaxReviewRef.current) pendingTaxReviewRef.current = null;
         onRunActiveChange(false);
         setRetrying(false);
+        const paused = stringOf(recordOf(error).code) === "private_task_paused";
         const cancelled = isAbortError(error);
         if (!cancelled) setActiveRunId(null);
+        if (paused) setRunError("");
         setActivity((current) => ({
           ...current,
-          status: cancelled ? "cancelled" : "error",
-          label: cancelled ? "Stopped" : "Connection failed",
-          detail: cancelled ? "Run cancelled" : error.message,
+          status: paused ? "complete" : cancelled ? "cancelled" : "error",
+          label: paused ? "Review paused" : cancelled ? "Stopped" : "Connection failed",
+          detail: paused ? "Saved work is retained" : cancelled ? "Run cancelled" : error.message,
           tools: settleRunningTools(current.tools),
         }));
       },
@@ -2088,6 +2106,11 @@ function AudreyThread({
       if (pendingTaxReviewRef.current === dispatchedTaxReviewRef.current) pendingTaxReviewRef.current = null;
       onRunActiveChange(false);
       setRetrying(false);
+      if (stringOf(recordOf(reason).code) === "private_task_paused") {
+        setRunError("");
+        setActivity((current) => ({ ...current, status: "complete", label: "Review paused", detail: "Saved work is retained" }));
+        return;
+      }
       setRunError(reason.message);
       setActivity((current) => current.status === "error" ? current : {
         ...current,
@@ -2451,9 +2474,20 @@ function AudreyThread({
                   onCaseChange={acceptTaxCase}
                   onSaved={() => setSkillId("tax-review")}
                   onReview={() => startTaxReview()}
+                  taskControls={taxCase ? <PrivateTaskProgress
+                    key={conversationId}
+                    conversationId={conversationId}
+                    refreshVersion={taxReviewRefresh}
+                    disabled={submissionBlocked || activity.status === "running" || recoveredRunActive
+                      || ["update_available", "unavailable"].includes(taxCase.reference_update?.status ?? "")}
+                    hasReview={Boolean(taxCase.review)}
+                    onReview={() => startTaxReview()}
+                    onChanged={() => setTaxReviewRefresh((current) => current + 1)}
+                    onTaskChange={acceptPrivateTask}
+                  /> : undefined}
                 /> : null}
                 {isPrivate && taxCase && selectedAttachments.length > 0 ? <p className="attachment-status">Tax review uses files already sent here or added to the project. Send newly selected files before reviewing them.</p> : null}
-                {lastAttempt && (restoredIncomplete || activity.status === "error" || runError) ? (
+                {lastAttempt && !durableRetryHandled && (restoredIncomplete || activity.status === "error" || runError) ? (
                   <button
                     className="retry-button"
                     type="button"

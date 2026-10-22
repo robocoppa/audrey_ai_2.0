@@ -114,6 +114,12 @@ async def lifespan(app: FastAPI):
         application_store.path,
         application_store.schema_version,
     )
+    from audrey.private_reviews import replay_private_deliveries
+
+    # Deliver already committed results before failing genuinely interrupted
+    # native attempts. Recovery never launches new model work.
+    await replay_private_deliveries(application_store)
+    await application_store.private_tasks.recover_for_restart()
     recovered_runs = await application_store.conversations.recover_interrupted_runs()
     if recovered_runs:
         log.warning(

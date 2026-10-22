@@ -1,8 +1,8 @@
-"""Durable Private work checkpoints; no model execution or automatic recovery.
+"""Durable Private checkpoints and native delivery; no model execution here.
 
 Workers must construct verified local runtimes and validate live files/models
 before supplying pins. This repository owns leases, revisions and committed
-progress, never private reasoning traces. A task is not a restartable native run.
+progress, never private reasoning traces. Native messages have explicit task bindings.
 """
 
 from __future__ import annotations
@@ -67,6 +67,42 @@ class TaskLimits(_Payload):
 class TaskUsage(_Payload):
     model_tokens: int = Field(default=0, ge=0, le=200000)
     tool_calls: int = Field(default=0, ge=0, le=256)
+
+
+class _DeliverySource(_Payload):
+    source_id: Identifier
+    title: Annotated[str, StringConstraints(max_length=500)]
+    url: Annotated[str, StringConstraints(max_length=2048)]
+
+
+class _DeliveryTool(_Payload):
+    tool_call_id: Identifier
+    name: Annotated[str, StringConstraints(min_length=1, max_length=100)]
+    status: Literal["succeeded", "failed", "incomplete"]
+    arguments: dict[str, Any]
+    result: Any | None
+    error_code: Annotated[str, StringConstraints(max_length=64)]
+
+
+class _DeliveryModel(_Payload):
+    model: Identifier
+    calls: int = Field(ge=1, le=10000)
+
+
+class TaskDelivery(_Payload):
+    """Bounded final native-message data, never instructions to execute later."""
+
+    assistant_content: Annotated[str, StringConstraints(strip_whitespace=False, max_length=64000)]
+    outcome: Literal["succeeded", "cancelled", "failed"]
+    finish_reason: Annotated[str, StringConstraints(max_length=200)] = ""
+    error_code: Annotated[str, StringConstraints(max_length=200)] = ""
+    virtual_model: Annotated[str, StringConstraints(max_length=200)] = ""
+    concrete_model: Annotated[str, StringConstraints(max_length=200)] = ""
+    prompt_tokens: int = Field(default=0, ge=0, le=200000)
+    completion_tokens: int = Field(default=0, ge=0, le=200000)
+    sources: Annotated[list[_DeliverySource], Field(max_length=50)] = Field(default_factory=list)
+    tool_calls: Annotated[list[_DeliveryTool], Field(max_length=50)] = Field(default_factory=list)
+    models: Annotated[list[_DeliveryModel], Field(max_length=50)] = Field(default_factory=list)
 
 
 class TaskCheckpoint(_Payload):
@@ -325,7 +361,10 @@ class PrivateTasksRepository:
         expected_case_revision: int,
         pins: dict,
         limits: dict | None = None,
+        native_run_id: str | None = None,
     ) -> dict:
+        if native_run_id is not None:
+            native_run_id = self._native_identifier(native_run_id)
         pins, limits = (
             _validated(TaskPins, pins),
             _validated(TaskLimits, {} if limits is None else limits),
@@ -337,6 +376,8 @@ class PrivateTasksRepository:
             self._access_binding(case, pins)
             if case["revision"] != expected_case_revision:
                 raise PrivateTaskConflictError("The saved case changed; reload it.")
+            if native_run_id is not None:
+                self._native_run(user_id, conversation_id, native_run_id)
             now = self._clock().isoformat()
             record = {
                 "id": "ptask_" + uuid.uuid4().hex,
@@ -346,6 +387,8 @@ class PrivateTasksRepository:
                 "case_revision": case["revision"],
                 "project_id": project_id,
                 "kind": "tax_review",
+                "native_run_id": native_run_id,
+                "delivery": None,
                 "status": "queued",
                 "revision": 1,
                 "fence": 0,
@@ -395,6 +438,97 @@ class PrivateTasksRepository:
 
         return await asyncio.to_thread(self._transaction, work)
 
+    @staticmethod
+    def _native_identifier(run_id: str) -> str:
+        if not isinstance(run_id, str) or not run_id.strip() or len(run_id) > 200:
+            raise PrivateTaskError("A bounded native run id is required.")
+        return run_id.strip()
+
+    def _native_run(self, user_id: str, conversation_id: str, run_id: str,
+                    task_id: str | None = None) -> None:
+        row = self._conn.execute(
+            "SELECT status,private_required,requested_model_id,skill_id FROM app_runs "
+            "WHERE run_id=? AND user_id=? AND conversation_id=?",
+            (run_id, user_id, conversation_id),
+        ).fetchone()
+        if row is None or not row["private_required"] or row["requested_model_id"] != "private" \
+                or row["skill_id"] != "tax-review":
+            raise PrivateTaskAccessError("An owned Private Tax review run is required.")
+        if row["status"] != "running":
+            raise PrivateTaskConflictError("Native task run is no longer active.")
+        duplicate = self._conn.execute(
+            "SELECT task_id FROM app_private_tasks "
+            "WHERE json_extract(record_json,'$.native_run_id')=? AND task_id!=? LIMIT 1",
+            (run_id, task_id or ""),
+        ).fetchone()
+        if duplicate is not None:
+            raise PrivateTaskConflictError("Native run is already bound to a task.")
+
+    async def bind_native_run(self, *, user_id: str, task_id: str,
+                              expected_revision: int, run_id: str) -> dict:
+        """Bind one trusted native attempt before execution, after revalidation."""
+        run_id = self._native_identifier(run_id)
+
+        def work():
+            record, _, _ = self._load(user_id, task_id)
+            self._revision(record, expected_revision)
+            if record["status"] != "queued":
+                raise PrivateTaskConflictError("Private task is not queued.")
+            if (record.get("delivery") or {}).get("pending"):
+                raise PrivateTaskConflictError("The previous task result is awaiting delivery.")
+            previous = record.get("native_run_id")
+            if previous and previous != run_id:
+                active = self._conn.execute(
+                    "SELECT 1 FROM app_runs WHERE run_id=? AND status='running'", (previous,),
+                ).fetchone()
+                if active is not None:
+                    raise PrivateTaskConflictError("The previous native attempt is still active.")
+            self._native_run(user_id, record["conversation_id"], run_id, task_id)
+            if previous == run_id:
+                return record
+            record.update(native_run_id=run_id, delivery=None)
+            return self._write(record)
+
+        return await asyncio.to_thread(self._transaction, work)
+
+    async def stop_unclaimed(self, *, user_id: str, task_id: str, expected_revision: int) -> bool:
+        """Clean up exactly an unlaunched attempt, even if its owner was revoked."""
+        def work():
+            row = self._conn.execute(
+                "SELECT record_json FROM app_private_tasks WHERE user_id=? AND task_id=? "
+                "AND revision=? AND status='queued'", (user_id, task_id, expected_revision),
+            ).fetchone()
+            if row is None:
+                return False
+            record = json.loads(row["record_json"])
+            record.update(status="paused", stop_reason="admission_failed", fence=record["fence"] + 1)
+            self._clear_lease(record)
+            self._write(record)
+            return True
+
+        return await asyncio.to_thread(self._transaction, work)
+
+    async def latest_for_conversation(self, *, user_id: str, conversation_id: str) -> dict | None:
+        def work():
+            self._case(user_id, conversation_id)
+            row = self._conn.execute(
+                "SELECT task_id FROM app_private_tasks WHERE user_id=? AND conversation_id=? "
+                "ORDER BY created_at DESC,rowid DESC LIMIT 1", (user_id, conversation_id),
+            ).fetchone()
+            return self._load(user_id, row["task_id"])[0] if row is not None else None
+
+        return await asyncio.to_thread(self._transaction, work)
+
+    async def get_for_run(self, *, user_id: str, run_id: str) -> dict | None:
+        def work():
+            row = self._conn.execute(
+                "SELECT task_id FROM app_private_tasks WHERE user_id=? "
+                "AND json_extract(record_json,'$.native_run_id')=? LIMIT 1", (user_id, run_id),
+            ).fetchone()
+            return self._load(user_id, row["task_id"])[0] if row is not None else None
+
+        return await asyncio.to_thread(self._transaction, work)
+
     async def claim(
         self,
         *,
@@ -413,6 +547,8 @@ class PrivateTasksRepository:
             self._bindings(record, case, project_id, pins, record["case_revision"])
             if record["status"] != "queued":
                 raise PrivateTaskConflictError("Private task is not queued.")
+            if (record.get("delivery") or {}).get("pending"):
+                raise PrivateTaskConflictError("The previous task result is awaiting delivery.")
             if self._exhausted(record):
                 raise PrivateTaskConflictError("Private task budget is exhausted.")
             now = self._clock()
@@ -500,8 +636,17 @@ class PrivateTasksRepository:
         checkpoint: dict,
         status: str = "queued",
         usage: dict | None = None,
+        delivery: dict | None = None,
     ) -> dict:
         checkpoint = _validated(TaskCheckpoint, checkpoint)
+        if delivery is not None:
+            delivery = _validated(TaskDelivery, delivery)
+            for tool in delivery["tool_calls"]:
+                tool.setdefault("result", None)
+            if len(_encoded(delivery).encode()) > 96 * 1024:
+                raise PrivateTaskError("Private task delivery limit exceeded.")
+            if status not in {"waiting_for_user", "paused", "completed", "failed"}:
+                raise PrivateTaskError("A native result requires a stopped task step.")
         pins, usage = (
             _validated(TaskPins, pins),
             _validated(TaskUsage, {} if usage is None else usage),
@@ -526,6 +671,7 @@ class PrivateTasksRepository:
                         "case_revision": expected_case_revision,
                         "pins": pins,
                         "usage": usage,
+                        **({"delivery": delivery} if delivery is not None else {}),
                     }
                 ).encode()
             ).hexdigest(),
@@ -543,6 +689,13 @@ class PrivateTasksRepository:
             self._revision(record, expected_revision)
             self._lease(record, lease_token, fence)
             self._bindings(record, case, project_id, pins, expected_case_revision)
+            if delivery is not None:
+                run_id = record.get("native_run_id")
+                if not run_id:
+                    raise PrivateTaskConflictError("A native task run must be bound before delivery.")
+                self._native_run(user_id, record["conversation_id"], run_id, task_id)
+                if (record.get("delivery") or {}).get("pending"):
+                    raise PrivateTaskConflictError("The previous task result is awaiting delivery.")
             for field, category in (
                 ("fact_ids", "facts"),
                 ("evidence_ids", "evidence"),
@@ -583,6 +736,13 @@ class PrivateTasksRepository:
                 )
             ):
                 record.update(status="paused", stop_reason="budget_exhausted")
+            if delivery is not None:
+                record["delivery"] = {
+                    "run_id": record["native_run_id"],
+                    "checkpoint_sequence": record["checkpoint_sequence"],
+                    "pending": True,
+                    "payload": delivery,
+                }
             self._clear_lease(record)
             return self._write(record)
 
@@ -612,6 +772,8 @@ class PrivateTasksRepository:
             if record["status"] in TERMINAL:
                 raise PrivateTaskConflictError("Private task is already finished.")
             if action == "resume":
+                if (record.get("delivery") or {}).get("pending"):
+                    raise PrivateTaskConflictError("The previous task result is awaiting delivery.")
                 self._access_binding(case, pins)
                 if record["status"] not in {"paused", "waiting_for_user"}:
                     raise PrivateTaskConflictError("Private task is not paused.")
@@ -670,6 +832,7 @@ class PrivateTasksRepository:
             "access_changed",
             "budget_exhausted",
             "worker_stopped",
+            "usage_unavailable",
         }:
             raise PrivateTaskError("Invalid Private task stop reason.")
         spent = _validated(TaskUsage, {} if usage is None else usage)
@@ -703,6 +866,86 @@ class PrivateTasksRepository:
                 record["stop_reason"] = "budget_exhausted"
             self._clear_lease(record)
             return self._write(record)
+
+        return await asyncio.to_thread(self._transaction, work)
+
+    async def committed_delivery(self, *, user_id: str, task_id: str, run_id: str) -> dict | None:
+        """Trusted native settlement lookup, independent of current owner access."""
+        def work():
+            row = self._conn.execute(
+                "SELECT record_json FROM app_private_tasks WHERE user_id=? AND task_id=?",
+                (user_id, task_id),
+            ).fetchone()
+            if row is None:
+                return None
+            delivery = json.loads(row["record_json"]).get("delivery")
+            return delivery if delivery and delivery.get("run_id") == run_id else None
+
+        return await asyncio.to_thread(self._transaction, work)
+
+    async def pending_deliveries(self) -> list[dict]:
+        """Trusted startup outbox, not an owner read or an HTTP projection.
+
+        Revoked owners' already committed terminal attempts still need their run
+        finalized before generic interrupted-run recovery. No generation occurs.
+        """
+        def work():
+            rows = self._conn.execute(
+                "SELECT record_json FROM app_private_tasks "
+                "WHERE json_extract(record_json,'$.delivery.pending')=1 "
+                "ORDER BY updated_at,task_id",
+            ).fetchall()
+            return [json.loads(row["record_json"]) for row in rows]
+
+        return await asyncio.to_thread(self._transaction, work)
+
+    async def ack_delivery(self, *, user_id: str, task_id: str, run_id: str,
+                           checkpoint_sequence: int) -> bool:
+        """Acknowledge exactly the committed result without changing task authority."""
+        _positive(checkpoint_sequence)
+
+        def work():
+            row = self._conn.execute(
+                "SELECT record_json FROM app_private_tasks WHERE user_id=? AND task_id=?",
+                (user_id, task_id),
+            ).fetchone()
+            if row is None:
+                return False
+            record = json.loads(row["record_json"])
+            delivery = record.get("delivery") or {}
+            if delivery.get("run_id") != run_id \
+                    or delivery.get("checkpoint_sequence") != checkpoint_sequence:
+                raise PrivateTaskConflictError("Private task delivery changed.")
+            if not delivery.get("pending"):
+                return True
+            delivery["pending"] = False
+            self._conn.execute(
+                "UPDATE app_private_tasks SET record_json=? WHERE user_id=? AND task_id=?",
+                (_encoded(record), user_id, task_id),
+            )
+            return True
+
+        return await asyncio.to_thread(self._transaction, work)
+
+    async def recover_for_restart(self) -> int:
+        """Pause all interrupted work; never dispatch it automatically after restart."""
+        def work():
+            now = self._clock()
+            rows = self._conn.execute(
+                "SELECT * FROM app_private_tasks WHERE status IN ('queued','running') "
+                "ORDER BY created_at,task_id",
+            ).fetchall()
+            for row in rows:
+                record = json.loads(row["record_json"])
+                record.update(revision=row["revision"], fence=row["fence"] + 1,
+                              status="paused", stop_reason="server_restart")
+                if row["status"] == "running":
+                    self._account_time(
+                        record, min(now, dt.datetime.fromisoformat(row["lease_expires_at"])),
+                    )
+                self._clear_lease(record)
+                self._write(record)
+            return len(rows)
 
         return await asyncio.to_thread(self._transaction, work)
 
