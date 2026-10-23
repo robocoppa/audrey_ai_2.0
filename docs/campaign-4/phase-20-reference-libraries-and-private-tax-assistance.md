@@ -797,6 +797,12 @@ Only audrey-ui rebuilds for the accompanying visual polish; the probe/fixture ar
 copied from the checkout at run time. Run while the GPU is otherwise quiet; this
 isolated process does not share the application's in-process fair queue.
 
+The initial live attempt produced no model answers because its client allowed
+environment proxy inheritance. The probe now uses the Private transport settings;
+policy failures stop remaining cases with a stable code and failed measurement,
+rather than appearing as completed accuracy results. No service rebuild is needed
+for this correction. Live quality measurement remains pending.
+
 Read the measurement before expanding scope. This diagnostic does not close
 native retrieval/extraction, multi-turn case authority, conflicting sources, the
 known tax-change errors below, or complete-return accuracy. Those remain targeted

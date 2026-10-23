@@ -288,6 +288,8 @@ async def run_sample(app, body: dict, entry: dict, *, model: str, seed: int) -> 
             if entry["expected"]["missing_fields"] else last["status"] == "checked")
     except (SampleError, OllamaError, ProcessingPolicyError, TimeoutError) as error:
         sample.update(status="failed", error=str(error) if isinstance(error, SampleError) else type(error).__name__)
+        if isinstance(error, ProcessingPolicyError):
+            sample["error_code"] = error.code
     sample["cost"] = costs(meter.calls[start:])
     sample["wall_seconds"] = round(time.monotonic() - started, 3)
     return sample
@@ -324,7 +326,8 @@ async def measure(args) -> dict:
         raise SetupError("Cannot select the configured local general writer") from None
     checker_code = await asyncio.to_thread(file_digest, Path(inspect.getfile(verify_review)))
     probe_code = await asyncio.to_thread(file_digest, Path(__file__))
-    client = OllamaClient(args.ollama_url)
+    # Private generation refuses clients that can inherit environment proxies.
+    client = OllamaClient(args.ollama_url, trust_env=False)
     try:
         tags = await client.tags()
         matches = [row for row in tags if row.get("name") == model or row.get("model") == model]
@@ -336,8 +339,11 @@ async def measure(args) -> dict:
         app = SimpleNamespace(state=SimpleNamespace(ollama=meter, gate=FairLocalGate(),
             cfg=SimpleNamespace(raw=cfg)))
         samples = []
+        policy_error = None
         with processing_scope(policy):
             for repeat in range(args.repeats):
+                if policy_error:
+                    break
                 for case in selected:
                     print(f"Measuring {case['id']} · repeat {repeat + 1}", file=sys.stderr, flush=True)
                     start = len(meter.calls)
@@ -348,6 +354,10 @@ async def measure(args) -> dict:
                         sample = {"case": case["id"], "seed": 100 + repeat, "status": "failed",
                                   "error": "sample_deadline", "cost": costs(meter.calls[start:])}
                     samples.append(sample)
+                    if sample.get("error") == "ProcessingPolicyError":
+                        # A shared client/policy refusal cannot yield a model comparison.
+                        policy_error = sample["error_code"]
+                        break
         try:
             final_tags = await client.tags()
             final = [row.get("digest") for row in final_tags if row.get("name") == model or row.get("model") == model]
@@ -359,7 +369,12 @@ async def measure(args) -> dict:
             row["checked_repair"]["passed"] and row["checking_completed_as_expected"] for row in samples)
             and all(call["input_tokens"] is not None and call["output_tokens"] is not None
                     for call in meter.calls))
-        return {"schema": 1, "status": "passed" if clean else "findings", "measurement_status": "completed",
+        status = "passed" if clean else "findings"
+        if policy_error and not any("single_pass" in sample for sample in samples):
+            status = "setup_error"
+        return {"schema": 1, "status": status,
+            "measurement_status": "failed" if policy_error or not summary["matched_pairs"] else "completed",
+            "error_code": policy_error, "accuracy_comparison_available": bool(summary["matched_pairs"]),
             "created_at": datetime.now(UTC).isoformat(), "scope": body["scope"],
             "provenance": {"fixture_sha256": digest(body), "model": model, "digest": matches[0]["digest"],
                 "model_identity_stable": stable,
@@ -390,10 +405,12 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         report = asyncio.run(measure(args))
-        code = 0 if report["status"] == "passed" else 1
+        code = {"passed": 0, "setup_error": 2}.get(report["status"], 1)
     except (SetupError, OllamaError, ProcessingPolicyError, KeyError) as error:
         report = {"schema": 1, "status": "setup_error", "error_kind": type(error).__name__,
                   "error": str(error) if isinstance(error, SetupError) else "Local model preflight failed"}
+        if isinstance(error, ProcessingPolicyError):
+            report["error_code"] = error.code
         code = 2
     except KeyboardInterrupt:
         report, code = {"schema": 1, "status": "interrupted"}, 130

@@ -203,7 +203,8 @@ async def test_full_measurement_preflights_and_keeps_identity_drift_as_findings(
     body = probe.load_cases(FIXTURE)
     calls = []
     class Client(FakeModel):
-        def __init__(self, base_url):
+        def __init__(self, base_url, *, trust_env):
+            assert trust_env is False
             super().__init__([worksheet(body["cases"][0]).model_dump(), {} if bad_checker else {
                 "findings": [{"finding_index": 0, "verdict": "supported",
                               "reason": "The exact table and arithmetic support the scope."}]}])
@@ -242,3 +243,73 @@ async def test_measurement_setup_refuses_before_client_construction(tmp_path, mo
         await probe.measure(SimpleNamespace(cases=FIXTURE, config=cfg,
             repeats=0 if reason == "repeats" else 1, only="bad" if reason == "bad_case" else "",
             ollama_url="http://ollama:11434"))
+
+
+@pytest.mark.parametrize("force_unsafe_transport", [False, True])
+async def test_measurement_crosses_real_private_client_boundary(tmp_path, monkeypatch, force_unsafe_transport):
+    import httpx
+
+    from audrey.models.ollama import OllamaClient
+
+    body = probe.load_cases(FIXTURE)
+    metadata = {"model_info": {"general.architecture": "test", "general.parameter_count": 1},
+                "details": {"format": "gguf"}}
+    replies = iter([worksheet(body["cases"][0]).model_dump(), {"findings": [{
+        "finding_index": 0, "verdict": "supported",
+        "reason": "The exact table and arithmetic support the limited worksheet."}]}])
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json={"models": [{"name": "local:latest", "digest": "a" * 64}]})
+        if request.url.path == "/api/show":
+            return httpx.Response(200, json=metadata)
+        assert request.url.path == "/api/chat"
+        assert request.url.host == "ollama"
+        payload = json.loads(request.content)
+        assert payload["model"] == "local:latest" and payload["think"] is False
+        return httpx.Response(200, json={"done": True, "done_reason": "stop",
+            "eval_count": 50, "prompt_eval_count": 100,
+            "message": {"role": "assistant", "content": json.dumps(next(replies))}})
+
+    def client_factory(base_url, **kwargs):
+        assert kwargs == {"trust_env": False}
+        if force_unsafe_transport:
+            kwargs["trust_env"] = True
+        return OllamaClient(base_url, transport=httpx.MockTransport(respond), **kwargs)
+
+    # No real network traffic: only HTTP transport is replaced, including metadata.
+    monkeypatch.setenv("HTTP_PROXY", "http://untrusted-proxy.invalid:3128")
+    monkeypatch.setattr(probe, "OllamaClient", client_factory)
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("model_registry:\n  general:\n    - {name: 'local:latest', priority: 1, location: local}\n")
+    report = await probe.measure(SimpleNamespace(cases=FIXTURE, config=cfg, repeats=1,
+        only="" if force_unsafe_transport else "basic-single", ollama_url="http://ollama:11434"))
+    generations = [request for request in requests if request.url.path == "/api/chat"]
+    if force_unsafe_transport:
+        assert not generations
+        assert report["status"] == "setup_error"
+        assert report["measurement_status"] == "failed"
+        assert report["error_code"] == "private_transport_not_allowed"
+        assert report["accuracy_comparison_available"] is False
+        assert len(report["samples"]) == 1  # Shared failure stops the remaining five cases.
+        assert report["samples"][0]["error_code"] == "private_transport_not_allowed"
+    else:
+        assert len(generations) == 2
+        assert [request.url.path for request in requests[:4]] == [
+            "/api/tags", "/api/show", "/api/tags", "/api/show"]
+        assert report["status"] == "passed"
+        assert report["measurement_status"] == "completed"
+        assert report["accuracy_comparison_available"] is True
+        assert report["summary"]["matched_pairs"] == 1
+        assert report["cost"]["output_tokens"] == {"known_total": 100, "unknown_calls": 0}
+
+
+def test_main_uses_setup_exit_for_policy_blocked_measurement(monkeypatch, capsys):
+    async def blocked(_args):
+        return {"status": "setup_error", "measurement_status": "failed",
+                "error_code": "private_transport_not_allowed"}
+    monkeypatch.setattr(probe, "measure", blocked)
+    assert probe.main([]) == 2
+    assert json.loads(capsys.readouterr().out)["error_code"] == "private_transport_not_allowed"

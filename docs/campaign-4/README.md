@@ -89,7 +89,7 @@ hides its launcher; closing restores it and keyboard focus. Global scrollbars no
 use thin muted blue thumbs. The user's functional/UI checks passed; broader tax
 accuracy remains unverified.
 
-**20E.1 built; live measurement pending:** a six-case fixed-passage diagnostic
+**20E.1 built; corrected probe awaits rerun:** a six-case fixed-passage diagnostic
 compares the exact same initial local worksheet with the production evidence
 checker and at most one repair/recheck. Independent hidden labels score amounts,
 year/withholding separation, corrected/duplicate records, eligibility questions,
@@ -98,6 +98,10 @@ regressions, false checker approvals, model/source/code identities and measured
 costs. It uses synthetic confirmed records and frozen official excerpts, without
 reading live cases or changing the library. This isolates check/repair behavior;
 it does not measure native retrieval, uploaded-file extraction or full returns.
+The first Tower attempt was blocked before generation by the probe's transport
+configuration; it supplied zero accuracy pairs. The probe now disables environment
+proxy inheritance, preserves Private guards and fails fast with a specific policy
+code; a real-client offline regression covers this boundary.
 **Next:** read this measurement before choosing the smallest 20E.2 native
 retrieval/accuracy comparison. No model promotion or default extension is implied.
 
