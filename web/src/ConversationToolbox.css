@@ -73,8 +73,44 @@
 .conversation-toolbox .tax-review[data-presentation="toolbox"] { display: flex; min-height: 0; flex: 1; flex-direction: column; }
 .conversation-toolbox .tax-review[data-presentation="toolbox"] .tax-review-body { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
 .conversation-toolbox .tax-review-body > * { flex-shrink: 0; }
-.conversation-toolbox .tax-review-body > .tax-review-question { flex: 1 1 auto; min-height: 7rem; }
+.conversation-toolbox .tax-review-body > .tax-review-question { flex: 1 1 auto; min-height: 0; }
 .conversation-toolbox .tax-review-inline-settings { max-height: 60%; overflow-y: auto; flex-shrink: 1; }
-.conversation-toolbox .tax-review-worksheet { max-height: 35%; overflow-y: auto; flex-shrink: 1; }
+/* Reserve the collapsed worksheet row; only its expanded contents may shrink.
+   Otherwise long choice histories squeeze the summary below the rail's edge. */
+.conversation-toolbox .tax-review-worksheet {
+  flex: 0 0 auto;
+  min-height: 2.75rem;
+  max-height: none;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.6rem;
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+.conversation-toolbox .tax-review-worksheet > summary {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.65rem 0.75rem;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-weight: 550;
+}
+.conversation-toolbox .tax-review-worksheet > summary:hover { background: var(--surface-active); color: var(--text); }
+.conversation-toolbox .tax-review-worksheet > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.conversation-toolbox .tax-review-worksheet[open] {
+  flex: 0 1 auto;
+  min-height: 5.75rem;
+  max-height: 45%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.conversation-toolbox .tax-review-worksheet > p,
+.conversation-toolbox .tax-review-worksheet > ul { margin: 0.65rem 0.75rem; }
+.conversation-toolbox .tax-review-worksheet > ul { padding-left: 1.15rem; }
 
 .toolbox-pending-count { display: inline-grid; min-width: 1.1rem; height: 1.1rem; padding-inline: 0.2rem; place-items: center; border-radius: 1rem; background: var(--surface-active); color: var(--accent); font-size: 0.65rem; }

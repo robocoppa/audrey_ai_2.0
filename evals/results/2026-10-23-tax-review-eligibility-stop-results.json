@@ -1,0 +1,193 @@
+{
+  "schema": 1,
+  "status": "findings",
+  "measurement_status": "completed",
+  "error_code": null,
+  "accuracy_comparison_available": true,
+  "created_at": "2026-10-23T13:13:31.424172+00:00",
+  "scope": "Controlled fixed-passage writer/check/repair diagnostic; not native retrieval, upload extraction or complete-return acceptance.",
+  "provenance": {
+    "fixture_sha256": "eab65fc853fcc446a55e9d4c7234db6c004e9033c42f5a8f5065d09b63bce312",
+    "model": "qwen3.8:latest",
+    "digest": "22130167c4c20e20c7b71454612966ca8e8171e9b3cc8ab6ce8aa6cbfec79643",
+    "model_identity_stable": true,
+    "checker_code_sha256": "89a24e55ee051e27baac798ca73c49d1724c8447991cd3738aac2f6232a8c724",
+    "probe_code_sha256": "653950e9351120b74dba7535832608b2f38f201a570c315e047ff7bd106c0887",
+    "writer_instruction_sha256": "4bdcb3a021444e9f05796107232b031557934f290e0d625783830e22e4ce4563",
+    "repeats": 1,
+    "case_count": 1,
+    "paired_initial_draft": true,
+    "temperature": 0,
+    "think": false,
+    "max_repairs": 1,
+    "max_checks": 2,
+    "source_mode": "frozen public HTML excerpt; no live library or PDF page validation",
+    "production_data_read_or_written": false,
+    "cold_load_controlled": false
+  },
+  "summary": {
+    "samples": 1,
+    "matched_pairs": 1,
+    "execution_failures": 0,
+    "single_pass_correct": 0,
+    "checked_repair_correct": 0,
+    "improved": 0,
+    "regressed": 0,
+    "checker_false_accepts": 0,
+    "unexpected_checking_stops": 0,
+    "promotion_decision": "none; inspect the matched results and ungraded prose"
+  },
+  "cost": {
+    "generation_calls": 1,
+    "generation_seconds": 4.896,
+    "input_tokens": {
+      "known_total": 885,
+      "unknown_calls": 0
+    },
+    "output_tokens": {
+      "known_total": 305,
+      "unknown_calls": 0
+    }
+  },
+  "samples": [
+    {
+      "case": "missing-eligibility",
+      "seed": 100,
+      "input_sha256": "439a83c715aaf31b41a07fe12e5cb53e8fcb870bcf36a6f8ef793ed2f632c3b8",
+      "status": "completed",
+      "assessments": [
+        {
+          "candidate_sha256": "04a9f91754731409e902b4d8f7c5d7be4e5e3d6d603d68af26485db84a20ce66",
+          "case_revision": 1,
+          "attempt": 1,
+          "status": "limited",
+          "stop_reason": "needs_user_input",
+          "findings": [
+            {
+              "finding_index": 0,
+              "verdict": "insufficient",
+              "reason": "Required facts or a user decision are not yet available."
+            }
+          ],
+          "model": ""
+        }
+      ],
+      "source_reopens": 0,
+      "single_pass": {
+        "worksheet": {
+          "wage_record_ids": [
+            "w2-current"
+          ],
+          "wages_usd": "50000.00",
+          "withholding_usd": "6000.00",
+          "deduction_usd": "15750.00",
+          "missing_fields": [
+            "age",
+            "blind_status",
+            "dependent_status"
+          ],
+          "next_question": "To confirm eligibility for the basic standard deduction, please provide your age, whether you are blind, and whether you can be claimed as a dependent by another person.",
+          "source_ids": [
+            "p501-2025-table6"
+          ],
+          "scope": "limited_worksheet",
+          "explanation": "Wages of $50,000.00 are taken from record w2-current. The source p501-2025-table6 specifies a $15,750 standard deduction for single filers but excludes those born before Jan 2, 1961, who are blind, or who can be claimed as a dependent. Since the profile does not confirm age, blindness, or dependent status, the deduction's applicability is unresolved. Withholding is tracked separately as $6,000.00."
+        },
+        "result_usd": null,
+        "passed": false,
+        "checks": {
+          "wages_usd": true,
+          "withholding_usd": true,
+          "deduction_usd": false,
+          "result_usd": true,
+          "wage_record_ids": true,
+          "missing_fields": true,
+          "question_needed": true,
+          "limited_scope": true,
+          "source_selection": true
+        },
+        "cost": {
+          "generation_calls": 1,
+          "generation_seconds": 4.896,
+          "input_tokens": {
+            "known_total": 885,
+            "unknown_calls": 0
+          },
+          "output_tokens": {
+            "known_total": 305,
+            "unknown_calls": 0
+          }
+        }
+      },
+      "checked_repair": {
+        "worksheet": {
+          "wage_record_ids": [
+            "w2-current"
+          ],
+          "wages_usd": "50000.00",
+          "withholding_usd": "6000.00",
+          "deduction_usd": "15750.00",
+          "missing_fields": [
+            "age",
+            "blind_status",
+            "dependent_status"
+          ],
+          "next_question": "To confirm eligibility for the basic standard deduction, please provide your age, whether you are blind, and whether you can be claimed as a dependent by another person.",
+          "source_ids": [
+            "p501-2025-table6"
+          ],
+          "scope": "limited_worksheet",
+          "explanation": "Wages of $50,000.00 are taken from record w2-current. The source p501-2025-table6 specifies a $15,750 standard deduction for single filers but excludes those born before Jan 2, 1961, who are blind, or who can be claimed as a dependent. Since the profile does not confirm age, blindness, or dependent status, the deduction's applicability is unresolved. Withholding is tracked separately as $6,000.00."
+        },
+        "result_usd": null,
+        "passed": false,
+        "checks": {
+          "wages_usd": true,
+          "withholding_usd": true,
+          "deduction_usd": false,
+          "result_usd": true,
+          "wage_record_ids": true,
+          "missing_fields": true,
+          "question_needed": true,
+          "limited_scope": true,
+          "source_selection": true
+        },
+        "cost": {
+          "generation_calls": 1,
+          "generation_seconds": 4.896,
+          "input_tokens": {
+            "known_total": 885,
+            "unknown_calls": 0
+          },
+          "output_tokens": {
+            "known_total": 305,
+            "unknown_calls": 0
+          }
+        }
+      },
+      "checking_completed_as_expected": true,
+      "cost": {
+        "generation_calls": 1,
+        "generation_seconds": 4.896,
+        "input_tokens": {
+          "known_total": 885,
+          "unknown_calls": 0
+        },
+        "output_tokens": {
+          "known_total": 305,
+          "unknown_calls": 0
+        }
+      },
+      "wall_seconds": 4.899
+    }
+  ],
+  "wall_seconds": 5.94,
+  "not_evaluated": [
+    "native retrieval and source reopening",
+    "uploads and field extraction from files",
+    "task lifecycle and multi-turn owner confirmation",
+    "unrestricted prose entailment",
+    "other tax provisions, full returns and independent legal correctness"
+  ],
+  "label_policy": "Source-checked coding-assistant labels, not independently adjudicated by a tax professional. Expected values are never sent to the writer or reviewer."
+}

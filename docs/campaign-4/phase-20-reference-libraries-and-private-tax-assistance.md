@@ -800,11 +800,9 @@ Use the existing on-box probe wrapper because this measurement imports installed
 production code and requires direct local-model control. `FOREGROUND=1 NOTIFY=1`
 prints the complete JSON in the launching shell and sends the existing Telegram
 log attachment. No PAT, upload, index run or live application data is needed.
-The probe/fixture are copied from the checkout at run time. The latest probe-only
-correction needs a pull on Tower, with no service rebuild or restart. Installed
-writer/checker and Private-header changes were the preceding deployment. Run
-while the GPU is otherwise quiet; this isolated process does not share the
-application's in-process fair queue.
+The probe/fixture are copied from the checkout at run time. This isolated
+process does not share the application's in-process fair queue. The diagnostic
+has concluded; no further run is queued for the remaining scalar-field defect.
 
 The October 22 measurement completed all six pairs without execution failures.
 Five passed in both arms. The missing-eligibility case incorrectly supplied the
@@ -836,18 +834,41 @@ citation. Native saved reviews carry needs-input/limited status when facts are
 missing; the generic calculator does not infer eligibility or erase independent
 arithmetic merely because another case question is open.
 
-The targeted October 22 followup now asks for age, blindness and dependency and
-stops checking as limited/needs_user_input, without a false approval or reviewer
-call. Its raw structured deduction remains non-null despite prose saying it cannot
-be applied. The probe incorrectly derives a result from that amount and rejects
-equivalent missing-field labels. The probe-only correction keeps quoted amounts
-in the explanation, requires unresolved applied numeric amounts to remain null,
-skips dependent subtraction while the worksheet declares missing prerequisites,
-and grades narrow aliases without rewriting raw output or hiding wrong amounts.
-No hidden answer labels enter generation or checking. Only missing-eligibility
-needs rerunning; the other five passes remain recorded. Native retrieval/extraction,
-multi-turn authority, conflicting sources, known tax-change errors and complete-
-return accuracy remain open. No model promotion or default extension is supported.
+The targeted followups identify age, blindness and dependency and stop checking
+as limited/needs_user_input, without approval or a reviewer call. After correcting
+the probe's premature subtraction and equivalent-field grading, the October 23
+result withholds derived arithmetic and passes every check except the raw applied
+deduction. That non-null field still contradicts the explicit unresolved state.
+Keep the failure and raw outputs; do not relabel it as a passed accuracy case.
+The scalar is specific to the diagnostic's schema; the native worksheet uses
+linked findings and proposed records, not this deduction_usd field. The latest
+early stop does not exercise the new reviewer condition inventory.
+
+**20E.1 is concluded with that limitation.** Repeated prompt changes to force
+one field to null have little bearing on useful native assistance. Keep the
+existing source/confirmation/calculation boundaries; do not add a universal tax
+rule engine or another model to make this probe pass. A model still interprets
+source conditions, so a second assessment is not independent legal verification.
+
+#### 20E.2 — bounded native accuracy check
+
+Use the existing native flow, with two concrete scenarios:
+
+1. One synthetic household worksheet: leave relevant eligibility facts unknown,
+   check that Audrey asks only the necessary grouped question and keeps the
+   conclusion unresolved, then explicitly confirm the facts. Audrey must read the
+   applicable official passage, retain its year/source, and save the requested
+   limited worksheet with code-calculated arithmetic and actual remaining gaps.
+2. One previously incorrect tax-year comparison below: verify the substantive
+   claims against the retained official passages. Catalog listings and fluent
+   prose alone do not establish a rule or its effective year.
+
+Record outcomes and costs once, including failures. Correct a concrete native
+defect if demonstrated, or narrow the supported task; do not reopen the isolated
+scalar test or expand into another prompt-tuning sweep. Closure is an explicit
+decision about the observed task, not every test eventually turning green.
+Unanswered facts, unresolved source conflicts and broader return completeness
+remain visible limitations. No model promotion or full-return acceptance follows.
 
 #### Accuracy and visible user flow
 
@@ -864,14 +885,16 @@ wait for the requested jurisdiction's official sources. Source updates run
 separately using public inputs; a Private case never performs public searches
 with taxpayer details. English-only work and the existing historical window stay.
 
-Compare matched single-pass and extended runs using the same files, library
-release, model identities and resource accounting. Score field/box extraction,
+For any later quality comparison justified by a reported task, keep files,
+library release, model identities and resource accounting matched. Relevant
+dimensions include field/box extraction,
 duplicate/corrected documents, wrong-year exclusion, eligibility conditions,
 citation support, decimal arithmetic/rounding, missing-fact handling and false
 certainty. Measure time/tokens as costs, not quality. Synthetic/redacted cases
 cover W-2/1099 fields, CSV/XLSX reconciliation, unread pages, source conflicts,
 missing records, local-service failure, cancellation and restart recovery.
-Keep manual native-browser acceptance for uploads, progress and results.
+Keep manual native-browser acceptance for uploads, progress and results;
+this list does not add tests to the two-scenario gate above.
 
 The earlier filing-requirements answer supplies concrete accuracy cases: preserve
 age/blindness qualifiers and the January-1 age convention; investigate the owned

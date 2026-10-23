@@ -280,15 +280,25 @@ and asked one grouped question. Checking stopped for user input without approval
 or a reviewer call. However, the structured applied deduction still contained the
 quoted $15,750 rule amount despite prose saying it could not yet apply. The test
 harness incorrectly derived a result from it and rejected equivalent field labels.
-This remains an unresolved structured-output failure, not a completed accuracy
-pass. The single writer call used **853 input and 310 output tokens in 27.24s**;
-cold loading was uncontrolled. A corrected test separates reference amounts from
-applied amounts and suppresses dependent arithmetic when prerequisites are missing,
-while preserving the raw answer and rejecting an incorrect applied amount.
+The single writer call used **853 input and 310 output tokens in 27.24s**;
+cold loading was uncontrolled. The harness was corrected to suppress dependent
+arithmetic while prerequisites are missing and accept equivalent field names,
+without rewriting the raw applied amount.
+
+An [October 23 rerun](results/2026-10-23-tax-review-eligibility-stop-results.json)
+with the same model digest and case input again asked for all three missing facts.
+The computed result stayed null, and server checking stopped as limited, needing
+user input: **no false approval and no reviewer call**. The raw applied-deduction
+field still contained $15,750, contradicting the stated unresolved eligibility.
+This remains a structured-output defect, not a full accuracy pass. One writer
+call used **885 input and 305 output tokens in 4.896s**; cold loading was
+uncontrolled, so the faster request does not establish a speed improvement.
 
 **Practical lesson:** the same model can repeat an unsupported assumption, and
 recognizing missing facts in prose does not guarantee correct structured values.
-Keep reference rules, applied values and generated arithmetic distinct.
+Keep source rules, saved user facts and applied arithmetic separate. Further
+isolated prompt tuning stops here; the next useful comparison exercises the
+actual workflow from source retrieval through user confirmation and calculation.
 
 ## 3. Small models for request classification
 

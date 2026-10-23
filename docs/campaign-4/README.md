@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 22, 2026.** English user input only. Passed work stays closed.
+**Updated October 23, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -89,24 +89,25 @@ hides its launcher; closing restores it and keyboard focus. Global scrollbars no
 use thin muted blue thumbs. The user's functional/UI checks passed; broader tax
 accuracy remains unverified.
 
-**20E.1 measured October 22; one substantive failure remains.** All six fixed-
-passage pairs completed. Both initial and checked worksheets passed five cases;
-there were no improvements or regressions. The writer applied a deduction despite
-missing age/blindness/dependency facts, and the same-model checker approved it.
-No repair was triggered. This supports no accuracy promotion; model measurements
-and retained outputs are in [MODEL-FACTS](../../evals/MODEL-FACTS.md).
-**20E.1 targeted followup measured; probe correction pending validation.**
-The writer now identifies the three missing facts and asks one grouped question;
-checking correctly stops as limited/needs-user-input without approval. The raw
-worksheet still places a quoted rule amount in the applied-deduction field. The
-probe then incorrectly subtracts it, and exact-label grading rejects equivalent
-blindness/dependency names. The probe correction separates reference and applied
-amounts, skips dependent arithmetic while its prerequisites are explicitly missing,
-and accepts narrow field-name aliases without concealing the raw wrong amount.
-Production instructions/checking remain unchanged; native partial status does not
-globally suppress independent arithmetic. **Next:** pull only, no rebuild, and
-rerun missing-eligibility before the smallest 20E.2 native comparison. The other
-five measurements stay passed; no model promotion is supported.
+**20E.1 diagnostic closed with a known limitation, October 23.** The original
+six-case measurement passed five in both arms; checking improved none and approved
+the unsupported deduction. Followups now ask the missing facts, withhold the
+derived result and stop without approval. The latest raw applied-deduction field
+still contradicts that unresolved state. Retain this failure in the model ledger;
+do not tune prompts or repeat this scalar test until green. This diagnostic is
+finished, not a full tax-accuracy pass. Other five passes stay recorded.
+
+**Next — bounded 20E.2 native validation.** Keep the current design: models
+interpret retained official passages and propose work; owner confirmations,
+source/year links and code arithmetic remain separate. Validate one real chat
+flow from missing facts through confirmation to a cited worksheet, then one
+previously incorrect tax-year comparison. Record both outcomes and costs before
+deciding whether a concrete defect needs a fix or the supported scope needs a
+limit. No new rule engine, model change or repeated probe gate is queued.
+
+**Toolbox worksheet layout followup:** reserve a complete worksheet-summary row
+on short screens and scroll the expanded content rather than clipping its action.
+Only audrey-ui rebuilds for this presentation fix.
 
 **Toolbox edge-tab followup built:** the closed Toolbox opens from a larger,
 vertically centered right-edge tab, with sideways text facing left. It hides while
@@ -119,8 +120,8 @@ details; touch can reveal them and Escape/outside interaction dismisses them.
 The compact header retains the badge while destructive chat actions stay in mobile
 navigation. Composer privacy prose is removed. Tax review's filing caution and
 settings behavior stay accepted. This UI and the preceding eligibility followup
-were deployed by rebuilding audrey and audrey-ui. The current probe correction
-needs neither rebuilt; no index, model or source update is needed.
+were deployed by rebuilding audrey and audrey-ui. The current layout correction
+rebuilds only audrey-ui; no index, model or source update is needed.
 
 **MiniMax M3.1 Flash:** configured as an unmeasured cloud draft/research candidate
 in mixed, Cloud and selected Research panels. Kimi K3 stays first, panel worker
@@ -157,7 +158,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Workflow accepted; fixed-passage measurement found one eligibility failure |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Workflow accepted; diagnostic closed with a known output limitation; native accuracy next |
 
 ## Build queue
 
@@ -191,10 +192,11 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **20D.5 built:** bounded local evidence checking and targeted repair;
   Toolbox presentation accepted October 22.
 - [x] **20E.1 measurement:** six fixed-passage pairs completed; five passed both arms.
-- [ ] **20E.1 probe correction built:** targeted followup identifies missing
-  facts and refuses approval; reference/applied amounts and dependent arithmetic
-  still need the corrected targeted measurement. Preserve the other five passes.
-- [ ] **20E.2:** native retrieval/accuracy comparison after the targeted correction.
+- [x] **20E.1 diagnostic concluded:** missing-fact stop and withheld result
+  observed; retain the raw applied-value inconsistency as a known failure.
+  No further scalar-probe rerun is queued; other five passes stay recorded.
+- [ ] **20E.2:** one native missing-facts/confirmation/worksheet flow and one
+  known tax-year comparison; record outcomes, then decide any narrow fix/scope limit.
 
 Tax year/jurisdiction and reference release belong to the case record; 20D.1 does
 not add premature tax-specific Project fields. OCR/media, fine-tuning and state
