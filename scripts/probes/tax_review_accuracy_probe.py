@@ -33,7 +33,7 @@ from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.ledger import inlined_schema
 from audrey.processing_policy import ProcessingPolicy, ProcessingPolicyError, processing_scope
-from audrey.tax_review import _calculation
+from audrey.tax_review import TAX_REVIEW_ELIGIBILITY_INSTRUCTION, _calculation
 from audrey.tax_verification import verify_review
 
 Money = Annotated[str, StringConstraints(pattern=r"^-?\d{1,12}(?:\.\d{1,6})?$")]
@@ -73,6 +73,8 @@ Do not invent source text or claim a complete return. Return only the specified
 JSON. The server computes wages minus deduction with its decimal calculator;
 do not subtract withholding or include prior-year income in current wages."""
 
+
+SYSTEM += "\n\n" + TAX_REVIEW_ELIGIBILITY_INSTRUCTION
 
 def digest(value: object) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
@@ -379,6 +381,7 @@ async def measure(args) -> dict:
             "provenance": {"fixture_sha256": digest(body), "model": model, "digest": matches[0]["digest"],
                 "model_identity_stable": stable,
                 "checker_code_sha256": checker_code, "probe_code_sha256": probe_code,
+                "writer_instruction_sha256": digest(SYSTEM),
                 "repeats": args.repeats, "case_count": len(selected), "paired_initial_draft": True,
                 "temperature": 0, "think": False, "max_repairs": 1, "max_checks": 2,
                 "source_mode": "frozen public HTML excerpt; no live library or PDF page validation",

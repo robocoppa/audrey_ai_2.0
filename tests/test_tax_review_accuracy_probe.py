@@ -166,7 +166,7 @@ async def test_live_production_checker_can_use_adapter_without_data_or_authority
     body = probe.load_cases(FIXTURE)
     entry = body["cases"][0]
     client = FakeModel([worksheet(entry).model_dump(), {"findings": [{"finding_index": 0,
-        "verdict": "supported", "reason": "The supplied dated table and exact arithmetic support this worksheet."}]}])
+        "verdict": "supported", "conditions": [], "reason": "The supplied dated table and exact arithmetic support this worksheet."}]}])
     meter = probe.Meter(client)
     app = SimpleNamespace(state=SimpleNamespace(ollama=meter, gate=FairLocalGate(),
         cfg=SimpleNamespace(raw={"model_registry": {"general": [{"name": "local:latest", "priority": 100}]}})))
@@ -206,7 +206,7 @@ async def test_full_measurement_preflights_and_keeps_identity_drift_as_findings(
         def __init__(self, base_url, *, trust_env):
             assert trust_env is False
             super().__init__([worksheet(body["cases"][0]).model_dump(), {} if bad_checker else {
-                "findings": [{"finding_index": 0, "verdict": "supported",
+                "findings": [{"finding_index": 0, "verdict": "supported", "conditions": [],
                               "reason": "The exact table and arithmetic support the scope."}]}])
             self.tag_reads = 0
             assert base_url == "http://ollama:11434"
@@ -255,7 +255,7 @@ async def test_measurement_crosses_real_private_client_boundary(tmp_path, monkey
     metadata = {"model_info": {"general.architecture": "test", "general.parameter_count": 1},
                 "details": {"format": "gguf"}}
     replies = iter([worksheet(body["cases"][0]).model_dump(), {"findings": [{
-        "finding_index": 0, "verdict": "supported",
+        "finding_index": 0, "verdict": "supported", "conditions": [],
         "reason": "The exact table and arithmetic support the limited worksheet."}]}])
     requests = []
 
@@ -313,3 +313,51 @@ def test_main_uses_setup_exit_for_policy_blocked_measurement(monkeypatch, capsys
     monkeypatch.setattr(probe, "measure", blocked)
     assert probe.main([]) == 2
     assert json.loads(capsys.readouterr().out)["error_code"] == "private_transport_not_allowed"
+
+
+
+def test_eligibility_instruction_is_shared_without_injecting_gold_or_missing_records():
+    from audrey.tax_review import TAX_REVIEW_ELIGIBILITY_INSTRUCTION, TAX_REVIEW_INSTRUCTION
+
+    assert TAX_REVIEW_ELIGIBILITY_INSTRUCTION in TAX_REVIEW_INSTRUCTION
+    assert TAX_REVIEW_ELIGIBILITY_INSTRUCTION in probe.SYSTEM
+    assert "unknown, not false" in TAX_REVIEW_ELIGIBILITY_INSTRUCTION
+    assert "false and zero are real values" in TAX_REVIEW_ELIGIBILITY_INSTRUCTION
+    body = probe.load_cases(FIXTURE)
+    entry = next(case for case in body["cases"] if case["id"] == "missing-eligibility")
+    packet = probe.input_packet(body, entry)
+    assert not {"age", "blind", "dependent"} & packet["confirmed_profile"].keys()
+    saved, _ = probe.support_case(packet, worksheet(entry))
+    assert saved["missing_items"] == []
+    assert "expected" not in packet
+
+
+async def test_absent_profile_field_cannot_be_approved_and_repair_keeps_it_unknown():
+    from audrey.pipeline.fair_gate import FairLocalGate
+
+    body = probe.load_cases(FIXTURE)
+    entry = next(case for case in body["cases"] if case["id"] == "missing-eligibility")
+    wrong = worksheet(entry, deduction_usd="15750.00", missing_fields=[], next_question="",
+                      source_ids=entry["input"]["source_ids"])
+    repaired = worksheet(entry)
+    # Reproduce a false approval, now citing an age field that does not exist.
+    reply = {"findings": [{"finding_index": 0, "verdict": "supported",
+        "reason": "The model incorrectly assumes the profile establishes eligibility.",
+        "conditions": [{"condition": "The source's age exclusion must not apply.",
+            "status": "met", "fact_ids": ["profile"], "fact_paths": ["/age"],
+            "evidence_ids": entry["input"]["source_ids"]}]}]}
+    client = FakeModel([wrong.model_dump(), reply, repaired.model_dump()])
+    app = SimpleNamespace(state=SimpleNamespace(ollama=probe.Meter(client), gate=FairLocalGate(),
+        cfg=SimpleNamespace(raw={"model_registry": {"general": [{"name": "local:latest", "priority": 100}]}})))
+    with probe.processing_scope(probe.ProcessingPolicy({"local:latest": "a" * 64}, "http://ollama:11434")):
+        result = await probe.run_sample(app, body, entry, model="local:latest", seed=100)
+    assert result["status"] == "completed"
+    assert result["single_pass"]["passed"] is False
+    assert result["assessments"][0]["status"] == "needs_repair"
+    assert result["assessments"][0]["findings"][0]["verdict"] != "supported"
+    assert result["checked_repair"]["passed"] is True
+    assert result["checked_repair"]["worksheet"]["deduction_usd"] is None
+    assert result["assessments"][1]["stop_reason"] == "needs_user_input"
+    assert len(client.requests) == 3  # No extra reviewer call for missing owner facts.
+    assert probe.summarize([result])["improved"] == 1
+    assert probe.summarize([result])["checker_false_accepts"] == 0

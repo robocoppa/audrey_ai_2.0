@@ -48,7 +48,8 @@ def _data():
 
 def _assessment(verdict="supported", **changes):
     return {"finding_index": 0, "verdict": verdict,
-            "reason": "The supplied support states the amount and year.", **changes}
+            "reason": "Pure arithmetic uses the supplied amounts and year; no conditional rule is applied.",
+            "conditions": [], **changes}
 
 
 def _app(reply=None, *, chat_error=None):
@@ -285,3 +286,167 @@ async def test_shared_source_is_reopened_once_and_every_finding_is_assessed():
     assert result["status"] == "checked"
     assert [finding["finding_index"] for finding in result["findings"]] == [0, 1]
     reader.assert_awaited_once()
+
+
+
+def _condition(status="met", **changes):
+    value = {"condition": "The supplied profile confirms the source's required condition.",
+             "status": status, "fact_ids": ["fact1"], "evidence_ids": ["rule1"], **changes}
+    value.setdefault("fact_paths", ["" for _ in value["fact_ids"]])
+    return value
+
+
+async def test_new_reviewer_reply_must_explicitly_inventory_conditions():
+    assessment = _assessment()
+    del assessment["conditions"]
+    result, *_ = await _verify(reply={"findings": [assessment]})
+    assert result["status"] == "limited"
+    assert result["stop_reason"] == "reviewer_unavailable"
+
+
+def test_saved_assessments_without_condition_inventory_remain_readable():
+    case, candidate = _data()
+    assessment = _assessment()
+    del assessment["conditions"]
+    report = ReviewVerification.model_validate({"candidate_sha256": candidate_digest(candidate),
+        "case_revision": case["revision"], "attempt": 1, "status": "checked",
+        "stop_reason": "checks_complete", "findings": [assessment]})
+    assert report.findings[0].conditions == []
+
+
+@pytest.mark.parametrize("value", [False, 0, "present"])
+async def test_explicit_false_zero_and_present_values_are_not_missing(value):
+    case, candidate = _data()
+    case["facts"][0]["value"] = value
+    result, *_ = await _verify(case, candidate,
+        reply={"findings": [_assessment(conditions=[_condition()])]})
+    assert result["status"] == "checked"
+    assert result["findings"][0]["conditions"][0]["status"] == "met"
+    assert case["evidence"][0]["tax_year_status"] == "proposed"
+
+
+@pytest.mark.parametrize("condition,verdict", [
+    (_condition("unknown", fact_ids=[]), "insufficient"),
+    (_condition("not_met"), "unsupported"),
+    (_condition(fact_ids=[]), "insufficient"),
+    (_condition(fact_ids=["another-owner-fact"]), "insufficient"),
+    (_condition(evidence_ids=[]), "insufficient"),
+    (_condition(evidence_ids=["unlinked-source"]), "insufficient"),
+    (_condition(fact_ids=["fact1", "fact1"]), "insufficient"),
+    (_condition(evidence_ids=["rule1", "rule1"]), "insufficient"),
+])
+async def test_declared_condition_gaps_cannot_be_overruled_by_supported_verdict(condition, verdict):
+    result, chat, *_ = await _verify(reply={"findings": [_assessment(conditions=[condition])]})
+    assert result["status"] == "needs_repair"
+    assert result["findings"][0]["verdict"] == verdict
+    assert result["findings"][0]["conditions"] == [condition]
+    chat.assert_awaited_once()
+
+
+@pytest.mark.parametrize("change", [
+    {"value": None}, {"value": ""}, {"value": {}}, {"status": "recorded"},
+    {"confirmed_tax_year": 2024},
+])
+async def test_condition_support_requires_current_confirmed_non_null_fact(change):
+    case, candidate = _data()
+    case["facts"][0].update(change)
+    result, *_ = await _verify(case, candidate,
+        reply={"findings": [_assessment(conditions=[_condition()])]})
+    assert result["status"] == "needs_repair"
+    assert result["findings"][0]["verdict"] == "insufficient"
+    assert "current confirmed fact" in result["findings"][0]["reason"]
+
+
+async def test_condition_cannot_borrow_a_fact_from_outside_this_finding_support():
+    case, candidate = _data()
+    case["facts"].append({**case["facts"][0], "id": "unlinked-fact"})
+    result, *_ = await _verify(case, candidate, reply={"findings": [
+        _assessment(conditions=[_condition(fact_ids=["unlinked-fact"])])]})
+    assert result["status"] == "needs_repair"
+    assert result["findings"][0]["verdict"] == "insufficient"
+
+
+async def test_condition_check_uses_source_rules_and_actual_fields_without_tax_field_list():
+    case, candidate = _data()
+    case["facts"][0]["value"] = {"completed_training": False}
+    case["evidence"][0]["passage"] = "Only applicants who have not completed training qualify."
+    condition = _condition(condition="completed_training is explicitly false, satisfying the source condition",
+                           fact_paths=["/completed_training"])
+    result, chat, *_ = await _verify(case, candidate,
+        reply={"findings": [_assessment(conditions=[condition])]})
+    assert result["status"] == "checked"
+    instructions = chat.call_args.kwargs["messages"][0]["content"]
+    assert "Include source footnotes" in instructions
+    assert "Missing/null does not mean false or zero" in instructions
+    assert "source metadata" in instructions
+
+
+def test_checked_report_rejects_unresolved_condition_even_if_verdict_claims_supported():
+    case, candidate = _data()
+    for status in ("unknown", "not_met"):
+        with pytest.raises(ValidationError):
+            ReviewVerification.model_validate({"candidate_sha256": candidate_digest(candidate),
+                "case_revision": case["revision"], "attempt": 1, "status": "checked",
+                "stop_reason": "checks_complete", "findings": [
+                    _assessment(conditions=[_condition(status)])]})
+
+
+@pytest.mark.parametrize("value,path,expected", [
+    ({"age": 40}, "/age", "checked"),
+    ({"blind": False}, "/blind", "checked"),
+    ({"profile": {"score": 0}}, "/profile/score", "checked"),
+    ({"members": [{"eligible": False}]}, "/members/0/eligible", "checked"),
+    ({"a/b": {"c~d": False}}, "/a~1b/c~0d", "checked"),
+    ({"filing_status": "single"}, "/age", "needs_repair"),
+    ({"age": None}, "/age", "needs_repair"),
+    ({"age": ""}, "/age", "needs_repair"),
+    ({"age": 40}, "", "needs_repair"),
+    ({"profile": {"age": 40}}, "/profile", "needs_repair"),
+    ({"members": [40]}, "/members/1", "needs_repair"),
+    ({"members": [40]}, "/members/00", "needs_repair"),
+    ({"members": [40]}, "/members/-1", "needs_repair"),
+    ({"age": 40}, "age", "needs_repair"),
+    ({"a~b": 40}, "/a~b", "needs_repair"),
+])
+async def test_conditions_resolve_actual_scalar_fields_in_composite_confirmed_profile(value, path, expected):
+    case, candidate = _data()
+    case["facts"][0]["value"] = value
+    result, *_ = await _verify(case, candidate, reply={"findings": [
+        _assessment(conditions=[_condition(fact_paths=[path])])]})
+    assert result["status"] == expected
+    if expected == "needs_repair":
+        assert result["findings"][0]["verdict"] == "insufficient"
+
+
+async def test_parallel_fact_paths_cannot_omit_the_field_reference():
+    result, *_ = await _verify(reply={"findings": [
+        _assessment(conditions=[_condition(fact_paths=[])])]})
+    assert result["status"] == "needs_repair"
+    assert result["findings"][0]["verdict"] == "insufficient"
+
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("mode", ["python", "json"])
+def test_condition_presence_survives_exact_report_roundtrips(explicit, mode):
+    case, candidate = _data()
+    assessment = _assessment()
+    if not explicit:
+        del assessment["conditions"]
+    wire = {"candidate_sha256": candidate_digest(candidate), "case_revision": case["revision"],
+            "attempt": 1, "status": "checked", "stop_reason": "checks_complete",
+            "findings": [assessment], "model": "local-checker"}
+    report = ReviewVerification.model_validate(wire)
+    assert report.findings[0].conditions == []
+    # This is the representation retained and compared by the atomic save.
+    stored = report.model_dump(mode=mode)
+    assert stored == wire
+    assert ReviewVerification.model_validate(stored).model_dump(mode=mode) == stored
+    assert ReviewVerification.model_validate_json(report.model_dump_json()).model_dump(mode=mode) == stored
+    assert ("conditions" in stored["findings"][0]) is explicit
+
+
+async def test_new_reviewer_explicit_empty_conditions_remain_on_saved_report_wire():
+    result, *_ = await _verify(reply={"findings": [_assessment(conditions=[])]})
+    assert result["findings"][0]["conditions"] == []
+    assert ReviewVerification.model_validate(result).model_dump(mode="json") == result

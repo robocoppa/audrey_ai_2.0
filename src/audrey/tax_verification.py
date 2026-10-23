@@ -19,8 +19,10 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     StringConstraints,
     ValidationError,
+    model_serializer,
     model_validator,
 )
 
@@ -41,10 +43,34 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
 
+class ConditionVerification(_Strict):
+    condition: Annotated[str, StringConstraints(min_length=1, max_length=300)]
+    status: Literal["met", "not_met", "unknown"]
+    fact_ids: Annotated[list[Annotated[str, StringConstraints(min_length=1, max_length=80)]],
+                        Field(max_length=12)]
+    evidence_ids: Annotated[list[Annotated[str, StringConstraints(min_length=1, max_length=80)]],
+                            Field(max_length=8)]
+    fact_paths: Annotated[list[Annotated[str, StringConstraints(max_length=300)]],
+                          Field(max_length=12)]
+
+
 class FindingVerification(_Strict):
     finding_index: int = Field(ge=0, le=11)
     verdict: Literal["supported", "unsupported", "insufficient"]
     reason: Annotated[str, StringConstraints(min_length=1, max_length=500)]
+    # Older saved assessments predate the condition inventory. New model replies
+    # use the stricter required field below; history remains readable.
+    conditions: Annotated[list[ConditionVerification], Field(max_length=12)] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def preserve_condition_presence(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        serialized = handler(self)
+        # Historical trusted reports must retain their exact stored shape for
+        # atomic saves and no-op comparisons. New replies explicitly supply the
+        # required field, including [] when no conditional rule is applied.
+        if "conditions" not in self.model_fields_set:
+            serialized.pop("conditions", None)
+        return serialized
 
 
 class ReviewVerification(_Strict):
@@ -66,14 +92,20 @@ class ReviewVerification(_Strict):
             raise ValueError("Finding assessments must be unique")
         if self.status == "checked" and (
             not indices or self.stop_reason != "checks_complete"
-            or any(finding.verdict != "supported" for finding in self.findings)
+            or any(finding.verdict != "supported" or any(
+                condition.status != "met" for condition in finding.conditions
+            ) for finding in self.findings)
         ):
             raise ValueError("Checked requires a supported assessment for every finding")
         return self
 
 
+class _ReviewerFinding(FindingVerification):
+    conditions: Annotated[list[ConditionVerification], Field(max_length=12)]
+
+
 class _ReviewerReply(_Strict):
-    findings: Annotated[list[FindingVerification], Field(min_length=1, max_length=12)]
+    findings: Annotated[list[_ReviewerFinding], Field(min_length=1, max_length=12)]
 
 
 _SYSTEM = """Check the proposed worksheet SUMMARY AND EVERY FINDING against only the supplied retained facts,
@@ -86,7 +118,27 @@ when its entire stated scope, conditions, year and amounts follow from supplied
 support; a genuine quotation alone does not support a different claim. Use
 unsupported for a contradiction, wrong amount, wrong year or overstatement; use
 insufficient when the passages omit a necessary condition or topic. Explain the
-specific gap or correction in at most 500 characters. A summary must not add unsupported claims beyond its findings: attribute any unsupported summary claim to finding_index 0. Do not request information
+specific gap or correction in at most 500 characters.
+Before the verdict, inventory the conditions and exceptions in the cited source
+that are necessary for THIS finding to follow. Include source footnotes. For
+each condition, name the supporting fact field/value in condition text, cite its
+evidence_ids, cite relevant fact_ids, and assign met, not_met or unknown. Supply
+parallel fact_paths using JSON pointers into each fact's value (e.g. /field);
+an empty path is only for a whole scalar value. Cite the actual relevant field
+of composite profiles, never their enclosing object. Unknown conditions may use
+empty fact_ids and fact_paths. A fact
+omitted from a confirmed profile is still unknown: confirmation of supplied
+fields does not confirm absent fields. Missing/null does not mean false or zero;
+an explicit false or zero is a supplied value. Do not silently assume an
+exception does not apply. A known condition needs an actual current confirmed
+fact; a source statement alone does not establish the user's eligibility.
+Unknown conditions make the applied conclusion insufficient; a contradicted
+condition makes it unsupported. Do not add conditions unrelated to the finding
+or require eligibility facts for a source description that applies no rule.
+For pure arithmetic or a rule description with no applied conditions, use an
+empty conditions list and explain why in reason. Never ask the user to resolve
+source metadata or provide a fact that this finding does not need.
+A summary must not add unsupported claims beyond its findings: attribute any unsupported summary claim to finding_index 0. Do not request information
 that is already supplied. Return only the specified JSON findings array object."""
 
 
@@ -210,6 +262,70 @@ def _parse_reply(raw: Any, count: int) -> list[dict] | None:
             sorted(reply.findings, key=lambda item: item.finding_index)]
 
 
+def _has_condition_value(fact: dict, path: str) -> bool:
+    """Resolve a JSON pointer to an explicit scalar, keeping false and zero."""
+    value = fact.get("value")
+    if path:
+        if not path.startswith("/"):
+            return False
+        for token in path[1:].split("/"):
+            if re.search(r"~(?![01])", token):
+                return False
+            token = token.replace("~1", "/").replace("~0", "~")
+            if isinstance(value, dict) and token in value:
+                value = value[token]
+            elif isinstance(value, list) and re.fullmatch(r"0|[1-9][0-9]*", token):
+                index = int(token)
+                if index >= len(value):
+                    return False
+                value = value[index]
+            else:
+                return False
+    return (value is not None and not isinstance(value, (dict, list))
+            and (not isinstance(value, str) or bool(value.strip())))
+
+
+def _check_conditions(findings: list[dict], bundles: list[dict], tax_year: int) -> None:
+    """Keep a model's condition inventory tied to this finding's saved support.
+
+    This validates references and unresolved statuses, not the completeness or
+    semantics of the model's inventory. Those remain a bounded model assessment.
+    """
+    for finding, bundle in zip(findings, bundles, strict=True):
+        facts = {item["id"]: item for item in bundle["facts"]}
+        evidence = {item["id"] for item in bundle["evidence"]}
+        gaps, contradictions = [], []
+        for condition in finding["conditions"]:
+            label = condition["condition"]
+            fact_ids, evidence_ids = condition["fact_ids"], condition["evidence_ids"]
+            paths = condition["fact_paths"]
+            if (not evidence_ids or len(evidence_ids) != len(set(evidence_ids))
+                    or not set(evidence_ids) <= evidence):
+                gaps.append(f"Condition '{label}' lacks linked official source support.")
+            if (len(paths) != len(fact_ids)
+                    or len(set(zip(fact_ids, paths, strict=True))) != len(fact_ids)
+                    or not set(fact_ids) <= facts.keys()):
+                gaps.append(f"Condition '{label}' cites unavailable fact support.")
+            elif condition["status"] != "unknown" and (
+                not fact_ids or any(
+                    facts[identifier].get("status") != "confirmed"
+                    or facts[identifier].get("case_tax_year", tax_year) != tax_year
+                    or facts[identifier].get("confirmed_tax_year", tax_year) != tax_year
+                    or not _has_condition_value(facts[identifier], path)
+                    for identifier, path in zip(fact_ids, paths, strict=True)
+                )
+            ):
+                gaps.append(f"Condition '{label}' has no current confirmed fact establishing it.")
+            if condition["status"] == "unknown":
+                gaps.append(f"Condition '{label}' remains unknown.")
+            elif condition["status"] == "not_met":
+                contradictions.append(f"Condition '{label}' is not met by the supplied facts.")
+        if gaps:
+            finding.update(verdict="insufficient", reason=" ".join(dict.fromkeys(gaps))[:500])
+        elif contradictions:
+            finding.update(verdict="unsupported", reason=" ".join(dict.fromkeys(contradictions))[:500])
+
+
 async def verify_review(
     app: Any, case: dict, candidate: dict, *,
     reread: Callable[[dict], Awaitable[dict]], attempt: int, user_id: str,
@@ -295,6 +411,7 @@ async def verify_review(
         return limited_verification(case, candidate, attempt=attempt,
                                     stop_reason="reviewer_unavailable", model=model,
                                     reason="The local reviewer did not produce one valid assessment per finding.")
+    _check_conditions(findings, bundles, case["tax_year"])
     checked = all(item["verdict"] == "supported" for item in findings)
     return _report(case, candidate, attempt=attempt,
                    status="checked" if checked else "needs_repair",

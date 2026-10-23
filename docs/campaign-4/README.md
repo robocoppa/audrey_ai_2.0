@@ -95,18 +95,28 @@ there were no improvements or regressions. The writer applied a deduction despit
 missing age/blindness/dependency facts, and the same-model checker approved it.
 No repair was triggered. This supports no accuracy promotion; model measurements
 and retained outputs are in [MODEL-FACTS](../../evals/MODEL-FACTS.md).
-**Next:** target omitted eligibility conditions in the writer/checker contract,
-then rerun only that case before broadening to the 20E.2 native comparison.
+**20E.1 eligibility followup built; targeted live check pending.** Writer and
+probe share the rule that omitted facts are unknown. New checker replies inventory
+applied source conditions and cite exact saved fact fields; missing/null/composite
+or stale support cannot establish a declared condition, while explicit false/zero
+remain valid values. Unresolved conditions trigger bounded repair instead of
+approval. The model can still omit or misinterpret a condition; this is not a
+complete rule engine. Existing saved assessments remain readable without changes
+to their stored shape. **Next:** rerun only missing-eligibility, then choose the
+smallest 20E.2 native comparison. The other five measurements stay recorded.
 
 **Toolbox edge-tab followup built:** the closed Toolbox opens from a larger,
 vertically centered right-edge tab, with sideways text facing left. It hides while
 the panel is open and restores keyboard focus on close. Only audrey-ui rebuilds.
 
-**Notices and settings polish built:** Tax review shows a brief filing caution;
-Private shows local server processing/storage with expandable privacy details.
-Settings has a bordered dialog button without a dropdown arrow. Conversation
-scrolling accounts for the complete composer height. The user moved on after
-that handoff; no repeat visual check is queued.
+**Private header followup built:** a subdued non-action status badge sits near
+Archive/Delete, between those controls and the conversation title. Hover/focus
+reveals processing/storage, administrator, Cloudflare, tool-scope and mode-lock
+details; touch can reveal them and Escape/outside interaction dismisses them.
+The compact header retains the badge while destructive chat actions stay in mobile
+navigation. Composer privacy prose is removed. Tax review's filing caution and
+settings behavior stay accepted. Deploy this UI and eligibility followup by
+rebuilding audrey and audrey-ui; no index, model or source update is needed.
 
 **MiniMax M3.1 Flash:** configured as an unmeasured cloud draft/research candidate
 in mixed, Cloud and selected Research panels. Kimi K3 stays first, panel worker
@@ -177,8 +187,8 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **20D.5 built:** bounded local evidence checking and targeted repair;
   Toolbox presentation accepted October 22.
 - [x] **20E.1 measurement:** six fixed-passage pairs completed; five passed both arms.
-- [ ] **20E.1 followup:** handle omitted eligibility conditions; target only that
-  failed case. Preserve the other five results.
+- [ ] **20E.1 followup built:** source-condition/confirmed-field checking;
+  targeted missing-eligibility measurement pending. Preserve the other five results.
 - [ ] **20E.2:** native retrieval/accuracy comparison after the targeted correction.
 
 Tax year/jurisdiction and reference release belong to the case record; 20D.1 does

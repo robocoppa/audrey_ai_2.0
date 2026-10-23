@@ -1564,6 +1564,8 @@ function ConversationThread({
         )}
       </div>
       <div className="thread-controls">
+        {privateRequired ? <PrivateModeNotice lockReason={conversation.project_id
+          ? "Leave this Private project before choosing another processing mode." : ""} /> : null}
         <div className="conversation-actions">
           <button
             type="button"
@@ -1613,7 +1615,12 @@ function ConversationThread({
   return (
     <>
       <div className="thread-header-shell">
-        {!compactNavigation ? conversationHeader : null}
+        {!compactNavigation ? conversationHeader : privateRequired ? (
+          <div className="thread-private-status">
+            <PrivateModeNotice lockReason={conversation.project_id
+              ? "Leave this Private project before choosing another processing mode." : ""} />
+          </div>
+        ) : null}
         {mutationError ? <p className="conversation-mutation-error" role="alert">{mutationError}</p> : null}
         {recoveredRunId && !durableReviewPresent ? (
           <div className="recovered-run" role="status" aria-label="Audrey is answering">
@@ -1645,9 +1652,6 @@ function ConversationThread({
           projectPicker={projectPicker}
           models={conversationModels}
           privateRequired={privateRequired}
-          privateLockReason={privateLocked ? conversation.project_id
-            ? "Leave this Private project before choosing another processing mode."
-            : "Private stays selected after the first message." : ""}
           skills={skills}
           canBrowseDirectModels={canBrowseDirectModels}
           modelId={selectedModelId}
@@ -1682,7 +1686,6 @@ function ConversationThread({
 
 function AudreyThread({
   privateRequired,
-  privateLockReason,
   conversationId,
   focusComposer,
   onComposerFocused,
@@ -1707,7 +1710,6 @@ function AudreyThread({
   onRunFinished,
 }: {
   privateRequired: boolean;
-  privateLockReason: string;
   conversationId: string;
   focusComposer: boolean;
   onComposerFocused: (conversationId: string) => void;
@@ -2654,7 +2656,6 @@ function AudreyThread({
                   </div>
                 </ComposerPrimitive.Root>
                 {modelChangeNotice ? <p className="attachment-status" role="status">{modelChangeNotice}</p> : null}
-                {isPrivate ? <PrivateModeNotice lockReason={privateLockReason} /> : null}
                 {attachmentPickerOpen ? (
                   <ComposerPickerPanel
                     className="attachment-picker"

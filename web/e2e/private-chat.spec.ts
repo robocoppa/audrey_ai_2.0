@@ -147,11 +147,17 @@ test(`Private keeps local controls, protected documents and upload routing throu
   const observed = await mockPrivateApi(page);
   await page.goto("./");
   await choosePrivate(page);
-  const privacy = page.getByRole("complementary", { name: "Private mode privacy" });
-  await expect(privacy.getByText("Local AI processing · Conversations and files are saved on this server.")).toBeVisible();
-  await privacy.getByText("Privacy details", { exact: true }).click();
-  await expect(privacy.getByText(/trusted server administrators/u)).toBeVisible();
-  await privacy.getByText("Privacy details", { exact: true }).click();
+  const privacy = page.getByRole("note", { name: "Private processing" });
+  await expect(privacy).toBeInViewport();
+  await expect(page.locator(".thread-header-shell").getByRole("note")).toBeVisible();
+  await expect(page.locator(".composer-dock").getByRole("note")).toHaveCount(0);
+  await privacy.focus();
+  await expect(page.getByRole("tooltip")).toContainText("trusted server administrators");
+  await expect(page.getByRole("tooltip")).toContainText("Cloudflare");
+  await expect(page.getByRole("tooltip")).toContainText("Private stays selected after the first message");
+  await expect(page.getByRole("tooltip")).toBeInViewport();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toBeInViewport();
   await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
@@ -395,3 +401,33 @@ test("a failed delete retains the conversation and identifies the failed action 
   expect(requests).toEqual(["DELETE", "GET"]);
   expect(creates).toBe(0);
 });
+
+for (const viewport of [{ width: 1120, height: 700 }, { width: 390, height: 667 }]) {
+  test(`Private header status fits and supports pointer details at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await mockPrivateApi(page, { initialPrivate: true, saved: true });
+    await page.goto("./");
+    const status = page.getByRole("note", { name: "Private processing" });
+    await expect(status).toBeInViewport();
+    if (viewport.width > 1100) {
+      const statusBox = await status.boundingBox();
+      const titleBox = await page.getByRole("heading", { name: "Private browser check" }).boundingBox();
+      const actionsBox = await page.getByRole("button", { name: "Archive", exact: true }).boundingBox();
+      expect(statusBox!.x).toBeGreaterThan(titleBox!.x + titleBox!.width);
+      expect(statusBox!.x + statusBox!.width).toBeLessThan(actionsBox!.x);
+      await status.hover();
+    } else {
+      await expect(page.getByRole("button", { name: "Archive", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Delete conversation", exact: true })).toHaveCount(0);
+      await status.dispatchEvent("pointerdown", { pointerType: "touch" });
+    }
+    const tooltip = page.getByRole("tooltip");
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toBeInViewport();
+    expect(await status.evaluate((element) => element.tagName)).toBe("SPAN");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+    await page.getByRole("textbox", { name: "Ask Audrey" }).click();
+    await expect(tooltip).toHaveCount(0);
+    await page.screenshot({ path: `/tmp/audrey-private-header-${viewport.width}.png` });
+  });
+}

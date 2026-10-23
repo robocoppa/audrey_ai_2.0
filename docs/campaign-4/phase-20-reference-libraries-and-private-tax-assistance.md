@@ -518,11 +518,14 @@ user facts/decisions; it does not promote evidence or silently resolve saved gap
 
 The Toolbox retains a muted filing caution: AI can be wrong; check sources and
 figures before filing, and Audrey does not prepare or file a return. Private
-retains its local-processing/server-storage notice and expandable administrator/
-Cloudflare detail. Neither adds an acknowledgement gate. The generic degraded
-badge stays removed; actual outage indicators remain. The user accepted the
-Toolbox flow October 22. The scrollbar/launcher followup rebuilds only audrey-ui;
-no new upload, source collection, index or model change is required.
+shows a subdued non-action status badge near Archive/Delete in the header,
+between the title and actions. A hover/focus tooltip carries the processing and
+server-storage details, administrator access, Cloudflare transport, tool scope
+and mode lock. Touch reveals the same text; Escape/outside interaction dismisses
+it. The compact header keeps the badge while Archive/Delete stay in mobile
+navigation. Composer disclosure prose is removed. Neither notice adds an
+acknowledgement gate. The generic degraded badge stays removed; actual outage
+indicators remain. The Toolbox flow is accepted; no repeat workflow check is due.
 
 Each conversation owns one case; Project membership is derived from its canonical
 conversation. A saved case does not activate Tax review automatically after reload.
@@ -797,8 +800,9 @@ Use the existing on-box probe wrapper because this measurement imports installed
 production code and requires direct local-model control. `FOREGROUND=1 NOTIFY=1`
 prints the complete JSON in the launching shell and sends the existing Telegram
 log attachment. No PAT, upload, index run or live application data is needed.
-Only audrey-ui rebuilds for the accompanying visual polish; the probe/fixture are
-copied from the checkout at run time. Run while the GPU is otherwise quiet; this
+The probe/fixture are copied from the checkout at run time. The eligibility
+followup changes installed writer/checker code and rebuilds audrey; the Private
+header followup additionally rebuilds audrey-ui. Run while the GPU is otherwise quiet; this
 isolated process does not share the application's in-process fair queue.
 
 The October 22 measurement completed all six pairs without execution failures.
@@ -809,11 +813,29 @@ a substantive unsupported-assumption failure. Do not populate missing-item recor
 from the hidden answer key to make the test pass. The initial transport-only
 failure is closed and supplied no model-quality evidence.
 
-Next, make omitted necessary conditions explicit in the writer/checker contract,
-add a regression using the unchanged incomplete profile, and rerun only that case.
-Keep the other five results. This does not close native retrieval/extraction,
-multi-turn authority, conflicting sources, the known tax-change errors below, or
-complete-return accuracy. No model promotion or default extension is supported.
+The eligibility followup is built. Native and probe writers share the instruction
+to inventory relevant source-stated conditions/exclusions before applying a rule.
+An omitted/null/empty fact stays unknown; explicit false and zero are values.
+Affected amounts stay unresolved and only a necessary grouped question is asked.
+Pure source descriptions that do not apply a rule need no personal interview.
+
+New checker replies include a bounded condition inventory per finding, with
+met/not-met/unknown status, cited source IDs and exact confirmed fact IDs/JSON
+pointers into their values. Server validation refuses missing, null, enclosing
+composite objects, stale/foreign-year or unlinked field support. Unknown conditions
+make the applied finding insufficient; contradicted conditions make it unsupported.
+This uses the same single reviewer call and one repair/recheck limit. It changes
+no owner confirmation, source-year authority, database schema, model or library release.
+Old assessments retain their original serialized shape and no-op behavior.
+
+The model still identifies the conditions and judges what each value means; empty
+or incomplete inventories can miss a rule, so this is not independent legal
+verification. The unchanged incomplete-profile regression rejects a fabricated
+age-field citation and retains unknown amounts through repair. Live validation
+must rerun only missing-eligibility before broadening; keep the other five results.
+Native retrieval/extraction, multi-turn authority, conflicting sources, known
+tax-change errors and complete-return accuracy remain open. No model promotion or
+default extension is supported by local tests.
 
 #### Accuracy and visible user flow
 
