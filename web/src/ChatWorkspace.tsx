@@ -2187,9 +2187,9 @@ function AudreyThread({
 
   function startTaxReview(text = TAX_REVIEW_PROMPT) {
     if (!taxCase || !isPrivate || readOnly || pendingTaxReviewRef.current
-      || ["update_available", "unavailable"].includes(taxCase.reference_update?.status ?? "")) return;
+      || ["update_available", "unavailable"].includes(taxCase.reference_update?.status ?? "")) return false;
     if (text === TAX_REVIEW_PROMPT && (submissionBlocked || recoveredRunActive
-      || activity.status === "running" || runtime.thread.getState().isRunning)) return;
+      || activity.status === "running" || runtime.thread.getState().isRunning)) return false;
     const request = { text };
     pendingTaxReviewRef.current = request;
     preserveComposerAttachmentsRef.current = true;
@@ -2197,6 +2197,7 @@ function AudreyThread({
     setLastAttempt(null);
     setSkillId("tax-review");
     setActivePicker(null);
+    return true;
   }
 
   useEffect(() => {

@@ -547,3 +547,194 @@ def test_review_schema_exposes_saved_worksheet_without_certification():
     properties = spec.parameters["properties"]["data"]["properties"]
     assert {"summary", "findings", "next_question"}.issubset(properties)
     assert not {"verified", "complete", "correct"}.intersection(properties)
+
+
+async def _native_statement(state, content):
+    with processing_scope(state.policy):
+        started = await state.store.conversations.begin_run(
+            user_id=state.owner.user_id, conversation_id=state.conversation.conversation_id,
+            user_content=content, expected_private_required=True,
+        )
+    assert started is not None
+    return {"user_id": state.owner.user_id,
+            "conversation_id": state.conversation.conversation_id,
+            "run_id": started.run.run_id,
+            "message_id": started.user_message.message_id,
+            "content": started.user_message.content}
+
+
+async def test_current_chat_fact_is_saved_without_repeat_confirmation(state):
+    from audrey.tax_review import user_statement_scope
+
+    case = await _create(state)
+    statement = await _native_statement(state, "For 2025, my W-2 wages are $50,000.")
+    with processing_scope(state.policy), user_statement_scope(**statement):
+        handler = make_tax_review_handler(app=state.app, principal=state.owner,
+                                         conversation_id=state.conversation.conversation_id)
+        result = await handler({"operation": "record_user_fact", "expected_revision": case["revision"],
+                                "data": {"label": "W-2 wages", "value": "my W-2 wages are $50,000"}})
+    assert result["updated_entry"]["status"] == "confirmed"
+    saved = (await state.client.get(state.path)).json()["case"]
+    assert saved["facts"][0]["value"] == "my W-2 wages are $50,000"
+    assert saved["facts"][0]["confirmed_by"] == "user_message"
+    assert saved["facts"][0]["source_message_id"] == statement["message_id"]
+    assert saved["facts"][0]["confirmed_tax_year"] == 2025
+    assert saved["evidence"] == []  # User statements never establish official law.
+    duplicate = None
+    with processing_scope(state.policy), user_statement_scope(**statement):
+        duplicate = await handler({"operation": "record_user_fact", "expected_revision": saved["revision"],
+                                   "data": {"label": "W-2 wages", "value": "my W-2 wages are $50,000"}})
+    assert duplicate["revision"] == saved["revision"]
+
+
+@pytest.mark.parametrize("change", [
+    {"user_id": "other-owner"}, {"conversation_id": "other-conversation"},
+    {"message_id": "forged-message"}, {"run_id": "forged-run"},
+    {"content": "I earned $75,000"},
+])
+async def test_direct_chat_fact_rejects_wrong_bound_source(state, change):
+    from audrey.tax_review import user_statement_scope
+
+    case = await _create(state)
+    statement = await _native_statement(state, "My wages are $50,000")
+    statement.update(change)
+    with processing_scope(state.policy), user_statement_scope(**statement):
+        result = await _call(state, "record_user_fact", expected_revision=case["revision"],
+                             data={"label": "Wages", "value": "$50,000"})
+    assert result["status"] == 422
+    assert (await state.client.get(state.path)).json()["case"]["facts"] == []
+
+
+async def test_missing_exited_or_nonverbatim_message_cannot_confirm_fact(state):
+    import contextvars
+
+    from audrey.tax_review import user_statement_scope
+
+    case = await _create(state)
+    statement = await _native_statement(state, "My W-2 says $50,000")
+    with processing_scope(state.policy):
+        handler = make_tax_review_handler(app=state.app, principal=state.owner,
+                                         conversation_id=state.conversation.conversation_id)
+        payload = {"operation": "record_user_fact", "expected_revision": case["revision"],
+                   "data": {"label": "Wages", "value": "$50,000"}}
+        assert (await handler(payload))["status"] == 422
+        with user_statement_scope(**statement):
+            copied = contextvars.copy_context()
+            normalized = {**payload, "data": {"label": "Wages", "value": "50000.00"}}
+            assert (await handler(normalized))["status"] == 422
+        assert (await handler(payload))["status"] == 422
+        # Even a task carrying a copied ContextVar cannot outlive the source scope.
+        import asyncio
+        assert (await asyncio.create_task(handler(payload), context=copied))["status"] == 422
+    assert (await state.client.get(state.path)).json()["case"]["facts"] == []
+
+
+async def test_model_cannot_forge_message_authority_in_tool_arguments(state):
+    await _create(state)
+    with pytest.raises(PrivateToolArgumentsError):
+        await _call(state, "record_user_fact", expected_revision=1,
+                    data={"label": "Wages", "value": "$50,000", "source_message_id": "forged"})
+    assert "edit_fact" not in tax_review_spec("http://custom-tools:8001").parameters["properties"]["operation"]["enum"]
+
+
+async def test_owner_edits_current_fact_in_place_and_browser_hides_audit(state):
+    case = await _create(state)
+    proposed = await _call(state, "propose_fact", expected_revision=case["revision"],
+                           data={"label": "Wages", "value": "$50,000", "kind": "user_statement"})
+    fact_id = proposed["updated_entry"]["id"]
+    response = await state.client.post(state.path + "/actions", json={
+        "operation": "edit_fact", "expected_revision": proposed["revision"],
+        "data": {"fact_id": fact_id, "label": "2025 W-2 wages", "value": "$52,000"},
+    })
+    assert response.status_code == 200, response.text
+    case = response.json()
+    assert len(case["facts"]) == 1 and case["facts"][0]["id"] == fact_id
+    assert case["facts"][0]["value"] == "$52,000" and case["facts"][0]["status"] == "confirmed"
+    assert "history" not in case["facts"][0]
+    stored = await state.store.tax_cases.get(user_id=state.owner.user_id,
+                                            conversation_id=state.conversation.conversation_id)
+    assert stored["facts"][0]["history"][0]["value"] == "$50,000"
+    replay = await state.client.post(state.path + "/actions", json={
+        "operation": "edit_fact", "expected_revision": proposed["revision"],
+        "data": {"fact_id": fact_id, "label": "Wages", "value": "$1"},
+    })
+    assert replay.status_code == 409
+
+
+async def test_answered_missing_question_resolves_only_with_current_quoted_fact(state):
+    from audrey.tax_review import user_statement_scope
+
+    case = await _create(state)
+    gap = await _call(state, "add_missing_item", expected_revision=case["revision"], data={
+        "label": "Filer age", "question": "How old were you at the end of 2025?"})
+    saved = (await state.client.get(state.path)).json()["case"]
+    assert saved["missing_items"][0]["question"] == "How old were you at the end of 2025?"
+    statement = await _native_statement(state, "I was 40 at the end of 2025")
+    with processing_scope(state.policy), user_statement_scope(**statement):
+        result = await _call(state, "record_user_fact", expected_revision=gap["revision"], data={
+            "label": "Age at year-end", "value": "40 at the end of 2025",
+            "addresses": [gap["updated_entry"]["id"]]})
+    assert "error" not in result
+    saved = (await state.client.get(state.path)).json()["case"]
+    assert saved["missing_items"][0]["status"] == "resolved"
+    assert saved["missing_items"][0]["resolved_with_fact_id"] == saved["facts"][0]["id"]
+
+
+async def test_chat_correction_updates_same_row_and_returns_id_with_answered_gap(state):
+    from audrey.tax_review import user_statement_scope
+
+    case = await _create(state)
+    proposed = await _call(state, "propose_fact", expected_revision=case["revision"],
+                           data={"label": "Wages", "value": "$50,000", "kind": "user_statement"})
+    fact_id = proposed["updated_entry"]["id"]
+    gap = await _call(state, "add_missing_item", expected_revision=proposed["revision"],
+                     data={"label": "Corrected wages", "question": "What are your corrected 2025 wages?"})
+    statement = await _native_statement(state, "Correction: my 2025 wages were $52,000.")
+    with processing_scope(state.policy), user_statement_scope(**statement):
+        result = await _call(state, "record_user_fact", expected_revision=gap["revision"], data={
+            "label": "Wages", "value": "my 2025 wages were $52,000", "fact_id": fact_id,
+            "addresses": [gap["updated_entry"]["id"]]})
+    assert result["updated_entry"] == {"id": fact_id, "status": "confirmed"}
+    saved = (await state.client.get(state.path)).json()["case"]
+    assert len(saved["facts"]) == 1 and saved["facts"][0]["id"] == fact_id
+    assert saved["missing_items"][0]["status"] == "resolved"
+    assert "history" not in saved["facts"][0]
+    # Changed values require an explicit existing ID, rather than another active row.
+    with processing_scope(state.policy), user_statement_scope(**statement):
+        refused = await _call(state, "record_user_fact", expected_revision=saved["revision"],
+                              data={"label": "Wages", "value": "$52,000"})
+    assert refused["status"] == 422
+    assert len((await state.client.get(state.path)).json()["case"]["facts"]) == 1
+
+
+async def test_previous_native_message_cannot_supply_current_fact(state):
+    from audrey.tax_review import user_statement_scope
+
+    case = await _create(state)
+    old = await _native_statement(state, "My old wages were $50,000")
+    await state.store.conversations.finish_run(user_id=state.owner.user_id,
+                                              run_id=old["run_id"], outcome="succeeded", assistant_content="Saved")
+    await _native_statement(state, "My current wages are $52,000")
+    with processing_scope(state.policy), user_statement_scope(**old):
+        refused = await _call(state, "record_user_fact", expected_revision=case["revision"],
+                              data={"label": "Wages", "value": "$50,000"})
+    assert refused["status"] == 422
+    assert (await state.client.get(state.path)).json()["case"]["facts"] == []
+
+
+async def test_quote_cannot_resolve_missing_item_from_other_tax_year(state):
+    from audrey.tax_review import user_statement_scope
+
+    case = await _create(state)
+    gap = await _call(state, "add_missing_item", expected_revision=case["revision"],
+                     data={"label": "Age", "question": "How old were you at the end of 2025?"})
+    changed = await state.client.post(state.path + "/actions", json={
+        "operation": "change_year", "expected_revision": gap["revision"], "data": {"tax_year": 2024}})
+    assert changed.status_code == 200
+    statement = await _native_statement(state, "I was 39 at the end of 2024")
+    with processing_scope(state.policy), user_statement_scope(**statement):
+        refused = await _call(state, "record_user_fact", expected_revision=changed.json()["revision"], data={
+            "label": "Age", "value": "39 at the end of 2024", "addresses": [gap["updated_entry"]["id"]]})
+    assert refused["status"] == 422
+    saved = (await state.client.get(state.path)).json()["case"]
+    assert saved["facts"] == [] and saved["missing_items"][0]["status"] == "unresolved"

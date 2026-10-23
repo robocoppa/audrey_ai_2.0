@@ -1285,3 +1285,66 @@ async def test_oversized_review_does_not_erase_prior_report_or_partial_case_upda
         )
         == case
     )
+
+
+async def test_owner_fact_correction_invalidates_old_calculations_and_review(state):
+    case = await _create(state)
+    case = await _update(state, case, "propose_fact", _fact(value="100.00"))
+    fact_id = case["facts"][0]["id"]
+    case = await _update(state, case, "confirm_fact", {"fact_id": fact_id}, actor="user")
+    case = await _update(state, case, "record_evidence", _evidence())
+    support = {"fact_ids": [fact_id], "evidence_ids": [case["evidence"][0]["id"]]}
+    case = await _update(state, case, "record_calculation", {
+        "label": "Wages", "inputs": {"wages": "100.00"}, "expression": "wages",
+        "rounding": "none", "result": "100", **support})
+    calculation_id = case["calculations"][0]["id"]
+    case = await _update(state, case, "propose_return_item", {"label": "Wages", **support})
+    candidate = {"summary": "Limited worksheet", "findings": [{"label": "Wages", "detail": "100.00",
+                  "calculation_ids": [calculation_id], **support}]}
+    case = await _update(state, case, "save_review", candidate)
+    with pytest.raises(TaxCaseError, match="user action"):
+        await _update(state, case, "edit_fact", {"fact_id": fact_id, "label": "Wages", "value": "200.00"})
+    changed = await _update(state, case, "edit_fact", {
+        "fact_id": fact_id, "label": "Wages", "value": "200.00"}, actor="user")
+    assert len(changed["facts"]) == 1 and changed["facts"][0]["id"] == fact_id
+    assert changed["facts"][0]["history"][0]["value"] == "100.00"
+    assert changed["facts"][0]["value"] == "200.00"
+    assert changed["facts"][0]["status"] == "confirmed"
+    assert changed["calculations"][0]["status"] == "needs_recheck"
+    assert changed["return_items"][0]["status"] == "needs_recheck"
+    assert tax_case_review(changed)["stale"]
+    assert any("after a saved fact changed" in issue for issue in tax_case_checklist(changed)["next_steps"])
+    with pytest.raises(TaxCaseError, match="rechecked calculations"):
+        await _update(state, changed, "save_review", candidate)
+    unchanged = await _update(state, changed, "edit_fact", {
+        "fact_id": fact_id, "label": "Wages", "value": "200.00"}, actor="user")
+    assert unchanged == changed
+
+
+async def test_unbound_repository_user_statement_is_not_an_authority(state):
+    case = await _create(state)
+    with pytest.raises(TaxCaseError, match="current user's own message"):
+        await _update(state, case, "record_user_fact", {"label": "Wages", "value": "$50,000"})
+    assert (await _create_read(state))["facts"] == []
+
+
+async def _create_read(state):
+    store, owner, _, conversation = state
+    return await store.tax_cases.get(user_id=owner.user_id, conversation_id=conversation.conversation_id)
+
+
+@pytest.mark.parametrize(("content", "excerpt", "valid"), [
+    ("My wages were 50000.00", "0", False),
+    ("My wages were $50,000.00", "000", False),
+    ("My wages were $50,000.00", "$50,000", False),
+    ("I was not blind", "blind", False),
+    ("I was not legally blind", "legally blind", False),
+    ("I cannot be claimed as a dependent", "claimed as a dependent", False),
+    ("I was not blind", "not blind", True),
+    ("I was not blind, and my wages were $50,000.00", "$50,000.00", True),
+    ("I was 40 at the end of 2025", "40 at the end of 2025", True),
+])
+def test_current_statement_requires_intact_excerpt(content, excerpt, valid):
+    from audrey.app_state.tax_cases import is_user_statement_excerpt
+
+    assert is_user_statement_excerpt(content, excerpt) is valid

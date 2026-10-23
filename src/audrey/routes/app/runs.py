@@ -704,6 +704,7 @@ class NativeRunManager:
         from audrey.models.ollama import generation_budget
         from audrey.private_reviews import replay_private_deliveries
         from audrey.private_task_runner import PrivateTaskStepRunner, StepResult
+        from audrey.tax_review import user_statement_scope
 
         context = RunEventContext(
             run_id=live.started.run.run_id,
@@ -713,7 +714,16 @@ class NativeRunManager:
         )
 
         async def work(execution_app, step):
-            with generation_budget(step.remaining_tokens, step.tokens_used, progress=step.progress):
+            # Bind the canonical typed turn before attachments, Project text or
+            # retrieved evidence decorate the model's context. Handlers created
+            # by task preparation read this revocable source at invocation time.
+            with user_statement_scope(
+                user_id=live.owner_user_id,
+                conversation_id=live.started.conversation.conversation_id,
+                run_id=live.started.run.run_id,
+                message_id=live.started.user_message.message_id,
+                content=live.started.user_message.content,
+            ), generation_budget(step.remaining_tokens, step.tokens_used, progress=step.progress):
                 async with asyncio.timeout(_TAX_REVIEW_TIMEOUT_S), aclosing(self._stream_factory(
                     execution_app, payload, messages, options, user_id=live.storage_namespace,
                     conversation_id=live.started.conversation.conversation_id,

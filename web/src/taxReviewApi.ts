@@ -48,6 +48,8 @@ export interface TaxFact {
   case_tax_year?: number;
   confirmed_tax_year?: number;
   confirmed_at?: string;
+  confirmed_by?: string;
+  source_message_id?: string;
   rejected_tax_year?: number;
   rejected_at?: string;
   created_at?: string;
@@ -95,7 +97,7 @@ export interface TaxCase {
   files?: Array<{ file_id: string; checksum: string; revision: string; filename: string }>;
   evidence: TaxEvidence[];
   calculations: TaxCalculation[];
-  missing_items: Array<{ id: string; label: string; status: "unresolved" | "resolved"; resolved_at?: string; created_at?: string }>;
+  missing_items: Array<{ id: string; label: string; question?: string; status: "unresolved" | "resolved"; resolved_at?: string; created_at?: string }>;
   return_items: unknown[];
   checklist: {
     status: "needs_information" | "ready_for_review";
@@ -142,6 +144,7 @@ export function saveTaxCase(conversationId: string, setup: TaxCaseSetup): Promis
 export type TaxCaseAction =
   | { operation: "confirm_facts"; data: { fact_ids: string[] } }
   | { operation: "reject_fact"; data: { fact_id: string } }
+  | { operation: "edit_fact"; data: { fact_id: string; label: string; value: string } }
   | { operation: "change_year"; data: { tax_year: number } }
   | { operation: "update_reference_release"; data: { reference_release: string } }
   | { operation: "confirm_fact"; data: { fact_id: string } }

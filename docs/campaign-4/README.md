@@ -22,10 +22,10 @@ are closed. [Navigation](phase-12-sidebar-navigation.md) holds the behavior.
 
 **20D.2 and UI followup accepted October 21.** Tax review
 settings open in a dialog bounded by the visible screen; the previous completed
-year remains the editable default. Essential choices appear together in the
-conversation. A saved choice becomes a visible user reply and Audrey continues
-automatically, preserving unsent text and attachments. The compact box retains
-settings and collapsed findings. Internal IDs/passing checklist rows stay hidden;
+year remains the editable default. A saved choice becomes a visible user reply
+and Audrey continues automatically, preserving unsent text and attachments.
+The current facts followup replaces the original grouped confirmation/history
+presentation; settings and collapsed findings remain in the Toolbox. Internal IDs/passing checklist rows stay hidden;
 Audrey handles source verification herself. The generic degraded badge is removed
 throughout chat, including after deletion; actual outage indicators remain.
 The user moved on after the targeted presentation handoff; keep this flow closed.
@@ -41,8 +41,9 @@ or new library publication is needed to deploy this slice.
 local tool writer through the normal native run, with stop/reconnect and a ten-minute foreground limit. It saves
 a goal-scoped worksheet with linked facts, official passages, arithmetic and
 explicit limitations. Case edits make an earlier worksheet stale. The Toolbox
-keeps findings expandable and user confirmations explicit. Selected-file inventory
-is inspectable; it does not prove every page was read. The user-reported synthetic
+keeps findings expandable; document-derived or uncertain facts need user review.
+The current facts followup below removes redundant confirmation of direct
+statements. Selected-file inventory is inspectable; it does not prove every page was read. The user-reported synthetic
 baseline passed the requested arithmetic and year/withholding separation, with an
 official passage retained. This limited pass does not establish legal accuracy or
 certify a complete return. Broader accuracy and background work follow later.
@@ -81,11 +82,11 @@ work and requires explicit resume with fresh validation. Restart never launches
 model work. No repeat lifecycle check is queued.
 
 **20D.5 and Toolbox accepted October 22.** Native worksheets receive bounded
-source checks and targeted repair; owner confirmations and source applicability
-retain their separate authority. Tax review settings/progress/choices live in the
-right Toolbox rail (drawer on compact screens), with previous decisions above the
-current prompt. Ordinary chat replaces idle Start/Continue actions. The open panel
-hides its launcher; closing restores it and keyboard focus. Global scrollbars now
+source checks and targeted repair; user facts and source applicability
+retain their separate authority. Tax review settings/progress live in the
+right Toolbox rail (drawer on compact screens). The current facts followup below
+replaces the previously accepted choice history with editable saved facts. Ordinary
+chat replaces idle Start/Continue actions. The open panel hides its launcher; closing restores it and keyboard focus. Global scrollbars now
 use thin muted blue thumbs. The user's functional/UI checks passed; broader tax
 accuracy remains unverified.
 
@@ -97,13 +98,29 @@ still contradicts that unresolved state. Retain this failure in the model ledger
 do not tune prompts or repeat this scalar test until green. This diagnostic is
 finished, not a full tax-accuracy pass. Other five passes stay recorded.
 
-**Next — bounded 20E.2 native validation.** Keep the current design: models
-interpret retained official passages and propose work; owner confirmations,
-source/year links and code arithmetic remain separate. Validate one real chat
-flow from missing facts through confirmation to a cited worksheet, then one
-previously incorrect tax-year comparison. Record both outcomes and costs before
-deciding whether a concrete defect needs a fix or the supported scope needs a
-limit. No new rule engine, model change or repeated probe gate is queued.
+**20E.2 first native outcome, October 23:** the final cited worksheet gave
+$50,000 − $15,750 = $34,250 and kept $6,000 withholding separate. Its first answer
+applied the deduction before the necessary eligibility facts were supplied, so
+this is not an accuracy pass. Redundant confirmations and a blank continuation
+also made the flow unclear. Keep the concrete eligibility limitation recorded;
+the closed scalar probe stays closed.
+
+**Current — Tax review facts followup.** Facts explicitly stated in the current
+authenticated chat message are saved without a second confirmation. Extracted or
+uncertain facts still need review. The Toolbox shows editable current facts in a
+table, replacing the choice timeline. Corrections retain internal history and
+invalidate dependent work; genuine missing information is asked as a clear
+question with an answer box that sends a normal chat turn; the composer also
+remains available. There is no “I’ve provided this” shortcut.
+This backend/UI change needs `audrey` and `audrey-ui` rebuilt; acceptance is pending.
+
+**Then — finish bounded 20E.2 native validation.** Check the revised facts flow
+and decide a narrow correction or scope limit for the observed premature
+deduction. Follow with the previously incorrect tax-year comparison, checking
+claims against retained passages. Record observed outcomes and available costs
+once. Source/year links, user authority and code arithmetic remain separate;
+neither UI polish nor model agreement establishes tax accuracy. No new rule
+engine, model change or repeated probe gate is queued.
 
 **Toolbox worksheet layout followup:** reserve a complete worksheet-summary row
 on short screens and scroll the expanded content rather than clipping its action.
@@ -120,8 +137,8 @@ details; touch can reveal them and Escape/outside interaction dismisses them.
 The compact header retains the badge while destructive chat actions stay in mobile
 navigation. Composer privacy prose is removed. Tax review's filing caution and
 settings behavior stay accepted. This UI and the preceding eligibility followup
-were deployed by rebuilding audrey and audrey-ui. The current layout correction
-rebuilds only audrey-ui; no index, model or source update is needed.
+were deployed by rebuilding audrey and audrey-ui. The current facts followup
+rebuilds audrey and audrey-ui; no index, model or source update is needed.
 
 **MiniMax M3.1 Flash:** configured as an unmeasured cloud draft/research candidate
 in mixed, Cloud and selected Research panels. Kimi K3 stays first, panel worker
@@ -158,7 +175,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Workflow accepted; diagnostic closed with a known output limitation; native accuracy next |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Editable facts followup; native eligibility limitation retained; tax-year comparison queued |
 
 ## Build queue
 
@@ -195,8 +212,11 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **20E.1 diagnostic concluded:** missing-fact stop and withheld result
   observed; retain the raw applied-value inconsistency as a known failure.
   No further scalar-probe rerun is queued; other five passes stay recorded.
-- [ ] **20E.2:** one native missing-facts/confirmation/worksheet flow and one
-  known tax-year comparison; record outcomes, then decide any narrow fix/scope limit.
+- [ ] **Current facts followup:** accept the editable Toolbox facts table,
+  immediate saving of direct chat statements and clear missing-information flow.
+- [ ] **20E.2:** decide a narrow fix or scope limit for premature deduction in
+  the observed native worksheet, then assess the known tax-year comparison once.
+  The correct final arithmetic alone does not close the eligibility failure.
 
 Tax year/jurisdiction and reference release belong to the case record; 20D.1 does
 not add premature tax-specific Project fields. OCR/media, fine-tuning and state

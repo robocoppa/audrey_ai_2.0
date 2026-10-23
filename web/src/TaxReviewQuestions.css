@@ -1,36 +1,39 @@
 .tax-review-question { display: flex; flex-direction: column; gap: 0.55rem; flex: 1 1 auto; min-height: 0; min-width: 0; }
 .tax-question-heading { flex: none; margin: 0; color: var(--text-soft); font-size: 0.78rem; font-weight: 500; }
 .tax-question-flow:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 0.7rem; }
-.tax-question-flow { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 0.7rem; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0.1rem 0.2rem 0.2rem 0; }
+.tax-question-flow { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 0.7rem; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 0.1rem 0.2rem 0.3rem 0; }
 .tax-question-flow > * { flex: 0 0 auto; }
-.tax-choice-history { display: grid; gap: 0.55rem; margin: 0; padding: 0; list-style: none; }
-.tax-choice-answered { min-width: 0; padding: 0.65rem 0.8rem; border: 1px solid var(--border); border-radius: 0.7rem; background: var(--surface); overflow-wrap: anywhere; }
-.tax-choice-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.3rem; margin-bottom: 0.3rem; }
-.tax-choice-outcome, .tax-choice-year { color: var(--muted); font-size: 0.68rem; }
-.tax-choice-outcome { display: inline-flex; align-items: center; gap: 0.3rem; }
-.tax-choice-answered > strong { color: var(--text-soft); font-size: 0.78rem; font-weight: 500; }
-.tax-choice-answered > p { margin: 0.2rem 0 0; color: var(--text); font-size: 0.8rem; line-height: 1.5; white-space: pre-wrap; }
-.tax-question-card { padding: 0.85rem 1rem; border: 1px solid var(--border); border-radius: 0.8rem; background: var(--surface-deep); }
-.tax-question-change { flex: none; padding: 0.2rem 0.5rem; border: 1px solid var(--border); border-radius: 0.4rem; background: transparent; color: var(--muted); font: inherit; font-size: 0.72rem; cursor: pointer; }
-.tax-question-value > span { margin-left: auto; }
-
-.tax-question-intro { margin: 0 0 0.5rem; color: var(--muted); font-size: 0.85rem; font-weight: 400; }
-.tax-question-facts { display: grid; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
-.tax-question-facts > li { display: grid; min-width: 0; gap: 0.45rem; }
-.tax-question-value { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.3rem 0.7rem; overflow-wrap: anywhere; }
-.tax-question-value > strong { color: var(--text-soft); font-size: 0.8rem; font-weight: 500; }
-.tax-question-value > span { color: var(--text); font-size: 0.84rem; }
-.tax-question-actions { margin-top: 0.8rem; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.tax-facts-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; border: 1px solid var(--border); border-radius: 0.65rem; overflow: hidden; background: var(--surface); font-size: 0.76rem; line-height: 1.5; }
+.tax-facts-table col:first-child { width: 36%; }
+.tax-facts-table col:last-child { width: 3.1rem; }
+.tax-facts-table th, .tax-facts-table td { text-align: left; vertical-align: top; padding: 0.55rem 0.5rem; overflow-wrap: anywhere; }
+.tax-facts-table thead th { background: var(--surface-raised); color: var(--muted); font-size: 0.68rem; font-weight: 500; }
+.tax-facts-table tbody tr + tr > * { border-top: 1px solid var(--border); }
+.tax-facts-table tbody th { color: var(--text-soft); font-weight: 500; }
+.tax-fact-value { color: var(--text); white-space: pre-wrap; }
+.tax-fact-origin { display: block; margin-top: 0.25rem; color: var(--muted); font-size: 0.64rem; font-weight: 400; }
+.tax-fact-year { display: block; margin-top: 0.3rem; color: var(--muted); font-size: 0.66rem; font-weight: 400; }
+.tax-fact-edit { min-height: 1.8rem; margin: -0.1rem -0.15rem; padding: 0.2rem 0.35rem; border: 1px solid transparent; border-radius: 0.35rem; color: var(--accent); background: transparent; font: inherit; font-size: 0.69rem; cursor: pointer; }
+.tax-fact-edit:hover { border-color: var(--border-strong); background: var(--surface-raised); }
+.tax-fact-edit:disabled { color: var(--muted); opacity: 0.5; cursor: default; }
+.tax-question-card { min-width: 0; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.7rem; background: var(--surface-deep); }
+.tax-question-card > h4 { margin: 0 0 0.45rem; color: var(--text-soft); font-size: 0.8rem; font-weight: 550; }
+.tax-question-intro { margin: 0 0 0.65rem; color: var(--text-soft); font-size: 0.8rem; line-height: 1.6; overflow-wrap: anywhere; }
+.tax-question-actions { margin-top: 0.65rem; display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .tax-question-actions button, .tax-question-error button { display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; min-height: 2rem; padding: 0.35rem 0.65rem; border: 1px solid var(--border); border-radius: 0.5rem; background: transparent; color: var(--text-soft); font: inherit; font-size: 0.72rem; cursor: pointer; }
 .tax-question-actions .tax-question-confirm { border-color: var(--border-strong); background: var(--surface-active); color: var(--text); }
 .tax-question-actions button:hover, .tax-question-error button:hover { border-color: var(--accent); background: var(--surface-raised); }
 .tax-question-actions button:disabled, .tax-question-error button:disabled { opacity: 0.5; cursor: default; }
 .tax-question-context, .tax-question-source { margin: 0.45rem 0 0; color: var(--muted); font-size: 0.67rem; line-height: 1.5; }
-.tax-question-source summary { width: fit-content; cursor: pointer; }
+.tax-question-source summary { width: fit-content; cursor: pointer; overflow-wrap: anywhere; }
 .tax-question-source blockquote { max-height: 7rem; overflow-y: auto; margin: 0.4rem 0 0; padding: 0.3rem 0.6rem; border-left: 2px solid var(--border-strong); color: var(--text-soft); white-space: pre-wrap; overflow-wrap: anywhere; }
-.tax-question-notice { margin: 0.45rem 0 0; color: var(--muted); font-size: 0.68rem; }
+.tax-fact-editor, .tax-question-answer label { display: grid; gap: 0.6rem; }
+.tax-fact-editor label, .tax-question-answer label { color: var(--muted); font-size: 0.7rem; }
+.tax-fact-editor label { display: grid; gap: 0.3rem; }
+.tax-fact-editor input, .tax-fact-editor textarea, .tax-question-answer textarea { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--border-strong); border-radius: 0.45rem; background: var(--surface); color: var(--text); padding: 0.5rem 0.55rem; font: inherit; font-size: 0.78rem; line-height: 1.5; resize: vertical; }
+.tax-fact-editor input:focus-visible, .tax-fact-editor textarea:focus-visible, .tax-question-answer textarea:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.tax-fact-editor .tax-question-actions { margin-top: 0; }
+.tax-question-notice { margin: 0; color: var(--muted); font-size: 0.68rem; }
 .tax-question-error { margin-top: 0.5rem; color: var(--danger); font-size: 0.7rem; }
 .tax-question-error p { margin: 0 0 0.4rem; }
-@media (max-width: 600px) { .tax-question-actions button { min-height: 2.5rem; } }
-
-.tax-question-change:disabled { opacity: 0.5; cursor: default; }
+@media (max-width: 600px) { .tax-question-actions button, .tax-fact-edit { min-height: 2.5rem; } }

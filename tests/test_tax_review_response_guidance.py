@@ -53,7 +53,7 @@ async def test_saved_user_fact_question_is_retained_with_response_guidance(state
         "next_question": "Are these wages correct?",
     })
     assert result["review"]["status"] == "needs_input"
-    assert "Group proposed facts in the review controls" in result["response_guidance"]
+    assert "Direct statements already saved with record_user_fact need no repeat confirmation" in result["response_guidance"]
     saved = (await state.client.get(state.path)).json()["case"]
     assert saved["review"]["next_question"] == "Are these wages correct?"
     assert saved["facts"][0]["status"] == "proposed"

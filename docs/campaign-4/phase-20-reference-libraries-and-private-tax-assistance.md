@@ -61,9 +61,9 @@ its first application; existing topic datasets and ordinary chat stay intact.
 
 1. Create a Project, choose **Tax assistance**, and set the tax year and
    federal/state jurisdictions. Select a published reference-library release.
-2. Explain the situation through a short interview covering income, household,
-   business, investments, property and other potentially relevant events.
-   Audrey expands the questions when facts indicate another applicable topic.
+2. Explain the situation in chat. Explicit current-message facts are saved
+   directly and shown in the Toolbox facts table; the user need not confirm
+   them again. Audrey asks only for missing information relevant to the goal.
 3. Upload actual forms and statements. Audrey records document coverage,
    flags unread or uncertain material and asks the user to confirm important
    amounts against the original page/box.
@@ -485,21 +485,22 @@ OCR/media remain deferred until a case requires them.
 
 #### Tax review tool and case record
 
-**20D.2 foundation and Toolbox presentation accepted October 22.**
+**20D.2 foundation accepted October 22; facts followup October 23.**
 Select Private and Tax review in Tools & skills to open the right-side Toolbox.
 Its settings expand inline; choose the federal return year and goal, then save.
 The year defaults to the previous completed calendar year. The Toolbox scrolls
-independently of chat, with saved choices above the current grouped prompt and
-collapsed worksheet findings below. Confirmed/rejected facts and addressed items
-reconstruct from canonical statuses/timestamps after refresh. Later choices remain
-visible for the mounted case. This is a current-case timeline, not a new decision
-audit spanning year changes that reset owner confirmations.
+independently of chat, with a compact current facts table and collapsed worksheet
+findings. Fact names and values remain editable and persist after refresh.
+Corrections replace the current row while retaining bounded history internally;
+confirmed/rejected prompts and addressed-item history are not another user-facing
+timeline. Extracted or uncertain details awaiting review remain clearly separate
+from saved accepted facts.
 
 On compact screens the Toolbox is a right-side modal drawer with Escape, close,
 backdrop dismissal and restored trigger focus. It starts closed for a saved case;
-selecting Tax review opens setup. A small pending-count badge makes new choices
-visible without forcing the drawer over the chat. Desktop uses a docked rail. A
-larger right-edge tab is centered vertically, with sideways lettering whose tops
+selecting Tax review opens setup. A small pending-count badge makes details
+needing review visible without forcing the drawer over the chat. Desktop uses a
+docked rail. A larger right-edge tab is centered vertically, with sideways lettering whose tops
 face left. The tab hides while open; closing restores it and keyboard focus. A
 narrow edge gutter keeps it clear of chat controls. App scrollbars use thin muted
 blue thumbs with transparent tracks and a system-color fallback for high-contrast
@@ -509,12 +510,19 @@ read-only.
 
 No idle Start/Continue action is shown. The user sends a normal chat prompt to
 start or continue work; active Pause/Cancel and genuine interruption Resume remain.
-An explicit saved owner choice sends one visible native user reply and starts the
-next review, preserving unsent composer text and files. A failed/stale save sends
-no reply. Only the owner confirms facts. Internal IDs, revisions and coverage
-checklists stay in tool feedback. Worksheet-save guidance separates an explicit
-source-stated year from unresolved catalog applicability and asks only for needed
-user facts/decisions; it does not promote evidence or silently resolve saved gaps.
+A saved owner correction or review choice sends one visible native user reply
+and continues the review, preserving unsent composer text and files. A failed or
+stale save sends no reply. Direct statements already saved from the current chat
+message need no confirmation click. A necessary missing fact is asked in plain
+language, with an answer box that submits a normal native user turn. The chat
+composer remains available too. Missing-item records keep a concise topic label
+and a distinct question explaining the information needed. The Toolbox does not
+offer an “I’ve provided this” button that resolves a gap without receiving
+information. A saved current-message fact can address the linked gap only when
+the statement answers it; partial answers leave remaining information open. Internal IDs, revisions and coverage checklists stay
+in tool feedback. Worksheet-save guidance separates an explicit source-stated
+year from unresolved catalog applicability; source verification remains Audrey’s
+work, not a user decision.
 
 The Toolbox retains a muted filing caution: AI can be wrong; check sources and
 figures before filing, and Audrey does not prepare or file a return. Private
@@ -525,7 +533,8 @@ and mode lock. Touch reveals the same text; Escape/outside interaction dismisses
 it. The compact header keeps the badge while Archive/Delete stay in mobile
 navigation. Composer disclosure prose is removed. Neither notice adds an
 acknowledgement gate. The generic degraded badge stays removed; actual outage
-indicators remain. The Toolbox flow is accepted; no repeat workflow check is due.
+indicators remain. Accepted Toolbox layout/lifecycle behavior stays closed;
+only the changed facts and missing-information flow needs browser acceptance.
 
 Each conversation owns one case; Project membership is derived from its canonical
 conversation. A saved case does not activate Tax review automatically after reload.
@@ -533,12 +542,24 @@ Automatic Private retains its existing tools and behavior. The additive schema 2
 record lives in the application database, participates in normal SQLite backup,
 and cascades on conversation deletion or owner purge.
 
-The in-process tool inspects/checks the case, proposes facts, retains exact IRS
-passages, runs decimal calculations and records missing items/return dependencies.
-Only owner UI actions confirm/reject proposed facts, resolve missing items or
-change the year. Extracted
+The in-process tool inspects/checks the case, saves direct statements, proposes
+uncertain facts, retains exact IRS passages, runs decimal calculations and records
+missing items/return dependencies. `record_user_fact` saves a verbatim excerpt
+from the current authenticated native user message without a second confirmation.
+The server binds owner, conversation, run/message identity and original text;
+model-supplied labels or a `user_statement` kind alone establish no authority.
+Retrieved documents, Project instructions and old assistant/history text cannot
+supply this current-message binding. This records what the user stated, not an
+independent verification of its truth or a model’s normalized interpretation.
+
+Document-derived, inferred or ambiguous values remain proposals. Only owner UI
+actions confirm/reject those proposals, edit facts or change the year. Extracted
 facts require a selected Private file, original checksum, exact page/text and
 proposed normalization; a passage check does not validate that normalization.
+An explicit correction updates the identified fact in place and retains its prior
+value/source internally. Dependent calculations and return items require recheck,
+and the previous worksheet becomes stale in the same save. Repeating unchanged
+information is a no-op, not another active fact or fresh verification.
 Official evidence must match an exact page in the pinned current release.
 Model-supplied tax-year applicability stays proposed/unknown. Checklists report
 coverage, including conflicting/unread material, without certifying tax correctness.
@@ -583,9 +604,9 @@ are described below.
 The model saves a bounded worksheet with a summary, linked findings and the next
 question. The server checks all dependency IDs and rejects rejected facts or stale
 support. It derives needs-input/evidence-limited status without letting the model
-certify tax correctness. Confirmations, missing items and changed year/library
-remain explicit user choices. Meaningful case changes invalidate the saved
-worksheet; no-op retries do not. Original evidence stays retained. Worksheets are
+certify tax correctness. Review of extracted/uncertain facts and changes to
+year/library remain explicit user choices; answers in chat can supply missing
+facts. Meaningful case changes invalidate the saved worksheet; no-op retries do not. Original evidence stays retained. Worksheets are
 covered by the existing case backup/purge and deletion rules in schema23.
 
 The Toolbox keeps saved status and worksheet details collapsed when idle.
@@ -623,8 +644,10 @@ Keep a compact durable record of:
 - Return year and federal/state scope, task goal, selected file IDs/revisions and
   pinned reference release. Calendar year and PDF revision date do not establish
   the return year. A new edition/release becomes an explicit case update.
-- User statements, extracted facts and user-confirmed facts as distinct states.
-  Only a user action can confirm a proposal. Unknown stays unknown.
+- Direct current-message statements, extracted/inferred proposals and accepted
+  facts with their actual authority/source. Direct statements need no repeated
+  confirmation; only a user action accepts an uncertain proposal. Unknown stays
+  unknown. Corrections retain internal history, not duplicate active table rows.
 - Document inventory and unread/uncertain pages; each extracted amount carries
   file/checksum, page/box, original text and normalization. Do not require full
   SSNs, bank details or unrelated identifiers for a planning/calculation task.
@@ -760,9 +783,11 @@ cancellation and unknown-usage failures retain the existing task pause boundary.
 
 A strict server-supplied report binds the exact validated worksheet digest and
 case revision and commits beside it under existing task fences. Failed findings
-are retained as partial work if the process stops before repair. Models and
-browser actions cannot inject assessments, approve personal facts or promote
-source tax-year status. A case edit invalidates the current assessment. Only a
+are retained as partial work if the process stops before repair. Model and
+browser payloads cannot inject assessments or promote source tax-year status.
+An assessment does not approve personal facts: those retain the current-message
+or explicit owner-action authority defined above. A case edit invalidates the
+current assessment. Only a
 current checked worksheet can finish a native task; unresolved checks remain
 paused or wait for the owner's needed facts. Model agreement does not prove
 legal correctness. The initial checker intentionally uses the same installed
@@ -856,15 +881,31 @@ Use the existing native flow, with two concrete scenarios:
 
 1. One synthetic household worksheet: leave relevant eligibility facts unknown,
    check that Audrey asks only the necessary grouped question and keeps the
-   conclusion unresolved, then explicitly confirm the facts. Audrey must read the
-   applicable official passage, retain its year/source, and save the requested
-   limited worksheet with code-calculated arithmetic and actual remaining gaps.
+   conclusion unresolved, then supply the facts in chat. Direct statements should
+   appear in the current facts table without another confirmation. Audrey must
+   retain the applicable official passage/year and save the requested limited
+   worksheet with code-calculated arithmetic and actual remaining gaps.
 2. One previously incorrect tax-year comparison below: verify the substantive
    claims against the retained official passages. Catalog listings and fluent
    prose alone do not establish a rule or its effective year.
 
-Record outcomes and costs once, including failures. Correct a concrete native
-defect if demonstrated, or narrow the supported task; do not reopen the isolated
+**October 23 native receipt:** the final worksheet cited Publication 17 (2025),
+applied $15,750 to $50,000 wages for $34,250 and kept $6,000 withholding separate.
+However, the first answer already applied that deduction before age, blindness
+and dependency were supplied. Final arithmetic therefore does not pass the
+missing-eligibility behavior. The transcript also exposed redundant confirmation,
+an empty continuation answer and a confusing retained prompt history. It does
+not provide a matched token/latency report. Keep the outcome and native eligibility
+limitation; do not reopen the concluded scalar probe.
+
+The user-authorized current slice replaces that confirmation/history flow with
+the editable facts contract above. Accept its changed browser behavior before
+moving to the tax-year comparison. The facts UI does not itself fix premature
+application of a deduction; decide a narrow native correction or supported-scope
+limit from the observed failure.
+
+Record outcomes and available costs once, including failures. Correct a concrete
+native defect if demonstrated, or narrow the supported task; do not reopen the isolated
 scalar test or expand into another prompt-tuning sweep. Closure is an explicit
 decision about the observed task, not every test eventually turning green.
 Unanswered facts, unresolved source conflicts and broader return completeness
@@ -873,9 +914,10 @@ remain visible limitations. No model promotion or full-return acceptance follows
 #### Accuracy and visible user flow
 
 User flow: select Private → open a tax Project → choose Tax review → specify
-return year and jurisdiction → upload/select documents → review proposed facts
-and the plan → send a review prompt. Show one compact Toolbox progress item such as
-“Checking income records · 3 of 8 checks complete,” with expandable current
+return year and jurisdiction → state facts in chat and/or upload documents →
+inspect current facts and review extracted/uncertain details → send a review
+prompt or answer a genuinely missing question. Show one compact Toolbox progress
+item such as “Checking income records · 3 of 8 checks complete,” with expandable current
 findings, missing items and Pause/Resume/Cancel. Keep the existing Models,
 Tool calls and Sources disclosures. Completion is a cited worksheet and a
 clear question list; this phase does not file returns or author office documents.

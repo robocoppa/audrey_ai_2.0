@@ -174,7 +174,7 @@ def _record_view(record: dict) -> dict:
     # rather than slicing content and silently changing what the reviewer sees.
     return {key: value for key, value in record.items() if key not in {
         "created_at", "created_by", "operation_key", "operation_digest",
-        "confirmed_at", "confirmed_by",
+        "confirmed_at", "confirmed_by", "history",
     }}
 
 

@@ -11,9 +11,13 @@ import asyncio
 import datetime as dt
 import hashlib
 import json
+import re
 import sqlite3
 import threading
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any, Literal
 
@@ -50,6 +54,67 @@ class TaxCaseConflictError(TaxCaseError):
 
 class TaxCaseAccessError(TaxCaseError):
     """An active owner and canonical Private conversation are required."""
+
+
+@dataclass
+class TaxUserStatement:
+    """Trusted native turn context; model payloads cannot supply this authority."""
+
+    user_id: str
+    conversation_id: str
+    run_id: str
+    message_id: str
+    content: str
+    active: bool = True
+
+
+_USER_STATEMENT: ContextVar[TaxUserStatement | None] = ContextVar("tax_user_statement", default=None)
+
+
+def current_user_statement() -> TaxUserStatement | None:
+    statement = _USER_STATEMENT.get()
+    return statement if statement is not None and statement.active else None
+
+
+def is_user_statement_excerpt(content: str, value: str) -> bool:
+    """Require an intact excerpt, not a number/token fragment or dropped negation.
+
+    This validates provenance, not every semantic interpretation of natural text.
+    The writer must still preserve complete assertions and leave ambiguity proposed.
+    """
+    if not value or not value.strip():
+        return False
+    for match in re.finditer(re.escape(value), content):
+        before, after = content[:match.start()], content[match.end():]
+        if before and before[-1].isalnum() and value[0].isalnum():
+            continue
+        if after and after[0].isalnum() and value[-1].isalnum():
+            continue
+        # Do not turn 50,000.00 into 50,000 or 50,000 into 000.
+        if (value[0].isdigit() and re.search(r"[0-9][.,]$", before)) or (
+            value[-1].isdigit() and re.match(r"[.,][0-9]", after)
+        ):
+            continue
+        # A negated assertion must quote the negation as part of the fact value.
+        if re.search(r"\b(?:not|no|never|without|cannot|[A-Za-z]+n't)\s+(?:[A-Za-z]+\s+){0,2}$",
+                     before, re.IGNORECASE):
+            continue
+        return True
+    return False
+
+
+@contextmanager
+def user_statement_scope(
+    *, user_id: str, conversation_id: str, run_id: str, message_id: str, content: str,
+):
+    """Bind one canonical native user turn; copied contexts expire with its scope."""
+    statement = TaxUserStatement(user_id, conversation_id, run_id, message_id, content)
+    token = _USER_STATEMENT.set(statement)
+    try:
+        yield statement
+    finally:
+        statement.active = False
+        _USER_STATEMENT.reset(token)
 
 
 class _Payload(BaseModel):
@@ -93,6 +158,26 @@ class ProposeFactPayload(_AppendPayload):
         if self.kind == "user_statement" and self.provenance is not None:
             raise ValueError("only extracted facts may have document provenance")
         return self
+
+
+class RecordUserFactPayload(_Payload):
+    label: Label
+    value: Annotated[str, StringConstraints(min_length=1, max_length=4000)]
+    fact_id: Identifier | None = None
+    addresses: EntryIds = Field(default_factory=list)
+
+    @field_validator("addresses")
+    @classmethod
+    def unique_addresses(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("missing item IDs must be unique")
+        return value
+
+
+class EditFactPayload(_Payload):
+    fact_id: Identifier
+    label: Label
+    value: Annotated[str, StringConstraints(min_length=1, max_length=4000)]
 
 
 class ConfirmFactPayload(_Payload):
@@ -169,6 +254,7 @@ class RecordCalculationPayload(_RecheckPayload):
 
 class AddMissingItemPayload(_AppendPayload):
     label: Label
+    question: Annotated[str, Field(max_length=500)] = ""
 
 
 class ResolveMissingItemPayload(_Payload):
@@ -206,6 +292,8 @@ class _CaseCreation(_Payload):
 
 OPERATION_MODELS: dict[str, type[_Payload]] = {
     "propose_fact": ProposeFactPayload,
+    "record_user_fact": RecordUserFactPayload,
+    "edit_fact": EditFactPayload,
     "confirm_fact": ConfirmFactPayload,
     "confirm_facts": ConfirmFactsPayload,
     "reject_fact": RejectFactPayload,
@@ -242,7 +330,12 @@ def validate_operation(operation: str, data: dict[str, Any]) -> dict[str, Any]:
     if model is None:
         raise TaxCaseError("Unsupported tax case operation.")
     try:
-        return model.model_validate(data).model_dump(mode="json")
+        payload = model.model_validate(data).model_dump(mode="json")
+        # Preserve historical idempotency digests when an old label-only gap is
+        # replayed; optional presentation text need not change its stored shape.
+        if operation == "add_missing_item" and not payload.get("question"):
+            payload.pop("question", None)
+        return payload
     except ValidationError as exc:
         raise TaxCaseError(f"Invalid {operation} payload.") from exc
 
@@ -338,6 +431,7 @@ class TaxCasesRepository:
         data: dict[str, Any],
         actor: Literal["model", "user"] = "model",
         verification: dict[str, Any] | None = None,
+        user_statement: TaxUserStatement | None = None,
     ) -> dict[str, Any]:
         if type(expected_revision) is not int or expected_revision < 1:
             raise TaxCaseError("A positive expected revision is required.")
@@ -376,6 +470,7 @@ class TaxCasesRepository:
             in {
                 "confirm_fact",
                 "confirm_facts",
+                "edit_fact",
                 "reject_fact",
                 "resolve_missing_item",
                 "change_year",
@@ -393,6 +488,7 @@ class TaxCasesRepository:
             payload,
             actor,
             verified_report,
+            user_statement,
         )
 
     def _update_sync(
@@ -404,6 +500,7 @@ class TaxCasesRepository:
         payload: dict[str, Any],
         actor: str,
         verification: dict[str, Any] | None,
+        user_statement: TaxUserStatement | None,
     ) -> dict[str, Any]:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
@@ -426,7 +523,13 @@ class TaxCasesRepository:
                     raise TaxCaseConflictError(
                         "The Private task lease or inputs changed."
                     ) from None
-                changed = _apply_operation(case, operation, payload, actor, verification)
+                if operation == "record_user_fact":
+                    self._assert_user_statement_locked(
+                        user_id, conversation_id, payload, user_statement,
+                    )
+                changed = _apply_operation(
+                    case, operation, payload, actor, verification, user_statement,
+                )
                 if changed:
                     case["revision"] += 1
                     case["updated_at"] = _utc_now()
@@ -466,6 +569,27 @@ class TaxCasesRepository:
                     self._conn.rollback()
                 raise
         return case
+
+    def _assert_user_statement_locked(
+        self, user_id: str, conversation_id: str, payload: dict[str, Any],
+        statement: TaxUserStatement | None,
+    ) -> None:
+        if (
+            statement is None or not statement.active
+            or statement.user_id != user_id or statement.conversation_id != conversation_id
+            or not is_user_statement_excerpt(statement.content, payload["value"])
+        ):
+            raise TaxCaseError("A fact must quote the current user's own message exactly.")
+        row = self._conn.execute(
+            "SELECT message_id,run_id,content FROM app_messages "
+            "WHERE user_id=? AND conversation_id=? AND role='user' "
+            "ORDER BY sequence_no DESC LIMIT 1", (user_id, conversation_id),
+        ).fetchone()
+        if (
+            row is None or row["message_id"] != statement.message_id
+            or row["run_id"] != statement.run_id or row["content"] != statement.content
+        ):
+            raise TaxCaseError("The current user-message source changed or is unavailable.")
 
     def _assert_context_locked(self, user_id: str, conversation_id: str) -> str | None:
         if (
@@ -520,7 +644,10 @@ def _apply_operation(
     payload: dict[str, Any],
     actor: str,
     verification: dict[str, Any] | None = None,
+    user_statement: TaxUserStatement | None = None,
 ) -> bool:
+    if operation in {"edit_fact", "record_user_fact"}:
+        return _write_current_fact(case, operation, payload, actor, user_statement)
     if operation == "save_review":
         # Revalidate even an identical report: a later fact rejection, year or
         # library change must never refresh stale support merely by replaying it.
@@ -547,6 +674,8 @@ def _apply_operation(
         old_year, new_year = case["tax_year"], payload["tax_year"]
         if old_year == new_year:
             return False
+        for item in case["missing_items"]:
+            item.setdefault("case_tax_year", old_year)
         for entry in case["facts"]:
             entry.setdefault("case_tax_year", old_year)
             if entry["status"] == "confirmed":
@@ -664,7 +793,7 @@ def _apply_operation(
     legacy_digest = hashlib.sha256(
         json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
-    year_scoped = category in {"facts", "calculations", "return_items"}
+    year_scoped = category in {"facts", "calculations", "return_items", "missing_items"}
     release_scoped = category in {"evidence", "calculations", "return_items"}
     payload_content = dict(content)
     if year_scoped:
@@ -741,6 +870,75 @@ def _apply_operation(
         entry["status"] = "unresolved"
     entries.append(entry)
     _link_superseded(superseded_entries, entry["id"])
+    return True
+
+
+def _write_current_fact(
+    case: dict[str, Any], operation: str, payload: dict[str, Any], actor: str,
+    statement: TaxUserStatement | None,
+) -> bool:
+    """Replace a current fact atomically; retained history is not another active row."""
+    fact_id = payload.get("fact_id")
+    if fact_id is not None:
+        fact = _entry(case["facts"], fact_id)
+    else:
+        # Repeating the same quoted statement should not create duplicate rows.
+        fact = next((item for item in case["facts"] if item.get("label") == payload["label"]
+                     and item.get("value") == payload["value"]
+                     and item.get("case_tax_year", case["tax_year"]) == case["tax_year"]
+                     and item.get("status") != "rejected"), None)
+    if fact is None and fact_id is None and any(
+        item.get("label") == payload["label"] and item.get("status") != "rejected"
+        and item.get("case_tax_year", case["tax_year"]) == case["tax_year"]
+        for item in case["facts"]
+    ):
+        raise TaxCaseError("A current fact already has this label. Use its fact_id to correct it.")
+    addressed = [_entry(case["missing_items"], identifier)
+                 for identifier in payload.get("addresses", [])]
+    if any(item.get("case_tax_year", case["tax_year"]) != case["tax_year"]
+           for item in addressed):
+        raise TaxCaseError("Only current-year missing items may be addressed.")
+    if fact is not None and fact.get("case_tax_year", case["tax_year"]) != case["tax_year"]:
+        raise TaxCaseError("A prior-year fact needs a new current-year record.")
+    source = statement.message_id if operation == "record_user_fact" and statement else None
+    confirmer = "user_message" if source else "user"
+    fact_changed = fact is None or any(fact.get(key) != payload[key] for key in ("label", "value"))
+    fact_changed = fact_changed or fact.get("status") != "confirmed"
+    changed = fact_changed or any(
+        item.get("status") != "resolved" for item in addressed
+    )
+    if not changed:
+        return False
+    now = _utc_now()
+    if fact is None:
+        if len(case["facts"]) >= MAX_CATEGORY_ENTRIES:
+            raise TaxCaseError("The tax case category has reached its entry limit.")
+        fact = {"id": _new_id(), "created_at": now, "created_by": actor,
+                "case_tax_year": case["tax_year"]}
+        case["facts"].append(fact)
+    elif fact_changed:
+        previous = {key: value for key, value in fact.items() if key != "history"}
+        fact.setdefault("history", []).append(previous)
+        for key in ("provenance", "rejected_at", "rejected_by", "rejected_tax_year",
+                    "operation_key", "source_message_id"):
+            fact.pop(key, None)
+        for item in [*case["calculations"], *case["return_items"]]:
+            if fact["id"] in item.get("fact_ids", []):
+                item.update(status="needs_recheck", recheck_for_fact_ids=[fact["id"]])
+    if fact_changed:
+        fact.update(label=payload["label"], value=payload["value"], kind="user_statement",
+                    provenance=None, status="confirmed", confirmed_at=now, confirmed_by=confirmer,
+                    confirmed_tax_year=case["tax_year"], updated_at=now)
+        if source:
+            fact["source_message_id"] = source
+        fact["operation_digest"] = hashlib.sha256(
+            json.dumps({key: fact[key] for key in ("label", "value", "kind", "case_tax_year")},
+                       sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    for item in addressed:
+        if item.get("status") != "resolved":
+            item.update(status="resolved", resolved_at=now, resolved_by="user_message",
+                        resolved_with_fact_id=fact["id"], source_message_id=source)
     return True
 
 
@@ -1088,6 +1286,8 @@ def tax_case_checklist(case: dict[str, Any]) -> dict[str, Any]:
             and replacement.get("status") in {"recorded", "proposed"}
         ):
             continue
+        if item.get("recheck_for_fact_ids"):
+            dependency_issues.append(f"Recheck item {item['id']} after a saved fact changed.")
         if item.get("recheck_for_reference_release") or item.get(
             "case_reference_release", case.get("reference_release")
         ) != case.get("reference_release"):

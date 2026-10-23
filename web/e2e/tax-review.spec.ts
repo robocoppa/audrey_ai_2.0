@@ -82,6 +82,8 @@ async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCou
         taxCase = { ...taxCase, tax_year: body.data.tax_year, revision: taxCase.revision + 1,
           facts: taxCase.facts.map((fact) => ({ ...fact, case_tax_year: fact.case_tax_year ?? taxCase!.tax_year,
             status: fact.status === "confirmed" ? "proposed" : fact.status })) };
+      } else if (body.operation === "edit_fact") {
+        taxCase = { ...taxCase, revision: taxCase.revision + 1, facts: taxCase.facts.map((fact) => fact.id === body.data.fact_id ? { ...fact, label: body.data.label, value: body.data.value, status: "confirmed" } : fact) };
       } else if (body.operation === "reject_fact") {
         taxCase = { ...taxCase, revision: taxCase.revision + 1, facts: taxCase.facts.map((fact) => fact.id === body.data.fact_id ? { ...fact, status: "rejected" } : fact) };
       } else {
@@ -99,14 +101,17 @@ async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCou
       if (taxCase && url.searchParams.get("skill") === "tax-review") {
         if (last.startsWith("I confirm these details")) {
           taxCase = fixtureCase("group_reviewed");
-          // A long saved choice history proves the rail scrolls independently.
+          // A long current facts proves the rail scrolls independently.
           const prior = taxCase.facts[0];
           taxCase.facts = [...Array.from({ length: options.historyCount ?? 0 }, (_, index) => ({
             ...prior, id: `tax_earlier_${index}`, label: `Earlier confirmed detail ${index + 1}`,
             confirmed_at: `2026-10-19T12:00:${String(index).padStart(2, "0")}Z`,
           })), ...taxCase.facts];
         }
-        else if (!last.startsWith("The saved ")) taxCase = fixtureCase("group_proposed");
+        else if (last === "I was 40.") {
+          taxCase = { ...taxCase, revision: taxCase.revision + 1, missing_items: [],
+            facts: [...taxCase.facts, { ...taxCase.facts[0], id: "age_fact", label: "Age at year-end", value: "40", status: "confirmed" }] };
+        } else if (!last.startsWith("I updated ") && !last.startsWith("The saved ")) taxCase = fixtureCase("group_proposed");
       }
       if (privateTask) privateTask = { ...privateTask, revision: privateTask.revision + 1,
         status: "completed", stop_reason: "", native_run_id: runId };
@@ -126,7 +131,11 @@ async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCou
       error_code: privateTask?.status === "paused" ? "private_task_paused" : "", title_pending: false });
     await route.abort("failed");
   });
-  return { requests, skills, agentBodies, offerLibraryUpdate() {
+  return { requests, skills, agentBodies, askQuestion() {
+    if (!taxCase) throw new Error("Create the case first.");
+    taxCase = { ...taxCase, revision: taxCase.revision + 1, missing_items: [{ id: "need_age", label: "Age",
+      question: "What was your age at the end of 2025?", status: "unresolved" }] };
+  }, offerLibraryUpdate() {
     if (!taxCase) throw new Error("Create the case before offering a library update.");
     taxCase = { ...taxCase, reference_update: { status: "update_available", release_id: "rel_updated_library" } };
   } };
@@ -157,7 +166,7 @@ async function closeToolbox(panel: Locator) {
 }
 
 for (const viewport of [{ width: 1280, height: 900 }, { width: 1280, height: 600 }, { width: 390, height: 667 }]) {
-  test(`Toolbox setup and saved choice history work at ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
+  test(`Toolbox setup and current facts work at ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     await page.clock.setFixedTime(new Date(DATE));
     const observed = await mockTaxApi(page, { historyCount: 8 });
@@ -222,14 +231,14 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 1280, height: 600
     await files.getByRole("button", { name: "Hide attachment picker" }).click();
     await composer.fill("Keep this unsent message and file.");
     await openToolbox(page, viewport.width);
-    const question = rail.getByRole("region", { name: "Tax review choices" });
+    const question = rail.getByRole("region", { name: "Tax review facts" });
     await expect(page.locator(".thread-viewport > .tax-review-question")).toHaveCount(0);
     await expect(question.getByText("Wages", { exact: true })).toBeVisible();
     await expect(question.getByText("Filing status", { exact: true })).toBeVisible();
     await question.getByRole("button", { name: "Confirm these details" }).click();
-    await expect(question.getByRole("list", { name: "Previous choices" }).getByText("Wages", { exact: true })).toBeVisible();
+    await expect(question.getByRole("table", { name: "Saved tax facts" }).getByText("Wages", { exact: true })).toBeVisible();
     await expect(question.getByRole("button", { name: "Confirm these details" })).toHaveCount(0);
-    await expect(question.locator(".tax-choice-answered")).toHaveCount(10);
+    await expect(question.locator(".tax-facts-table tbody > tr")).toHaveCount(10);
     expect(observed.requests[1].body).toEqual({ expected_revision: fixtures.group_proposed.revision,
       operation: "confirm_facts", data: { fact_ids: fixtures.group_proposed.facts.map(({ id }) => id) } });
     expect(observed.skills).toEqual(["tax-review", "tax-review"]);
@@ -267,7 +276,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 1280, height: 600
     await expect(worksheetToggle).toBeInViewport({ ratio: 1 });
     await page.reload();
     await openToolbox(page, viewport.width);
-    await expect(question.locator(".tax-choice-answered")).toHaveCount(10);
+    await expect(question.locator(".tax-facts-table tbody > tr")).toHaveCount(10);
     await expect(question.getByRole("button", { name: "Confirm these details" })).toHaveCount(0);
     await expect(rail.getByRole("button", { name: /Start review|Continue review/u })).toHaveCount(0);
     await panel.getByRole("button", { name: /Tax review · 2025/u }).click();
@@ -275,6 +284,26 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 1280, height: 600
     await panel.getByRole("button", { name: /Tax review · 2025/u }).click();
     await expect(settings).toHaveCount(0);
     expect(observed.agentBodies).toHaveLength(2);
+    // A correction replaces its table row and sends saved owner feedback. It
+    // never appends another historical confirmation card.
+    await question.getByRole("button", { name: "Edit Wages", exact: true }).click();
+    await question.getByLabel("Value for Wages", { exact: true }).fill("52000.00");
+    await question.getByRole("button", { name: "Save fact", exact: true }).click();
+    await expect(question.getByRole("table", { name: "Saved tax facts" })).toHaveText(/52000.00/u);
+    await expect(question.locator(".tax-facts-table tbody > tr")).toHaveCount(10);
+    expect(observed.requests.at(-1)?.body).toMatchObject({ operation: "edit_fact", data: { label: "Wages", value: "52000.00" } });
+    await expect.poll(() => observed.agentBodies.length).toBe(3);
+    observed.askQuestion();
+    await page.reload();
+    await openToolbox(page, viewport.width);
+    await expect(question.getByText("What was your age at the end of 2025?", { exact: true })).toBeVisible();
+    await question.getByLabel("Your answer", { exact: true }).fill("I was 40.");
+    await question.getByRole("button", { name: "Send answer", exact: true }).click();
+    await expect(question.getByRole("table", { name: "Saved tax facts" })).toHaveText(/Age at year-end40/u);
+    await expect(question.getByRole("button", { name: "Send answer", exact: true })).toHaveCount(0);
+    expect(JSON.stringify(observed.agentBodies[3])).toContain("I was 40.");
+    expect(observed.requests.some(({ body }) => body.operation === "resolve_missing_item")).toBe(false);
+    await page.screenshot({ path: testInfo.outputPath("toolbox-current-facts.png") });
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
   });
 }

@@ -304,3 +304,85 @@ async def test_restart_pauses_interrupted_native_review_without_scheduling_anoth
         assert await reopened.private_tasks.get(user_id=state.owner.user_id, task_id=before["id"]) == task
     finally:
         reopened.close()
+
+
+async def test_native_typed_fact_is_bound_to_current_saved_turn_without_a_confirmation(native):
+    from audrey.tax_review import current_user_statement
+
+    state = native
+    conversation, case = await saved_case(state)
+    seen = []
+
+    async def stream(execution_app, _payload, _messages, _options, *, event_context,
+                     model_tools, **_kwargs):
+        source = current_user_statement()
+        assert source is not None
+        assert source.user_id == state.owner.user_id
+        assert source.conversation_id == conversation["id"]
+        assert source.run_id == event_context.run_id
+        assert source.content == "My filing status is single."
+        result = await case_tool(state, execution_app, model_tools, "record_user_fact",
+            expected_revision=case["revision"],
+            data={"label": "Filing status", "value": "single"})
+        seen.append(result)
+        emitter = event_context.emitter
+        emitter.run_started()
+        emitter.message_started()
+        emitter.text_delta("Saved your filing status as single.")
+        emitter.message_finished(status="completed")
+        emitter.run_finished(status="succeeded", finish_reason="stop")
+        yield "terminal"
+
+    state.manager._stream_factory = stream
+    run = await start_review(state, conversation["id"], "My filing status is single.")
+    await _settle(state, run["id"])
+    saved = await state.store.tax_cases.get(user_id=state.owner.user_id,
+                                           conversation_id=conversation["id"])
+    assert len(saved["facts"]) == 1
+    assert saved["facts"][0]["value"] == "single"
+    assert saved["facts"][0]["status"] == "confirmed"
+    assert seen
+    assert current_user_statement() is None
+    record = await state.store.conversations.get_run(user_id=state.owner.user_id, run_id=run["id"])
+    assert record.status == "succeeded"
+    # No separate native confirmation turn was needed to accept the typed fact.
+    messages = await state.store.conversations.list_messages(user_id=state.owner.user_id,
+                                                           conversation_id=conversation["id"])
+    assert [m.role for m in messages] == ["user", "assistant"]
+
+
+async def test_native_statement_binding_cannot_use_an_earlier_turn_as_current_authority(native):
+    state = native
+    conversation, case = await saved_case(state)
+    state.manager._stream_factory = proposal_stream(state, case, [])
+    first = await start_review(state, conversation["id"], "My filing status is single.")
+    await _settle(state, first["id"])
+    case = await state.store.tax_cases.get(user_id=state.owner.user_id,
+                                          conversation_id=conversation["id"])
+    errors = []
+
+    async def stream(execution_app, _payload, _messages, _options, *, event_context,
+                     model_tools, **_kwargs):
+        result = await dispatch_one(execution_app.state.archive_http, model_tools, {
+            "function": {"name": "tax_review", "arguments": {
+                "operation": "record_user_fact", "expected_revision": case["revision"],
+                "data": {"label": "Filing status", "value": "single"},
+            }},
+        }, max_result_chars=8000, timeout_s=2, user_id=state.owner.storage_namespace)
+        errors.append(json.loads(result.content))
+        emitter = event_context.emitter
+        emitter.run_started()
+        emitter.message_started()
+        emitter.text_delta("No new fact was recorded from this turn.")
+        emitter.message_finished(status="completed")
+        emitter.run_finished(status="succeeded", finish_reason="stop")
+        yield "terminal"
+
+    state.manager._stream_factory = stream
+    second = await start_review(state, conversation["id"], "What information do you still need?")
+    await _settle(state, second["id"])
+    assert errors and errors[0].get("error")
+    saved = await state.store.tax_cases.get(user_id=state.owner.user_id,
+                                           conversation_id=conversation["id"])
+    assert saved["facts"] == case["facts"]
+    assert saved["facts"][0]["status"] == "proposed"

@@ -450,3 +450,17 @@ async def test_new_reviewer_explicit_empty_conditions_remain_on_saved_report_wir
     result, *_ = await _verify(reply={"findings": [_assessment(conditions=[])]})
     assert result["findings"][0]["conditions"] == []
     assert ReviewVerification.model_validate(result).model_dump(mode="json") == result
+
+
+async def test_reviewer_receives_current_fact_value_without_retained_correction_history():
+    case, candidate = _data()
+    case["facts"][0]["history"] = [{"value": "OLD_VALUE_NOT_CURRENT_SUPPORT",
+                                   "status": "confirmed", "confirmed_by": "user"}]
+    before = copy.deepcopy(case)
+    result, chat, _, _ = await _verify(case, candidate)
+    assert result["status"] == "checked"
+    supplied = chat.call_args.kwargs["messages"][1]["content"]
+    assert "OLD_VALUE_NOT_CURRENT_SUPPORT" not in supplied
+    current = json.loads(supplied)["support"][0]["facts"][0]
+    assert current["value"] == "50000" and "history" not in current
+    assert case == before  # The internal audit still retains the prior value.
