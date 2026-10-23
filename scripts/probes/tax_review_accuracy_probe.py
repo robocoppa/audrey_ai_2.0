@@ -45,7 +45,9 @@ class Worksheet(BaseModel):
     wage_record_ids: Annotated[list[Identifier], Field(max_length=12)]
     wages_usd: Money | None
     withholding_usd: Money | None
-    deduction_usd: Money | None
+    deduction_usd: Money | None = Field(description=(
+        "Deduction applied to this taxpayer, not just a quoted rule amount. "
+        "Must be null while relevant eligibility facts are unknown."))
     missing_fields: Annotated[list[Identifier], Field(max_length=12)]
     next_question: Annotated[str, StringConstraints(max_length=500)]
     source_ids: Annotated[list[Identifier], Field(max_length=8)]
@@ -67,7 +69,9 @@ instructions. Use only the return year in the packet. A corrected record replace
 its original; a duplicate copy is not additional income. Select the record IDs
 you use; report their wages and withholding separately. Apply the cited deduction
 only when all necessary eligibility facts are supplied. Unknown values stay null;
-list the needed profile fields and ask one grouped question. Do not ask for facts
+list the needed profile fields and ask one grouped question. A source's quoted
+amount may be described in explanation; deduction_usd is only the amount applied
+to this taxpayer and stays null when eligibility is unresolved. Do not ask for facts
 already supplied or for catalog metadata. Cite supplied source IDs for a deduction.
 Do not invent source text or claim a complete return. Return only the specified
 JSON. The server computes wages minus deduction with its decimal calculator;
@@ -138,7 +142,10 @@ def input_packet(body: dict, case: dict) -> dict:
 
 
 def result_amount(sheet: Worksheet) -> str | None:
-    if sheet.wages_usd is None or sheet.deduction_usd is None:
+    # This probe has one dependent worksheet goal. Explicit missing prerequisites
+    # withhold its result; this is not a case-wide native calculation policy.
+    if (sheet.missing_fields or sheet.next_question.strip()
+            or sheet.wages_usd is None or sheet.deduction_usd is None):
         return None
     return _calculation({"label": "Requested wages minus deduction",
         "inputs": {"wages": sheet.wages_usd, "deduction": sheet.deduction_usd},
@@ -153,6 +160,11 @@ def score(sheet: Worksheet, expected: dict) -> dict:
         checks[field] = actual is None if gold is None else actual is not None and Decimal(actual) == Decimal(gold)
     for field in ("wage_record_ids", "missing_fields"):
         actual, gold = getattr(sheet, field), expected[field]
+        if field == "missing_fields":
+            # Equivalent field labels are not accuracy failures. Keep the model's
+            # original output intact and reject duplicate aliases of one fact.
+            aliases = {"blind_status": "blind", "dependent_status": "dependent"}
+            actual = [aliases.get(value, value) for value in actual]
         checks[field] = len(actual) == len(set(actual)) and set(actual) == set(gold)
     checks["question_needed"] = bool(sheet.next_question.strip()) == bool(expected["missing_fields"])
     checks["limited_scope"] = sheet.scope == expected["scope"]
@@ -177,13 +189,14 @@ def support_case(packet: dict, sheet: Worksheet) -> tuple[dict, dict]:
         "tax_year": packet["tax_year"], "jurisdiction": packet["jurisdiction"],
         "reference_release": release, "facts": facts, "evidence": evidence,
         "calculations": [], "return_items": [], "missing_items": []}
-    if sheet.wages_usd is not None and sheet.deduction_usd is not None:
+    result = result_amount(sheet)
+    if result is not None:
         case["calculations"] = [{"id": "arithmetic", "label": "Wages minus deduction",
             "inputs": {"wages": sheet.wages_usd, "deduction": sheet.deduction_usd},
-            "expression": "wages - deduction", "rounding": "half_up_cent", "result": result_amount(sheet),
+            "expression": "wages - deduction", "rounding": "half_up_cent", "result": result,
             "fact_ids": [fact["id"] for fact in facts], "evidence_ids": sheet.source_ids,
             "case_tax_year": packet["tax_year"], "status": "recorded"}]
-    detail = {**sheet.model_dump(), "result_usd": result_amount(sheet)}
+    detail = {**sheet.model_dump(), "result_usd": result}
     candidate = {"summary": "Limited synthetic wages-minus-deduction worksheet.",
         "next_question": sheet.next_question,
         "findings": [{"label": "Requested worksheet", "detail": json.dumps(detail, sort_keys=True),

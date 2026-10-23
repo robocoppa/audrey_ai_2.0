@@ -361,3 +361,86 @@ async def test_absent_profile_field_cannot_be_approved_and_repair_keeps_it_unkno
     assert len(client.requests) == 3  # No extra reviewer call for missing owner facts.
     assert probe.summarize([result])["improved"] == 1
     assert probe.summarize([result])["checker_false_accepts"] == 0
+
+
+@pytest.mark.parametrize("deduction", ["15750.00", "15000.00"])
+def test_unresolved_eligibility_withholds_arithmetic_but_keeps_wrong_applied_amount_visible(deduction):
+    body = probe.load_cases(FIXTURE)
+    entry = next(case for case in body["cases"] if case["id"] == "missing-eligibility")
+    # The live writer asked the right question but put a reference amount into
+    # the applied field. Accept its equivalent labels without hiding that error.
+    sheet = worksheet(entry, deduction_usd=deduction,
+        missing_fields=["age", "blind_status", "dependent_status"],
+        next_question="Please provide your age, blindness and dependent status.",
+        source_ids=entry["input"]["source_ids"])
+    before = sheet.model_dump()
+    assert probe.result_amount(sheet) is None
+    saved, candidate = probe.support_case(probe.input_packet(body, entry), sheet)
+    assert saved["calculations"] == []
+    finding = candidate["findings"][0]
+    assert finding["calculation_ids"] == []
+    detail = json.loads(finding["detail"])
+    assert detail["deduction_usd"] == deduction  # Never normalize a wrong answer to null.
+    assert detail["result_usd"] is None
+    score = probe.score(sheet, entry["expected"])
+    assert score["passed"] is False
+    assert {key for key, passed in score["checks"].items() if not passed} == {"deduction_usd"}
+    assert sheet.model_dump() == before
+
+
+@pytest.mark.parametrize("missing,question", [(["age"], ""), ([], "What is your age?")])
+def test_either_explicit_unresolved_signal_blocks_the_probe_dependent_calculation(missing, question):
+    body = probe.load_cases(FIXTURE)
+    entry = body["cases"][0]
+    sheet = worksheet(entry, missing_fields=missing, next_question=question)
+    assert probe.result_amount(sheet) is None
+    saved, _ = probe.support_case(probe.input_packet(body, entry), sheet)
+    assert saved["calculations"] == []
+    # Complete confirmed inputs still get the original arithmetic. A quoted
+    # amount never replaces the applied amount in that calculation.
+    complete = worksheet(entry, explanation="The source quotes the basic deduction; eligibility is confirmed.")
+    assert probe.result_amount(complete) == entry["expected"]["result_usd"]
+
+
+@pytest.mark.parametrize("fields,correct", [
+    (["age", "blind_status", "dependent_status"], True),
+    (["age", "blind", "dependent_status"], True),
+    (["age", "blind", "blind_status", "dependent"], False),
+    (["age", "blind_status"], False),
+    (["age", "blind_status", "dependent_status", "filing_status"], False),
+    (["age", "blind_status", "can_claim_child"], False),
+])
+def test_equivalent_missing_field_labels_do_not_hide_duplicate_missing_or_unrelated_facts(fields, correct):
+    body = probe.load_cases(FIXTURE)
+    entry = next(case for case in body["cases"] if case["id"] == "missing-eligibility")
+    sheet = worksheet(entry, missing_fields=fields)
+    assert probe.score(sheet, entry["expected"])["checks"]["missing_fields"] is correct
+    assert sheet.missing_fields == fields
+
+
+@pytest.mark.parametrize("applied", [None, "15750.00", "15000.00"])
+async def test_quoted_amount_does_not_apply_a_deduction_or_turn_limited_assessment_into_approval(applied):
+    body = probe.load_cases(FIXTURE)
+    entry = next(case for case in body["cases"] if case["id"] == "missing-eligibility")
+    sheet = worksheet(entry, deduction_usd=applied,
+        missing_fields=["age", "blind_status", "dependent_status"],
+        source_ids=entry["input"]["source_ids"],
+        explanation="The source's basic amount is $15,750, but eligibility is unknown; it cannot yet apply.")
+    client = FakeModel([sheet.model_dump()])
+    app = SimpleNamespace(state=SimpleNamespace(ollama=probe.Meter(client)))
+    # Exercise the actual production checker: missing owner facts must stop it
+    # without an extra model call, regardless of the independent answer grade.
+    with probe.processing_scope(probe.ProcessingPolicy({"local:latest": "a" * 64}, "http://ollama:11434")):
+        result = await probe.run_sample(app, body, entry, model="local:latest", seed=100)
+    assert result["status"] == "completed"
+    assert result["checking_completed_as_expected"] is True
+    assert result["assessments"][0]["status"] == "limited"
+    assert result["assessments"][0]["stop_reason"] == "needs_user_input"
+    for arm in ("single_pass", "checked_repair"):
+        assert result[arm]["worksheet"] == sheet.model_dump()
+        assert result[arm]["result_usd"] is None
+        assert result[arm]["passed"] is (applied is None)
+        assert result[arm]["checks"]["source_selection"] is True
+    assert len(client.requests) == 1
+    assert result["cost"]["generation_calls"] == 1
+    assert probe.summarize([result])["checker_false_accepts"] == 0

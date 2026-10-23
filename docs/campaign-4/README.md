@@ -95,15 +95,18 @@ there were no improvements or regressions. The writer applied a deduction despit
 missing age/blindness/dependency facts, and the same-model checker approved it.
 No repair was triggered. This supports no accuracy promotion; model measurements
 and retained outputs are in [MODEL-FACTS](../../evals/MODEL-FACTS.md).
-**20E.1 eligibility followup built; targeted live check pending.** Writer and
-probe share the rule that omitted facts are unknown. New checker replies inventory
-applied source conditions and cite exact saved fact fields; missing/null/composite
-or stale support cannot establish a declared condition, while explicit false/zero
-remain valid values. Unresolved conditions trigger bounded repair instead of
-approval. The model can still omit or misinterpret a condition; this is not a
-complete rule engine. Existing saved assessments remain readable without changes
-to their stored shape. **Next:** rerun only missing-eligibility, then choose the
-smallest 20E.2 native comparison. The other five measurements stay recorded.
+**20E.1 targeted followup measured; probe correction pending validation.**
+The writer now identifies the three missing facts and asks one grouped question;
+checking correctly stops as limited/needs-user-input without approval. The raw
+worksheet still places a quoted rule amount in the applied-deduction field. The
+probe then incorrectly subtracts it, and exact-label grading rejects equivalent
+blindness/dependency names. The probe correction separates reference and applied
+amounts, skips dependent arithmetic while its prerequisites are explicitly missing,
+and accepts narrow field-name aliases without concealing the raw wrong amount.
+Production instructions/checking remain unchanged; native partial status does not
+globally suppress independent arithmetic. **Next:** pull only, no rebuild, and
+rerun missing-eligibility before the smallest 20E.2 native comparison. The other
+five measurements stay passed; no model promotion is supported.
 
 **Toolbox edge-tab followup built:** the closed Toolbox opens from a larger,
 vertically centered right-edge tab, with sideways text facing left. It hides while
@@ -115,8 +118,9 @@ reveals processing/storage, administrator, Cloudflare, tool-scope and mode-lock
 details; touch can reveal them and Escape/outside interaction dismisses them.
 The compact header retains the badge while destructive chat actions stay in mobile
 navigation. Composer privacy prose is removed. Tax review's filing caution and
-settings behavior stay accepted. Deploy this UI and eligibility followup by
-rebuilding audrey and audrey-ui; no index, model or source update is needed.
+settings behavior stay accepted. This UI and the preceding eligibility followup
+were deployed by rebuilding audrey and audrey-ui. The current probe correction
+needs neither rebuilt; no index, model or source update is needed.
 
 **MiniMax M3.1 Flash:** configured as an unmeasured cloud draft/research candidate
 in mixed, Cloud and selected Research panels. Kimi K3 stays first, panel worker
@@ -187,8 +191,9 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **20D.5 built:** bounded local evidence checking and targeted repair;
   Toolbox presentation accepted October 22.
 - [x] **20E.1 measurement:** six fixed-passage pairs completed; five passed both arms.
-- [ ] **20E.1 followup built:** source-condition/confirmed-field checking;
-  targeted missing-eligibility measurement pending. Preserve the other five results.
+- [ ] **20E.1 probe correction built:** targeted followup identifies missing
+  facts and refuses approval; reference/applied amounts and dependent arithmetic
+  still need the corrected targeted measurement. Preserve the other five passes.
 - [ ] **20E.2:** native retrieval/accuracy comparison after the targeted correction.
 
 Tax year/jurisdiction and reference release belong to the case record; 20D.1 does

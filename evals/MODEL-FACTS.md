@@ -273,8 +273,22 @@ so these are not model-arithmetic successes.
 Checking added six calls, 10,160 input tokens and 870 output tokens. Request time
 rose from 43.05s to 62.74s; cold loading was uncontrolled. This small study, with one sample per case,
 tests fixed-passage checking, not document retrieval or complete returns.
-**Practical lesson:** a second pass by the same model can repeat an unsupported
-eligibility assumption; its approval alone is not evidence of correctness.
+
+A [targeted followup](results/2026-10-22-tax-review-eligibility-followup-results.json)
+with explicit missing-fact instructions identified age, blindness and dependency
+and asked one grouped question. Checking stopped for user input without approval
+or a reviewer call. However, the structured applied deduction still contained the
+quoted $15,750 rule amount despite prose saying it could not yet apply. The test
+harness incorrectly derived a result from it and rejected equivalent field labels.
+This remains an unresolved structured-output failure, not a completed accuracy
+pass. The single writer call used **853 input and 310 output tokens in 27.24s**;
+cold loading was uncontrolled. A corrected test separates reference amounts from
+applied amounts and suppresses dependent arithmetic when prerequisites are missing,
+while preserving the raw answer and rejecting an incorrect applied amount.
+
+**Practical lesson:** the same model can repeat an unsupported assumption, and
+recognizing missing facts in prose does not guarantee correct structured values.
+Keep reference rules, applied values and generated arithmetic distinct.
 
 ## 3. Small models for request classification
 
@@ -852,7 +866,9 @@ the report can be read without opening them.
   and `model-2026-10-01-142858`; associated result/narrative files.
 - **Conditional-rule checking:** [October 22 fixed-passage worksheets](results/2026-10-22-tax-review-fixed-passage-results.json),
   retaining all six initial/final structured outputs, reviewer decisions,
-  fixture/model identities and measured costs.
+  fixture/model identities and measured costs; the
+  [targeted eligibility followup](results/2026-10-22-tax-review-eligibility-followup-results.json)
+  retains the subsequent partial improvement and its remaining output/test defects.
 - **Classification:** [September results](results/2026-09-30-systemone-router-probe-results.json),
   [October Clef comparison](results/2026-10-03-clef-systemone-router-results.json),
   [Nimble v3 three-round comparison](results/2026-10-15-082632-nimble-v3-router-results.json),

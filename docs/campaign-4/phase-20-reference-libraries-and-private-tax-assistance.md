@@ -800,10 +800,11 @@ Use the existing on-box probe wrapper because this measurement imports installed
 production code and requires direct local-model control. `FOREGROUND=1 NOTIFY=1`
 prints the complete JSON in the launching shell and sends the existing Telegram
 log attachment. No PAT, upload, index run or live application data is needed.
-The probe/fixture are copied from the checkout at run time. The eligibility
-followup changes installed writer/checker code and rebuilds audrey; the Private
-header followup additionally rebuilds audrey-ui. Run while the GPU is otherwise quiet; this
-isolated process does not share the application's in-process fair queue.
+The probe/fixture are copied from the checkout at run time. The latest probe-only
+correction needs a pull on Tower, with no service rebuild or restart. Installed
+writer/checker and Private-header changes were the preceding deployment. Run
+while the GPU is otherwise quiet; this isolated process does not share the
+application's in-process fair queue.
 
 The October 22 measurement completed all six pairs without execution failures.
 Five passed in both arms. The missing-eligibility case incorrectly supplied the
@@ -830,12 +831,23 @@ Old assessments retain their original serialized shape and no-op behavior.
 
 The model still identifies the conditions and judges what each value means; empty
 or incomplete inventories can miss a rule, so this is not independent legal
-verification. The unchanged incomplete-profile regression rejects a fabricated
-age-field citation and retains unknown amounts through repair. Live validation
-must rerun only missing-eligibility before broadening; keep the other five results.
-Native retrieval/extraction, multi-turn authority, conflicting sources, known
-tax-change errors and complete-return accuracy remain open. No model promotion or
-default extension is supported by local tests.
+verification. The incomplete-profile regression rejects a fabricated age-field
+citation. Native saved reviews carry needs-input/limited status when facts are
+missing; the generic calculator does not infer eligibility or erase independent
+arithmetic merely because another case question is open.
+
+The targeted October 22 followup now asks for age, blindness and dependency and
+stops checking as limited/needs_user_input, without a false approval or reviewer
+call. Its raw structured deduction remains non-null despite prose saying it cannot
+be applied. The probe incorrectly derives a result from that amount and rejects
+equivalent missing-field labels. The probe-only correction keeps quoted amounts
+in the explanation, requires unresolved applied numeric amounts to remain null,
+skips dependent subtraction while the worksheet declares missing prerequisites,
+and grades narrow aliases without rewriting raw output or hiding wrong amounts.
+No hidden answer labels enter generation or checking. Only missing-eligibility
+needs rerunning; the other five passes remain recorded. Native retrieval/extraction,
+multi-turn authority, conflicting sources, known tax-change errors and complete-
+return accuracy remain open. No model promotion or default extension is supported.
 
 #### Accuracy and visible user flow
 
