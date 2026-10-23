@@ -18,6 +18,8 @@
   --success: #68d391;
   --border: rgb(155 172 196 / 20%);
   --border-strong: rgb(99 181 255 / 62%);
+  --scrollbar-thumb: #4d6e95;
+  --scrollbar-thumb-hover: #789ac0;
   --brand-gradient: linear-gradient(135deg, #3499fa 0%, #4676f2 52%, #5158ec 100%);
   --focus-glow: 0 0 0 0.2rem rgb(70 118 242 / 18%), 0 0 1.5rem rgb(52 153 250 / 20%);
   --shadow-sm: 0 5px 18px rgb(0 0 0 / 24%);
@@ -29,6 +31,40 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* Older WebKit keeps the same quiet blue treatment as native thin scrollbars. */
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar {
+    width: 0.5rem;
+    height: 0.5rem;
+  }
+
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 1rem;
+    background: var(--scrollbar-thumb);
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover,
+  ::-webkit-scrollbar-thumb:active {
+    background-color: var(--scrollbar-thumb-hover);
+  }
+}
+
+@media (forced-colors: active) {
+  * {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
 }
 
 html,

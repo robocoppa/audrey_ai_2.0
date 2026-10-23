@@ -138,21 +138,22 @@ function toolbox(page: Page, width: number): Locator {
 
 async function openToolbox(page: Page, width: number) {
   const panel = toolbox(page, width);
-  const trigger = page.getByRole("button", { name: "Toolbox", exact: true });
-  await expect(trigger).toBeVisible();
-  // Loading a saved case can automatically open the desktop rail. Check its
-  // rendered state and open atomically so that late load cannot turn this into
-  // a second toggle which closes it again.
+  const trigger = page.locator(".conversation-toolbox-toolbar > button");
+  await expect(trigger).toBeAttached();
+  // A saved desktop case may open the rail before its hidden trigger is read.
+  // Check and open atomically so that loading cannot cause a second toggle.
   await trigger.evaluate((button) => {
-    if (button.getAttribute("aria-expanded") !== "true") button.click();
+    if (!button.closest("[hidden]")) button.click();
   });
   await expect(panel).toBeVisible();
+  await expect(trigger).toBeHidden();
   return panel;
 }
 
 async function closeToolbox(panel: Locator) {
   await panel.getByRole("button", { name: "Hide toolbox", exact: true }).click();
   await expect(panel).not.toBeVisible();
+  await expect(panel.page().getByRole("button", { name: "Toolbox", exact: true })).toBeFocused();
 }
 
 for (const viewport of [{ width: 1280, height: 900 }, { width: 1280, height: 600 }, { width: 390, height: 667 }]) {
@@ -165,6 +166,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 1280, height: 600
     await page.getByRole("dialog", { name: "Choose how Audrey uses tools" }).getByRole("button", { name: /Tax review/u }).click();
     const rail = toolbox(page, viewport.width);
     await expect(rail).toBeVisible();
+    await expect(page.getByRole("button", { name: "Toolbox", exact: true })).toHaveCount(0);
     const settings = rail.getByRole("region", { name: "Tax review settings" });
     await expect(settings).toBeVisible();
     await expect(page.getByRole("dialog", { name: "Tax review settings" })).toHaveCount(0);

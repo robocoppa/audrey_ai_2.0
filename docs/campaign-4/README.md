@@ -53,7 +53,7 @@ Private conversation, expiring worker leases, revision/fence checks and replay-s
 checkpoints. Pause/cancel prevent late task writes; changed case/source/Project or
 model/policy bindings require revalidation. Resource accounting and partial-work
 stop reasons survive restart and existing backup/restore. Native integration is
-built below; browser acceptance remains pending.
+built and accepted below.
 
 **20D.4b.1 built:** one bounded leased step can use the verified Private runtime
 and owned local tools. Tax-case changes and task revision advancement commit
@@ -80,21 +80,26 @@ original native message. Restart replays committed results, pauses unfinished
 work and requires explicit resume with fresh validation. Restart never launches
 model work. No repeat lifecycle check is queued.
 
-**20D.5 built; browser acceptance pending:** saving a native worksheet reopens
-linked official passages and checks its summary/findings with the verified local
-model. Focused repair gets at most one recheck within the existing task budgets.
-Assessments bind the exact worksheet and case revision; unresolved work stays
-partial and later case edits make checks stale. Owner confirmation and proposed
-source applicability remain separate. No model, config, schema or index change.
-**Toolbox followup built:** Tax review settings, progress and choices now live in
-a right sidebar; compact screens use a dismissible right drawer. Confirmed,
-rejected and resolved choices remain above the current prompt and survive refresh
-from saved case records. Idle Start/Continue buttons are removed: ordinary chat
-prompts drive work. Pause/Cancel and interruption Resume remain. The saved-choice
-feedback still informs Audrey without consuming unsent text/files. Response
-guidance keeps internal bookkeeping out of the final answer; applicability and
-source-conflict checks retain their existing authority. Browser acceptance is
-pending. **Next: 20E**, matched accuracy evaluation after that targeted check.
+**20D.5 and Toolbox accepted October 22.** Native worksheets receive bounded
+source checks and targeted repair; owner confirmations and source applicability
+retain their separate authority. Tax review settings/progress/choices live in the
+right Toolbox rail (drawer on compact screens), with previous decisions above the
+current prompt. Ordinary chat replaces idle Start/Continue actions. The open panel
+hides its launcher; closing restores it and keyboard focus. Global scrollbars now
+use thin muted blue thumbs. The user's functional/UI checks passed; broader tax
+accuracy remains unverified.
+
+**20E.1 built; live measurement pending:** a six-case fixed-passage diagnostic
+compares the exact same initial local worksheet with the production evidence
+checker and at most one repair/recheck. Independent hidden labels score amounts,
+year/withholding separation, corrected/duplicate records, eligibility questions,
+source selection and decimal rounding. Reports retain initial/final outputs,
+regressions, false checker approvals, model/source/code identities and measured
+costs. It uses synthetic confirmed records and frozen official excerpts, without
+reading live cases or changing the library. This isolates check/repair behavior;
+it does not measure native retrieval, uploaded-file extraction or full returns.
+**Next:** read this measurement before choosing the smallest 20E.2 native
+retrieval/accuracy comparison. No model promotion or default extension is implied.
 
 **Notices and settings polish built:** Tax review shows a brief filing caution;
 Private shows local server processing/storage with expandable privacy details.
@@ -137,7 +142,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Saved reviews and bounded evidence checks built; accuracy evaluation next |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Workflow accepted; fixed-passage accuracy measurement pending |
 
 ## Build queue
 
@@ -169,8 +174,10 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **20D.4b.2b built:** native saved reviews, progress/control, safe restart
   recovery and idempotent delivery; user moved on from the lifecycle handoff.
 - [x] **20D.5 built:** bounded local evidence checking and targeted repair;
-  Toolbox presentation followup built; browser acceptance pending.
-- [ ] **20E:** compare single-pass and extended accuracy before extending defaults.
+  Toolbox presentation accepted October 22.
+- [ ] **20E.1 built:** measure fixed-passage writer/check/repair quality; live results pending.
+- [ ] **20E.2:** use those results to target the remaining native retrieval/accuracy
+  comparison before extending defaults.
 
 Tax year/jurisdiction and reference release belong to the case record; 20D.1 does
 not add premature tax-specific Project fields. OCR/media, fine-tuning and state

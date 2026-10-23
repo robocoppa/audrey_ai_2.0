@@ -17,6 +17,7 @@ export function ConversationToolbox({ available, open, onOpenChange, content, ch
   const titleId = useId();
   const panelId = useId();
   const visible = available && open;
+  const wasVisible = useRef(visible);
   useEffect(() => {
     const media = window.matchMedia?.("(max-width: 900px)");
     if (!media) return;
@@ -33,10 +34,14 @@ export function ConversationToolbox({ available, open, onOpenChange, content, ch
     } else if (!visible && dialog.open) dialog.close();
     return () => { if (dialog.open) dialog.close(); };
   }, [compact, visible]);
+  useLayoutEffect(() => {
+    // The trigger becomes focusable only after the closed state renders.
+    if (!visible && wasVisible.current) triggerRef.current?.focus({ preventScroll: true });
+    wasVisible.current = visible;
+  }, [visible]);
   function close() {
     dialogRef.current?.close();
     onOpenChange(false);
-    triggerRef.current?.focus({ preventScroll: true });
   }
   const contents = <>
     <header className="conversation-toolbox-header">
@@ -49,7 +54,7 @@ export function ConversationToolbox({ available, open, onOpenChange, content, ch
   </>;
   return <div className="conversation-with-toolbox" data-toolbox-open={visible && !compact}>
     <div className="conversation-toolbox-main">
-      {available ? <div className="conversation-toolbox-toolbar">
+      {available ? <div className="conversation-toolbox-toolbar" hidden={visible}>
         <button ref={triggerRef} type="button" aria-label="Toolbox" title={pendingCount ? `${pendingCount} details to review` : "Toolbox"} aria-controls={panelId} aria-expanded={visible}
           aria-haspopup={compact ? "dialog" : undefined} onClick={() => onOpenChange(!visible)}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16v12H4zM8 8V5h8v3M4 13h16M10 12v3h4v-3" /></svg>Toolbox{pendingCount ? <span className="toolbox-pending-count" aria-hidden="true">{pendingCount}</span> : null}

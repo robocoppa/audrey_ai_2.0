@@ -27,6 +27,17 @@ question is "which models earn a panel seat" — the easy tier can't separate th
 per-worker latency in the drafts). `code` and `code_models` also double as
 **per-model sweep sets** — see "Per-model sweeps" below.
 
+## Private worksheet accuracy diagnostic
+
+`tax_review_accuracy_probe.py` is a controlled fixed-passage study using the
+installed production evidence checker and calculator. Its six English synthetic
+cases compare a first draft with the same draft after bounded checking/repair,
+scored against hidden structured labels. It does not measure native retrieval or
+certify tax accuracy. The existing probe wrapper is needed for its installed-code
+and direct local-model controls; the normal API eval workflow below is unchanged.
+The [phase contract](../docs/campaign-4/phase-20-reference-libraries-and-private-tax-assistance.md#20e1--controlled-checkrepair-measurement)
+owns its scope and followups.
+
 ## What the harness checks
 
 Per case, against the reassembled streamed answer:

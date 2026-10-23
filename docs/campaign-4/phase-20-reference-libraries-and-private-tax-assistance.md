@@ -485,7 +485,7 @@ OCR/media remain deferred until a case requires them.
 
 #### Tax review tool and case record
 
-**20D.2 foundation accepted October 21; Toolbox presentation updated October 22.**
+**20D.2 foundation and Toolbox presentation accepted October 22.**
 Select Private and Tax review in Tools & skills to open the right-side Toolbox.
 Its settings expand inline; choose the federal return year and goal, then save.
 The year defaults to the previous completed calendar year. The Toolbox scrolls
@@ -498,8 +498,9 @@ audit spanning year changes that reset owner confirmations.
 On compact screens the Toolbox is a right-side modal drawer with Escape, close,
 backdrop dismissal and restored trigger focus. It starts closed for a saved case;
 selecting Tax review opens setup. A small pending-count badge makes new choices
-visible without forcing the drawer over the chat. Desktop uses a docked rail.
-Open/closed state survives recovered-run runtime refreshes. Closing the panel does
+visible without forcing the drawer over the chat. Desktop uses a docked rail. The launcher hides while open; closing restores
+it and keyboard focus. App scrollbars use thin muted blue thumbs with transparent
+tracks and a system-color fallback for high-contrast settings. Open/closed state survives recovered-run runtime refreshes. Closing the panel does
 not start work or discard current selections. Archived controls are read-only.
 
 No idle Start/Continue action is shown. The user sends a normal chat prompt to
@@ -515,10 +516,9 @@ The Toolbox retains a muted filing caution: AI can be wrong; check sources and
 figures before filing, and Audrey does not prepare or file a return. Private
 retains its local-processing/server-storage notice and expandable administrator/
 Cloudflare detail. Neither adds an acknowledgement gate. The generic degraded
-badge stays removed; actual outage indicators remain. Deployment for this UI and
-response-guidance followup rebuilds audrey and audrey-ui. Native browser acceptance
-checks the Toolbox, retained choices and absence of idle review buttons; no new
-upload, source collection, index or model change is required.
+badge stays removed; actual outage indicators remain. The user accepted the
+Toolbox flow October 22. The scrollbar/launcher followup rebuilds only audrey-ui;
+no new upload, source collection, index or model change is required.
 
 Each conversation owns one case; Project membership is derived from its canonical
 conversation. A saved case does not activate Tax review automatically after reload.
@@ -768,6 +768,39 @@ checks its linked rules/arithmetic and verifies saved findings after refresh.
 No new upload, reindex, source collection or migration is required. Local checks
 prove plumbing and boundaries; deployed behavior and answer quality still need
 their separate acceptance.
+
+#### 20E.1 — controlled check/repair measurement
+
+`scripts/probes/tax_review_accuracy_probe.py` uses the installed production
+`verify_review` and decimal calculator against six frozen synthetic cases in
+`evals/cases/tax_review_accuracy.json`. Cases cover the limited 2025 single-filer
+worksheet, wrong-year/withholding separation, corrected/duplicate records, missing
+eligibility facts, confirmed head-of-household status and cent rounding. Public
+Publication 501 Table 6 text includes its age/blindness/dependency qualification;
+the excerpt and source section are hashed. This packet is not a live IRS release
+or a claim to have reopened an original PDF page.
+
+Both arms share the exact first draft, confirmed inputs, source packet and local
+model digest. The extended arm invokes the production checker, then at most one
+focused rewrite and recheck. Expected outputs never enter either model request.
+Independent structured checks report improvements, regressions and wrong outputs
+that the checker accepted. Full synthetic outputs remain available for prose
+review; structured scores do not establish prose entailment or legal correctness.
+The report records exact code/fixture/model identities, unknown usage explicitly,
+wall time, generation costs and execution failures separately from quality.
+
+Use the existing on-box probe wrapper because this measurement imports installed
+production code and requires direct local-model control. `FOREGROUND=1 NOTIFY=1`
+prints the complete JSON in the launching shell and sends the existing Telegram
+log attachment. No PAT, upload, index run or live application data is needed.
+Only audrey-ui rebuilds for the accompanying visual polish; the probe/fixture are
+copied from the checkout at run time. Run while the GPU is otherwise quiet; this
+isolated process does not share the application's in-process fair queue.
+
+Read the measurement before expanding scope. This diagnostic does not close
+native retrieval/extraction, multi-turn case authority, conflicting sources, the
+known tax-change errors below, or complete-return accuracy. Those remain targeted
+20E.2 work; do not promote models or extend review defaults from a green run alone.
 
 #### Accuracy and visible user flow
 

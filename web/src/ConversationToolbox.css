@@ -4,6 +4,7 @@
 .conversation-toolbox-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .conversation-toolbox-main > .thread-root { flex: 1; min-height: 0; height: auto; }
 .conversation-toolbox-toolbar { display: flex; flex: none; justify-content: flex-end; padding: 0.35rem 1rem; }
+.conversation-toolbox-toolbar[hidden] { display: none; }
 .conversation-toolbox-toolbar > button { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 2rem; padding: 0.25rem 0.65rem; border: 1px solid var(--border); border-radius: 0.55rem; background: var(--surface-deep); color: var(--text-soft); font: inherit; font-size: 0.73rem; cursor: pointer; }
 .conversation-toolbox-toolbar > button:hover { border-color: var(--accent); background: var(--surface-raised); }
 .conversation-toolbox { display: flex; min-width: 0; min-height: 0; flex-direction: column; border: 0; border-left: 1px solid var(--border); background: var(--surface-deep); color: var(--text-soft); }

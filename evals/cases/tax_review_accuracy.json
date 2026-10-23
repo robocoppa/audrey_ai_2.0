@@ -1,0 +1,309 @@
+{
+  "schema": 1,
+  "language": "en",
+  "synthetic": true,
+  "scope": "Controlled fixed-passage writer/check/repair diagnostic; not native retrieval, upload extraction or complete-return acceptance.",
+  "label_policy": "Source-checked coding-assistant labels, not independently adjudicated by a tax professional. Expected values are never sent to the writer or reviewer.",
+  "sources": [
+    {
+      "id": "p501-2025-table6",
+      "url": "https://www.irs.gov/publications/p501",
+      "title": "Publication 501 (2025), 2025 Standard Deduction Tables, Table 6",
+      "verified_at": "2026-10-22",
+      "tax_year": 2025,
+      "passage": "2025 Standard Deduction Tables\nTable 6. Standard Deduction Chart for Most People*\nIF your filing status is... YOUR standard deduction is...\nSingle or Married filing separately $15,750\nMarried filing jointly or Qualifying surviving spouse 31,500\nHead of household 23,625\n* Don't use this chart if you were born before January 2, 1961, or are blind, or if someone else can claim you (or your spouse if filing jointly) as a dependent. Use Table 7 or Table 8 instead.",
+      "passage_sha256": "f80bac6c4dd97e939850effa89a2b0970d4dcd06f89aaeb0d9df2badab163414"
+    }
+  ],
+  "cases": [
+    {
+      "id": "basic-single",
+      "input": {
+        "tax_year": 2025,
+        "jurisdiction": "US-federal",
+        "goal": "Calculate current-year wages minus the applicable basic standard deduction, rounded half up to cents. Track withholding separately. This is a limited worksheet, not tax liability, a refund or a complete return.",
+        "confirmed_profile": {
+          "filing_status": "single",
+          "age": 40,
+          "blind": false,
+          "dependent": false,
+          "residency": "U.S. citizen all year",
+          "return_period": "full calendar year",
+          "deduction_choice": "basic standard deduction"
+        },
+        "confirmed_records": [
+          {
+            "id": "w2-current",
+            "tax_year": 2025,
+            "employer": "Example Employer",
+            "box_1_wages_usd": "50000.00",
+            "box_2_withholding_usd": "6000.00",
+            "status": "original",
+            "replaces": null,
+            "duplicate_of": null
+          }
+        ],
+        "source_ids": [
+          "p501-2025-table6"
+        ]
+      },
+      "expected": {
+        "wage_record_ids": [
+          "w2-current"
+        ],
+        "wages_usd": "50000.00",
+        "withholding_usd": "6000.00",
+        "deduction_usd": "15750.00",
+        "result_usd": "34250.00",
+        "missing_fields": [],
+        "scope": "limited_worksheet"
+      }
+    },
+    {
+      "id": "prior-year-withholding",
+      "input": {
+        "tax_year": 2025,
+        "jurisdiction": "US-federal",
+        "goal": "Calculate current-year wages minus the applicable basic standard deduction, rounded half up to cents. Track withholding separately. This is a limited worksheet, not tax liability, a refund or a complete return.",
+        "confirmed_profile": {
+          "filing_status": "single",
+          "age": 40,
+          "blind": false,
+          "dependent": false,
+          "residency": "U.S. citizen all year",
+          "return_period": "full calendar year",
+          "deduction_choice": "basic standard deduction"
+        },
+        "confirmed_records": [
+          {
+            "id": "w2-current",
+            "tax_year": 2025,
+            "employer": "Example Employer",
+            "box_1_wages_usd": "50000.00",
+            "box_2_withholding_usd": "6000.00",
+            "status": "original",
+            "replaces": null,
+            "duplicate_of": null
+          },
+          {
+            "id": "w2-prior",
+            "tax_year": 2024,
+            "employer": "Example Employer",
+            "box_1_wages_usd": "9000.00",
+            "box_2_withholding_usd": "500.00",
+            "status": "original",
+            "replaces": null,
+            "duplicate_of": null
+          }
+        ],
+        "source_ids": [
+          "p501-2025-table6"
+        ]
+      },
+      "expected": {
+        "wage_record_ids": [
+          "w2-current"
+        ],
+        "wages_usd": "50000.00",
+        "withholding_usd": "6000.00",
+        "deduction_usd": "15750.00",
+        "result_usd": "34250.00",
+        "missing_fields": [],
+        "scope": "limited_worksheet"
+      }
+    },
+    {
+      "id": "corrected-and-duplicate",
+      "input": {
+        "tax_year": 2025,
+        "jurisdiction": "US-federal",
+        "goal": "Calculate current-year wages minus the applicable basic standard deduction, rounded half up to cents. Track withholding separately. This is a limited worksheet, not tax liability, a refund or a complete return.",
+        "confirmed_profile": {
+          "filing_status": "single",
+          "age": 40,
+          "blind": false,
+          "dependent": false,
+          "residency": "U.S. citizen all year",
+          "return_period": "full calendar year",
+          "deduction_choice": "basic standard deduction"
+        },
+        "confirmed_records": [
+          {
+            "id": "w2-current",
+            "tax_year": 2025,
+            "employer": "Example Employer",
+            "box_1_wages_usd": "50000.00",
+            "box_2_withholding_usd": "6000.00",
+            "status": "original",
+            "replaces": null,
+            "duplicate_of": null
+          },
+          {
+            "id": "w2-corrected",
+            "tax_year": 2025,
+            "employer": "Example Employer",
+            "box_1_wages_usd": "52000.00",
+            "box_2_withholding_usd": "6200.00",
+            "status": "corrected",
+            "replaces": "w2-current",
+            "duplicate_of": null
+          },
+          {
+            "id": "w2-copy",
+            "tax_year": 2025,
+            "employer": "Example Employer",
+            "box_1_wages_usd": "52000.00",
+            "box_2_withholding_usd": "6200.00",
+            "status": "corrected",
+            "replaces": "w2-current",
+            "duplicate_of": "w2-corrected"
+          }
+        ],
+        "source_ids": [
+          "p501-2025-table6"
+        ]
+      },
+      "expected": {
+        "wage_record_ids": [
+          "w2-corrected"
+        ],
+        "wages_usd": "52000.00",
+        "withholding_usd": "6200.00",
+        "deduction_usd": "15750.00",
+        "result_usd": "36250.00",
+        "missing_fields": [],
+        "scope": "limited_worksheet"
+      }
+    },
+    {
+      "id": "missing-eligibility",
+      "input": {
+        "tax_year": 2025,
+        "jurisdiction": "US-federal",
+        "goal": "Calculate current-year wages minus the applicable basic standard deduction, rounded half up to cents. Track withholding separately. This is a limited worksheet, not tax liability, a refund or a complete return.",
+        "confirmed_profile": {
+          "filing_status": "single",
+          "residency": "U.S. citizen all year",
+          "return_period": "full calendar year",
+          "deduction_choice": "basic standard deduction"
+        },
+        "confirmed_records": [
+          {
+            "id": "w2-current",
+            "tax_year": 2025,
+            "employer": "Example Employer",
+            "box_1_wages_usd": "50000.00",
+            "box_2_withholding_usd": "6000.00",
+            "status": "original",
+            "replaces": null,
+            "duplicate_of": null
+          }
+        ],
+        "source_ids": [
+          "p501-2025-table6"
+        ]
+      },
+      "expected": {
+        "wage_record_ids": [
+          "w2-current"
+        ],
+        "wages_usd": "50000.00",
+        "withholding_usd": "6000.00",
+        "deduction_usd": null,
+        "result_usd": null,
+        "missing_fields": [
+          "age",
+          "blind",
+          "dependent"
+        ],
+        "scope": "limited_worksheet"
+      }
+    },
+    {
+      "id": "head-of-household",
+      "input": {
+        "tax_year": 2025,
+        "jurisdiction": "US-federal",
+        "goal": "Calculate current-year wages minus the applicable basic standard deduction, rounded half up to cents. Track withholding separately. This is a limited worksheet, not tax liability, a refund or a complete return.",
+        "confirmed_profile": {
+          "filing_status": "head_of_household",
+          "age": 40,
+          "blind": false,
+          "dependent": false,
+          "residency": "U.S. citizen all year",
+          "return_period": "full calendar year",
+          "deduction_choice": "basic standard deduction"
+        },
+        "confirmed_records": [
+          {
+            "id": "w2-current",
+            "tax_year": 2025,
+            "employer": "Example Employer",
+            "box_1_wages_usd": "50000.00",
+            "box_2_withholding_usd": "6000.00",
+            "status": "original",
+            "replaces": null,
+            "duplicate_of": null
+          }
+        ],
+        "source_ids": [
+          "p501-2025-table6"
+        ]
+      },
+      "expected": {
+        "wage_record_ids": [
+          "w2-current"
+        ],
+        "wages_usd": "50000.00",
+        "withholding_usd": "6000.00",
+        "deduction_usd": "23625.00",
+        "result_usd": "26375.00",
+        "missing_fields": [],
+        "scope": "limited_worksheet"
+      }
+    },
+    {
+      "id": "decimal-rounding",
+      "input": {
+        "tax_year": 2025,
+        "jurisdiction": "US-federal",
+        "goal": "Calculate current-year wages minus the applicable basic standard deduction, rounded half up to cents. Track withholding separately. This is a limited worksheet, not tax liability, a refund or a complete return.",
+        "confirmed_profile": {
+          "filing_status": "single",
+          "age": 40,
+          "blind": false,
+          "dependent": false,
+          "residency": "U.S. citizen all year",
+          "return_period": "full calendar year",
+          "deduction_choice": "basic standard deduction"
+        },
+        "confirmed_records": [
+          {
+            "id": "w2-current",
+            "tax_year": 2025,
+            "employer": "Example Employer",
+            "box_1_wages_usd": "50000.125",
+            "box_2_withholding_usd": "6000.00",
+            "status": "original",
+            "replaces": null,
+            "duplicate_of": null
+          }
+        ],
+        "source_ids": [
+          "p501-2025-table6"
+        ]
+      },
+      "expected": {
+        "wage_record_ids": [
+          "w2-current"
+        ],
+        "wages_usd": "50000.125",
+        "withholding_usd": "6000.00",
+        "deduction_usd": "15750.00",
+        "result_usd": "34250.13",
+        "missing_fields": [],
+        "scope": "limited_worksheet"
+      }
+    }
+  ]
+}
