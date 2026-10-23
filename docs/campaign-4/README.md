@@ -89,21 +89,18 @@ hides its launcher; closing restores it and keyboard focus. Global scrollbars no
 use thin muted blue thumbs. The user's functional/UI checks passed; broader tax
 accuracy remains unverified.
 
-**20E.1 built; corrected probe awaits rerun:** a six-case fixed-passage diagnostic
-compares the exact same initial local worksheet with the production evidence
-checker and at most one repair/recheck. Independent hidden labels score amounts,
-year/withholding separation, corrected/duplicate records, eligibility questions,
-source selection and decimal rounding. Reports retain initial/final outputs,
-regressions, false checker approvals, model/source/code identities and measured
-costs. It uses synthetic confirmed records and frozen official excerpts, without
-reading live cases or changing the library. This isolates check/repair behavior;
-it does not measure native retrieval, uploaded-file extraction or full returns.
-The first Tower attempt was blocked before generation by the probe's transport
-configuration; it supplied zero accuracy pairs. The probe now disables environment
-proxy inheritance, preserves Private guards and fails fast with a specific policy
-code; a real-client offline regression covers this boundary.
-**Next:** read this measurement before choosing the smallest 20E.2 native
-retrieval/accuracy comparison. No model promotion or default extension is implied.
+**20E.1 measured October 22; one substantive failure remains.** All six fixed-
+passage pairs completed. Both initial and checked worksheets passed five cases;
+there were no improvements or regressions. The writer applied a deduction despite
+missing age/blindness/dependency facts, and the same-model checker approved it.
+No repair was triggered. This supports no accuracy promotion; model measurements
+and retained outputs are in [MODEL-FACTS](../../evals/MODEL-FACTS.md).
+**Next:** target omitted eligibility conditions in the writer/checker contract,
+then rerun only that case before broadening to the 20E.2 native comparison.
+
+**Toolbox edge-tab followup built:** the closed Toolbox opens from a larger,
+vertically centered right-edge tab, with sideways text facing left. It hides while
+the panel is open and restores keyboard focus on close. Only audrey-ui rebuilds.
 
 **Notices and settings polish built:** Tax review shows a brief filing caution;
 Private shows local server processing/storage with expandable privacy details.
@@ -146,7 +143,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Workflow accepted; fixed-passage accuracy measurement pending |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Workflow accepted; fixed-passage measurement found one eligibility failure |
 
 ## Build queue
 
@@ -179,9 +176,10 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
   recovery and idempotent delivery; user moved on from the lifecycle handoff.
 - [x] **20D.5 built:** bounded local evidence checking and targeted repair;
   Toolbox presentation accepted October 22.
-- [ ] **20E.1 built:** measure fixed-passage writer/check/repair quality; live results pending.
-- [ ] **20E.2:** use those results to target the remaining native retrieval/accuracy
-  comparison before extending defaults.
+- [x] **20E.1 measurement:** six fixed-passage pairs completed; five passed both arms.
+- [ ] **20E.1 followup:** handle omitted eligibility conditions; target only that
+  failed case. Preserve the other five results.
+- [ ] **20E.2:** native retrieval/accuracy comparison after the targeted correction.
 
 Tax year/jurisdiction and reference release belong to the case record; 20D.1 does
 not add premature tax-specific Project fields. OCR/media, fine-tuning and state

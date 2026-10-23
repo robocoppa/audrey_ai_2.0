@@ -52,12 +52,12 @@ export function ConversationToolbox({ available, open, onOpenChange, content, ch
     </header>
     <div className="conversation-toolbox-content">{content}</div>
   </>;
-  return <div className="conversation-with-toolbox" data-toolbox-open={visible && !compact}>
+  return <div className="conversation-with-toolbox" data-toolbox-open={visible && !compact} data-toolbox-available={available}>
     <div className="conversation-toolbox-main">
       {available ? <div className="conversation-toolbox-toolbar" hidden={visible}>
         <button ref={triggerRef} type="button" aria-label="Toolbox" title={pendingCount ? `${pendingCount} details to review` : "Toolbox"} aria-controls={panelId} aria-expanded={visible}
           aria-haspopup={compact ? "dialog" : undefined} onClick={() => onOpenChange(!visible)}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16v12H4zM8 8V5h8v3M4 13h16M10 12v3h4v-3" /></svg>Toolbox{pendingCount ? <span className="toolbox-pending-count" aria-hidden="true">{pendingCount}</span> : null}
+          <span className="conversation-toolbox-tab-label">Toolbox</span>{pendingCount ? <span className="toolbox-pending-count" aria-hidden="true">{pendingCount}</span> : null}
         </button>
       </div> : null}
       {children}

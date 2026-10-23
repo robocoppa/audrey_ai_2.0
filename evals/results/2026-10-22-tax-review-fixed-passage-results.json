@@ -1,0 +1,794 @@
+{
+  "schema": 1,
+  "status": "findings",
+  "measurement_status": "completed",
+  "error_code": null,
+  "accuracy_comparison_available": true,
+  "created_at": "2026-10-23T01:27:55.731723+00:00",
+  "scope": "Controlled fixed-passage writer/check/repair diagnostic; not native retrieval, upload extraction or complete-return acceptance.",
+  "provenance": {
+    "fixture_sha256": "eab65fc853fcc446a55e9d4c7234db6c004e9033c42f5a8f5065d09b63bce312",
+    "model": "qwen3.8:latest",
+    "digest": "22130167c4c20e20c7b71454612966ca8e8171e9b3cc8ab6ce8aa6cbfec79643",
+    "model_identity_stable": true,
+    "checker_code_sha256": "14f9e20f3a89d20874ff81f2e718123982d5528b98bc609db3d2c4a504ada485",
+    "probe_code_sha256": "a93e03dc76269c329f64bb7f69dde7e40dd6805acd634a1c983a9bfbed383ef8",
+    "repeats": 1,
+    "case_count": 6,
+    "paired_initial_draft": true,
+    "temperature": 0,
+    "think": false,
+    "max_repairs": 1,
+    "max_checks": 2,
+    "source_mode": "frozen public HTML excerpt; no live library or PDF page validation",
+    "production_data_read_or_written": false,
+    "cold_load_controlled": false
+  },
+  "summary": {
+    "samples": 6,
+    "matched_pairs": 6,
+    "execution_failures": 0,
+    "single_pass_correct": 5,
+    "checked_repair_correct": 5,
+    "improved": 0,
+    "regressed": 0,
+    "checker_false_accepts": 1,
+    "unexpected_checking_stops": 1,
+    "promotion_decision": "none; inspect the matched results and ungraded prose"
+  },
+  "cost": {
+    "generation_calls": 12,
+    "generation_seconds": 62.744,
+    "input_tokens": {
+      "known_total": 14547,
+      "unknown_calls": 0
+    },
+    "output_tokens": {
+      "known_total": 2051,
+      "unknown_calls": 0
+    }
+  },
+  "samples": [
+    {
+      "case": "basic-single",
+      "seed": 100,
+      "input_sha256": "c10bcaf32f824b9dca39474bda41a9f8fc6a53035d99e1e7491ae28c0c93e453",
+      "status": "completed",
+      "assessments": [
+        {
+          "candidate_sha256": "220c333fcbc2af757c5d1a94f0dc099d3150b30b0a31f7437b901b5cd8940fd9",
+          "case_revision": 1,
+          "attempt": 1,
+          "status": "checked",
+          "stop_reason": "checks_complete",
+          "findings": [
+            {
+              "finding_index": 0,
+              "verdict": "supported",
+              "reason": "The calculation correctly applies the 2025 standard deduction for a single filer ($15,750) from the provided Table 6 to the confirmed 2025 wages ($50,000). The arithmetic (50,000 - 15,750 = 34,250) is accurate. The profile confirms eligibility (single, not blind, not dependent, age 40). Withholding is tracked separately as requested. The scope is correctly limited to the worksheet calculation."
+            }
+          ],
+          "model": "qwen3.8:latest"
+        }
+      ],
+      "source_reopens": 1,
+      "single_pass": {
+        "worksheet": {
+          "wage_record_ids": [
+            "w2-current"
+          ],
+          "wages_usd": "50000.00",
+          "withholding_usd": "6000.00",
+          "deduction_usd": "15750.00",
+          "missing_fields": [],
+          "next_question": "",
+          "source_ids": [
+            "p501-2025-table6"
+          ],
+          "scope": "limited_worksheet",
+          "explanation": "Used the single 2025 W-2 record (w2-current) for wages and withholding. Applied the 2025 basic standard deduction for a single filer from the supplied Table 6. No corrections, duplicates, or missing eligibility facts were present."
+        },
+        "result_usd": "34250.00",
+        "passed": true,
+        "checks": {
+          "wages_usd": true,
+          "withholding_usd": true,
+          "deduction_usd": true,
+          "result_usd": true,
+          "wage_record_ids": true,
+          "missing_fields": true,
+          "question_needed": true,
+          "limited_scope": true,
+          "source_selection": true
+        },
+        "cost": {
+          "generation_calls": 1,
+          "generation_seconds": 23.698,
+          "input_tokens": {
+            "known_total": 691,
+            "unknown_calls": 0
+          },
+          "output_tokens": {
+            "known_total": 181,
+            "unknown_calls": 0
+          }
+        }
+      },
+      "checked_repair": {
+        "worksheet": {
+          "wage_record_ids": [
+            "w2-current"
+          ],
+          "wages_usd": "50000.00",
+          "withholding_usd": "6000.00",
+          "deduction_usd": "15750.00",
+          "missing_fields": [],
+          "next_question": "",
+          "source_ids": [
+            "p501-2025-table6"
+          ],
+          "scope": "limited_worksheet",
+          "explanation": "Used the single 2025 W-2 record (w2-current) for wages and withholding. Applied the 2025 basic standard deduction for a single filer from the supplied Table 6. No corrections, duplicates, or missing eligibility facts were present."
+        },
+        "result_usd": "34250.00",
+        "passed": true,
+        "checks": {
+          "wages_usd": true,
+          "withholding_usd": true,
+          "deduction_usd": true,
+          "result_usd": true,
+          "wage_record_ids": true,
+          "missing_fields": true,
+          "question_needed": true,
+          "limited_scope": true,
+          "source_selection": true
+        },
+        "cost": {
+          "generation_calls": 2,
+          "generation_seconds": 27.129,
+          "input_tokens": {
+            "known_total": 2282,
+            "unknown_calls": 0
+          },
+          "output_tokens": {
+            "known_total": 338,
+            "unknown_calls": 0
+          }
+        }
+      },
+      "checking_completed_as_expected": true,
+      "cost": {
+        "generation_calls": 2,
+        "generation_seconds": 27.129,
+        "input_tokens": {
+          "known_total": 2282,
+          "unknown_calls": 0
+        },
+        "output_tokens": {
+          "known_total": 338,
+          "unknown_calls": 0
+        }
+      },
+      "wall_seconds": 27.135
+    },
+    {
+      "case": "prior-year-withholding",
+      "seed": 100,
+      "input_sha256": "25d9e65204f098af891e87a86bcc63b533f3a85fc47ab46017a263a99e6ebbaf",
+      "status": "completed",
+      "assessments": [
+        {
+          "candidate_sha256": "8c55f8887002df0e91e8ac22c5cf6250ab6b454394da2f3b94d0187c3513e4eb",
+          "case_revision": 1,
+          "attempt": 1,
+          "status": "checked",
+          "stop_reason": "checks_complete",
+          "findings": [
+            {
+              "finding_index": 0,
+              "verdict": "supported",
+              "reason": "The calculation correctly uses 2025 wages ($50,000) and the 2025 single standard deduction ($15,750) from the provided evidence. The result ($34,250) is accurate. The scope is correctly limited to the worksheet, and withholding is tracked separately as requested."
+            }
+          ],
+          "model": "qwen3.8:latest"
+        }
+      ],
+      "source_reopens": 1,
+      "single_pass": {
+        "worksheet": {
+          "wage_record_ids": [
+            "w2-current"
+          ],
+          "wages_usd": "50000.00",
+          "withholding_usd": "6000.00",
+          "deduction_usd": "15750.00",
+          "missing_fields": [],
+          "next_question": "",
+          "source_ids": [
+            "p501-2025-table6"
+          ],
+          "scope": "limited_worksheet",
+          "explanation": "Used 2025 W-2 wages only. Applied 2025 basic standard deduction for single, non-blind, non-dependent filer per Publication 501 Table 6. Withholding is tracked separately and not subtracted."
+        },
+        "result_usd": "34250.00",
+        "passed": true,
+        "checks": {
+          "wages_usd": true,
+          "withholding_usd": true,
+          "deduction_usd": true,
+          "result_usd": true,
+          "wage_record_ids": true,
+          "missing_fields": true,
+          "question_needed": true,
+          "limited_scope": true,
+          "source_selection": true
+        },
+        "cost": {
+          "generation_calls": 1,
+          "generation_seconds": 3.528,
+          "input_tokens": {
+            "known_total": 770,
+            "unknown_calls": 0
+          },
+          "output_tokens": {
+            "known_total": 176,
+            "unknown_calls": 0
+          }
+        }
+      },
+      "checked_repair": {
+        "worksheet": {
+          "wage_record_ids": [
+            "w2-current"
+          ],
+          "wages_usd": "50000.00",
+          "withholding_usd": "6000.00",
+          "deduction_usd": "15750.00",
+          "missing_fields": [],
+          "next_question": "",
+          "source_ids": [
+            "p501-2025-table6"
+          ],
+          "scope": "limited_worksheet",
+          "explanation": "Used 2025 W-2 wages only. Applied 2025 basic standard deduction for single, non-blind, non-dependent filer per Publication 501 Table 6. Withholding is tracked separately and not subtracted."
+        },
+        "result_usd": "34250.00",
+        "passed": true,
+        "checks": {
+          "wages_usd": true,
+          "withholding_usd": true,
+          "deduction_usd": true,
+          "result_usd": true,
+          "wage_record_ids": true,
+          "missing_fields": true,
+          "question_needed": true,
+          "limited_scope": true,
+          "source_selection": true
+        },
+        "cost": {
+          "generation_calls": 2,
+          "generation_seconds": 6.429,
+          "input_tokens": {
+            "known_total": 2492,
+            "unknown_calls": 0
+          },
+          "output_tokens": {
+            "known_total": 291,
+            "unknown_calls": 0
+          }
+        }
+      },
+      "checking_completed_as_expected": true,
+      "cost": {
+        "generation_calls": 2,
+        "generation_seconds": 6.429,
+        "input_tokens": {
+          "known_total": 2492,
+          "unknown_calls": 0
+        },
+        "output_tokens": {
+          "known_total": 291,
+          "unknown_calls": 0
+        }
+      },
+      "wall_seconds": 6.431
+    },
+    {
+      "case": "corrected-and-duplicate",
+      "seed": 100,
+      "input_sha256": "acd56c4ce7c8c6839e5c21b5145b71abcea6bc13b2e4b816c00d0ea057ccb822",
+      "status": "completed",
+      "assessments": [
+        {
+          "candidate_sha256": "90ca5725a98ea1978e7c034e8f8f35e8d7a286e88c1a7eeac6e384f69152e02e",
+          "case_revision": 1,
+          "attempt": 1,
+          "status": "checked",
+          "stop_reason": "checks_complete",
+          "findings": [
+            {
+              "finding_index": 0,
+              "verdict": "supported",
+              "reason": "The calculation correctly uses the 2025 standard deduction for a single filer ($15,750) from the provided evidence, applies it to the corrected wages ($52,000), and yields the correct result ($36,250). The profile confirms eligibility (not blind/dependent), and the use of the corrected W-2 over the original is consistent with the supplied facts."
+            }
+          ],
+          "model": "qwen3.8:latest"
+        }
+      ],
+      "source_reopens": 1,
+      "single_pass": {
+        "worksheet": {
+          "wage_record_ids": [
+            "w2-corrected"
+          ],
+          "wages_usd": "52000.00",
+          "withholding_usd": "6200.00",
+          "deduction_usd": "15750.00",
+          "missing_fields": [],
+          "next_question": "",
+          "source_ids": [
+            "p501-2025-table6"
+          ],
+          "scope": "limited_worksheet",
+          "explanation": "Used the corrected W-2 (w2-corrected) which replaces the original (w2-current). The copy (w2-copy) is a duplicate and was ignored. The basic standard deduction for a single filer in 2025 is $15,750 according to Publication 501, Table 6. The profile confirms the filer is not blind, not a dependent, and eligible for the basic standard deduction. The server will compute 52000.00 - 15750.00."
+        },
+        "result_usd": "36250.00",
+        "passed": true,
+        "checks": {
+          "wages_usd": true,
+          "withholding_usd": true,
+          "deduction_usd": true,
+          "result_usd": true,
+          "wage_record_ids": true,
+          "missing_fields": true,
+          "question_needed": true,
+          "limited_scope": true,
+          "source_selection": true
+        },
+        "cost": {
+          "generation_calls": 1,
+          "generation_seconds": 4.474,
+          "input_tokens": {
+            "known_total": 866,
+            "unknown_calls": 0
+          },
+          "output_tokens": {
+            "known_total": 244,
+            "unknown_calls": 0
+          }
+        }
+      },
+      "checked_repair": {
+        "worksheet": {
+          "wage_record_ids": [
+            "w2-corrected"
+          ],
+          "wages_usd": "52000.00",
+          "withholding_usd": "6200.00",
+          "deduction_usd": "15750.00",
+          "missing_fields": [],
+          "next_question": "",
+          "source_ids": [
+            "p501-2025-table6"
+          ],
+          "scope": "limited_worksheet",
+          "explanation": "Used the corrected W-2 (w2-corrected) which replaces the original (w2-current). The copy (w2-copy) is a duplicate and was ignored. The basic standard deduction for a single filer in 2025 is $15,750 according to Publication 501, Table 6. The profile confirms the filer is not blind, not a dependent, and eligible for the basic standard deduction. The server will compute 52000.00 - 15750.00."
+        },
+        "result_usd": "36250.00",
+        "passed": true,
+        "checks": {
+          "wages_usd": true,
+          "withholding_usd": true,
+          "deduction_usd": true,
+          "result_usd": true,
+          "wage_record_ids": true,
+          "missing_fields": true,
+          "question_needed": true,
+          "limited_scope": true,
+          "source_selection": true
+        },
+        "cost": {
+          "generation_calls": 2,
+          "generation_seconds": 7.82,
+          "input_tokens": {
+            "known_total": 2882,
+            "unknown_calls": 0
+          },
+          "output_tokens": {
+            "known_total": 374,
+            "unknown_calls": 0
+          }
+        }
+      },
+      "checking_completed_as_expected": true,
+      "cost": {
+        "generation_calls": 2,
+        "generation_seconds": 7.82,
+        "input_tokens": {
+          "known_total": 2882,
+          "unknown_calls": 0
+        },
+        "output_tokens": {
+          "known_total": 374,
+          "unknown_calls": 0
+        }
+      },
+      "wall_seconds": 7.822
+    },
+    {
+      "case": "missing-eligibility",
+      "seed": 100,
+      "input_sha256": "439a83c715aaf31b41a07fe12e5cb53e8fcb870bcf36a6f8ef793ed2f632c3b8",
+      "status": "completed",
+      "assessments": [
+        {
+          "candidate_sha256": "f5b90e5da6700ba6dce0aa32c5f3720406743ae88873e401c237f8cf734d0a78",
+          "case_revision": 1,
+          "attempt": 1,
+          "status": "checked",
+          "stop_reason": "checks_complete",
+          "findings": [
+            {
+              "finding_index": 0,
+              "verdict": "supported",
+              "reason": "The calculation correctly applies the 2025 standard deduction for a single filer ($15,750) to the confirmed 2025 wages ($50,000), resulting in $34,250. The evidence passage explicitly lists $15,750 for single filers in Table 6. The facts confirm the filing status, tax year, and wage amount. The scope is correctly limited to the worksheet calculation as requested, and withholding is tracked separately without affecting the deduction calculation."
+            }
+          ],
+          "model": "qwen3.8:latest"
+        }
+      ],
+      "source_reopens": 1,
+      "single_pass": {
+        "worksheet": {
+          "wage_record_ids": [
+            "w2-current"
+          ],
+          "wages_usd": "50000.00",
+          "withholding_usd": "6000.00",
+          "deduction_usd": "15750.00",
+          "missing_fields": [],
+          "next_question": "",
+          "source_ids": [
+            "p501-2025-table6"
+          ],
+          "scope": "limited_worksheet",
+          "explanation": "Used the single confirmed 2025 W-2 (w2-current) for wages and withholding. Applied the 2025 basic standard deduction for single filers from the supplied Table 6. Withholding is tracked separately and not subtracted from wages. No corrections, duplicates, or missing eligibility facts were present."
+        },
+        "result_usd": "34250.00",
+        "passed": false,
+        "checks": {
+          "wages_usd": true,
+          "withholding_usd": true,
+          "deduction_usd": false,
+          "result_usd": false,
+          "wage_record_ids": true,
+          "missing_fields": false,
+          "question_needed": false,
+          "limited_scope": true,
+          "source_selection": true
+        },
+        "cost": {
+          "generation_calls": 1,
+          "generation_seconds": 3.805,
+          "input_tokens": {
+            "known_total": 674,
+            "unknown_calls": 0
+          },
+          "output_tokens": {
+            "known_total": 192,
+            "unknown_calls": 0
+          }
+        }
+      },
+      "checked_repair": {
+        "worksheet": {
+          "wage_record_ids": [
+            "w2-current"
+          ],
+          "wages_usd": "50000.00",
+          "withholding_usd": "6000.00",
+          "deduction_usd": "15750.00",
+          "missing_fields": [],
+          "next_question": "",
+          "source_ids": [
+            "p501-2025-table6"
+          ],
+          "scope": "limited_worksheet",
+          "explanation": "Used the single confirmed 2025 W-2 (w2-current) for wages and withholding. Applied the 2025 basic standard deduction for single filers from the supplied Table 6. Withholding is tracked separately and not subtracted from wages. No corrections, duplicates, or missing eligibility facts were present."
+        },
+        "result_usd": "34250.00",
+        "passed": false,
+        "checks": {
+          "wages_usd": true,
+          "withholding_usd": true,
+          "deduction_usd": false,
+          "result_usd": false,
+          "wage_record_ids": true,
+          "missing_fields": false,
+          "question_needed": false,
+          "limited_scope": true,
+          "source_selection": true
+        },
+        "cost": {
+          "generation_calls": 2,
+          "generation_seconds": 7.297,
+          "input_tokens": {
+            "known_total": 2270,
+            "unknown_calls": 0
+          },
+          "output_tokens": {
+            "known_total": 346,
+            "unknown_calls": 0
+          }
+        }
+      },
+      "checking_completed_as_expected": false,
+      "cost": {
+        "generation_calls": 2,
+        "generation_seconds": 7.297,
+        "input_tokens": {
+          "known_total": 2270,
+          "unknown_calls": 0
+        },
+        "output_tokens": {
+          "known_total": 346,
+          "unknown_calls": 0
+        }
+      },
+      "wall_seconds": 7.299
+    },
+    {
+      "case": "head-of-household",
+      "seed": 100,
+      "input_sha256": "08a87b9c4a1ff6bbe847ca3b0a2b2d843ac839c008b1a9369affafc420b9f1a8",
+      "status": "completed",
+      "assessments": [
+        {
+          "candidate_sha256": "c6da2d2d1ce2283bb507a7d822249f74fc3abb60cba2b01df6a7ae8774cd4cfc",
+          "case_revision": 1,
+          "attempt": 1,
+          "status": "checked",
+          "stop_reason": "checks_complete",
+          "findings": [
+            {
+              "finding_index": 0,
+              "verdict": "supported",
+              "reason": "The calculation correctly applies the 2025 Head of Household standard deduction ($23,625) from the supplied Table 6 to the confirmed 2025 W-2 wages ($50,000), resulting in $26,375. The profile confirms eligibility (not blind, not dependent, age 40), and withholding is tracked separately as required."
+            }
+          ],
+          "model": "qwen3.8:latest"
+        }
+      ],
+      "source_reopens": 1,
+      "single_pass": {
+        "worksheet": {
+          "wage_record_ids": [
+            "w2-current"
+          ],
+          "wages_usd": "50000.00",
+          "withholding_usd": "6000.00",
+          "deduction_usd": "23625.00",
+          "missing_fields": [],
+          "next_question": "",
+          "source_ids": [
+            "p501-2025-table6"
+          ],
+          "scope": "limited_worksheet",
+          "explanation": "Used the single confirmed 2025 W-2 (w2-current) for wages and withholding. Applied the 2025 basic standard deduction for Head of household from the supplied Table 6 because the profile is not blind, not a dependent, and not born before Jan 2, 1961. Withholding is tracked separately and not subtracted from wages."
+        },
+        "result_usd": "26375.00",
+        "passed": true,
+        "checks": {
+          "wages_usd": true,
+          "withholding_usd": true,
+          "deduction_usd": true,
+          "result_usd": true,
+          "wage_record_ids": true,
+          "missing_fields": true,
+          "question_needed": true,
+          "limited_scope": true,
+          "source_selection": true
+        },
+        "cost": {
+          "generation_calls": 1,
+          "generation_seconds": 3.955,
+          "input_tokens": {
+            "known_total": 694,
+            "unknown_calls": 0
+          },
+          "output_tokens": {
+            "known_total": 206,
+            "unknown_calls": 0
+          }
+        }
+      },
+      "checked_repair": {
+        "worksheet": {
+          "wage_record_ids": [
+            "w2-current"
+          ],
+          "wages_usd": "50000.00",
+          "withholding_usd": "6000.00",
+          "deduction_usd": "23625.00",
+          "missing_fields": [],
+          "next_question": "",
+          "source_ids": [
+            "p501-2025-table6"
+          ],
+          "scope": "limited_worksheet",
+          "explanation": "Used the single confirmed 2025 W-2 (w2-current) for wages and withholding. Applied the 2025 basic standard deduction for Head of household from the supplied Table 6 because the profile is not blind, not a dependent, and not born before Jan 2, 1961. Withholding is tracked separately and not subtracted from wages."
+        },
+        "result_usd": "26375.00",
+        "passed": true,
+        "checks": {
+          "wages_usd": true,
+          "withholding_usd": true,
+          "deduction_usd": true,
+          "result_usd": true,
+          "wage_record_ids": true,
+          "missing_fields": true,
+          "question_needed": true,
+          "limited_scope": true,
+          "source_selection": true
+        },
+        "cost": {
+          "generation_calls": 2,
+          "generation_seconds": 6.908,
+          "input_tokens": {
+            "known_total": 2334,
+            "unknown_calls": 0
+          },
+          "output_tokens": {
+            "known_total": 333,
+            "unknown_calls": 0
+          }
+        }
+      },
+      "checking_completed_as_expected": true,
+      "cost": {
+        "generation_calls": 2,
+        "generation_seconds": 6.908,
+        "input_tokens": {
+          "known_total": 2334,
+          "unknown_calls": 0
+        },
+        "output_tokens": {
+          "known_total": 333,
+          "unknown_calls": 0
+        }
+      },
+      "wall_seconds": 6.911
+    },
+    {
+      "case": "decimal-rounding",
+      "seed": 100,
+      "input_sha256": "702696bc84d33b78187bf0bd15c5a668e220dcc51bfe5f91ea4c6cb076eba2d3",
+      "status": "completed",
+      "assessments": [
+        {
+          "candidate_sha256": "5ef14801b5b79b69fa125a3cbb48334f0df72d6a9419801d53b1dd230bfd0ced",
+          "case_revision": 1,
+          "attempt": 1,
+          "status": "checked",
+          "stop_reason": "checks_complete",
+          "findings": [
+            {
+              "finding_index": 0,
+              "verdict": "supported",
+              "reason": "The calculation correctly applies the 2025 standard deduction for a single filer ($15,750) from the provided Table 6 to the confirmed 2025 W-2 wages ($50,000.125). The arithmetic (50,000.125 - 15,750 = 34,250.125) is correctly rounded half-up to cents ($34,250.13). The profile confirms eligibility (single, not blind, not dependent, age 40). Withholding is tracked separately as requested. The scope is limited to the worksheet as specified."
+            }
+          ],
+          "model": "qwen3.8:latest"
+        }
+      ],
+      "source_reopens": 1,
+      "single_pass": {
+        "worksheet": {
+          "wage_record_ids": [
+            "w2-current"
+          ],
+          "wages_usd": "50000.125",
+          "withholding_usd": "6000.00",
+          "deduction_usd": "15750.00",
+          "missing_fields": [],
+          "next_question": "",
+          "source_ids": [
+            "p501-2025-table6"
+          ],
+          "scope": "limited_worksheet",
+          "explanation": "Used the single 2025 W-2 record (w2-current) for wages and withholding. Applied the 2025 basic standard deduction for a single filer from the supplied Table 6. No corrections, duplicates, or missing eligibility facts were present."
+        },
+        "result_usd": "34250.13",
+        "passed": true,
+        "checks": {
+          "wages_usd": true,
+          "withholding_usd": true,
+          "deduction_usd": true,
+          "result_usd": true,
+          "wage_record_ids": true,
+          "missing_fields": true,
+          "question_needed": true,
+          "limited_scope": true,
+          "source_selection": true
+        },
+        "cost": {
+          "generation_calls": 1,
+          "generation_seconds": 3.586,
+          "input_tokens": {
+            "known_total": 692,
+            "unknown_calls": 0
+          },
+          "output_tokens": {
+            "known_total": 182,
+            "unknown_calls": 0
+          }
+        }
+      },
+      "checked_repair": {
+        "worksheet": {
+          "wage_record_ids": [
+            "w2-current"
+          ],
+          "wages_usd": "50000.125",
+          "withholding_usd": "6000.00",
+          "deduction_usd": "15750.00",
+          "missing_fields": [],
+          "next_question": "",
+          "source_ids": [
+            "p501-2025-table6"
+          ],
+          "scope": "limited_worksheet",
+          "explanation": "Used the single 2025 W-2 record (w2-current) for wages and withholding. Applied the 2025 basic standard deduction for a single filer from the supplied Table 6. No corrections, duplicates, or missing eligibility facts were present."
+        },
+        "result_usd": "34250.13",
+        "passed": true,
+        "checks": {
+          "wages_usd": true,
+          "withholding_usd": true,
+          "deduction_usd": true,
+          "result_usd": true,
+          "wage_record_ids": true,
+          "missing_fields": true,
+          "question_needed": true,
+          "limited_scope": true,
+          "source_selection": true
+        },
+        "cost": {
+          "generation_calls": 2,
+          "generation_seconds": 7.161,
+          "input_tokens": {
+            "known_total": 2287,
+            "unknown_calls": 0
+          },
+          "output_tokens": {
+            "known_total": 369,
+            "unknown_calls": 0
+          }
+        }
+      },
+      "checking_completed_as_expected": true,
+      "cost": {
+        "generation_calls": 2,
+        "generation_seconds": 7.161,
+        "input_tokens": {
+          "known_total": 2287,
+          "unknown_calls": 0
+        },
+        "output_tokens": {
+          "known_total": 369,
+          "unknown_calls": 0
+        }
+      },
+      "wall_seconds": 7.163
+    }
+  ],
+  "wall_seconds": 63.82,
+  "not_evaluated": [
+    "native retrieval and source reopening",
+    "uploads and field extraction from files",
+    "task lifecycle and multi-turn owner confirmation",
+    "unrestricted prose entailment",
+    "other tax provisions, full returns and independent legal correctness"
+  ],
+  "label_policy": "Source-checked coding-assistant labels, not independently adjudicated by a tax professional. Expected values are never sent to the writer or reviewer."
+}

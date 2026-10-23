@@ -3,16 +3,57 @@
 .conversation-thread-slot > .conversation-with-toolbox { grid-row: 2; }
 .conversation-toolbox-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .conversation-toolbox-main > .thread-root { flex: 1; min-height: 0; height: auto; }
-.conversation-toolbox-toolbar { display: flex; flex: none; justify-content: flex-end; padding: 0.35rem 1rem; }
+.conversation-with-toolbox[data-toolbox-available="true"][data-toolbox-open="false"] > .conversation-toolbox-main {
+  padding-right: calc(3rem + env(safe-area-inset-right, 0px));
+}
+.conversation-toolbox-toolbar {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  z-index: 15;
+  transform: translateY(-50%);
+}
 .conversation-toolbox-toolbar[hidden] { display: none; }
-.conversation-toolbox-toolbar > button { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 2rem; padding: 0.25rem 0.65rem; border: 1px solid var(--border); border-radius: 0.55rem; background: var(--surface-deep); color: var(--text-soft); font: inherit; font-size: 0.73rem; cursor: pointer; }
-.conversation-toolbox-toolbar > button:hover { border-color: var(--accent); background: var(--surface-raised); }
+.conversation-toolbox-toolbar > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: calc(3rem + env(safe-area-inset-right, 0px));
+  min-height: 10rem;
+  padding: 1rem max(0.5rem, env(safe-area-inset-right, 0px)) 1rem 0.5rem;
+  border: 1px solid rgb(99 181 255 / 32%);
+  border-right: 0;
+  border-radius: 0.85rem 0 0 0.85rem;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  box-shadow: -0.3rem 0 1rem rgb(0 0 0 / 20%);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.conversation-toolbox-toolbar > button:hover {
+  border-color: var(--accent);
+  background: var(--surface-active);
+  color: var(--text);
+}
+.conversation-toolbox-toolbar > button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -5px;
+}
+.conversation-toolbox-tab-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
 .conversation-toolbox { display: flex; min-width: 0; min-height: 0; flex-direction: column; border: 0; border-left: 1px solid var(--border); background: var(--surface-deep); color: var(--text-soft); }
 .conversation-toolbox[hidden] { display: none; }
 .conversation-toolbox-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.8rem 0.9rem; border-bottom: 1px solid var(--border); }
 .conversation-toolbox-header h2 { display: flex; align-items: center; gap: 0.5rem; margin: 0; font-size: 0.84rem; font-weight: 600; color: var(--text); }
 .conversation-toolbox svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.conversation-toolbox-toolbar svg { width: 0.9rem; height: 0.9rem; fill: none; stroke: currentColor; stroke-width: 1.5; }
 .conversation-toolbox-header button { display: grid; place-items: center; flex: none; width: 2rem; height: 2rem; padding: 0; border: 1px solid transparent; border-radius: 0.5rem; background: transparent; color: var(--muted); cursor: pointer; }
 .conversation-toolbox-header button:hover { border-color: var(--border-strong); background: var(--surface-raised); color: var(--text); }
 .conversation-toolbox-content { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 0.75rem; }
@@ -20,7 +61,10 @@
 .conversation-toolbox-drawer:not([open]) { display: none; }
 .conversation-toolbox-drawer::backdrop { background: rgb(3 10 21 / 58%); }
 @media (max-width: 900px) {
-  .conversation-toolbox-toolbar { padding: 0.3rem 0.8rem; }
+  .conversation-toolbox-toolbar > button {
+    width: calc(2.8rem + env(safe-area-inset-right, 0px));
+    min-height: 9rem;
+  }
   .conversation-toolbox-header { padding-top: max(0.8rem, env(safe-area-inset-top)); }
   .conversation-toolbox-header button { min-width: 2.5rem; min-height: 2.5rem; }
   .conversation-toolbox-content { padding-bottom: env(safe-area-inset-bottom); }

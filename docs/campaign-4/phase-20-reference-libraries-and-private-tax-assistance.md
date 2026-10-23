@@ -498,10 +498,14 @@ audit spanning year changes that reset owner confirmations.
 On compact screens the Toolbox is a right-side modal drawer with Escape, close,
 backdrop dismissal and restored trigger focus. It starts closed for a saved case;
 selecting Tax review opens setup. A small pending-count badge makes new choices
-visible without forcing the drawer over the chat. Desktop uses a docked rail. The launcher hides while open; closing restores
-it and keyboard focus. App scrollbars use thin muted blue thumbs with transparent
-tracks and a system-color fallback for high-contrast settings. Open/closed state survives recovered-run runtime refreshes. Closing the panel does
-not start work or discard current selections. Archived controls are read-only.
+visible without forcing the drawer over the chat. Desktop uses a docked rail. A
+larger right-edge tab is centered vertically, with sideways lettering whose tops
+face left. The tab hides while open; closing restores it and keyboard focus. A
+narrow edge gutter keeps it clear of chat controls. App scrollbars use thin muted
+blue thumbs with transparent tracks and a system-color fallback for high-contrast
+settings. Open/closed state survives recovered-run runtime refreshes. Closing the
+panel does not start work or discard current selections. Archived controls are
+read-only.
 
 No idle Start/Continue action is shown. The user sends a normal chat prompt to
 start or continue work; active Pause/Cancel and genuine interruption Resume remain.
@@ -797,16 +801,19 @@ Only audrey-ui rebuilds for the accompanying visual polish; the probe/fixture ar
 copied from the checkout at run time. Run while the GPU is otherwise quiet; this
 isolated process does not share the application's in-process fair queue.
 
-The initial live attempt produced no model answers because its client allowed
-environment proxy inheritance. The probe now uses the Private transport settings;
-policy failures stop remaining cases with a stable code and failed measurement,
-rather than appearing as completed accuracy results. No service rebuild is needed
-for this correction. Live quality measurement remains pending.
+The October 22 measurement completed all six pairs without execution failures.
+Five passed in both arms. The missing-eligibility case incorrectly supplied the
+deduction despite absent age/blindness/dependency facts, and the reviewer approved
+it; no repair ran. The source explicitly conditions use of its table, so this is
+a substantive unsupported-assumption failure. Do not populate missing-item records
+from the hidden answer key to make the test pass. The initial transport-only
+failure is closed and supplied no model-quality evidence.
 
-Read the measurement before expanding scope. This diagnostic does not close
-native retrieval/extraction, multi-turn case authority, conflicting sources, the
-known tax-change errors below, or complete-return accuracy. Those remain targeted
-20E.2 work; do not promote models or extend review defaults from a green run alone.
+Next, make omitted necessary conditions explicit in the writer/checker contract,
+add a regression using the unchanged incomplete profile, and rerun only that case.
+Keep the other five results. This does not close native retrieval/extraction,
+multi-turn authority, conflicting sources, the known tax-change errors below, or
+complete-return accuracy. No model promotion or default extension is supported.
 
 #### Accuracy and visible user flow
 

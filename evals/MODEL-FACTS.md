@@ -2,7 +2,7 @@
 
 **Results, strengths, and failure modes from practical tests**
 
-Updated October 17, 2026 · Measurements collected July–October 2026
+Updated October 22, 2026 · Measurements collected July–October 2026
 
 This report compares local and hosted language models for writing, coding,
 answering from supplied documents, selecting tools, and interpreting images.
@@ -254,6 +254,27 @@ measurements.
 **Practical lesson:** more precision, more accepted text, and more passing
 pipeline checks do not establish more accurate prose. Inspect the substantive
 claims and count rejected answers as well as successful ones.
+
+### Checking conditional rules against supplied facts
+
+On October 22, `qwen3.8:latest` (digest `22130167…`, thinking off, temperature
+zero) completed six synthetic tax-worksheet cases using a fixed official excerpt.
+Each first draft was then assessed by the same model, with one repair allowed if
+flagged. **Both versions passed 5/6; the checker improved none and approved the
+wrong case.** No repair was triggered.
+
+The failed draft applied a deduction without the required age, blindness and
+dependency facts. The rule's conditions were supplied, but the model claimed no
+facts were missing; its second pass agreed. Correct cases separated return years
+and withholding, recognized a corrected record and duplicate copy, and selected
+the supplied filing-status row. Decimal subtraction/rounding used server code,
+so these are not model-arithmetic successes.
+
+Checking added six calls, 10,160 input tokens and 870 output tokens. Request time
+rose from 43.05s to 62.74s; cold loading was uncontrolled. This small study, with one sample per case,
+tests fixed-passage checking, not document retrieval or complete returns.
+**Practical lesson:** a second pass by the same model can repeat an unsupported
+eligibility assumption; its approval alone is not evidence of correctness.
 
 ## 3. Small models for request classification
 
@@ -807,7 +828,8 @@ Keep these limits visible:
 
 This revision includes the October 15 router and embedding comparisons,
 retrospective source-label repairs, October 16 personal-retrieval diagnostics,
-and the October 17 matched document-layout comparison. The 48-chunk history
+the October 17 matched document-layout comparison, and the October 22 supplied-
+source worksheet check. The 48-chunk history
 comparison covers one positive exchange and no negative-query gate; its report
 contains no source conversation text or user identities. The document follow-up
 retains the supplied compact JSON with model identities, fixture hashes, paired
@@ -828,6 +850,9 @@ the report can be read without opening them.
 - **Narrative comparison:** separate security-report results dated September
   30–October 1, run IDs `model-2026-09-30-200843`, `model-2026-10-01-080608`,
   and `model-2026-10-01-142858`; associated result/narrative files.
+- **Conditional-rule checking:** [October 22 fixed-passage worksheets](results/2026-10-22-tax-review-fixed-passage-results.json),
+  retaining all six initial/final structured outputs, reviewer decisions,
+  fixture/model identities and measured costs.
 - **Classification:** [September results](results/2026-09-30-systemone-router-probe-results.json),
   [October Clef comparison](results/2026-10-03-clef-systemone-router-results.json),
   [Nimble v3 three-round comparison](results/2026-10-15-082632-nimble-v3-router-results.json),

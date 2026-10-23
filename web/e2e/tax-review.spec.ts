@@ -198,6 +198,15 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 1280, height: 600
     await openToolbox(page, viewport.width);
     expect(observed.agentBodies).toHaveLength(0);
     await closeToolbox(rail);
+    const tab = page.getByRole("button", { name: "Toolbox", exact: true });
+    const tabBounds = await tab.boundingBox();
+    expect(tabBounds!.width).toBeGreaterThanOrEqual(44);
+    expect(tabBounds!.height).toBeGreaterThan(tabBounds!.width * 2);
+    expect(Math.abs(tabBounds!.x + tabBounds!.width - viewport.width)).toBeLessThan(1);
+    expect(Math.abs(tabBounds!.y + tabBounds!.height / 2 - viewport.height / 2)).toBeLessThan(1);
+    const sendBounds = await page.getByRole("button", { name: "Send message", exact: true }).boundingBox();
+    expect(sendBounds!.x + sendBounds!.width).toBeLessThanOrEqual(tabBounds!.x);
+    await page.screenshot({ path: testInfo.outputPath("toolbox-tab.png") });
     await expect(page.getByText("Some features degraded", { exact: true })).toHaveCount(0);
 
     const composer = page.getByRole("textbox", { name: "Ask Audrey" });
