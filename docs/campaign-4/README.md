@@ -43,12 +43,12 @@ table and clear missing-information questions passed. Do not repeat that flow.
 **Tax review projects and scope accepted October 24.** The user reported the
 remaining checks passed. Automatic Private grouping, canonical facts/worksheets,
 document access and scope presentation stay closed. The audit runtime handoff
-also passed. Only the tax-year comparison below remains in the current queue.
+also passed. The tax-year comparison has now been assessed once below.
 
 **Composer Stop polish built October 24.** A red square icon replaces the word
-Stop in a button matching Send's shape and dimensions. Accessible naming and
-cancellation stay intact; existing desktop/mobile cancel/reload checks pass.
-Rebuild audrey-ui for this UI-only change.
+Stop in a button matching Send's shape and dimensions. The user's followup makes
+the inner square larger while keeping the outer control unchanged. Accessible
+naming and cancellation stay intact. Rebuild audrey-ui for this UI-only change.
 
 **Runtime maintenance built October 23.** The approved model/Private/research
 audit is addressed and locally verified; the local course `AUDIT.md` holds the drain.
@@ -70,14 +70,27 @@ and tool feedback instructs the writer to keep model-selected rule amounts condi
 or checked support assessment does not establish entitlement. The premature
 deduction remains a known model limitation, not a corrected accuracy result.
 The user accepted this presentation October 24. No accuracy claim follows
-from that acceptance; the one source-comparison outcome remains unreported.
+from that acceptance.
 
-**Then — finish bounded 20E.2 native validation.** Make one previously incorrect
-tax-year comparison, checking claims against retained passages. Record the outcome
-and available costs once. No scalar-probe rerun, generic eligibility detector,
-new model or full-return acceptance is queued. Use one fresh Private Tax review
-case for 2025 and the comparison prompt in Phase 20. No upload or script is needed;
-keep the conversation until the answer and cited passages have been assessed.
+**20E.2 comparison assessed October 24: incomplete.** The answer supported one
+2025 EITC income-limit topic and explicitly left the other topics and 2024
+comparison unresolved. Better uncertainty reporting does not pass comparison
+coverage. The [retained assessment](../../evals/results/2026-10-24-tax-review-native-comparison.md)
+records the evidence and missing execution metadata. The model's budget claim
+does not identify the stopping cause. Keep broad comparison coverage as a known
+limitation, with exact-source review and conditional arithmetic supported.
+
+**User-requested targeted retest October 24:** continue the same saved case for
+only the Form 8911 instructions' page-1 cutoff and edition. The reply and retained
+passage are pending. Preserve remaining topics/source conflicts and spent task
+usage; no new upload, rebuild, model or index work is required. An exhausted-task
+refusal is diagnostic evidence, not permission to reset its budget. The original
+multi-topic comparison remains incomplete.
+
+No broader repeat test is queued. A later
+decision to improve broader autonomous review starts from this saved run's
+actual tool trace, task usage and stop reason. Do not automatically raise caps,
+change models, reindex or reopen the concluded scalar diagnostic.
 
 **Toolbox worksheet layout followup:** reserve a complete worksheet-summary row
 on short screens and scroll the expanded content rather than clipping its action.
@@ -130,7 +143,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Facts, Private case projects and scope accepted; one tax-year comparison remains |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Product flow accepted; comparison assessed incomplete with known coverage limits |
 
 ## Build queue
 
@@ -176,8 +189,9 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **20E.2 supported scope:** source review and conditional arithmetic;
   eligibility is not determined. Scope metadata and worksheet presentation are
   implemented and user-accepted October 24. The earlier premature deduction stays recorded.
-- [ ] **20E.2 comparison:** assess the known tax-year comparison once against
-  retained official passages. No full-return or eligibility-accuracy acceptance.
+- [x] **20E.2 comparison assessment:** completed once October 24; outcome is
+  incomplete coverage, not a passed comparison or eligibility-accuracy result.
+  Retain the limitation; no repeated broad test is queued.
 
 Tax year/jurisdiction and reference release remain in the case record. Project
 views read that canonical record rather than duplicate it in Project instructions. OCR/media, fine-tuning and state

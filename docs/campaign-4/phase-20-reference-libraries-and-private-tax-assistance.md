@@ -949,26 +949,24 @@ prose or guarantee that every source condition was inventoried. No new eligibili
 engine, model or reviewer call is added.
 
 Backend and UI verification passed and the user accepted the project/scope
-flow October 24. Do not repeat those browser checks. The next remaining item is
-the one known tax-year comparison in the native review flow:
+flow October 24. Do not repeat those browser checks. The one native comparison
+was assessed October 24 and is concluded with incomplete coverage, as recorded
+in the [retained result](../../evals/results/2026-10-24-tax-review-native-comparison.md).
+It supported the 2025 EITC income limits while leaving the other requested topics
+and 2024 figures unresolved. This improves uncertainty reporting without passing
+comparison coverage. Runtime usage and the actual stopping cause are unverified;
+the answer's budget explanation is not telemetry.
 
-1. Open a fresh Private conversation and choose Tax review. Use return year 2025
-   and goal "Compare 2025 with 2024 federal tax changes."
-2. Send one message:
-
-   > Using only the owned IRS library, compare tax year 2025 with 2024. Cover
-   > personal exemptions, the basic standard deduction, qualified tips and
-   > overtime deductions, EITC for families with three or more qualifying children,
-   > and the alternative-fuel refueling credit cutoff. Cite the publication and
-   > PDF page for supported claims. Distinguish tax years from effective dates,
-   > and identify anything you cannot verify or where sources conflict. This is
-   > a source comparison, not an assessment of my personal eligibility.
-
-3. Keep that conversation and supply the answer and cited sources for one
-   assessment. No upload, source refresh, reindex or new script is needed. A
-   successful tool call proves retrieval, not accuracy. Unsupported values,
-   unresolved source conflicts and missing prior-year support stay explicit;
-   an honestly limited result is not a complete comparison pass.
+The user explicitly requested a targeted retest October 24: continue the same
+saved case and read only the owned Form 8911 instructions' What's New on PDF
+page 1. Require the edition, exact placed-in-service cutoff, citation and saved
+passage. Keep other topics and any earlier conflicting evidence unresolved.
+The current December 2025 public source identifies June 30, 2026; an older owned
+edition must be disclosed rather than silently treated as current. No pull,
+rebuild or upload is needed for the tax check. A paused task retains spent usage;
+if its durable budget is truly exhausted, preserve the refusal and inspect it
+before changing limits. No result is claimed until the user supplies the reply.
+This tests one-source use/continuation, not broad comparison coverage.
 
 Record outcomes and available costs once, including failures. Correct a concrete
 native defect if demonstrated, or narrow the supported task; do not reopen the isolated

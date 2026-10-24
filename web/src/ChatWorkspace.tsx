@@ -2632,7 +2632,7 @@ function AudreyThread({
                           onClick={() => { userRequestedCancelRef.current = true; }}
                         >
                           <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <rect x="6.5" y="6.5" width="11" height="11" rx="1.4" />
+                            <rect x="4" y="4" width="16" height="16" rx="1.6" />
                           </svg>
                         </ComposerPrimitive.Cancel>
                       ) : null}
