@@ -1,4 +1,4 @@
-# Lesson 13 — Per-user context: identity, memory, and history
+# Lesson 14 — Per-user context: identity, memory, and history
 
 **Estimated time:** 45-60 minutes if you keep
 [`auth.py`](../../src/audrey/auth.py),
@@ -37,10 +37,9 @@ identity         - who the request is from — the gating fact
 ```
 
 Without identity, the other two have nothing to do. With it, every
-per-user surface in the system reads from one canonical source: an
-`AuthedUser.email` resolved by `require_user` once per request and
-cached for 30 seconds. The rest of this lesson is what falls out of
-that decision.
+per-user surface in the system reads from one canonical source: the
+storage namespace that `require_user` resolves for every request. The
+rest of this lesson is what falls out of that decision.
 
 (One non-identity-gated injection also runs on every request: a
 datetime system message — "today is 2026-05-27T14:32:00-07:00, treat
@@ -55,61 +54,30 @@ lesson is per-user.)
 
 ## 2. Read-along
 
-### 2.1 Establishing the user — `AuthedUser` and `require_user`
+### 2.1 Establishing the user — `require_user`
 
-Memory and the chat archive both key on a per-user id. Where does that
-id come from? Open [`auth.py`](../../src/audrey/auth.py).
+Memory and the chat archive both key on a per-user value. Where does it
+come from? Open [`auth.py`](../../src/audrey/auth.py).
 
-#### What "identity" actually means over HTTP
+HTTP is stateless: every request arrives with no memory of the last one,
+so "who is this?" has to be answered again on every request. The answer
+comes from a **credential** the request carries, which the server checks.
+Audrey accepts two, as Lesson 4 described:
 
-HTTP is stateless. Every request arrives at the server with no memory
-of any previous request. So "who is this user?" has to be re-answered
-on every single request, somehow. The mechanism is a **credential the
-client attaches to each request** — typically in a header — that the
-server can validate.
+- **A browser request** passes through Cloudflare Access, which adds a
+  signed `Cf-Access-Jwt-Assertion` header once the person has signed in.
+  Audrey checks that signature itself, against Cloudflare's published keys.
+- **A bot or script** sends `Authorization: Bearer aud_pat_…`, a personal
+  access token Audrey issued. Audrey looks it up in its own database.
 
-Audrey's clients (Open WebUI and the upload page) attach a credential
-called a **JWT** (JSON Web Token) — a string the user gets after
-logging in, which they hand back on every subsequent request to prove
-they're still the same person.
-
-The client attaches the JWT in an HTTP header called `Authorization`,
-using a convention called **bearer-token auth**:
-
-```text
-Authorization: Bearer eyJhbGciOiJIUzI1NiIs...<long opaque string>...
-```
-
-The word "bearer" is literal — "whoever bears (carries) this token is
-treated as the identity it represents." That's both the strength
-(simple) and the risk (if the token leaks, anyone holding it *is* the
-user). Bearer tokens are the current standard for API auth.
-
-#### Why Audrey doesn't validate the token itself
-
-Most apps own their user database and validate tokens themselves.
-Audrey does not. There's a separate service — **Open WebUI (OWUI)** —
-which is the chat frontend the user logs into. OWUI owns the user
-accounts, issues the JWTs, and is the authority on which JWTs are
-real. Audrey is a backend that OWUI talks to.
-
-If Audrey re-implemented JWT validation, it would have to share a
-signing secret with OWUI, stay in sync with OWUI's user lifecycle
-(activations, role changes, deletions), and keep its own user table
-consistent with OWUI's. All of that would add unnecessary complexity.
-
-The cleaner move is to **delegate**: on each request, Audrey forwards
-the token to OWUI and asks "is this real, and if so, who?" OWUI's
-answer is the source of truth. This pattern is called an **auth
-probe** or **token introspection**. The slogan: *OWUI says who;
-Audrey just remembers the answer briefly.*
+Anything else is refused with 401. A bad Access assertion is refused
+outright: Audrey never falls back to another credential on the same request.
 
 #### What `require_user` looks like at the route
 
 [`require_user`](../../src/audrey/auth.py#L308) is a FastAPI
-**dependency**. A dependency in FastAPI is a function whose return
-value gets injected into a route handler automatically. The chat
-route declares it at
+**dependency**: a function whose return value FastAPI injects into a route
+handler automatically. The chat route declares it at
 [`routes/openai/routes.py:121`](../../src/audrey/routes/openai/routes.py#L121):
 
 ```python
@@ -120,94 +88,28 @@ async def chat_completions(
 ):
 ```
 
-The `me: AuthedUser = Depends(require_user)` line reads as: "before
-running the route body, call `require_user(request)`. If it raises
-`HTTPException`, return that error to the client. Otherwise, bind its
-return value to the parameter `me`." From the route body's
-perspective, `me` simply exists; the route never sees the JWT, the
-OWUI probe, the cache, or the 401 path. Auth has been pushed entirely
-into one dependency.
+The `me: AuthedUser = Depends(require_user)` line reads as: "Before running
+the route body, call `require_user(request)`. If it raises `HTTPException`,
+return that error to the client. Otherwise, bind its return value to `me`."
+The route never sees a credential or a 401 path; authentication lives in one
+dependency.
 
-The return type, `AuthedUser`, is a small dataclass at
-[`auth.py:86`](../../src/audrey/auth.py#L86):
+Both credentials resolve to one Audrey account, and `require_user` returns
+an `AuthedUser` for it. The field that matters here is `email`, and its name
+is misleading: it holds the account's **storage namespace**, the private key
+that memory, uploads and the chat archive file this person's data under. For
+an account that existed before Audrey kept its own accounts, the namespace is
+the email it had then; a newer account gets an opaque `ns_…` id. Either way it
+never changes, even when the person's email does, which is why data is keyed
+on it. A later lesson on identity covers accounts, tokens and namespaces in
+full.
 
-```python
-@dataclass(slots=True)
-class AuthedUser:
-    email: str       # canonical user id — never replace with a database id
-    role: str        # "user" | "admin"
-    owui_id: str
-```
-
-The load-bearing field is `email`. Per-user memory keys on it,
-per-user uploads key on it, the chat archive keys on it. The comment
-on the dataclass says so explicitly because a future refactor might
-be tempted to add a numeric `id` field instead — every place that
-hands `user_id=me.email` would silently break.
-
-`owui_id` is OWUI's internal user id (kept for debugging / future
-admin features), and `role` is `"user"` or `"admin"` — used by the
-admin-only routes via a companion dependency,
-[`require_admin`](../../src/audrey/auth.py#L456), which calls
-`require_user` first then additionally checks `me.role == "admin"`
-and returns 403 if not. (401 means "we don't know who you are"; 403
-means "we know who you are and you're not allowed.")
-
-#### Inside `require_user`, step by step
-
-Three things happen on the way to `me`:
-
-1. **Header parse.** The dependency reads the `Authorization` header.
-   It accepts only the bearer shape — `Authorization: Bearer <token>`
-   — and rejects anything else with 401. OWUI also sets an `HttpOnly`
-   `token` cookie on its own same-origin responses, but Audrey
-   **ignores cookies entirely**. The reason is **CSRF** (Cross-Site
-   Request Forgery): a browser will automatically attach cookies to
-   any request to the cookie's domain, including requests originated
-   by a malicious third-party page the user happens to be visiting.
-   If Audrey accepted cookie-borne tokens, that malicious page could
-   silently make authenticated requests on the user's behalf.
-   Requiring the explicit `Authorization` header closes that path —
-   third-party JavaScript can't read or set arbitrary headers on
-   cross-origin requests by default.
-
-2. **Cache check.** Asking OWUI on every single request would be
-   expensive — a dashboard with 20 widgets re-polling means 20 OWUI
-   probes per refresh. So `require_user` keeps a per-token cache: if
-   the same token was successfully resolved within the last 30
-   seconds, return the cached `AuthedUser` without calling OWUI. The
-   cache is a plain Python dict mapping token → `(timestamp,
-   AuthedUser)`, with an opportunistic sweep of expired entries when
-   the dict grows past 1024. For Audrey's dozens-of-users scale,
-   that's plenty — no LRU eviction, no Redis, just a dict.
-
-   The 30-second TTL is the freshness-vs-load tradeoff: long enough
-   to absorb burst traffic, short enough that role/permission changes
-   in OWUI propagate within half a minute.
-
-3. **OWUI probe.** On a cache miss, `require_user` makes an HTTP
-   request: `GET http://open-webui:8080/api/v1/auths/`, with the
-   user's bearer token forwarded in *its* `Authorization` header. (We
-   are, in a sense, impersonating the user against OWUI to ask "is
-   this you?") OWUI replies with a JSON body containing the user's
-   `id`, `email`, `role`, and other fields. Audrey extracts what it
-   needs into `AuthedUser` and caches the result.
-
-   The probe accepts only `role in {"user", "admin"}`. OWUI returns
-   200 OK for `pending` users — accounts that exist but haven't been
-   activated by an admin — but Audrey explicitly rejects those at
-   [`auth.py:145`](../../src/audrey/auth.py#L145), returning 401 with
-   "Account not activated." This is **fail-closed**: an unknown role
-   string (a future OWUI version's new state, a garbled response)
-   also fails, on the principle that auth code should refuse what it
-   doesn't understand rather than guess.
-
-   Failure modes: 401 from OWUI → 401 to the client (token is bad).
-   Anything else (500, timeout, connection refused) → 502 to the
-   client, which distinguishes "you're not logged in" from "auth
-   itself is broken." Timeout is 5 seconds; OWUI and Audrey live on
-   the same Docker network, so anything slower than that means OWUI
-   is actually down, not slow.
+An account can exist without being usable: a new account waits for an admin
+to approve it, and an admin can disable one. `require_user` refuses an
+inactive account with 403, not 401, because Audrey knows who it is; the
+account just isn't allowed in. Admin-only routes go one step further with
+[`require_admin`](../../src/audrey/auth.py#L456), which runs `require_user`
+first and then returns 403 unless the account is an admin.
 
 #### What the route does with `me`
 
@@ -229,28 +131,6 @@ put anything there. The header-resolved `me.email` is the only thing
 that drives memory, archive, and quota scoping. A mismatch is logged
 once for drift-debugging, then ignored.
 
-#### Cache invalidation
-
-The 30-second TTL means most state changes in OWUI propagate within
-half a minute on their own. But there's one case where waiting is
-wrong: an admin deletes or bans a user in OWUI, and that user's
-already-cached `AuthedUser` shouldn't keep working for 30 more
-seconds. OWUI v0.9.x doesn't emit user-deletion webhooks, so Audrey
-exposes two admin endpoints in
-[`routes/admin.py`](../../src/audrey/routes/admin.py) for explicit
-eviction:
-
-- `POST /v1/admin/auth/clear` — drops every cached entry. Useful
-  after an OWUI config or version change.
-- An email-scoped variant powered by
-  [`clear_auth_cache_for_email`](../../src/audrey/auth.py#L516) —
-  drops just one user's entries (a user can have multiple tokens
-  across devices) without disturbing others.
-
-In short: **OWUI says who; Audrey caches the answer for 30 seconds,
-unless an admin says otherwise.**
-
-
 ### 2.2 Memory recall
 
 Open [`pipeline/memory.py`](../../src/audrey/pipeline/memory.py).
@@ -265,7 +145,7 @@ four skip guards before any network call:
 ```text
 not user_id                          - anonymous request, nothing to recall
 registry missing memory_search       - tool offline, dispatch would fail
-empty query (last_user_text)         - prefix-only OWUI utility tasks, etc.
+empty query (last_user_text)         - nothing to search with
 query > MAX_QUERY_CHARS              - clamp; embedding signal dilutes past ~500 chars
 ```
 
@@ -292,7 +172,7 @@ no `httpx.RequestError` handling. Same posture for malformed JSON
 bodies and missing `results` arrays.
 
 Hits become a system message via
-[`memory_system_message`](../../src/audrey/pipeline/memory.py#L114):
+[`memory_system_message`](../../src/audrey/pipeline/memory.py#L121):
 
 ```text
 [Relevant memories from previous conversations with this user:]
@@ -370,7 +250,7 @@ Two details:
 - **`partial=True` on client disconnect.** `wrap()` catches
   `CancelledError` from the source generator and sets
   `self.partial = True` before re-raising. Cancellation happens when
-  the user closes the OWUI tab mid-response. The half-finished answer
+  a `/v1` client hangs up mid-response. The half-finished answer
   is still worth archiving — but the `partial` flag tells the search
   side that it's not the full reply, useful when the model later
   recalls "what I said to you last time."
@@ -378,44 +258,31 @@ Two details:
 
 ### 2.4 The chat archive — conversation id
 
-Capture is one half. Persisting needs a `conversation_id` so search
-results stitch into threads. OWUI sends a `chat_id` in the request
-body, but Audrey doesn't get to pick where OWUI puts it — different
-versions have shipped different shapes, and a future OWUI release
-could move the field again.
-
+Capture is one half. Storing a turn needs a `conversation_id`, so search
+results can be stitched back into threads. A turn from the browser app
+already has one, because it belongs to an Audrey conversation. A turn from a
+`/v1` client is harder: the API has no standard conversation field. So
 [`resolve_conversation_id`](../../src/audrey/pipeline/chat_archive.py#L74)
-walks a five-step ladder, returning at the first hit:
+walks a ladder and returns at the first hit:
 
 ```text
-1. raw_payload["chat_id"]                  - current OWUI fast path
-2. raw_payload["metadata"]["chat_id"]      - speculative nested variant
-3. messages[-1]["metadata"]["chat_id"]     - older OWUI shape
-4. sha256(user, first 6 message contents)  - deterministic derive
-5. fresh-<uuid4>                           - last resort
+1. a top-level chat_id or conversation_id          - a client that sends one
+2. either id under the request's metadata          - another common placement
+3. either id in a message's metadata, newest first
+4. sha256(user, first user turn)                   - deterministic fallback
+5. a fresh random id                               - last resort
 ```
 
-On the OWUI version Audrey runs against today, **step 1 wins on every
-request**. Steps 2 and 3 exist because earlier OWUI releases placed
-`chat_id` under `metadata` or attached it to the last message instead
-of the top level; keeping both checks means an OWUI downgrade or a
-future upgrade that flips the field location doesn't break archive
-stitching without an Audrey change.
+Steps 1 to 3 cover clients that track conversations themselves and say so,
+wherever they put the id. Step 4 is the load-bearing fallback for clients
+that send none. It hashes only the authenticated user and the first user
+turn, so a client that resends the whole growing conversation on every
+request keeps getting the same id from its first turn on, and its turns
+still stitch into one thread. Step 5 fires only when there's no user turn
+at all.
 
-Step 4 is the genuinely load-bearing fallback. It fires when *no*
-OWUI version supplies a `chat_id` — for example, a future OWUI rewrite
-that drops the field entirely, or a non-OWUI client hitting the route
-directly. The deterministic hash means a second request in the same
-conversational context still lands on the same `conversation_id`
-(same first six messages → same hash), so thread stitching survives
-even without metadata. The six-message prefix is long enough to pin
-a thread, short enough that the id stays stable as the conversation
-grows.
-
-Step 5 only fires when there are no messages and no user — a true
-edge case (anonymous request with empty history).
-
-The route resolves this once before pipeline branching at
+The route resolves this once, before the streaming and non-streaming paths
+split, at
 [`routes/openai/routes.py:276`](../../src/audrey/routes/openai/routes.py#L276), then
 threads `conversation_id` through both the streaming and non-streaming
 paths so capture and archive write agree.
@@ -484,7 +351,7 @@ OpenAPI tool surface (it's not model-callable — only Audrey's archive
 client calls it).
 
 Now switch to [`tools-server/chat_archive.py`](../../tools-server/chat_archive.py).
-[`ChatArchiveStore.archive_turn`](../../tools-server/chat_archive.py#L580)
+[`ChatArchiveStore.archive_turn`](../../tools-server/chat_archive.py#L736)
 does three things in order:
 
 1. **SQLite write** — user turn + assistant turn into `messages`, plus
@@ -516,7 +383,7 @@ not lock-based concurrency control.
 that's only the assistant turn loses the "what was I asking" context
 — the user types "what about the second one?" and the matching answer
 is meaningless without the prior question. So
-[`build_chunks`](../../tools-server/chat_archive.py#L237) concatenates
+[`build_chunks`](../../tools-server/chat_archive.py#L270) concatenates
 `User: ... \nAssistant: ...` into the chunk text. Long pairs split at
 sentence boundaries with overlap, same chunking shape as the KB
 ingest pipeline (covered in the KB-ingest lesson).
@@ -525,7 +392,7 @@ ingest pipeline (covered in the KB-ingest lesson).
 request, before the model sees the prompt. The chat archive does not.
 The model decides when to search it via the `chat_history_search`
 tool. The reasoning is in
-[`prompts.py:482`](../../src/audrey/pipeline/prompts.py#L482):
+[`prompts.py:501`](../../src/audrey/pipeline/prompts.py#L501):
 
 ```python
 "Use `chat_history_search` only when the user references something "
@@ -572,18 +439,15 @@ path.
 For each scenario below, sketch your answer before reading the
 discussion. Operational judgment, not trivia.
 
-**1. A request arrives with a valid bearer token, but Audrey returns
-401 with "Account not activated." OWUI shows the user as logged in.
-What's going on?**
+**1. Someone signs in through Cloudflare Access without trouble, but every
+chat request gets a 403. What's going on?**
 
-OWUI's `role` is `pending` — the JWT is valid, but the user hasn't
-been activated by an admin in OWUI. Audrey fails them closed at
-[`auth.py:145`](../../src/audrey/auth.py#L145); the allowed set is
-`{"user", "admin"}` only. The 30-second cache means this state lingers
-for half a minute after the admin activates them in OWUI. To force
-immediate eviction, hit `POST /v1/admin/auth/clear` (or its
-email-scoped variant) — otherwise the next probe after TTL expiry
-picks up the new role.
+Cloudflare Access proved who they are; Audrey's own account state decides
+whether they may use it. Their account is inactive: either it's new and
+still waiting for an admin to approve it, or an admin disabled it.
+`require_user` resolves the account and refuses an inactive one with 403,
+not 401, because Audrey knows exactly who is asking. Nothing about their
+data changes. Once an admin activates the account, the next request works.
 
 **2. A user reports "I told Audrey my birthday is in July, but the
 next day it didn't remember." Trace the read and write paths.**
@@ -602,36 +466,34 @@ not via Audrey writing directly. Two failure modes are common:
   `memory_search` can't find it. Check the stored tag against the
   current `me.email`.
 
-**3. A user opens a fresh OWUI tab, types the same opening question
-they asked yesterday. Does the archive treat this as a continued
-conversation or a new one?**
+**3. An API client starts a new conversation by sending the same opening
+question it sent yesterday, and it sends no conversation id. Does the archive
+treat this as a continued conversation or a new one?**
 
-It depends on whether OWUI sends `chat_id`. If yes (steps 1-3 of
-[`resolve_conversation_id`](../../src/audrey/pipeline/chat_archive.py#L74)),
-new tab → new chat_id → new conversation. If OWUI omits the field
-(step 4 fallback), the deterministic hash over `(user, first 6
-message contents)` will match yesterday's hash and the new request
-stitches into yesterday's conversation. That's deliberate — the goal
-of step 4 is exactly to survive missing `chat_id` metadata — but it
-means "same opening turns" is the stitching signal, not "same tab."
+A continued one. With no id from the client, step 4 of
+[`resolve_conversation_id`](../../src/audrey/pipeline/chat_archive.py#L74)
+hashes the authenticated user and the first user turn. Same user, same
+opening question, same hash, so the new turn stitches into yesterday's
+thread. That's the price of the fallback: "same opening turn" is the
+stitching signal. A client that wants separate threads should send its own
+`chat_id` or `conversation_id`. Browser turns are unaffected, because each
+belongs to its own Audrey conversation.
 
 **4. The archive write times out. Does the user see an error?**
 
-No. The post-response archive call is best-effort:
-[`ChatArchiveClient.archive_turn`](../../src/audrey/pipeline/chat_archive.py#L502)
-catches every `httpx.HTTPError` and `TimeoutError`, logs them, and
-increments `chat_archive_writes_total{result="fail"}`. The response is
-already on its way back to the user — the archive write happens *after*
-the response is produced. Net effect: a transient tools-server outage
-loses archive coverage for that turn, but chat keeps working. The next
-turn's archive write will succeed independently.
+No, and the turn isn't lost either. The response path doesn't call the
+sidecar: it commits a small row to a local SQLite outbox,
+[`ChatArchiveQueue`](../../src/audrey/pipeline/chat_archive.py#L569), and
+moves on. A background worker delivers queued rows to the sidecar and keeps
+retrying failed ones. A tools-server outage delays archive coverage for
+those turns; once the sidecar is back, the worker catches up.
 
 **5. Anonymous request (no auth header) hits the chat route. Walk what
 breaks and where.**
 
 It doesn't reach the pipeline at all. `Depends(require_user)` runs
-first; missing or malformed `Authorization` raises 401 before the
-route body executes. The chat route has no anonymous path — the
+first; a request with neither a Cloudflare Access assertion nor a bearer
+token gets 401 before the route body executes. The chat route has no anonymous path — the
 schema's `payload.user` field is OpenAI-spec passthrough, never
 trusted for identity.
 

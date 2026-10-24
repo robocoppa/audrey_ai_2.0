@@ -35,21 +35,35 @@ plan.
 
 **The answer pipeline**
 
-- [Lesson 6 — The model layer](lesson-06-the-model-layer.md)
-- [Lesson 7 — Classification and routing](lesson-07-classification-and-routing.md)
-- [Lesson 8 — Deep mode: planner, panel, synthesizer, reflect](lesson-08-deep-mode.md)
-- [Lesson 9 — Tool use and the ReAct loop](lesson-09-tool-use-and-react.md)
-- [Lesson 10 — How function calling actually works](lesson-10-how-function-calling-works.md)
-- [Lesson 11 — The knowledge base: ingest and search](lesson-11-kb-ingest-and-search.md)
-- [Lesson 12 — The KB lifecycle: watcher, reconcile, uploads](lesson-12-kb-lifecycle.md)
-- [Lesson 13 — Per-user context: identity, memory, and history](lesson-13-memory-and-context-injection.md)
-- [Lesson 14 — Fair scheduling: how Audrey shares one GPU](lesson-14-fair-scheduling.md)
-- [Lesson 15 — The OpenAI routes, end-to-end](lesson-15-openai-routes.md)
-- [Lesson 16 — The custom-tools sidecar](lesson-16-custom-tools-sidecar.md)
-- [Lesson 17 — Research mode](lesson-17-research-mode.md)
+- [Lesson 6 — The model layer I: choosing a model](lesson-06-the-model-layer.md)
+- [Lesson 7 — The model layer II: calling models](lesson-07-calling-models.md)
+- [Lesson 8 — Classification and routing](lesson-08-classification-and-routing.md)
+- [Lesson 9 — Deep mode and research mode](lesson-09-deep-mode.md)
+- [Lesson 10 — Tool use and the ReAct loop](lesson-10-tool-use-and-react.md)
+- [Lesson 11 — How function calling actually works](lesson-11-how-function-calling-works.md)
+- [Lesson 12 — The knowledge base: ingest and search](lesson-12-kb-ingest-and-search.md)
+- [Lesson 13 — The KB lifecycle: watcher, reconcile, uploads](lesson-13-kb-lifecycle.md)
+- [Lesson 14 — Per-user context: identity, memory, and history](lesson-14-memory-and-context-injection.md)
+- [Lesson 15 — Fair scheduling: how Audrey shares one GPU](lesson-15-fair-scheduling.md)
+- [Lesson 16 — The OpenAI routes, end-to-end](lesson-16-openai-routes.md)
+- [Lesson 17 — The custom-tools sidecar](lesson-17-custom-tools-sidecar.md)
 
-Lessons 6–17 are being brought up to date one at a time. Until a lesson's
-refresh lands, parts of it may describe an earlier version of Audrey.
+Lessons 11–17 are being brought up to date one at a time. Until a
+lesson's refresh lands, parts of it may describe an earlier version of Audrey.
+
+**Lesson numbers changed on 2026-10-23,** when the model layer became two
+lessons and research mode joined deep mode. Old Lessons 7–16 are now 8–17
+(old Lesson *N* is now Lesson *N*+1), Lesson 7 is new, and research mode, old
+Lesson 17, is now a section of Lesson 9. Older notes elsewhere in the
+repository may use the old numbers.
+
+**The course structure was revised on 2026-10-23:** 27 lessons in seven parts,
+with the pipeline taught in the order a request meets it, and identity and the
+application database moved into the platform part. The
+[plan](../plans/lesson-catch-up-plan.md#the-course-structure-revised-2026-10-23)
+has the table. The files keep their current numbers until the database and
+identity lessons are added; that renumber also puts the pipeline lessons in
+their new order.
 
 ## Prerequisites
 

@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 23, 2026.** English user input only. Passed work stays closed.
+**Updated October 24, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -9,86 +9,12 @@ they are not ongoing task lists.
 
 ## Current work
 
-**20D.1 accepted October 20:** Private Projects, protected uploads/context,
-refresh/isolation and new Private model choices passed. Delete-to-new-chat,
-model switching before the first message and the MiniMax addition are accepted.
-Private portrait, activity-sorted history and Automatic tools presentation are
-accepted. The reference count repair is accepted: the latest Private comparison
-completed content search and page reads. Accuracy remains open; retrieved pages
-did not prevent outdated deduction figures and a wrong credit cutoff year.
-Project deletion beside Edit and interrupted conversation-deletion recovery are
-accepted. The original Cloudflare origin cause was not identified; diagnostics
-are closed. [Navigation](phase-12-sidebar-navigation.md) holds the behavior.
-
-**20D.2 and UI followup accepted October 21.** Tax review
-settings open in a dialog bounded by the visible screen; the previous completed
-year remains the editable default. A saved choice becomes a visible user reply
-and Audrey continues automatically, preserving unsent text and attachments.
-The current facts followup replaces the original grouped confirmation/history
-presentation; settings and collapsed findings remain in the Toolbox. Internal IDs/passing checklist rows stay hidden;
-Audrey handles source verification herself. The generic degraded badge is removed
-throughout chat, including after deletion; actual outage indicators remain.
-The user moved on after the targeted presentation handoff; keep this flow closed.
-
-**20D.3a built:** saved cases remain readable if the IRS library changes or is
-unavailable. An explicit owner action adopts the exact available release;
-confirmed personal facts and original passages are retained, while rule evidence
-and related work require rechecking. Models cannot approve the update. Publication
-races show a further update choice, without silently adopting it. No index rerun
-or new library publication is needed to deploy this slice.
-
-**20D.3b accepted for the limited worksheet:** a Tax review chat prompt runs one
-local tool writer through the normal native run, with stop/reconnect and a ten-minute foreground limit. It saves
-a goal-scoped worksheet with linked facts, official passages, arithmetic and
-explicit limitations. Case edits make an earlier worksheet stale. The Toolbox
-keeps findings expandable; document-derived or uncertain facts need user review.
-The current facts followup below removes redundant confirmation of direct
-statements. Selected-file inventory is inspectable; it does not prove every page was read. The user-reported synthetic
-baseline passed the requested arithmetic and year/withholding separation, with an
-official passage retained. This limited pass does not establish legal accuracy or
-certify a complete return. Broader accuracy and background work follow later.
-[Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md) holds the contract.
-
-**20D.4a built:** SQLite task/checkpoint foundation, with one active task per
-Private conversation, expiring worker leases, revision/fence checks and replay-safe
-checkpoints. Pause/cancel prevent late task writes; changed case/source/Project or
-model/policy bindings require revalidation. Resource accounting and partial-work
-stop reasons survive restart and existing backup/restore. Native integration is
-built and accepted below.
-
-**20D.4b.1 built:** one bounded leased step can use the verified Private runtime
-and owned local tools. Tax-case changes and task revision advancement commit
-atomically; cancellation, stale inputs and expired leases refuse late findings.
-Observed token/tool costs persist during the step. An idle lease is not renewed,
-and timeouts or failures retain partial work with a specific stop reason. This
-executor now runs through the existing native run manager.
-
-**20D.4b.2a built:** native task admission/preparation refreshes current account
-and Private-model permissions, the case and published IRS release. Exact selected
-originals, extracted text and semantic Project context are pinned by digest.
-Permission changes are checked again inside case-write transactions. Explicit
-resume revalidates inputs and retains spent resources; stale checkpoints cannot
-start work.
-
-**20D.4b.2b complete; user advanced past the lifecycle handoff October 22:** native Tax review turns create
-or explicitly resume a saved task through the existing run manager and fair GPU
-queue. One compact progress row provides Pause/Resume/Cancel; normal Stop cancels
-the task. Refresh retains saved progress; review controls preserve unsent drafts.
-Each attempt remains one
-bounded local writer; generated-token usage is observed before output is accepted.
-Checkpoint and final-answer outbox commit together, and delivery reuses the
-original native message. Restart replays committed results, pauses unfinished
-work and requires explicit resume with fresh validation. Restart never launches
-model work. No repeat lifecycle check is queued.
-
-**20D.5 and Toolbox accepted October 22.** Native worksheets receive bounded
-source checks and targeted repair; user facts and source applicability
-retain their separate authority. Tax review settings/progress live in the
-right Toolbox rail (drawer on compact screens). The current facts followup below
-replaces the previously accepted choice history with editable saved facts. Ordinary
-chat replaces idle Start/Continue actions. The open panel hides its launcher; closing restores it and keyboard focus. Global scrollbars now
-use thin muted blue thumbs. The user's functional/UI checks passed; broader tax
-accuracy remains unverified.
+**Accepted foundation:** the owned IRS library, Private Projects and local file
+processing, conversation recovery, Tax review worksheet/task lifecycle and Toolbox
+presentation remain closed. The editable direct-chat facts workflow is accepted.
+The [Phase 20 contract](phase-20-reference-libraries-and-private-tax-assistance.md)
+holds those behaviors; the build queue below records completed milestones.
+The collector, index and embedding migrations need no further run.
 
 **20E.1 diagnostic closed with a known limitation, October 23.** The original
 six-case measurement passed five in both arms; checking improved none and approved
@@ -105,19 +31,30 @@ this is not an accuracy pass. Redundant confirmations and a blank continuation
 also made the flow unclear. Keep the concrete eligibility limitation recorded;
 the closed scalar probe stays closed.
 
-**Current — Tax review facts followup.** Facts explicitly stated in the current
-authenticated chat message are saved without a second confirmation. Extracted or
-uncertain facts still need review. The Toolbox shows editable current facts in a
-table, replacing the choice timeline. Corrections retain internal history and
-invalidate dependent work; genuine missing information is asked as a clear
-question with an answer box that sends a normal chat turn; the composer also
-remains available. There is no “I’ve provided this” shortcut.
-This backend/UI change needs `audrey` and `audrey-ui` rebuilt; acceptance is pending.
+**Facts workflow accepted October 23.** Direct chat facts, the editable Toolbox
+table and clear missing-information questions passed. Do not repeat that flow.
 
-**Then — finish bounded 20E.2 native validation.** Check the revised facts flow
-and decide a narrow correction or scope limit for the observed premature
-deduction. Follow with the previously incorrect tax-year comparison, checking
-claims against retained passages. Record observed outcomes and available costs
+**Current — Tax review projects built.** Starting a case creates a Private
+`Tax review <year>` project, or reuses the current owned Private project. The
+project shows canonical facts and saved worksheets and retains document links.
+Existing ungrouped cases have an explicit Create Private project action; reads
+do not recreate deleted projects. Browser acceptance remains pending.
+
+**Runtime maintenance built October 23.** The approved model/Private/research
+audit is addressed and locally verified; the local course `AUDIT.md` holds the drain.
+The retired client integration is removed. [Phase 2](phase-02-native-application.md#retained-compatibility-boundaries)
+explains the retained data/protocol contracts. The affected lessons describe the
+current behavior. Deploy backend, UI and sidecar together using the handoff below.
+
+**Sidecar maintenance built October 24.** The approved Cycle 2b source changes
+are locally verified and recorded in the local course AUDIT. Runtime behavior
+is in [Phase 1](phase-01-platform-hardening.md#tool-availability-at-runtime).
+Deploy audrey and custom-tools together. Lesson files are left to the author;
+this handoff provides an outline only. Product queue order stays below.
+
+**Then — finish bounded 20E.2 native validation.** Decide a narrow correction
+or scope limit for the observed premature deduction. Follow with the previously
+incorrect tax-year comparison, checking claims against retained passages. Record observed outcomes and available costs
 once. Source/year links, user authority and code arithmetic remain separate;
 neither UI polish nor model agreement establishes tax accuracy. No new rule
 engine, model change or repeated probe gate is queued.
@@ -136,9 +73,7 @@ reveals processing/storage, administrator, Cloudflare, tool-scope and mode-lock
 details; touch can reveal them and Escape/outside interaction dismisses them.
 The compact header retains the badge while destructive chat actions stay in mobile
 navigation. Composer privacy prose is removed. Tax review's filing caution and
-settings behavior stay accepted. This UI and the preceding eligibility followup
-were deployed by rebuilding audrey and audrey-ui. The current facts followup
-rebuilds audrey and audrey-ui; no index, model or source update is needed.
+settings behavior stay accepted. This presentation flow is accepted; no repeat check is queued.
 
 **MiniMax M3.1 Flash:** configured as an unmeasured cloud draft/research candidate
 in mixed, Cloud and selected Research panels. Kimi K3 stays first, panel worker
@@ -175,7 +110,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Editable facts followup; native eligibility limitation retained; tax-year comparison queued |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Facts accepted; automatic Private case projects built; bounded native accuracy work remains |
 
 ## Build queue
 
@@ -212,14 +147,18 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **20E.1 diagnostic concluded:** missing-fact stop and withheld result
   observed; retain the raw applied-value inconsistency as a known failure.
   No further scalar-probe rerun is queued; other five passes stay recorded.
-- [ ] **Current facts followup:** accept the editable Toolbox facts table,
-  immediate saving of direct chat statements and clear missing-information flow.
+- [x] **Facts followup:** editable current facts, direct chat statements and
+  clear missing-information flow accepted.
+- [ ] **Tax project acceptance:** verify automatic Private grouping, saved
+  facts/worksheet and project document access.
+- [x] **Runtime maintenance:** approved audit source changes and retired-client
+  cleanup implemented; see the local course AUDIT for the drain.
 - [ ] **20E.2:** decide a narrow fix or scope limit for premature deduction in
   the observed native worksheet, then assess the known tax-year comparison once.
   The correct final arithmetic alone does not close the eligibility failure.
 
-Tax year/jurisdiction and reference release belong to the case record; 20D.1 does
-not add premature tax-specific Project fields. OCR/media, fine-tuning and state
+Tax year/jurisdiction and reference release remain in the case record. Project
+views read that canonical record rather than duplicate it in Project instructions. OCR/media, fine-tuning and state
 source adapters wait for a concrete supported case. English-only scope remains.
 
 Older unreported browser polish is grouped in the existing phase contracts:
@@ -271,7 +210,7 @@ has the one-time backup and cleanup command.
 | Backend Python/dependencies | `docker compose up -d --build audrey` |
 | Browser code/assets | `docker compose up -d --build audrey-ui` |
 | Shared KB code used by both services | Rebuild `audrey` and `custom-tools` |
-| Tools sidecar code | Rebuild `custom-tools`; restart `audrey` for startup discovery |
+| Tools sidecar code | Rebuild `custom-tools`; Audrey refreshes discovery automatically. Rebuild `audrey` too when its code/declarations changed |
 | Media worker/fetcher code | Rebuild the corresponding `media-worker` or `media-fetcher` |
 | `config.yaml` or service environment | `docker compose up -d --force-recreate audrey` (use affected service; add `--build` when code changed) |
 | Eval image contents | `docker compose --profile eval build audrey-eval` |

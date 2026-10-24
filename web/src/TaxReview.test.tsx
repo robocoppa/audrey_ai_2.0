@@ -297,3 +297,21 @@ it("creates a Tax review from the inline Toolbox setup without opening a popup",
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
+
+
+it("groups a legacy case only after an explicit choice and keeps its canonical facts", async () => {
+  const legacy = { ...taxCase, project_id: null };
+  const grouped = { ...legacy, project_id: "proj_tax" };
+  const fetchMock = vi.fn().mockResolvedValueOnce(json({ case: legacy })).mockResolvedValueOnce(json(grouped));
+  vi.stubGlobal("fetch", fetchMock);
+  const callbacks = props();
+  render(<TaxReview {...callbacks} />);
+  const create = await screen.findByRole("button", { name: "Create Private project" });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  fireEvent.click(create);
+  await waitFor(() => expect(callbacks.onCaseChange).toHaveBeenLastCalledWith(grouped));
+  expect(fetchMock.mock.calls[1][0]).toBe("/api/conversations/con_private/tax-review/project");
+  expect(fetchMock.mock.calls[1][1].method).toBe("POST");
+  expect(screen.queryByRole("button", { name: "Create Private project" })).not.toBeInTheDocument();
+  expect(callbacks.onSaved).not.toHaveBeenCalled();
+});

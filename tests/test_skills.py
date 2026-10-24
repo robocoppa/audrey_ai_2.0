@@ -78,7 +78,7 @@ def test_valid_bundle_preserves_instructions_and_hashes_resources(tmp_path):
     assert len(first.digest) == 64
 
 
-def test_tracked_video_bundle_matches_rollback_prompt_byte_for_byte():
+def test_tracked_video_bundle_preserves_core_guidance_and_adds_frame_inspection():
     spec = load_skill_bundle(
         _REPO_ROOT / "skills" / "video-analysis",
         limits=SkillLimits(),
@@ -86,7 +86,14 @@ def test_tracked_video_bundle_matches_rollback_prompt_byte_for_byte():
     )
 
     assert spec.id == "video-analysis"
-    assert spec.instructions == VIDEO_SPECIALIST_SYSTEM
+    # The shipped skill extends the fallback prompt with the frame tool; exact
+    # byte equality stopped being the contract when that capability shipped.
+    assert spec.instructions.startswith(VIDEO_SPECIALIST_SYSTEM)
+    frame_guidance = spec.instructions.removeprefix(VIDEO_SPECIALIST_SYSTEM).strip()
+    assert "inspect_video_frame" in spec.allowed_tools
+    assert "inspect_video_frame" in frame_guidance
+    assert "timestamp in seconds" in frame_guidance
+    assert "A still frame does not establish movement or speech" in frame_guidance
     assert spec.resources == ()
 
 

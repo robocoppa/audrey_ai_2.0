@@ -73,7 +73,7 @@ class _StrictChatMessage(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    # Older OWUI payloads attach conversation metadata to a message. Preserve
+    # Some compatible clients attach conversation metadata to a message. Preserve
     # it through validation for archive identity; route adapters explicitly
     # exclude it at the model-provider boundary.
     metadata: dict[str, Any] | None = None
@@ -129,7 +129,7 @@ class DeveloperChatMessage(_StrictChatMessage):
 class UserChatMessage(_StrictChatMessage):
     role: Literal["user"]
     # A plain string for ordinary text turns, OR the OpenAI multimodal
-    # list-of-parts shape OWUI sends when a user attaches an image.
+    # list-of-parts shape compatible clients send when a user attaches an image.
     content: ChatContent
     name: str | None = None
 
@@ -213,7 +213,7 @@ ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "
 
 
 class ChatCompletionRequest(BaseModel):
-    # OWUI adds top-level extension fields such as `chat_id`. Keep accepting
+    # Compatible clients add top-level extension fields such as `chat_id`. Keep accepting
     # them for client compatibility; the public compatibility table explicitly
     # records that unmodelled generation controls are ignored.
     model_config = ConfigDict(extra="ignore")

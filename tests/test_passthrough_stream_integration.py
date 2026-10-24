@@ -102,7 +102,7 @@ async def _drain(app) -> list[str]:
             messages=[{"role": "user", "content": "hello"}],
             stream=True,
         ),
-        me=SimpleNamespace(email="alice@example.com", role="user", owui_id="abc"),
+        me=SimpleNamespace(email="alice@example.com", role="user"),
     )
     return [chunk.decode() if isinstance(chunk, bytes) else chunk
             async for chunk in resp.body_iterator]
@@ -142,7 +142,7 @@ async def test_non_streaming_passthrough_also_completes():
             messages=[{"role": "user", "content": "hello"}],
             stream=False,
         ),
-        me=SimpleNamespace(email="alice@example.com", role="user", owui_id="abc"),
+        me=SimpleNamespace(email="alice@example.com", role="user"),
     )
     assert resp["object"] == "chat.completion"
     assert captured[0]["think"] is False
@@ -213,7 +213,7 @@ async def _run_tool_loop_request(app, *, messages, stream: bool):
             tools=[_WEATHER_TOOL],
             stream=stream,
         ),
-        me=SimpleNamespace(email="alice@example.com", role="user", owui_id="abc"),
+        me=SimpleNamespace(email="alice@example.com", role="user"),
     )
     if not stream:
         return response

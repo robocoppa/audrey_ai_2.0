@@ -26,9 +26,8 @@ When a `FairLocalGate` is supplied, each `ollama.chat` is wrapped with
 tool call doesn't head-of-line-block other users' GPU work. The gate is
 re-acquired for the next round; if another user slipped in between, the
 model may be reloaded — that's the trade we accept to keep tool-wait time
-non-blocking. Deep panel passes `gate=None` because it holds the gate at
-the whole-worker level (one acquire across all rounds, by design — see
-`deep_panel._run_one_worker`).
+non-blocking. Fast, deep-worker and research factchecker callers all pass
+the gate so local model calls and visual tools can take turns using it.
 """
 
 from __future__ import annotations
@@ -546,9 +545,9 @@ async def _noop_gate():
 def _gate_ctx(gate: FairLocalGate | None, model: str, location: str, user_id: str | None):
     """Acquire the gate per-chat-call when supplied; no-op when None or cloud.
 
-    Deep panel passes `gate=None` because it holds the gate across the whole
-    worker (rounds + tool dispatch). Fast path passes a real gate so the
-    tool-dispatch window between rounds releases the GPU for other users.
+    Fast, deep-worker and research factchecker callers pass the real gate.
+    Tool dispatch between rounds leaves the GPU available to visual tools
+    and other users.
     """
     if gate is None or location != "local":
         return _noop_gate()

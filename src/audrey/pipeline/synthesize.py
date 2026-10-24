@@ -6,7 +6,7 @@ on facts or the observed tool activity exposes incomplete evidence —
 it's not a required section.
 
 The original conversation's system messages (datetime, memory recall,
-OWUI template variables) are forwarded into the synth call so the
+client-provided context) are forwarded into the synth call so the
 synthesizer reasons about "today" from the same temporal floor as the
 workers, not from its training cutoff.
 
@@ -125,7 +125,7 @@ def _build_synth_messages(
     """Forward original system messages, then append synth-system + user.
 
     Workers see all the system messages from the request (datetime from
-    `node_datetime`, memory recall hits, OWUI template variables, any
+    `node_datetime`, memory recall hits, and any
     user-supplied system prompts). The same system messages are forwarded
     into the synth call so the synthesizer reasons with the same context
     — most importantly the datetime (otherwise synth hedges about "today"
@@ -388,7 +388,7 @@ async def synthesize_stream(
             think = (
                 await ollama.thinking_flag(model, False)
                 if response_format is not None
-                else None
+                else await think_for(ollama, cfg, role="deep_synth", model=model)
             )
             async with gate.acquire(model, location=loc, user_id=user_id):
                 stream_kwargs: dict[str, Any] = {

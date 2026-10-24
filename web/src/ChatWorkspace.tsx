@@ -59,6 +59,7 @@ import {
   deleteConversation,
   discardEmptyConversation,
   getConversation,
+  getProject,
   getRun,
   getFileImageUrl,
   listConversations,
@@ -619,6 +620,20 @@ export function ChatWorkspace({
     setConversations((current) => upsertConversation(current, updated));
   }
 
+  async function taxProjectAssociated(conversationId: string, projectId: string) {
+    try {
+      const [updated, project] = await Promise.all([getConversation(conversationId), getProject(projectId)]);
+      if (updated.project_id !== project.id || !project.private_required || !updated.private_required) {
+        throw new Error("The saved case project changed. Reload the conversation.");
+      }
+      setProjects((current) => [project, ...current.filter(({ id }) => id !== project.id)]);
+      setProjectsExpanded(true);
+      replaceConversation(updated);
+    } catch (reason) {
+      setProjectsError(actionError("Tax case saved; could not refresh its project", reason));
+    }
+  }
+
   function replaceDraftConversation(previousId: string, updated: Conversation, draft: ComposerDraft) {
     setReplacedDrafts((current) => ({ ...current, [updated.id]: draft }));
     setConversations((current) => upsertConversation(current.filter(({ id }) => id !== previousId), updated));
@@ -1177,6 +1192,7 @@ export function ChatWorkspace({
               canBrowseDirectModels={canBrowseDirectModels}
               showProgress={preferences.show_progress}
               onConversationChange={replaceConversation}
+              onTaxProjectAssociated={(projectId) => void taxProjectAssociated(opened.id, projectId)}
               replacementDraft={replacedDrafts[opened.id]}
               onDraftConsumed={(conversationId) => setReplacedDrafts((current) => {
                 const remaining = { ...current };
@@ -1215,6 +1231,7 @@ function ConversationThread({
   canBrowseDirectModels,
   showProgress,
   onConversationChange,
+  onTaxProjectAssociated,
   replacementDraft,
   onDraftConsumed,
   onDraftReplaced,
@@ -1232,6 +1249,7 @@ function ConversationThread({
   canBrowseDirectModels: boolean;
   showProgress: boolean;
   onConversationChange: (conversation: Conversation) => void;
+  onTaxProjectAssociated: (projectId: string) => void;
   replacementDraft?: ComposerDraft;
   onDraftConsumed: (conversationId: string) => void;
   onDraftReplaced: (previousId: string, conversation: Conversation, draft: ComposerDraft) => void;
@@ -1650,6 +1668,8 @@ function ConversationThread({
           focusComposer={focusComposer}
           onComposerFocused={onComposerFocused}
           projectPicker={projectPicker}
+          projectId={conversation.project_id ?? null}
+          onTaxProjectAssociated={onTaxProjectAssociated}
           models={conversationModels}
           privateRequired={privateRequired}
           skills={skills}
@@ -1690,6 +1710,8 @@ function AudreyThread({
   focusComposer,
   onComposerFocused,
   projectPicker,
+  projectId,
+  onTaxProjectAssociated,
   models,
   skills,
   canBrowseDirectModels,
@@ -1714,6 +1736,8 @@ function AudreyThread({
   focusComposer: boolean;
   onComposerFocused: (conversationId: string) => void;
   projectPicker: ReactNode;
+  projectId: string | null;
+  onTaxProjectAssociated: (projectId: string) => void;
   canBrowseDirectModels: boolean;
   models: AudreyModel[];
   skills: SkillSummary[];
@@ -1851,6 +1875,13 @@ function AudreyThread({
     setTaxCase((current) => current && value && current.id === value.id && current.revision > value.revision
       ? current : value);
   }, []);
+  const requestedTaxProject = useRef<string | null>(null);
+  useEffect(() => {
+    const caseProjectId = taxCase?.project_id;
+    if (!caseProjectId || requestedTaxProject.current === caseProjectId) return;
+    requestedTaxProject.current = caseProjectId;
+    if (caseProjectId !== projectId) onTaxProjectAssociated(caseProjectId);
+  }, [taxCase?.project_id, projectId, onTaxProjectAssociated]);
   const supportsFiles = selectedModel.capabilities.includes("files");
   useEffect(() => {
     if (!skillId) return;

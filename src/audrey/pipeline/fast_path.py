@@ -84,10 +84,10 @@ def pick_fast_model(
     *,
     task: TaskType,
 ) -> ModelSpec:
-    spec = registry.first_healthy(task, health.is_healthy)
-    if spec is None:
+    candidates = _healthy_fast_candidates(registry, health, task=task, limit=1)
+    if not candidates:
         raise OllamaError(f"No healthy model available for task={task}")
-    return spec
+    return candidates[0]
 
 
 # How many models the non-tools fast path will try before giving up. The
@@ -104,18 +104,22 @@ def _healthy_fast_candidates(
     task: TaskType,
     limit: int,
 ) -> list[ModelSpec]:
-    """Up to `limit` healthy candidates for `task`, highest priority first.
+    """Healthy candidates in priority order, or one earliest-recovery probe.
 
-    Reads health at selection time (same as `pick_fast_model`); a model
-    cooled down by an earlier attempt in this same request is skipped on the
-    next pass because `_run_one_chat` records the failure before we loop.
+    Probing only one cooling model lets a recovered Ollama daemon serve the
+    next request immediately, without retrying every model during an outage.
     """
+    if limit <= 0:
+        return []
+    candidates = registry.candidates(task)
     out: list[ModelSpec] = []
-    for spec in registry.candidates(task):
+    for spec in candidates:
         if health.is_healthy(spec.name):
             out.append(spec)
             if len(out) >= limit:
                 break
+    if not out and candidates:
+        out.append(min(candidates, key=lambda spec: health.cooldown_remaining(spec.name)))
     return out
 
 
@@ -213,7 +217,7 @@ class _InlineThinkFilter:
                 continue
 
             # A closing tag with no opening tag is the malformed shape seen in
-            # OWUI. Text after it is buffered until completion so an exact
+            # clients. Text after it is buffered until completion so an exact
             # replay can be dropped instead of rendering the answer twice.
             self._mode = "after_close"
             self._after_close.append(data[marker_at + len(self._CLOSE):])

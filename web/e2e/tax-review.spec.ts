@@ -18,7 +18,7 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCount?: number } = {}) {
+async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCount?: number; autoProject?: boolean } = {}) {
   let taxCase: TaxCase | null = options.savedTask ? fixtureCase("created") : null;
   let privateTask: PrivateTask | null = options.savedTask ? {
     id: "task_saved_review", conversation_id: ID, revision: 7, status: "running", stop_reason: "",
@@ -32,8 +32,9 @@ async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCou
   const agentBodies: Array<Record<string, unknown>> = [];
   const conversation = {
     id: ID, title: "Private tax review", private_required: true, default_mode: "local", default_model_id: "private",
-    project_id: null, created_at: DATE, updated_at: DATE, last_message_at: null as string | null, archived_at: null,
+    project_id: null as string | null, created_at: DATE, updated_at: DATE, last_message_at: null as string | null, archived_at: null,
   };
+  const taxProject = { id: "proj_tax", name: "Tax review 2025", instructions: "", private_required: true, created_at: DATE, updated_at: DATE };
   const ordinary = { ...conversation, id: OTHER, title: "Ordinary conversation", private_required: false, default_mode: "auto", default_model_id: "auto", last_message_at: DATE };
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -45,7 +46,11 @@ async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCou
     if (path === "/api/skills") return json(route, { enabled: true, status: "ready", items: [] });
     if (path === "/api/capabilities") return json(route, { status: "degraded", generated_at: DATE, chat: { status: "available" }, tools: { status: "degraded" }, knowledge: { status: "available" }, skills: { status: "available" } });
     if (path === "/api/files") return json(route, fileFixture);
-    if (path === "/api/projects") return json(route, { items: [], next_cursor: null });
+    if (path === "/api/projects") return json(route, { items: conversation.project_id ? [taxProject] : [], next_cursor: null });
+    if (path === "/api/projects/proj_tax") return json(route, taxProject);
+    if (path === "/api/projects/proj_tax/conversations") return json(route, { items: [conversation], next_cursor: null });
+    if (path === "/api/projects/proj_tax/files") return json(route, { items: [], limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
+    if (path === "/api/projects/proj_tax/tax-reviews") return json(route, { items: taxCase ? [taxCase] : [] });
     if (path === "/api/conversations") return json(route, request.method() === "POST" ? conversation : { items: [conversation, ordinary], next_cursor: null });
     if (path === `/api/conversations/${ID}`) return json(route, conversation);
     if (path === `/api/conversations/${OTHER}`) return json(route, ordinary);
@@ -66,7 +71,8 @@ async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCou
       if (request.method() === "GET") return json(route, { case: taxCase });
       const body = request.postDataJSON();
       requests.push({ path, body });
-      taxCase = { ...fixtureCase("created"), tax_year: body.tax_year, goal: body.goal };
+      if (options.autoProject) conversation.project_id = taxProject.id;
+      taxCase = { ...fixtureCase("created"), tax_year: body.tax_year, goal: body.goal, project_id: conversation.project_id };
       return json(route, taxCase, 201);
     }
     if (path === `/api/conversations/${ID}/tax-review/actions`) {
@@ -138,6 +144,8 @@ async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCou
   }, offerLibraryUpdate() {
     if (!taxCase) throw new Error("Create the case before offering a library update.");
     taxCase = { ...taxCase, reference_update: { status: "update_available", release_id: "rel_updated_library" } };
+  }, saveProjectWorksheet() {
+    taxCase = { ...fixtureCase("group_reviewed"), project_id: conversation.project_id };
   } };
 }
 
@@ -351,5 +359,40 @@ for (const viewport of [{ width: 1280, height: 600 }, { width: 390, height: 667 
     await openToolbox(page, viewport.width);
     expect(observed.agentBodies).toHaveLength(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+  });
+}
+
+
+for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 760 }]) {
+  test(`Tax case creates a visible Private project and preserves the current draft at ${viewport.width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport);
+    const observed = await mockTaxApi(page, { autoProject: true });
+    await page.goto("./");
+    const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+    await composer.fill("Keep my unsent tax question.");
+    await page.getByRole("button", { name: "Tools and skills: Automatic" }).click();
+    await page.getByRole("dialog", { name: "Choose how Audrey uses tools" }).getByRole("button", { name: /Tax review/u }).click();
+    const rail = toolbox(page, viewport.width);
+    const settings = rail.getByRole("region", { name: "Tax review settings" });
+    await settings.getByLabel("Review goal", { exact: true }).fill("Review deductions");
+    await settings.getByRole("button", { name: "Use Tax review" }).click();
+    await expect(page.getByRole("button", { name: "Move conversation to project", exact: true })).toContainText("Tax review 2025");
+    if (viewport.width <= 900) await closeToolbox(rail);
+    await expect(composer).toHaveValue("Keep my unsent tax question.");
+    expect(observed.agentBodies).toHaveLength(0);
+    observed.saveProjectWorksheet();
+    if (viewport.width <= 900) await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.locator(".project-sidebar-link").filter({ hasText: "Tax review 2025" }).click();
+    const project = page.getByRole("region", { name: "Tax reviews", exact: true });
+    await expect(project.getByRole("table", { name: "2025 saved tax facts" })).toBeVisible();
+    await project.getByText("Saved worksheet", { exact: true }).click();
+    await expect(project.getByText((fixtures.group_reviewed as TaxCase).review!.summary, { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Upload file to project", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Choose from My Files", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+    await page.screenshot({ path: testInfo.outputPath("tax-project-overview.png"), fullPage: true });
+    await project.getByRole("button", { name: "Open review conversation", exact: true }).click();
+    await expect(composer).toHaveValue("Keep my unsent tax question.");
+    await expect(page.getByRole("button", { name: "Audrey model", exact: true })).toContainText("Private");
   });
 }

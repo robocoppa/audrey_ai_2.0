@@ -6,6 +6,7 @@ routes retain their separate restrictions; no caller header establishes privacy.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any, Literal
@@ -23,6 +24,8 @@ from audrey.routes import files as upload_routes
 from audrey.routes import references
 from audrey.tools.calculator import CalculateRequest, calculate_value
 from audrey.tools.private_dispatch import PrivateToolArgumentsError, PrivateToolHandler
+
+log = logging.getLogger(__name__)
 
 SUPPORTED_PRIVATE_TOOL_NAMES = frozenset({
     "calculate", "list_my_files", "get_file_text", "analyze_table", "kb_search",
@@ -71,23 +74,40 @@ def make_private_tool_handlers(
         if current_processing_policy() is not policy or (owner is not None and owner != user):
             raise ProcessingPolicyError("private_tool_not_allowed")
 
-    def check_row(row: dict) -> None:
+    async def ready_rows() -> list[dict]:
         from audrey.kb.private_documents import private_text_collection
 
-        if (
-            not row.get("private_required") or row.get("status") != "ready"
-            or row.get("kind") != "text" or row.get("collection") != private_text_collection(user)
-        ):
-            raise ProcessingPolicyError("private_processing_unavailable")
+        rows = await upload_routes._get_uploads_db(request).list_user(user)
+        ready, invalid = [], 0
+        for row in rows:
+            if not row.get("private_required") or row.get("status") != "ready" or row.get("kind") != "text":
+                continue
+            if (row.get("collection") != private_text_collection(user)
+                    or row.get("source_freed_at")):
+                invalid += 1
+                continue
+            ready.append(dict(row))
+        if invalid:
+            # Never log owner identities, names, paths or record content.
+            log.warning("private files: skipped %d ineligible ready records", invalid)
+        return ready
 
     async def owned_row(filename: str) -> dict:
         guard()
-        rows = await upload_routes._get_uploads_db(request).list_user(user)
-        row = next((row for row in rows if str(row["filename"]).strip().casefold() == filename.strip().casefold()), None)
-        if row is None:
+        matches = [row for row in await ready_rows()
+                   if str(row["filename"]).strip().casefold() == filename.strip().casefold()]
+        if not matches:
             raise ProcessingPolicyError("private_processing_unavailable")
-        check_row(row)
-        return dict(row)
+        # Names are not unique. Resolve only among eligible Private documents,
+        # with a stable tie-break, and tell the caller when newest wins.
+        matches.sort(key=lambda row: (str(row["uploaded_at"]), str(row["file_id"])), reverse=True)
+        row = matches[0]
+        row["_duplicate_filename"] = len(matches) > 1
+        return row
+
+    def duplicate_notice(row: dict) -> str:
+        return ("Multiple ready Private documents share this name; using the newest upload."
+                if row.get("_duplicate_filename") else "")
 
     async def calculate(args: dict[str, Any]) -> dict:
         guard()
@@ -152,12 +172,9 @@ def make_private_tool_handlers(
     async def list_files(args: dict[str, Any]) -> dict:
         body = _OwnerRequest.model_validate(args)
         guard(body.user)
-        rows = await upload_routes._get_uploads_db(request).list_user(user)
+        rows = await ready_rows()
         files = []
         for row in rows:
-            if not row.get("private_required") or row.get("status") != "ready" or row.get("kind") != "text":
-                continue
-            check_row(row)
             files.append({
                 "filename": str(row["filename"]), "kind": "text", "status": "ready",
                 "uploaded_at": str(row["uploaded_at"]), "duration_s": 0.0,
@@ -178,8 +195,8 @@ def make_private_tool_handlers(
             text, filename = document.text, document.filename
         else:
             async with private_document_source(app, principal, str(row["file_id"])) as source:
-                row = await owned_row(body.filename)
-                text, filename = str(row.get("summary") or ""), source.filename
+                current = await upload_routes._get_uploads_db(request).get_upload(str(row["file_id"]))
+                text, filename = str(current.get("summary") or ""), source.filename
         offset = min(body.offset, len(text))
         end = min(offset + 2_000, len(text))
         identity = {}
@@ -191,7 +208,10 @@ def make_private_tool_handlers(
             **identity, "filename": filename, "artifact": artifact, "text": text[offset:end],
             "offset": offset, "next_offset": end if end < len(text) else None,
             "total_chars": len(text),
-            "note": "This is a page of the owned document; follow next_offset for the rest." if end < len(text) else "",
+            "note": " ".join(part for part in (
+                "This is a page of the owned document; follow next_offset for the rest." if end < len(text) else "",
+                duplicate_notice(row),
+            ) if part),
         }
 
     async def kb_search(args: dict[str, Any]) -> dict:
@@ -199,10 +219,7 @@ def make_private_tool_handlers(
 
         body = _SearchRequest.model_validate(args)
         guard(body.user)
-        rows = [row for row in await upload_routes._get_uploads_db(request).list_user(user)
-                if row.get("private_required") and row.get("status") == "ready" and row.get("kind") == "text"]
-        for row in rows:
-            check_row(row)
+        rows = await ready_rows()
         if body.filename:
             rows = [row for row in rows if str(row["filename"]).strip().casefold() == body.filename.strip().casefold()]
         if not rows:
@@ -239,9 +256,7 @@ def make_private_tool_handlers(
         kept = [entry for entry in fused if passes_evidence(entry, min_score=floor, min_overlap=overlap)]
         # A deletion/purge begun during retrieval removes the file from the
         # authoritative ready-file list even if Qdrant cleanup is retrying.
-        live = {str(row["file_id"]) for row in await upload_routes._get_uploads_db(request).list_user(user)
-                if row.get("private_required") and row.get("status") == "ready"
-                and row.get("collection") == collection}
+        live = {str(row["file_id"]) for row in await ready_rows()}
         seen, first, remaining = set(), [], []
         for entry in kept:
             file_id = str(entry.hit.payload["file_id"])
@@ -266,7 +281,7 @@ def make_private_tool_handlers(
             spec = TableAnalysisRequest.model_validate(body.model_dump(exclude={"user", "filename"}))
             mime = "text/csv" if source.path.suffix.lower() == ".csv" else source.mime
             result = await asyncio.to_thread(analyze_table, source.path, mime, spec)
-        return {**result, "filename": str(row["filename"]), "artifact": "table", "file_id": str(row["file_id"]), "note": ""}
+        return {**result, "filename": str(row["filename"]), "artifact": "table", "file_id": str(row["file_id"]), "note": duplicate_notice(row)}
 
     handlers = {
         "calculate": calculate, "reference_lookup": lookup, "read_reference": read,

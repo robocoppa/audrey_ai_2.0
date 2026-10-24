@@ -32,6 +32,7 @@ from pydantic import (
 )
 
 from audrey.app_state.private_tasks import PrivateTaskError, guard_tax_case_write
+from audrey.app_state.projects import PROJECT_MAX_FILES
 
 MAX_CASE_BYTES = 128 * 1024
 MAX_CATEGORY_ENTRIES = 100
@@ -366,6 +367,7 @@ class TaxCasesRepository:
         goal: str,
         reference_release: str,
         files: list[dict[str, Any]] | None = None,
+        validated_private_file_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         try:
             payload = _CaseCreation.model_validate(
@@ -381,18 +383,33 @@ class TaxCasesRepository:
             raise TaxCaseError("Invalid tax case creation payload.") from exc
         if len({item["file_id"] for item in payload["files"]}) != len(payload["files"]):
             raise TaxCaseError("Case files must be unique.")
-        return await asyncio.to_thread(self._create_sync, user_id, conversation_id, payload)
+        file_ids = self._project_file_ids(validated_private_file_ids)
+        return await asyncio.to_thread(
+            self._create_sync, user_id, conversation_id, payload, file_ids,
+        )
 
     def _create_sync(
-        self, user_id: str, conversation_id: str, payload: dict[str, Any]
+        self, user_id: str, conversation_id: str, payload: dict[str, Any],
+        validated_private_file_ids: list[str],
     ) -> dict[str, Any]:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
                 project_id = self._assert_context_locked(user_id, conversation_id)
-                if self._case_row_locked(user_id, conversation_id) is not None:
-                    raise TaxCaseConflictError("A tax case already exists for this conversation.")
+                existing = self._case_row_locked(user_id, conversation_id)
+                if existing is not None:
+                    case = self._decode(existing, project_id)
+                    if any(case[key] != payload[key] for key in ("tax_year", "jurisdiction", "goal")):
+                        raise TaxCaseConflictError("A different tax case already exists for this conversation.")
+                    # A retry must not reset facts, replace the release pin or
+                    # recreate a project the owner intentionally removed.
+                    self._conn.commit()
+                    return case
                 now = _utc_now()
+                project_id = self._ensure_project_locked(
+                    user_id, conversation_id, project_id, payload["tax_year"], now,
+                )
+                self._add_project_files_locked(project_id, validated_private_file_ids, now)
                 case = {
                     "id": _new_id(),
                     "conversation_id": conversation_id,
@@ -420,6 +437,155 @@ class TaxCasesRepository:
                     self._conn.rollback()
                 raise
         return case
+
+    async def ensure_project(
+        self, *, user_id: str, conversation_id: str,
+        validated_private_file_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Explicitly group a legacy case; reads never recreate deleted projects."""
+        file_ids = self._project_file_ids(validated_private_file_ids)
+        return await asyncio.to_thread(self._ensure_project_sync, user_id, conversation_id, file_ids)
+
+    def _ensure_project_sync(
+        self, user_id: str, conversation_id: str, file_ids: list[str],
+    ) -> dict[str, Any]:
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                project_id = self._assert_context_locked(user_id, conversation_id)
+                row = self._case_row_locked(user_id, conversation_id)
+                if row is None:
+                    raise TaxCaseError("No tax case exists for this conversation.")
+                case = self._decode(row, project_id)
+                now = _utc_now()
+                project_id = self._ensure_project_locked(
+                    user_id, conversation_id, project_id, case["tax_year"], now,
+                )
+                self._add_project_files_locked(project_id, file_ids, now)
+                case["project_id"] = project_id
+                self._conn.execute(
+                    "UPDATE app_tax_cases SET project_id=?,record_json=? "
+                    "WHERE user_id=? AND conversation_id=?",
+                    (project_id, _encode(case), user_id, conversation_id),
+                )
+                self._conn.commit()
+            except BaseException:
+                if self._conn.in_transaction:
+                    self._conn.rollback()
+                raise
+        return case
+
+    async def link_project_files(
+        self, *, user_id: str, conversation_id: str,
+        validated_private_file_ids: list[str],
+    ) -> None:
+        """Attach service-validated Private documents before capturing run inputs."""
+        file_ids = self._project_file_ids(validated_private_file_ids)
+        await asyncio.to_thread(self._link_project_files_sync, user_id, conversation_id, file_ids)
+
+    def _link_project_files_sync(
+        self, user_id: str, conversation_id: str, file_ids: list[str],
+    ) -> None:
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                project_id = self._assert_context_locked(user_id, conversation_id)
+                if project_id is None or self._case_row_locked(user_id, conversation_id) is None:
+                    raise TaxCaseAccessError("An existing Private tax project is required.")
+                if self._conn.execute(
+                    "SELECT 1 FROM app_runs WHERE user_id=? AND conversation_id=? "
+                    "AND status='running'", (user_id, conversation_id),
+                ).fetchone() is not None:
+                    raise TaxCaseConflictError("Stop the current run before adding project files.")
+                self._add_project_files_locked(project_id, file_ids, _utc_now())
+                self._conn.commit()
+            except BaseException:
+                if self._conn.in_transaction:
+                    self._conn.rollback()
+                raise
+
+    async def list_for_project(
+        self, *, user_id: str, project_id: str,
+    ) -> list[dict[str, Any]]:
+        """Project views read current case records, never copied facts or outputs."""
+        return await asyncio.to_thread(self._list_for_project_sync, user_id, project_id)
+
+    def _list_for_project_sync(self, user_id: str, project_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            project = self._conn.execute(
+                "SELECT 1 FROM app_projects p JOIN app_users u ON u.user_id=p.user_id "
+                "WHERE p.project_id=? AND p.user_id=? AND p.private_required=1 "
+                "AND u.status='active' AND NOT EXISTS "
+                "(SELECT 1 FROM account_deletion_requests d WHERE d.user_id=u.user_id)",
+                (project_id, user_id),
+            ).fetchone()
+            if project is None:
+                raise TaxCaseAccessError("Private project not found.")
+            rows = self._conn.execute(
+                "SELECT t.case_id,t.revision,t.record_json FROM app_tax_cases t "
+                "JOIN app_conversations c ON c.conversation_id=t.conversation_id "
+                "AND c.user_id=t.user_id WHERE t.user_id=? AND c.project_id=? "
+                "AND c.private_required=1 AND c.archived_at IS NULL "
+                "ORDER BY t.updated_at DESC,t.case_id DESC", (user_id, project_id),
+            ).fetchall()
+            return [self._decode(row, project_id) for row in rows]
+
+    @staticmethod
+    def _project_file_ids(file_ids: list[str] | None) -> list[str]:
+        # These are resolved against the owner's Private upload inventory by the
+        # service. File bytes and their ownership live outside this database.
+        if file_ids is None:
+            return []
+        if (not isinstance(file_ids, list) or len(file_ids) > PROJECT_MAX_FILES
+                or any(not isinstance(item, str) or not item or len(item) > 200
+                       for item in file_ids) or len(set(file_ids)) != len(file_ids)):
+            raise TaxCaseError("Invalid Private project file selection.")
+        return list(file_ids)
+
+    def _ensure_project_locked(
+        self, user_id: str, conversation_id: str, project_id: str | None,
+        tax_year: int, now: str,
+    ) -> str:
+        if project_id is not None:
+            return project_id  # _assert_context_locked already checked owner/privacy.
+        # A running turn captured a project/source snapshot. Do not invalidate it
+        # by silently moving its conversation during execution.
+        if self._conn.execute(
+            "SELECT 1 FROM app_runs WHERE user_id=? AND conversation_id=? "
+            "AND status='running'", (user_id, conversation_id),
+        ).fetchone() is not None or self._conn.execute(
+            "SELECT 1 FROM app_private_tasks WHERE user_id=? AND conversation_id=? "
+            "AND status IN ('queued','running','waiting_for_user','paused')",
+            (user_id, conversation_id),
+        ).fetchone() is not None:
+            raise TaxCaseConflictError("Stop the current review before creating its project.")
+        project_id = f"proj_{uuid.uuid4().hex}"
+        self._conn.execute(
+            "INSERT INTO app_projects "
+            "(project_id,user_id,name,instructions,created_at,updated_at,private_required) "
+            "VALUES (?,?,?,'',?,?,1)",
+            (project_id, user_id, f"Tax review {tax_year}", now, now),
+        )
+        self._conn.execute(
+            "UPDATE app_conversations SET project_id=?,updated_at=? "
+            "WHERE user_id=? AND conversation_id=?", (project_id, now, user_id, conversation_id),
+        )
+        return project_id
+
+    def _add_project_files_locked(self, project_id: str, file_ids: list[str], now: str) -> None:
+        existing = {row[0] for row in self._conn.execute(
+            "SELECT file_id FROM app_project_files WHERE project_id=?", (project_id,),
+        )}
+        if len(existing | set(file_ids)) > PROJECT_MAX_FILES:
+            raise TaxCaseError(f"Private projects can contain at most {PROJECT_MAX_FILES} files.")
+        self._conn.executemany(
+            "INSERT OR IGNORE INTO app_project_files (project_id,file_id,added_at) VALUES (?,?,?)",
+            [(project_id, file_id, now) for file_id in file_ids],
+        )
+        if set(file_ids) - existing:
+            self._conn.execute(
+                "UPDATE app_projects SET updated_at=? WHERE project_id=?", (now, project_id),
+            )
 
     async def update(
         self,

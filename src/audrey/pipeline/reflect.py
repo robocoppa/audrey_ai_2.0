@@ -1,4 +1,6 @@
-"""Reflection — quality gate on the synthesized answer.
+"""Graph-only reflection — a length check on the synthesized answer.
+
+The streaming driver does not run this check or retry generations.
 
 Checks:
   - non-empty (synth didn't bail with `no_drafts`)
@@ -7,10 +9,10 @@ Checks:
     etc.) — see `_BREVITY_CUES` below.
 
 If the gate fails, the graph runs the deep panel + synth one more time
-(max_retries=1). On retry we add a system note nudging the synthesizer
-to be more substantive. If the second pass still fails, we ship what we
-have rather than 502 — the answer is tagged with `reflect_passed=False`
-in state for log inspection.
+(max_retries=1), sampling the same inputs again without a new system note.
+A failed research writer does not trigger a full-pipeline retry. If the
+second pass still fails, the graph returns what it has, tagged with
+`reflect_passed=False` in state for log inspection.
 
 Length-and-brevity is the sole structural check; we don't require any
 fixed section structure in the answer.

@@ -47,7 +47,7 @@ def _build_app(*, describe=None, service_token: str = SECRET) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
     app.state.cfg = SimpleNamespace(
-        env=SimpleNamespace(kb_service_token=service_token, owui_url="http://owui"),
+        env=SimpleNamespace(kb_service_token=service_token),
         raw={"vision": {"timeout_s": 120}},
     )
     for attr in ("ollama", "registry", "health", "gate"):

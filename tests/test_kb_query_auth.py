@@ -11,7 +11,7 @@ another user's uploads. These tests pin the fix:
     end user is pinned to their own email, so `user` can't widen the search.
 
 Hermetic: qdrant/embedder are fakes, the merge is patched to capture the effective
-user, and OWUI is stubbed where the bearer arm is exercised. No network.
+user, and authentication is stubbed where the bearer arm is exercised. No network.
 """
 
 from __future__ import annotations
@@ -27,7 +27,6 @@ import audrey.routes.kb as kb_module
 from audrey import auth as auth_module
 from audrey.auth import (
     KBCaller,
-    clear_auth_cache,
     resolve_kb_caller,
     verify_service_token,
 )
@@ -36,13 +35,6 @@ from audrey.routes.kb import router
 SECRET = "s3cr3t-service-token"  # noqa: S105  (test fixture, not a real secret)
 
 
-@pytest.fixture(autouse=True)
-def _isolate_cache():
-    # require_user (reached via the bearer arm) caches per token; clear around
-    # each test so a stubbed OWUI response can't leak across tests.
-    clear_auth_cache()
-    yield
-    clear_auth_cache()
 
 
 # ── verify_service_token ───────────────────────────────────────────────
@@ -67,46 +59,18 @@ def test_verify_service_token_missing_presented():
 
 # ── resolve_kb_caller (unit) ───────────────────────────────────────────
 
-class _FakeResp:
-    def __init__(self, status: int, body: dict):
-        self.status_code = status
-        self._body = body
-        self.text = str(body)
-
-    def json(self):
-        return self._body
 
 
-class _FakeClient:
-    def __init__(self, resp: _FakeResp):
-        self._resp = resp
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc):
-        return None
-
-    async def get(self, url, headers=None):
-        return self._resp
 
 
-def _stub_owui(monkeypatch, email: str, role: str = "user"):
-    resp = _FakeResp(200, {"id": "u", "email": email, "role": role})
-    monkeypatch.setattr(auth_module.httpx, "AsyncClient", lambda *a, **k: _FakeClient(resp))
 
 
 def _fake_request(
     service_token: str = SECRET,
-    owui_url: str = "http://owui",
-    *,
-    owui_auth_enabled: bool = False,
 ):
     return SimpleNamespace(
         app=SimpleNamespace(state=SimpleNamespace(
             cfg=SimpleNamespace(env=SimpleNamespace(
-                owui_url=owui_url,
-                owui_auth_enabled=owui_auth_enabled,
                 kb_service_token=service_token,
             )),
         )),
@@ -135,9 +99,9 @@ async def test_resolve_bad_service_token_falls_through_to_bearer_401():
 
 
 async def test_resolve_user_bearer_yields_user_caller(monkeypatch):
-    _stub_owui(monkeypatch, email="alice@example.com")
+    monkeypatch.setattr(auth_module, "require_user", AsyncMock(return_value=SimpleNamespace(email="alice@example.com")))
     caller = await resolve_kb_caller(
-        _fake_request(owui_auth_enabled=True),
+        _fake_request(),
         x_audrey_service_token=None,
         authorization="Bearer tok",
     )
@@ -197,7 +161,7 @@ def _build_app(monkeypatch, service_token: str = SECRET):
         file_deletion_ids=AsyncMock(return_value=set()),
     )
     app.state.cfg = SimpleNamespace(
-        env=SimpleNamespace(kb_service_token=service_token, owui_url="http://owui"),
+        env=SimpleNamespace(kb_service_token=service_token),
         raw={},
     )
     return app, captured

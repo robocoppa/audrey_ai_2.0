@@ -20,7 +20,7 @@ export interface AudreyModel {
   capabilities: string[];
   enabled: boolean;
   audience: AccessGroup;
-  visibility: "public" | "private";
+  visibility: "public" | "restricted";
   roles: AccessGroup[];
   portrait_url: string;
 }
@@ -542,7 +542,7 @@ export function updateAdminModel(
 
 export function updateAdminModelProfile(
   modelId: string,
-  profile: { visibility: "public" | "private"; roles: AccessGroup[]; display_name: string; enabled?: boolean },
+  profile: { visibility: "public" | "restricted"; roles: AccessGroup[]; display_name: string; enabled?: boolean },
 ): Promise<AdminModel> {
   return apiJson<AdminModel>(`/api/admin/model-profiles/${encodeURIComponent(modelId)}`, {
     method: "PATCH",
@@ -732,6 +732,10 @@ export function listProjects(cursor?: string): Promise<AudreyProjectList> {
   const params = new URLSearchParams({ limit: "100" });
   if (cursor) params.set("cursor", cursor);
   return apiJson<AudreyProjectList>(`/api/projects?${params}`);
+}
+
+export function getProject(projectId: string): Promise<AudreyProject> {
+  return apiJson<AudreyProject>(`/api/projects/${encodeURIComponent(projectId)}`);
 }
 
 export function createProject(

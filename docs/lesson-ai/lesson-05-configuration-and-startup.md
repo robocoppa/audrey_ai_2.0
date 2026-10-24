@@ -103,8 +103,8 @@ identity: they trust the `user` value Audrey sends with each call, and Audrey
 sets that value from the authenticated account, never from the model. A
 service that trusts its caller that much must be reachable only by that
 caller. The comments in
-[the `custom-tools` stanza](../../compose.yaml#L135) record what went wrong
-when its port was published.
+[the `custom-tools` stanza](../../compose.yaml#L135) spell out why it must
+never publish a port.
 
 **The media worker can reach Audrey and nothing else.** It joins only
 [`media-net`](../../compose.yaml#L362), which is declared `internal: true`. The
@@ -127,10 +127,9 @@ with a route out.
 > still reach any port the *host* publishes on the home network, by IP
 > address. Ollama publishes its port on the host, so a container that can't
 > resolve `ollama` can still connect to the server's address on Ollama's port.
-> The media worker's first version did exactly that. `internal: true` removes
-> the route: a container that is only on an internal network can reach the
-> other containers on that network, and nothing else. The comment above
-> `media-net` in `compose.yaml` tells the story.
+> `internal: true` removes the route: A container that is only on an internal
+> network can reach the other containers on that network, and nothing else.
+> The comment above `media-net` in `compose.yaml` explains the choice.
 > **A missing name is not a missing route.**
 
 The fetcher can't have `internal: true`, so its isolation is weaker, and the
@@ -187,9 +186,8 @@ Pydantic Settings reads from exactly that environment.
 container at `/app/config.yaml`, read-only. The image also contains a copy from
 build time, but the runtime bind mount is the one that counts. The Dockerfile
 sets `AUDREY_CONFIG=/app/config.yaml`, so `get_config()` reads that mounted
-file. After a `git pull` that changes `config.yaml` on the server, recreate the
-container (`docker compose up -d --force-recreate audrey`) rather than only
-restarting it, so it starts from the pulled file.
+file. After `config.yaml` changes on the server, the container has to be
+recreated rather than only restarted, so it starts from the new file.
 
 **It waits for custom-tools.** Audrey discovers tools during startup by asking
 custom-tools for `/openapi.json`. Its [`depends_on`](../../compose.yaml#L48)
@@ -199,7 +197,7 @@ partial, Audrey retries in the background (§2.5).
 
 Now open [`src/audrey/main.py`](../../src/audrey/main.py). When uvicorn imports
 `audrey.main:app`, Python executes the module top to bottom and creates the
-FastAPI [`app`](../../src/audrey/main.py#L498) object near the end of the file.
+FastAPI [`app`](../../src/audrey/main.py#L500) object near the end of the file.
 Importing the module does not mean Audrey is ready yet. The app exists, but
 the expensive shared objects are built later, by `lifespan`.
 
@@ -227,8 +225,8 @@ Open [`src/audrey/config.py`](../../src/audrey/config.py). The first important
 class is [`EnvOverrides`](../../src/audrey/config.py#L24), which inherits from
 `pydantic_settings.BaseSettings`.
 
-The merge happens in `Config._apply_env_overrides` at
-[`config.py:166`](../../src/audrey/config.py#L166). Read it top to bottom
+The merge happens in
+[`Config._apply_env_overrides`](../../src/audrey/config.py#L158). Read it top to bottom
 — it's just a list of "if env var X was set, write its value into the
 right slot of the YAML dict." The YAML dict is the merged result;
 `Config.raw` exposes it.
@@ -238,7 +236,7 @@ right slot of the YAML dict." The YAML dict is the merged result;
 You set `GPU_CONCURRENCY=2` in the environment Python sees at boot.
 Here's what happens:
 
-1. `lifespan()` calls [`get_config()`](../../src/audrey/config.py#L745).
+1. `lifespan()` calls [`get_config()`](../../src/audrey/config.py#L737).
 2. `get_config()` creates `EnvOverrides()`.
 3. Pydantic Settings sees `GPU_CONCURRENCY=2`, matches it to
    `gpu_concurrency`, and converts it to an integer.
@@ -283,7 +281,7 @@ else:
 ```
 
 The reason is in the docstring of
-[`active_env_overrides`](../../src/audrey/config.py#L214): an override silently
+[`active_env_overrides`](../../src/audrey/config.py#L206): an override silently
 displaces a value committed in `config.yaml`, so the file stops describing what
 is running and nothing in it admits that. One log line makes "what is this box
 actually running?" a search instead of a deduction.
@@ -313,9 +311,9 @@ SHOUTY_CASE.
 
 Two reasons.
 
-**(1) The model registry is too structured to live in env vars.** A
-model registry entry has a model name, task type, priority, speed hint,
-quality hint, and local/cloud location. A deep-panel pool is a list of
+**(1) The model registry is too structured to live in env vars.** The
+registry lists, for each task type, models with a name, a priority and a
+location (local or cloud). A deep-panel pool is a list of
 worker models plus a synthesizer and fallback. A KB config has
 collections, dataset paths, chunking knobs, watcher settings, and
 reconcile settings. YAML is good at this kind of shape.
@@ -386,6 +384,7 @@ grouped by role rather than by exact line number:
 | KB stack | `QdrantKB`, `UploadsDB` (reconciled), `StorageLifecycle`, embedders, `KBWatcher`, `KBReconciler` | Search, upload records, file quotas, re-ingest and cleanup | `app.state.qdrant`, `.uploads_db`, and so on |
 | Durable delivery | `FileDeletionWorker`, `ChatArchiveQueue`, `ChatProjectionPromoter`, `UserDataPurgeCoordinator` | Work that must finish even across a restart: deleting files, archiving turns, purging an account | `app.state.file_deletions`, `.archive_queue`, `.archive_projector`, `.user_data_purges` |
 | Native runs | `ConversationTitleGenerator`, `NativeRunManager` | Name new conversations; own live runs | `app.state.conversation_titles`, `.native_runs` |
+| References | `ReferenceLibraryRegistry`, `ReferenceSearchService` | Libraries of owned reference documents, such as published tax guidance, that tools can search and quote | `app.state.reference_libraries`, `.reference_search` |
 | Readiness | `ReadinessCollector`, plus a first snapshot | One report on what's up and what's degraded | `app.state.readiness` |
 
 You don't need to know these classes yet; later lessons take them one at a
@@ -397,11 +396,11 @@ workers.
 #### Settling interrupted runs
 
 Opening the application database does real work. The
-[`ApplicationStore`](../../src/audrey/app_state/store.py#L83) constructor
+[`ApplicationStore`](../../src/audrey/app_state/store.py#L90) constructor
 connects to SQLite, switches on the settings Audrey relies on, and applies any
 pending schema migrations before anything else can touch the data. Then
 `lifespan` settles runs a previous process left behind, at
-[`main.py:117`](../../src/audrey/main.py#L117):
+[`main.py:119`](../../src/audrey/main.py#L119):
 
 ```python
 recovered_runs = await application_store.conversations.recover_interrupted_runs()
@@ -410,7 +409,7 @@ recovered_runs = await application_store.conversations.recover_interrupted_runs(
 Lesson 4 showed that a run has two halves: a durable record in the database and
 a live task in memory. A crash or a power cut destroys the task and leaves the
 record saying `running`, which nothing would ever change.
-[`recover_interrupted_runs`](../../src/audrey/app_state/repositories.py#L1100)
+[`recover_interrupted_runs`](../../src/audrey/app_state/repositories.py#L1237)
 marks every such run as failed with the error code `server_restart`, and its
 half-written answer as incomplete, before Audrey serves its first request. A
 reloaded page then shows an honest ending instead of an answer that never
@@ -422,7 +421,7 @@ Not every startup failure means the same thing.
 
 If `config.yaml` is missing or malformed, Audrey cannot know which models,
 tools, timeouts, and routing rules to use. There is no honest degraded mode.
-[`_load_yaml()`](../../src/audrey/config.py#L262) lets that exception crash
+[`_load_yaml()`](../../src/audrey/config.py#L254) lets that exception crash
 startup, and so do the checks `get_config()` runs on several config sections.
 The same goes for Cloudflare Access switched on without its settings, and for
 an application database that can't be opened or migrated: without them, Audrey
@@ -452,7 +451,7 @@ retry their queues until each item is done: file deletions, archive
 deliveries, account purges. `NativeRunManager` holds every live run.
 
 Ordering matters at startup too. The uploads reconcile,
-[`reconcile_with_qdrant`](../../src/audrey/main.py#L214), must finish before
+[`reconcile_with_qdrant`](../../src/audrey/main.py#L216), must finish before
 uvicorn accepts traffic, because it isn't safe alongside uploads that are in
 progress. It restores missing legacy catalog rows, preserves existing
 ownership and lifecycle metadata, and reports missing search content. Empty
@@ -460,7 +459,7 @@ or partially lost search collections never delete upload records. The
 lifespan runs this before `yield`, so that ordering is structural.
 
 At shutdown, the `finally` block at
-[`main.py:417`](../../src/audrey/main.py#L417) stops things in a deliberate
+[`main.py:419`](../../src/audrey/main.py#L419) stops things in a deliberate
 order:
 
 ```python
@@ -511,7 +510,7 @@ app.state.tools = tool_registry
 
 Then route handlers can retrieve those same objects from `request.app.state`.
 Routes usually do it through small helpers that fail clearly when a service
-isn't there, like [`_store`](../../src/audrey/routes/app/runs.py#L835) in the
+isn't there, like [`_store`](../../src/audrey/routes/app/runs.py#L1085) in the
 runs module:
 
 ```python
@@ -549,7 +548,7 @@ One subtle part of `main.py` is easy to miss if you are new to Python
 closures.
 
 During startup, Audrey compiles the graph at
-[`main.py:189`](../../src/audrey/main.py#L189):
+[`main.py:191`](../../src/audrey/main.py#L191):
 
 ```python
 graph = build_graph(
@@ -578,7 +577,7 @@ returned, because it captured that object.
 Audrey's graph does the same thing with `tool_registry`. So when tools are
 rediscovered, the existing registry object has to be refreshed in place. Here
 is the admin route that does it,
-[`rediscover_tools`](../../src/audrey/main.py#L592):
+[`rediscover_tools`](../../src/audrey/main.py#L594):
 
 ```python
 fresh = await discover_all(tool_servers)
@@ -611,7 +610,7 @@ and the live registry stays as it was.
 
 The same in-place refresh runs without anyone asking, too. If the first
 discovery at startup comes back empty, or with some tools unavailable,
-[`_retry_tool_discovery`](../../src/audrey/main.py#L440) retries in the
+[`_retry_tool_discovery`](../../src/audrey/main.py#L442) retries in the
 background for about two minutes, mutating the same registry when it succeeds.
 After that window, the admin route is the way to retry.
 
@@ -639,7 +638,7 @@ busy the GPU gate is. It boils all of that down to one status:
 - **ready**: everything is up;
 - **degraded**: something optional is down, but chat works;
 - **unready**: a *required* component is down. By default only Ollama is
-  required ([`readiness`](../../config.yaml#L1375) in `config.yaml`), because
+  required ([`readiness`](../../config.yaml#L1377) in `config.yaml`), because
   without it Audrey can't answer at all.
 
 The snapshot can be read three ways: admins call `GET /v1/admin/readiness`
@@ -728,9 +727,9 @@ code that cleans them up live in one function.
 
 ## When you're ready for the next lesson
 
-The next lesson covers the model layer:
-[Lesson 6 - The model layer](lesson-06-the-model-layer.md). We will trace what
-happens when a pipeline node says "I need a general-purpose model": how the
-registry ranks candidates, how the health tracker filters failing ones, how the
-request becomes an HTTP call to Ollama, and how local and `:cloud`-suffixed
-model names travel through the same client.
+The next lesson opens the model layer:
+[Lesson 6 — The model layer I: choosing a model](lesson-06-the-model-layer.md).
+It traces what happens when a pipeline node says "I need a general-purpose
+model": which choices a person may pick, how the registry ranks candidates, and
+how the health tracker steps around failing ones. The lesson after it follows
+the call itself to Ollama.

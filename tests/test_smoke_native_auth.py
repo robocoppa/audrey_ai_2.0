@@ -1,4 +1,4 @@
-"""Native live smokes can authenticate without OWUI bearer tokens."""
+"""Native live smokes authenticate with explicit Cloudflare assertions."""
 
 from __future__ import annotations
 
@@ -39,8 +39,8 @@ _STREAMING_SCRIPTS = frozenset(_SCRIPTS) - {
 def test_access_assertions_are_authoritative_and_secrets_stay_out_of_repr(monkeypatch):
     monkeypatch.setenv("AUDREY_USER_JWT", " user-jwt ")
     monkeypatch.setenv("AUDREY_ADMIN_JWT", " admin-jwt ")
-    monkeypatch.setenv("TEST_OWUI_TOKEN", "legacy-user")
-    monkeypatch.setenv("ADMIN_OWUI_TOKEN", "legacy-admin")
+    monkeypatch.setenv("UNSUPPORTED_USER_TOKEN", "legacy-user")
+    monkeypatch.setenv("UNSUPPORTED_ADMIN_TOKEN", "legacy-admin")
     credentials = SmokeCredentials.from_env()
     assert credentials.user == "user-jwt"
     assert credentials.admin == "admin-jwt"
@@ -57,11 +57,11 @@ def test_access_assertions_are_authoritative_and_secrets_stay_out_of_repr(monkey
     assert "admin-jwt" not in repr(credentials)
 
 
-def test_legacy_bearers_are_ignored(monkeypatch):
+def test_unsupported_credentials_are_ignored(monkeypatch):
     monkeypatch.delenv("AUDREY_USER_JWT", raising=False)
     monkeypatch.delenv("AUDREY_ADMIN_JWT", raising=False)
-    monkeypatch.setenv("TEST_OWUI_TOKEN", "legacy-user")
-    monkeypatch.setenv("ADMIN_OWUI_TOKEN", "legacy-admin")
+    monkeypatch.setenv("UNSUPPORTED_USER_TOKEN", "legacy-user")
+    monkeypatch.setenv("UNSUPPORTED_ADMIN_TOKEN", "legacy-admin")
     credentials = SmokeCredentials.from_env()
     assert credentials.user == ""
     assert credentials.admin == ""
@@ -131,8 +131,8 @@ def test_direct_script_execution_still_resolves_helper(tmp_path):
     for key in (
         "AUDREY_USER_JWT",
         "AUDREY_ADMIN_JWT",
-        "TEST_OWUI_TOKEN",
-        "ADMIN_OWUI_TOKEN",
+        "UNSUPPORTED_USER_TOKEN",
+        "UNSUPPORTED_ADMIN_TOKEN",
     ):
         env.pop(key, None)
     root = Path(__file__).resolve().parent.parent
@@ -149,12 +149,12 @@ def test_direct_script_execution_still_resolves_helper(tmp_path):
 
 
 @pytest.mark.parametrize("module_name", _SCRIPTS)
-def test_every_native_smoke_refuses_legacy_owui_credentials(module_name):
+def test_every_native_smoke_refuses_unsupported_credentials(module_name):
     env = os.environ.copy()
     env.pop("AUDREY_USER_JWT", None)
     env.pop("AUDREY_ADMIN_JWT", None)
-    env["TEST_OWUI_TOKEN"] = "legacy-user-secret"  # noqa: S105 - fake test value
-    env["ADMIN_OWUI_TOKEN"] = "legacy-admin-secret"  # noqa: S105 - fake test value
+    env["UNSUPPORTED_USER_TOKEN"] = "legacy-user-secret"  # noqa: S105 - fake test value
+    env["UNSUPPORTED_ADMIN_TOKEN"] = "legacy-admin-secret"  # noqa: S105 - fake test value
     root = Path(__file__).resolve().parent.parent
 
     result = subprocess.run(

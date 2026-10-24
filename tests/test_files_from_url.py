@@ -61,10 +61,10 @@ def _build_app(
     app = FastAPI()
     app.include_router(files_router)
     app.dependency_overrides[require_user] = lambda: AuthedUser(
-        email=ME, role="user", owui_id="u1")
+        email=ME, role="user")
     app.state.uploads_db = db
     app.state.cfg = SimpleNamespace(
-        env=SimpleNamespace(kb_service_token=SECRET, owui_url="http://owui"),
+        env=SimpleNamespace(kb_service_token=SECRET),
         raw={"kb": {
             "upload_root": str(tmp_path / "uploads"),
             "max_upload_mb": 50, "max_user_bytes": max_user_bytes,

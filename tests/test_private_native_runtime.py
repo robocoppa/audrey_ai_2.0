@@ -458,3 +458,24 @@ async def test_private_graph_dispatches_calculator_without_environment_proxy_or_
     assert not any(r.url.path == "/calculate" for r in requests)
     assert not any("memory" in r.url.path or "web" in r.url.path for r in requests)
     assert all(not client.trust_env and client.is_closed for client in clients)
+
+
+async def test_private_execution_view_allows_only_declared_shared_services():
+    app, requests = _app(), []
+    shared = object()
+    app.state.application_store = shared
+    app.state.future_cloud_service = object()
+    original_ollama = app.state.ollama
+    runtime = PrivateProcessingRuntime(POLICY, ollama_transport=httpx.MockTransport(_handler(requests)))
+    async with runtime.scope(app) as execution:
+        assert execution.state.application_store is shared
+        assert execution.state.health is app.state.health
+        assert execution.state.gate is app.state.gate
+        assert execution.state.inflight is app.state.inflight
+        assert execution.state.ollama is not original_ollama
+        with pytest.raises(ProcessingPolicyError):
+            _ = execution.state.future_cloud_service
+        with pytest.raises(ProcessingPolicyError):
+            _ = getattr(execution.state, "another_ordinary_service", None)
+    assert app.state.ollama is original_ollama
+    assert app.state.future_cloud_service is not None

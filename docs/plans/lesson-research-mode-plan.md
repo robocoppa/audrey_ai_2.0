@@ -1,5 +1,9 @@
 # Plan — new course lesson: Research mode (`audrey_research`)
 
+> **Status (2026-10-23):** historical. The standalone lesson was retired;
+> research mode is now §2.5 of
+> [Lesson 9 — Deep mode and research mode](../lesson-ai/lesson-09-deep-mode.md).
+
 A plan for adding a maintainer-course lesson on Audrey's research mode — the
 staged claim/source-ledger pipeline behind `audrey_research`. This is the **plan**,
 not the lesson; per the lesson workflow, the actual write is gated on (a) user

@@ -209,7 +209,7 @@ def _stub_app(
 
 
 def _stub_user(email: str = "alice@example.com", role: str = "user") -> SimpleNamespace:
-    return SimpleNamespace(email=email, role=role, owui_id="abc")
+    return SimpleNamespace(email=email, role=role)
 
 
 def _payload(

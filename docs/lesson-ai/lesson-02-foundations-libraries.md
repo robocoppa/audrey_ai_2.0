@@ -49,10 +49,11 @@ Audrey is one HTTP surface that has to do three different things:
    prove who is calling: the browser app with a signed identity header
    from Cloudflare Access, a bot or script with a personal access
    token.
-2. **Validate the request schemas for every endpoint.**
-   `ChatCompletionRequest`, `KBIngestRequest`, file-upload metadata,
-   admin actions — all coming from arbitrary clients (the browser app,
-   bots and scripts, direct `curl`s).
+2. **Validate the request schemas for every endpoint.** A message
+   from the browser app (`RunCreateRequest`), an OpenAI-style chat
+   request (`ChatCompletionRequest`), file-upload metadata, admin
+   actions — all coming from clients Audrey doesn't control (the
+   browser app, bots and scripts, direct `curl`s).
 3. **Stream Server-Sent Events back.** Answers arrive token by token
    as Ollama generates them, not in a single response. Clients of the
    OpenAI-compatible API expect OpenAI's framing (`data: {...}\n\n`);
@@ -62,8 +63,9 @@ Audrey is one HTTP surface that has to do three different things:
 Without a framework, each of those becomes hand-rolled work in every
 route. With FastAPI, you get all three for free:
 
-- Auth becomes one parameter declaration: `me: AuthedUser =
-  Depends(require_user)`. The function never runs if auth fails.
+- Auth becomes one parameter declaration, such as `principal:
+  Principal = Depends(require_principal)`. The function never runs if
+  auth fails.
 - Validation becomes one parameter: `payload: ChatCompletionRequest`.
   Bad input gets a structured 422 response automatically; your code
   never sees malformed data.
@@ -71,13 +73,12 @@ route. With FastAPI, you get all three for free:
   FastAPI handles the chunked transfer encoding.
 
 The dependency-injection model in particular pays off in this
-codebase. Audrey has multiple auth tiers (`require_user`,
-`require_admin`) and multiple per-request derived values (decoded
-user identity, request-scoped metrics labels). With `Depends(...)`,
-each one is a small declarative function used as a parameter. The
-alternative — a middleware that mutates a `request.state` dict that
-every handler has to read from carefully — is what every other
-framework's tutorials apologize about.
+codebase. Audrey has several tiers of access (any signed-in person,
+an active account, an admin, a personal token with the right scope),
+and with `Depends(...)` each one is a small declarative function used
+as a parameter. The alternative — a middleware that mutates a
+`request.state` dict that every handler has to read from carefully —
+is what every other framework's tutorials apologize about.
 
 ### What FastAPI gives you
 
@@ -99,8 +100,9 @@ request:
 | `PATCH`  | "Modify part of this thing."                                        | Yes                    |
 | `DELETE` | "Remove this thing."                                                | Yes                    |
 
-Audrey uses `GET`, `POST`, and `DELETE`. `PUT` and `PATCH` exist but
-aren't needed yet. The rules are conventions, not enforcement —
+Audrey uses all five. Renaming a conversation, for example, is a
+`PATCH` on that conversation. The rules are conventions, not
+enforcement —
 nothing stops you writing `@app.get("/delete-everything")` — but
 violating them confuses every other tool that talks HTTP (browsers,
 proxies, monitoring, your own future self).
@@ -252,6 +254,15 @@ token. If it fails it raises `HTTPException(401)` and the route never
 runs. If it succeeds, `me` contains the user's identity. Concise +
 hard to forget.
 
+Dependencies can depend on other dependencies, and FastAPI resolves
+the chain for you. The browser app's routes use `require_principal`,
+which itself depends on `require_user` and then refuses a disabled
+account with a 403. Some routes go one step further with
+`require_scope("compat:full")`, a function that *builds* a dependency:
+it depends on `require_principal` and also refuses a personal token
+that wasn't granted that scope. Each layer adds one check, and a route
+asks for exactly the layer it needs.
+
 ### Request/response lifecycle (mental model)
 
 ```
@@ -283,8 +294,9 @@ into the appropriate HTTP response and short-circuits the rest.
   etc.).
 - The app object itself is built in
   [`src/audrey/main.py`](../../src/audrey/main.py).
-- Auth uses `Depends(require_user)` and `Depends(require_admin)` —
-  defined in [`src/audrey/auth.py`](../../src/audrey/auth.py).
+- The auth dependencies (`require_user`, `require_principal`,
+  `require_admin_principal`, `require_scope`) are defined in
+  [`src/audrey/auth.py`](../../src/audrey/auth.py).
 
 ---
 
@@ -338,7 +350,7 @@ Concrete value Pydantic adds, with examples drawn from the real
   classifier and produces a confusing "no user message found" error
   ten frames deeper.
 - **Typed optional fields like `temperature: float | None = None`**
-  validate for free from the annotation alone: a client that sends
+  validate for free from the annotation alone: A client that sends
   `"temperature": "hot"` gets a clean 422 ("Input should be a valid
   number") instead of that string reaching Ollama. Pydantic enforces
   the *type* without any extra code. Note Audrey deliberately does
@@ -349,6 +361,13 @@ Concrete value Pydantic adds, with examples drawn from the real
   sampling values itself. The lesson here is the split: Pydantic gives
   you type-validation for nothing, and range-validation is a
   deliberate choice you opt into per field.
+- **Unknown fields are a decision, made once per schema.**
+  `ChatCompletionRequest` is set to *ignore* fields it doesn't know,
+  because OpenAI-style clients send plenty of options Audrey doesn't
+  use, and rejecting them would break those clients. `RunCreateRequest`,
+  which only Audrey's own browser app sends, *forbids* them
+  (`extra="forbid"`), so a typo in the app fails loudly instead of
+  being silently dropped.
 - **The schema is the contract.** When clients start sending a new
   field, the Pydantic model is the single place that has to be
   updated. Without it, the contract lives implicitly
@@ -424,8 +443,10 @@ a precise error: `messages: List should have at least 1 item`.
   role-specific message schemas and their `ChatMessage` union.
 - [`src/audrey/routes/openai/schemas.py:215`](../../src/audrey/routes/openai/schemas.py#L215) —
   the surrounding `ChatCompletionRequest` schema.
-- [`src/audrey/routes/admin.py`](../../src/audrey/routes/admin.py) —
-  response models like `AuthClearResponse`.
+- [`RunCreateRequest`](../../src/audrey/routes/app/runs.py#L124) — a
+  browser message: length limits, a `pattern` for skill names, and a
+  `model_validator` that rejects a request naming both a mode and a
+  model.
 - [`src/audrey/config.py`](../../src/audrey/config.py) — Pydantic
   Settings models for env-var loading.
 - [`tools-server/app.py`](../../tools-server/app.py) — every endpoint
@@ -458,35 +479,37 @@ run." The state object accumulates results as the graph runs.
 Audrey's pipeline is a real state machine, not a linear chain. Within
 one chat completion, control flows through:
 
-1. **classify** — figure out the task type from the prompt.
-2. **complexity** — fast-path or deep-panel?
-3. **memory recall** — fetch any relevant remembered facts.
-4. **datetime injection** — add ISO-8601 timestamp context.
-5. **fair-gate** — wait for a per-user concurrency slot.
-6. **either fast-path (single model) OR deep panel (N parallel
-   workers + planner + synth)**.
-7. **reflect** — does the answer pass quality checks?
-8. **on failure: retry the panel; on success: stream out**.
+1. **datetime** — put the current date and time at the top of the
+   conversation.
+2. **memory recall** — add any of the person's remembered facts that
+   match.
+3. **classify** — figure out the task type from the prompt.
+4. **complexity** — fast path or deep?
+5. **either the fast path (one model), which may escalate to deep if
+   its answer is too thin, OR the planner and then a deep branch**
+   (a panel of workers and a synthesizer, or research mode's stages).
+6. **reflect** — is the deep answer long enough? If not, run the deep
+   branch once more.
 
-There are conditional edges everywhere — fast vs deep, reflect-pass
-vs reflect-retry, brevity-cue bypass, escalation. Without a graph
-library, this becomes ~15 functions passing a giant dict by kwarg
+There are conditional edges everywhere: fast or deep, escalate or
+stop, panel or research, retry or finish. Without a graph library,
+this becomes a dozen functions passing a giant dict by keyword
 through nested `if/else` blocks. The flow lives implicitly in the
 call stack and cannot be read top-to-bottom from any single file.
 
 With LangGraph, the topology lives in
 [`src/audrey/pipeline/graph.py`](../../src/audrey/pipeline/graph.py).
 **The whole pipeline is in one file.** Adding a stage is one
-`add_node` call and one or two `add_edge` calls. Concrete past pain:
-the brevity-cue bypass that fixed the reflection step burning cloud
-time on legitimately short answers (e.g. "what year is it? answer in
-one sentence") was a *one new conditional edge*, not a refactor —
-the existing topology absorbed it cleanly.
+`add_node` call and an edge or two. Research mode shows it: It's one
+more node, `research`, reached by a conditional edge after the
+planner and joined to `reflect` by a plain edge. Nothing else in the
+topology had to change.
 
 A second thing LangGraph buys you: Each node is a small async
-function with one responsibility. They're individually testable
-(tests/test_classify.py, tests/test_reflect.py, tests/test_fair_gate.py)
-because they take state in and return state out, no hidden globals.
+function with one responsibility, and the real logic it wraps lives
+in plain functions (`classify.py`, `reflect.py` and so on) that take
+values in and return values out, with no hidden globals. That makes
+each piece easy to read, and easy to test, on its own.
 
 ### The shape
 
@@ -574,7 +597,9 @@ panel based on prompt complexity.
 > **Audrey uses LangGraph and not LangChain.** Audrey talks to Ollama
 > through its own small client (`models/ollama.py`) rather than
 > LangChain's `ChatOllama`, because the abstraction tax wasn't worth
-> the dependency for the limited surface we use.
+> the dependency for the limited surface we use. You'll still see
+> `langchain-core` in the dependency list: LangGraph is built on that
+> small core package, but Audrey's own code never imports it.
 
 
 ## You're done with Lesson 2

@@ -16,8 +16,8 @@ initiates actions; it never owns authoritative history or the internal tool loop
   versioned migrations. Search/archive/Qdrant data are repairable projections.
 - Cloudflare Access authenticates the public browser. Audrey verifies the
   signed application assertion and owns approval, roles, and model policy.
-- Audrey PATs serve direct API clients and evals. Open WebUI remains stopped;
-  its dormant adapter is diagnostic-only, with `OWUI_AUTH_ENABLED=0` normally.
+- Audrey PATs serve direct API clients and evals. Unknown bearer credentials
+  are rejected locally; there is no external-client sign-in adapter.
 
 ## Identity and authorization contract
 
@@ -50,9 +50,10 @@ initiates actions; it never owns authoritative history or the internal tool loop
   usage, and terminal outcomes. Adapters do not parse each other's display text.
 - Native replay is bounded and process-local. Expired replay falls back to
   durable run/message reads; a restart does not claim its event buffer survived.
-- Native requests exclude OWUI utility-prompt routing. `/v1` keeps its
-  compatibility behavior for external clients.
-- Empty abandoned drafts do not enter history. Search, pagination, rename,
+- Native and `/v1` requests use the same model-choice rules. A task-like
+  heading in user text does not override the requested model or skip archival.
+- Empty abandoned drafts do not enter history; a saved Tax review case is
+  durable work and retains its conversation even before the first message. Search, pagination, rename,
   archive/restore, deletion, canonical refresh, and retry remain owner-bound.
 
 ## Files, preferences, and data controls
@@ -80,6 +81,19 @@ Take SQLite-aware online backups before migrations and verify isolated restore.
 Keep projections rebuildable. Browser rollback redeploys a known-good UI image;
 backend recovery uses the current backend service and preserves application data.
 Runner and credential guidance lives in [live smoke testing](../reference/live-smoke-testing.md).
+
+## Retained compatibility boundaries
+
+The retired Open WebUI integration has been removed: no sign-in probe, token
+cache, environment settings, roster-import command or special prompt routing.
+Existing account storage namespaces and external-identity rows are deliberately
+not renamed or deleted; changing them would orphan stored uploads and search
+collections. Generic OpenAI-compatible fields such as `chat_id`, message metadata
+and image parts stay because other clients use them. `history_import.py` stays
+because it imports Audrey's own portable chat-export format, independent of any
+external UI. Tests retain historical provider identifiers and error envelopes
+only to cover account binding and compatible-client error handling. No test or
+runtime path needs the retired UI to run.
 
 ## Optional historical import and deferred choices
 

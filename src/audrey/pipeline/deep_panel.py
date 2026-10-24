@@ -18,9 +18,9 @@ Concurrency:
 Workers are tool-capable: when a `ToolRegistry` is supplied and the worker
 model is in `fast_path.tool_capable_models`, the worker runs a ReAct loop
 (`pipeline/react.py`) with a tighter per-worker budget from
-`agentic.react.deep_worker`. The GPU gate is held for the *entire* loop —
-not just a single chat call — so local workers never overlap across tool
-rounds. Tool-grounded drafts carry `tool_rounds` > 0 in their `WorkerDraft`.
+`agentic.react.deep_worker`. The GPU gate is acquired for each local model
+call, allowing visual tools to acquire it between calls. Tool-grounded drafts
+carry `tool_rounds` > 0 in their `WorkerDraft`.
 Those workers also receive `DEEP_WORKER_SYSTEM` (see `_with_worker_system`),
 which tells them they're producing one draft of several — tool-free workers
 run on the unmodified conversation, exactly as before.
@@ -265,7 +265,8 @@ async def think_for(ollama: OllamaClient, cfg: Any, *, role: str, model: str) ->
     grounding task — so per-model keeps the change the size of the evidence.
 
     `thinking.deep_worker` / `.deep_synth` switch a whole role, across every
-    pool. Wider blast radius, same warning.
+    pool. Research verification and writing share `deep_synth`, since both
+    reason over the researchers' drafts. Wider blast radius, same warning.
 
     `thinking.ledger_structure` is the exception to "prefer per-model", and it
     is on by default: it covers the two schema-pinned structuring calls, whose
@@ -274,9 +275,9 @@ async def think_for(ollama: OllamaClient, cfg: Any, *, role: str, model: str) ->
     at `thinking=273013 done_reason='length' eval_count=65536`, a whole 64k
     budget for an empty reply, and the fail-soft path made it a silent loss.
 
-    ⚠️ Deliberately NOT wired into `run_react`'s default. That loop is shared
-    with the factchecker, which runs under `format=` where thinking has broken
-    JSON before; it takes `think` per call so each caller decides.
+    `run_react` takes `think` per call rather than applying this policy itself.
+    Workers and the prose factchecker use `deep_worker`; schema-pinned
+    structuring calls separately use `ledger_structure`.
     """
     section = getattr(cfg, "thinking", None) or {}
     if not isinstance(section, dict):
@@ -838,6 +839,8 @@ def select_researchers(
         loc = registry.location_of(name)
         if loc == "cloud":
             if cloud_count >= max_researchers_cloud:
+                log.warning("research: cloud researcher %s dropped by max_research_workers_cloud=%d",
+                            name, max_researchers_cloud)
                 continue
             cloud_count += 1
         out.append((name, loc))
@@ -1052,10 +1055,9 @@ def _empty_content_diag(resp: dict[str, Any]) -> str:
     reach `message.content`". So a mechanical structuring call that thinks can
     answer 200 OK with zero bytes of JSON.
 
-    Run `173826` lost a fact-check batch exactly that way and left only
-    `len=0, head='', tail=''` to go on. ⚠️ Worth knowing while reading this:
-    **no deep-panel `ollama.chat` call passes `think`**, so all four run at
-    whatever the model defaults to.
+    Report the separate thinking length and finish reason even when the
+    caller supplied `think`: capability checks can omit an unsupported flag,
+    and a model can still spend its output budget without returning content.
     """
     msg = resp.get("message", {}) or {}
     thinking = msg.get("thinking") or ""
@@ -1268,19 +1270,22 @@ async def _single_chat_stage(
     messages: list[dict[str, Any]],
     timeout_s: float,
     user_id: str | None,
+    cfg: Config,
 ) -> str:
-    """Run one non-tool chat call (Verify or Write), gate-held for local.
+    """Run the non-tool research verifier, gate-held for local.
 
     Returns the content string, or "" on failure (the pipeline degrades
     rather than raising — same posture as `_run_one_worker`).
     """
     try:
+        think = await think_for(ollama, cfg, role="deep_synth", model=model)
         async with gate.acquire(model, location=location, user_id=user_id):
             resp = await ollama.chat(
                 model=model,
                 messages=messages,
                 options={"temperature": 0.2},
                 timeout_s=timeout_s,
+                think=think,
             )
         health.record_success(model)
         return (resp.get("message", {}) or {}).get("content", "") or ""
@@ -1877,7 +1882,8 @@ async def run_research_pipeline_streaming(
        "ledger": dict | None, "factcheck": dict | None, "dispositions": str,
        "error": str, "prompt_eval_count": int, "eval_count": int}
           Always emitted last. `error` is "" on success, or "no_writer" /
-          "write_failed" when the write stage could not produce an answer.
+          "write_failed" when no answer was produced, or "write_truncated" when
+          the active writer failed after sending part of the answer.
           `ledger`/`factcheck` are the structured intermediates as plain
           dicts (`.model_dump()`), None when the stage didn't run/parse;
           `dispositions` is the hedge-guidance block exactly as handed to
@@ -2016,7 +2022,7 @@ async def run_research_pipeline_streaming(
             critique = await _single_chat_stage(
                 ollama, health, gate,
                 model=verifier, location=registry.location_of(verifier),
-                messages=v_msgs, timeout_s=timeout_s, user_id=user_id,
+                messages=v_msgs, timeout_s=timeout_s, user_id=user_id, cfg=cfg,
             )
         yield {"type": "verify_done", "ok": bool(critique)}
 
@@ -2080,10 +2086,12 @@ async def run_research_pipeline_streaming(
             {"role": "user", "content": _factcheck_user_block(user_text, findings, critique)},
         ]
         try:
+            think = await think_for(ollama, cfg, role="deep_worker", model=factchecker)
             fc: ReactResult = await run_react(
                 ollama, health, tools,  # type: ignore[arg-type]
                 model=factchecker,
                 messages=fc_msgs,
+                think=think,
                 options=options,
                 timeout_s=timeout_s,
                 max_rounds=fc_budget["max_rounds"],
@@ -2154,7 +2162,7 @@ async def run_research_pipeline_streaming(
     # ── Write stage (always runs) ──────────────────────────────────────
     writer = pool.get("writer")
     fallback = pool.get("fallback_synth")
-    candidates = [m for m in (writer, fallback) if m]
+    candidates = list(dict.fromkeys(m for m in (writer, fallback) if m))
     accumulated = ""
     writer_model = ""
     write_error = "no_writer" if not candidates else "write_failed"
@@ -2188,7 +2196,7 @@ async def run_research_pipeline_streaming(
             think = (
                 await ollama.thinking_flag(model, False)
                 if response_format is not None
-                else None
+                else await think_for(ollama, cfg, role="deep_synth", model=model)
             )
             async with gate.acquire(model, location=loc, user_id=user_id):
                 stream_kwargs: dict[str, Any] = {

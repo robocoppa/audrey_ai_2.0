@@ -1,11 +1,10 @@
 """In-process model health tracker with exponential backoff.
 
 When a model returns an error or times out, we cool it down so the registry
-doesn't immediately re-pick it. Each failure doubles the cooldown (capped).
-A successful call clears the record.
-
-Used by the registry's `first_healthy` / `candidates` helpers as the
-`predicate` argument: unhealthy models are skipped during selection.
+doesn't immediately re-pick it. A new failure after the previous cooldown
+doubles the next cooldown (capped). Failures during a window do not extend it. A successful
+call clears the record. Callers normally skip cooling candidates; the fast
+path probes the earliest recovery when its entire candidate pool is cooling.
 """
 
 from __future__ import annotations
@@ -25,8 +24,8 @@ class _HealthState:
 class HealthTracker:
     """Per-model health with exp-backoff cooldowns.
 
-    Defaults: start at 5s cooldown, double per failure, cap at 5 min.
-    Records the last 20 failures per model for debugging via `snapshot()`.
+    Defaults: start at 5s, double after each elapsed cooldown, cap at 5 min.
+    `snapshot()` reports current cooldowns; internal failure history is bounded.
     """
 
     def __init__(
@@ -47,14 +46,24 @@ class HealthTracker:
             return True
         return time.monotonic() >= state.cooldown_until
 
+    def cooldown_remaining(self, model: str) -> float:
+        """Seconds until the candidate can normally be selected again."""
+        state = self._by_model.get(model)
+        return max(0.0, state.cooldown_until - time.monotonic()) if state else 0.0
+
     def record_success(self, model: str) -> None:
         self._by_model.pop(model, None)
 
     def record_failure(self, model: str, error: str) -> None:
+        now = time.monotonic()
         state = self._by_model.setdefault(model, _HealthState())
+        if now < state.cooldown_until:
+            # In-flight calls share this outage. Count the window once, rather
+            # than extending downtime for each request that was already sent.
+            return
         state.consecutive_failures += 1
         backoff = min(self._base * (2 ** (state.consecutive_failures - 1)), self._max)
-        state.cooldown_until = time.monotonic() + backoff
+        state.cooldown_until = now + backoff
         state.last_error = error
         state.history.append((time.time(), error))
         if len(state.history) > self._history_size:

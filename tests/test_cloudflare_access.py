@@ -219,10 +219,3 @@ def test_environment_configuration_defaults_to_disabled(monkeypatch):
     assert env.cloudflare_access_enabled is False
     assert env.cloudflare_access_team_domain == ""
     assert env.cloudflare_access_audience == ""
-
-
-def test_owui_auth_adapter_is_dormant_by_default(monkeypatch):
-    monkeypatch.delenv("OWUI_AUTH_ENABLED", raising=False)
-
-    assert EnvOverrides(_env_file=None).owui_auth_enabled is False
-    assert EnvOverrides(_env_file=None, OWUI_AUTH_ENABLED="1").owui_auth_enabled is True

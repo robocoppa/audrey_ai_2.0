@@ -59,8 +59,9 @@ its first application; existing topic datasets and ordinary chat stay intact.
 
 ## User flow
 
-1. Create a Project, choose **Tax assistance**, and set the tax year and
-   federal/state jurisdictions. Select a published reference-library release.
+1. Choose Private and start **Tax review**, setting the year and goal. The
+   case automatically creates a Private project or reuses the current owned
+   Private project, with the published IRS release pinned to the case.
 2. Explain the situation in chat. Explicit current-message facts are saved
    directly and shown in the Toolbox facts table; the user need not confirm
    them again. Audrey asks only for missing information relevant to the goal.
@@ -79,6 +80,32 @@ its first application; existing topic datasets and ordinary chat stay intact.
 
 A document being uploaded or indexed is not evidence that every page was read.
 A relevant search result is not a complete eligibility determination.
+
+## Private project for a saved Tax review
+
+Starting a case outside a Project atomically creates `Tax review <year>`, groups
+the conversation and saves the case. Inside an owned Private Project the case
+uses that Project. Retrying the same setup returns the saved case; it does not
+create another project or discard saved facts. A saved case survives abandoned
+draft cleanup before its first message.
+
+The Project page reads current facts and saved worksheets directly from the
+case, including retained passages and linked arithmetic. Open review conversation
+returns to the normal chat/Toolbox. Existing upload and Choose from My files
+controls store owned Private documents in the Project. Ready documents already
+attached to the case conversation are linked when grouping; new attachments sent
+with Tax review are linked before the task pins its context. Ordinary Private
+chats keep their existing conversation-only attachment behavior.
+
+Existing ungrouped cases offer **Create Private project**. This explicit action
+preserves their case and conversation; merely opening a case never creates or
+recreates a Project. Deleting a Project retains its conversations, files and case
+under the established deletion contract. Files still require current ownership,
+Private readiness and retained source bytes; a filename is never authority.
+
+This changes no schema, model, index or embedding profile. The prior editable
+facts workflow is accepted. Only the new grouping/project view needs browser
+acceptance; the bounded native accuracy work remains separate.
 
 ## Reference storage and ownership
 
@@ -898,9 +925,9 @@ an empty continuation answer and a confusing retained prompt history. It does
 not provide a matched token/latency report. Keep the outcome and native eligibility
 limitation; do not reopen the concluded scalar probe.
 
-The user-authorized current slice replaces that confirmation/history flow with
-the editable facts contract above. Accept its changed browser behavior before
-moving to the tax-year comparison. The facts UI does not itself fix premature
+The editable facts workflow above is accepted. Automatic Private project
+grouping is the current browser followup; then resume the bounded accuracy decision
+and tax-year comparison. The facts UI does not itself fix premature
 application of a deduction; decide a narrow native correction or supported-scope
 limit from the observed failure.
 

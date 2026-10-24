@@ -102,8 +102,9 @@ async def test_schema23_case_survives_reopen_and_conversation_is_single_case(sta
     assert created["conversation_id"] == conversation.conversation_id
     assert created["revision"] == 1 and created["checklist_version"] == 1
     assert created["facts"] == created["evidence"] == created["calculations"] == []
+    assert await _create(state) == created
     with pytest.raises(TaxCaseConflictError):
-        await _create(state)
+        await _create(state, goal="A different goal")
     reopened = ApplicationStore(store.path)
     try:
         assert (
@@ -1348,3 +1349,155 @@ def test_current_statement_requires_intact_excerpt(content, excerpt, valid):
     from audrey.app_state.tax_cases import is_user_statement_excerpt
 
     assert is_user_statement_excerpt(content, excerpt) is valid
+
+
+async def test_ungrouped_case_creates_private_project_atomically_and_retries_reuse_it(state):
+    store, owner, _, _ = state
+    conversation = await store.conversations.create(user_id=owner.user_id, private_required=True)
+    before = store._conn.execute("SELECT COUNT(*) FROM app_projects").fetchone()[0]
+    second = ApplicationStore(store.path)
+    payload = dict(user_id=owner.user_id, conversation_id=conversation.conversation_id,
+                   tax_year=2025, goal="Review wages", reference_release="rel_current")
+    try:
+        first, retried = await asyncio.gather(
+            store.tax_cases.create(**payload), second.tax_cases.create(**payload),
+        )
+        assert first == retried
+        project = await store.projects.get(user_id=owner.user_id, project_id=first["project_id"])
+        assert project.private_required and project.name == "Tax review 2025"
+        current = await store.conversations.get(
+            user_id=owner.user_id, conversation_id=conversation.conversation_id,
+        )
+        assert current.project_id == project.project_id and current.private_required
+        assert store._conn.execute("SELECT COUNT(*) FROM app_projects").fetchone()[0] == before + 1
+        # An uncertain retry cannot replace facts or a later-published release pin.
+        changed_pin = await store.tax_cases.create(**{**payload, "reference_release": "rel_new"})
+        assert changed_pin["reference_release"] == "rel_current"
+        with pytest.raises(TaxCaseConflictError):
+            await store.tax_cases.create(**{**payload, "tax_year": 2024})
+    finally:
+        second.close()
+
+
+async def test_case_insert_failure_rolls_back_new_project_and_conversation_membership(state):
+    store, owner, _, _ = state
+    conversation = await store.conversations.create(user_id=owner.user_id, private_required=True)
+    before = store._conn.execute("SELECT COUNT(*) FROM app_projects").fetchone()[0]
+    with store._lock:
+        store._conn.execute("CREATE TRIGGER reject_tax_case BEFORE INSERT ON app_tax_cases "
+                            "BEGIN SELECT RAISE(ABORT,'simulated case failure'); END")
+        store._conn.commit()
+    with pytest.raises(sqlite3.IntegrityError, match="simulated case failure"):
+        await store.tax_cases.create(user_id=owner.user_id, conversation_id=conversation.conversation_id,
+                                     tax_year=2025, goal="Review", reference_release="rel_current")
+    assert store._conn.execute("SELECT COUNT(*) FROM app_projects").fetchone()[0] == before
+    current = await store.conversations.get(user_id=owner.user_id, conversation_id=conversation.conversation_id)
+    assert current.project_id is None
+    assert await store.tax_cases.get(user_id=owner.user_id, conversation_id=conversation.conversation_id) is None
+
+
+async def test_case_project_file_references_are_atomic_bounded_and_deduplicated(state):
+    store, owner, project, conversation = state
+    case = await store.tax_cases.create(
+        user_id=owner.user_id, conversation_id=conversation.conversation_id,
+        tax_year=2025, goal="Review", reference_release="rel_current",
+        validated_private_file_ids=["private-statement"],
+    )
+    assert case["project_id"] == project.project_id
+    assert [item.file_id for item in await store.projects.list_files(
+        user_id=owner.user_id, project_id=project.project_id,
+    )] == ["private-statement"]
+    await store.tax_cases.link_project_files(user_id=owner.user_id,
+        conversation_id=conversation.conversation_id, validated_private_file_ids=["private-statement", "new-document"])
+    await store.tax_cases.link_project_files(user_id=owner.user_id,
+        conversation_id=conversation.conversation_id, validated_private_file_ids=["private-statement", "new-document"])
+    assert len(await store.projects.list_files(user_id=owner.user_id, project_id=project.project_id)) == 2
+    full = [f"file-{n}" for n in range(19)]
+    with pytest.raises(TaxCaseError, match="at most 20"):
+        await store.tax_cases.link_project_files(user_id=owner.user_id,
+            conversation_id=conversation.conversation_id, validated_private_file_ids=full)
+    assert len(await store.projects.list_files(user_id=owner.user_id, project_id=project.project_id)) == 2
+
+
+async def test_deleted_project_stays_deleted_until_explicit_idempotent_case_grouping(state):
+    store, owner, project, conversation = state
+    case = await _create(state)
+    case = await _update(state, case, "propose_fact", _fact())
+    assert await store.projects.delete(user_id=owner.user_id, project_id=project.project_id)
+    read = await store.tax_cases.get(user_id=owner.user_id, conversation_id=conversation.conversation_id)
+    assert read["project_id"] is None
+    assert store._conn.execute("SELECT COUNT(*) FROM app_projects").fetchone()[0] == 0
+    # A replay of old creation is also a read, not implicit resurrection.
+    assert (await _create(state))["project_id"] is None
+    grouped = await store.tax_cases.ensure_project(user_id=owner.user_id,
+        conversation_id=conversation.conversation_id, validated_private_file_ids=["selected-document"])
+    assert grouped["project_id"] and grouped["project_id"] != project.project_id
+    assert grouped["revision"] == case["revision"] and grouped["facts"] == case["facts"]
+    assert (await store.tax_cases.ensure_project(user_id=owner.user_id,
+        conversation_id=conversation.conversation_id))["project_id"] == grouped["project_id"]
+    assert store._conn.execute("SELECT COUNT(*) FROM app_projects").fetchone()[0] == 1
+
+
+async def test_running_turn_blocks_project_reparenting_and_file_changes(state):
+    from audrey.processing_policy import ProcessingPolicy, processing_scope
+
+    store, owner, _, _ = state
+    conversation = await store.conversations.create(user_id=owner.user_id, private_required=True)
+    with processing_scope(ProcessingPolicy({"local:latest": "a" * 64}, "http://ollama:11434")):
+        await store.conversations.begin_run(user_id=owner.user_id,
+            conversation_id=conversation.conversation_id, user_content="Working", expected_private_required=True)
+    before = store._conn.execute("SELECT COUNT(*) FROM app_projects").fetchone()[0]
+    with pytest.raises(TaxCaseConflictError, match="Stop"):
+        await store.tax_cases.create(user_id=owner.user_id, conversation_id=conversation.conversation_id,
+            tax_year=2025, goal="Review", reference_release="rel_current")
+    assert store._conn.execute("SELECT COUNT(*) FROM app_projects").fetchone()[0] == before
+    case = await _create(state)
+    with processing_scope(ProcessingPolicy({"local:latest": "a" * 64}, "http://ollama:11434")):
+        await store.conversations.begin_run(user_id=owner.user_id,
+            conversation_id=case["conversation_id"], user_content="Working", expected_private_required=True)
+    with pytest.raises(TaxCaseConflictError, match="Stop"):
+        await store.tax_cases.link_project_files(user_id=owner.user_id,
+            conversation_id=case["conversation_id"], validated_private_file_ids=["new-document"])
+
+
+async def test_project_case_list_uses_current_membership_and_records_and_excludes_archives(state):
+    store, owner, project, conversation = state
+    case = await _create(state)
+    case = await _update(state, case, "propose_fact", _fact())
+    assert (await store.tax_cases.list_for_project(user_id=owner.user_id,
+        project_id=project.project_id))[0]["facts"] == case["facts"]
+    target = await store.projects.create(user_id=owner.user_id, name="New Private project", private_required=True)
+    await store.conversations.update(user_id=owner.user_id, conversation_id=conversation.conversation_id,
+                                     project_id=target.project_id, update_project=True)
+    assert await store.tax_cases.list_for_project(user_id=owner.user_id, project_id=project.project_id) == []
+    listed = await store.tax_cases.list_for_project(user_id=owner.user_id, project_id=target.project_id)
+    assert listed[0]["project_id"] == target.project_id
+    await store.conversations.update(user_id=owner.user_id, conversation_id=conversation.conversation_id, archived=True)
+    assert await store.tax_cases.list_for_project(user_id=owner.user_id, project_id=target.project_id) == []
+    other = await _owner(store, "project-other")
+    with pytest.raises(TaxCaseAccessError):
+        await store.tax_cases.list_for_project(user_id=other.user_id, project_id=target.project_id)
+    ordinary = await store.projects.create(user_id=owner.user_id, name="Ordinary")
+    with pytest.raises(TaxCaseAccessError):
+        await store.tax_cases.list_for_project(user_id=owner.user_id, project_id=ordinary.project_id)
+
+
+@pytest.mark.parametrize("project_kind", ["ordinary", "foreign"])
+async def test_auto_case_project_refuses_ordinary_or_foreign_membership_without_writes(state, project_kind):
+    store, owner, _, _ = state
+    other = await _owner(store, "other-project-owner")
+    project = await store.projects.create(
+        user_id=other.user_id if project_kind == "foreign" else owner.user_id,
+        name="Invalid target", private_required=project_kind == "foreign",
+    )
+    conversation = await store.conversations.create(user_id=owner.user_id, private_required=True)
+    with store._lock:
+        store._conn.execute("UPDATE app_conversations SET project_id=? WHERE conversation_id=?",
+                            (project.project_id, conversation.conversation_id))
+        store._conn.commit()
+    before = store._conn.execute("SELECT COUNT(*) FROM app_projects").fetchone()[0]
+    with pytest.raises(TaxCaseAccessError):
+        await store.tax_cases.create(user_id=owner.user_id, conversation_id=conversation.conversation_id,
+            tax_year=2025, goal="Review", reference_release="rel_current")
+    assert store._conn.execute("SELECT COUNT(*) FROM app_projects").fetchone()[0] == before
+    assert store._conn.execute("SELECT COUNT(*) FROM app_tax_cases").fetchone()[0] == 0

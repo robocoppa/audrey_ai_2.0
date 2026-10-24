@@ -1,4 +1,4 @@
-"""Credentials for live native smoke scripts during the OWUI cutover.
+"""Cloudflare credentials for live native smoke scripts.
 
 All native smokes require Cloudflare Access application assertions. Never print
 the tokens: an application JWT is an account credential, not a service token.

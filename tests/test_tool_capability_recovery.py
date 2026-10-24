@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call
@@ -14,6 +15,8 @@ from audrey import main as main_module
 from audrey.app_state import ApplicationStore
 from audrey.auth import AuthedUser
 from audrey.identity import CloudflareAccessClaims
+from audrey.pipeline import graph as graph_module
+from audrey.skills import SkillLimits, SkillRegistry
 from audrey.tools.discovery import ToolRegistry, ToolSpec
 
 
@@ -78,11 +81,12 @@ def tool_state(monkeypatch):
     skills = SimpleNamespace(refresh_availability=Mock())
     cfg = SimpleNamespace(
         tools={"servers": ["http://custom-tools:8001"]},
-        env=SimpleNamespace(owui_auth_enabled=False),
+        env=SimpleNamespace(),
     )
     monkeypatch.setattr(main_module.app.state, "cfg", cfg, raising=False)
     monkeypatch.setattr(main_module.app.state, "tools", live, raising=False)
     monkeypatch.setattr(main_module.app.state, "skills", skills, raising=False)
+    monkeypatch.setattr(main_module.app.state, "tools_discovery_lock", asyncio.Lock(), raising=False)
     monkeypatch.setattr(main_module.app.state, "cloudflare_access_verifier", None, raising=False)
     return live, skills, cfg
 
@@ -168,7 +172,7 @@ async def test_empty_rediscovery_preserves_live_registry_and_skills(tool_state, 
     monkeypatch.setattr(main_module, "discover_all", discover)
 
     with pytest.raises(HTTPException) as error:
-        await main_module.rediscover_tools(_admin=AuthedUser(email="admin@example.com", role="admin", owui_id="admin-subject"))
+        await main_module.rediscover_tools(_admin=AuthedUser(email="admin@example.com", role="admin"))
 
     assert error.value.status_code == 503
     discover.assert_awaited_once_with(cfg.tools["servers"])
@@ -187,7 +191,7 @@ async def test_successful_rediscovery_replaces_records_in_place(
     spec = _spec("web_fetch", available=available)
     monkeypatch.setattr(main_module, "discover_all", AsyncMock(return_value=ToolRegistry(by_name={spec.name: spec})))
 
-    result = await main_module.rediscover_tools(_admin=AuthedUser(email="admin@example.com", role="admin", owui_id="admin-subject"))
+    result = await main_module.rediscover_tools(_admin=AuthedUser(email="admin@example.com", role="admin"))
 
     names = ["web_fetch"] if available else []
     assert result == {"tools": names, "count": len(names), "declared_count": 1}
@@ -202,7 +206,7 @@ async def test_empty_rediscovery_is_valid_without_configured_servers(tool_state,
     discover = AsyncMock(return_value=ToolRegistry())
     monkeypatch.setattr(main_module, "discover_all", discover)
 
-    result = await main_module.rediscover_tools(_admin=AuthedUser(email="admin@example.com", role="admin", owui_id="admin-subject"))
+    result = await main_module.rediscover_tools(_admin=AuthedUser(email="admin@example.com", role="admin"))
 
     assert result == {"tools": [], "count": 0, "declared_count": 0}
     discover.assert_awaited_once_with([])
@@ -221,3 +225,209 @@ async def test_legacy_upload_page_is_retired_without_removing_file_api():
     paths = {route.path for route in main_module.app.routes}
     assert "/v1/files" in paths
     assert "/v1/files/{file_id}" in paths
+
+
+async def test_live_monitor_tracks_loss_and_recovery_in_existing_graph_and_skills(
+    monkeypatch, tmp_path,
+):
+    ready = ToolRegistry(by_name={"kb_search": _spec("kb_search", available=True)})
+    degraded = ToolRegistry(by_name={"kb_search": _spec("kb_search", available=False)})
+    live = ToolRegistry(by_name=ready.by_name.copy())
+    bundle = tmp_path / "document-analysis"
+    bundle.mkdir()
+    (bundle / "SKILL.md").write_text(
+        "---\nid: document-analysis\nname: Document analysis\n"
+        "description: Read document evidence.\nversion: 1\n"
+        "allowed_tools: [kb_search]\nsupported_modes: [auto]\n"
+        "resources: []\n---\nRead the evidence.\n",
+    )
+    skills = SkillRegistry(
+        enabled=True, roots=(tmp_path,), limits=SkillLimits(),
+        known_tools=frozenset({"kb_search"}), available_tools=frozenset(live.names()),
+    )
+    snapshots = asyncio.Queue()
+    publications = asyncio.Queue()
+    update = skills.refresh_availability
+
+    def record_publication(names):
+        update(names)
+        publications.put_nowait(names)
+
+    monkeypatch.setattr(skills, "refresh_availability", record_publication)
+
+    async def discover(_servers):
+        return await snapshots.get()
+
+    calls = []
+
+    async def generate(*_args, tools, **_kwargs):
+        calls.append(tools.names())
+        assert tools is live
+        return "example-model", {"message": {"content": "answer"}}
+
+    monkeypatch.setattr(main_module, "discover_all", discover)
+    monkeypatch.setattr(graph_module, "run_fast_path", generate)
+    graph = graph_module.build_graph(
+        SimpleNamespace(raw={}, router={}, timeouts={}),
+        Mock(), Mock(), Mock(), Mock(), live, Mock(),
+    )
+    fast_node = graph.nodes["fast_path"].bound
+    state = {"task_type": "general", "messages": [{"role": "user", "content": "Hello"}]}
+    await fast_node.ainvoke(state)
+    assert skills.snapshot().status == "ready"
+    monitor = asyncio.create_task(main_module._maintain_tool_discovery(
+        live, ["http://custom-tools:8001"], skills=skills,
+        lock=asyncio.Lock(), interval_s=0,
+    ))
+    try:
+        await snapshots.put(degraded)
+        assert await asyncio.wait_for(publications.get(), timeout=1) == frozenset()
+        assert skills.snapshot().status == "degraded"
+        await fast_node.ainvoke(state)
+        await snapshots.put(ready)
+        assert await asyncio.wait_for(publications.get(), timeout=1) == frozenset({"kb_search"})
+        assert skills.snapshot().status == "ready"
+        await fast_node.ainvoke(state)
+    finally:
+        monitor.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await monitor
+
+    assert calls == [["kb_search"], [], ["kb_search"]]
+
+
+async def test_live_monitor_recovers_after_empty_snapshot_and_fetch_exception(monkeypatch):
+    original = _spec("web_search", available=True)
+    live = ToolRegistry(by_name={original.name: original})
+    recovery = ToolRegistry(by_name={"web_fetch": _spec("web_fetch", available=True)})
+    snapshots = asyncio.Queue()
+    fetched = asyncio.Queue()
+    published = asyncio.Event()
+    skills = SimpleNamespace(refresh_availability=Mock(side_effect=lambda _names: published.set()))
+
+    async def discover(_servers):
+        value = await snapshots.get()
+        fetched.put_nowait(value)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    monkeypatch.setattr(main_module, "discover_all", discover)
+    monitor = asyncio.create_task(main_module._maintain_tool_discovery(
+        live, ["http://custom-tools:8001"], skills=skills, interval_s=0,
+    ))
+    try:
+        await snapshots.put(ToolRegistry())
+        await asyncio.wait_for(fetched.get(), timeout=1)
+        assert live.by_name == {original.name: original}
+        await snapshots.put(httpx.ConnectError("offline"))
+        await asyncio.wait_for(fetched.get(), timeout=1)
+        assert live.by_name == {original.name: original}
+        skills.refresh_availability.assert_not_called()
+        await snapshots.put(recovery)
+        await asyncio.wait_for(published.wait(), timeout=1)
+        assert live.names() == ["web_fetch"]
+    finally:
+        monitor.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await monitor
+
+
+async def test_slow_monitor_continues_after_bounded_startup_retries(monkeypatch):
+    live = ToolRegistry()
+    retry = AsyncMock()
+    monkeypatch.setattr(main_module, "_retry_tool_discovery", retry)
+    discovered = asyncio.Event()
+    skills = SimpleNamespace(refresh_availability=Mock(side_effect=lambda _names: discovered.set()))
+    monkeypatch.setattr(main_module, "discover_all", AsyncMock(return_value=ToolRegistry(
+        by_name={"calculate": _spec("calculate", available=True)},
+    )))
+    lock = asyncio.Lock()
+    monitor = asyncio.create_task(main_module._maintain_tool_discovery(
+        live, ["http://custom-tools:8001"], skills=skills, lock=lock, interval_s=0,
+    ))
+    try:
+        await asyncio.wait_for(discovered.wait(), timeout=1)
+        retry.assert_awaited_once_with(
+            live, ["http://custom-tools:8001"], skills=skills, lock=lock,
+        )
+        assert live.names() == ["calculate"]
+    finally:
+        monitor.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await monitor
+
+
+@pytest.mark.parametrize("startup_retry", [False, True])
+async def test_discovery_cancellation_does_not_publish_pending_snapshot(monkeypatch, startup_retry):
+    original = _spec("web_search", available=True)
+    live = ToolRegistry(by_name={original.name: original})
+    started = asyncio.Event()
+    finish = asyncio.Event()
+    skills = SimpleNamespace(refresh_availability=Mock())
+    lock = asyncio.Lock()
+
+    async def discover(_servers):
+        started.set()
+        await finish.wait()
+        return ToolRegistry(by_name={"kb_search": _spec("kb_search", available=False)})
+
+    monkeypatch.setattr(main_module, "discover_all", discover)
+    worker = main_module._retry_tool_discovery if startup_retry else main_module._maintain_tool_discovery
+    task = asyncio.create_task(worker(
+        live, ["http://custom-tools:8001"], skills=skills, lock=lock, interval_s=0,
+    ))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    finish.set()
+
+    assert live.by_name == {original.name: original}
+    skills.refresh_availability.assert_not_called()
+    assert not lock.locked()
+
+
+async def test_manual_rediscovery_waits_for_background_fetch_before_publishing_newer_view(
+    tool_state, monkeypatch,
+):
+    live, skills, cfg = tool_state
+    lock = main_module.app.state.tools_discovery_lock
+    old_fetch_started = asyncio.Event()
+    old_fetch_finish = asyncio.Event()
+    old = ToolRegistry(by_name={"kb_search": _spec("kb_search", available=True)})
+    current = ToolRegistry(by_name={"kb_search": _spec("kb_search", available=False)})
+    fetch_count = 0
+
+    async def discover(_servers):
+        nonlocal fetch_count
+        fetch_count += 1
+        if fetch_count == 1:
+            old_fetch_started.set()
+            await old_fetch_finish.wait()
+            return old
+        return current
+
+    monkeypatch.setattr(main_module, "discover_all", discover)
+    background = asyncio.create_task(main_module._refresh_tool_discovery(
+        live, cfg.tools["servers"], skills=skills, lock=lock,
+    ))
+    await asyncio.wait_for(old_fetch_started.wait(), timeout=1)
+    manual = asyncio.create_task(main_module.rediscover_tools(
+        _admin=AuthedUser(email="admin@example.com", role="admin"),
+    ))
+    try:
+        await asyncio.sleep(0)
+        assert fetch_count == 1
+        assert not manual.done()
+    finally:
+        old_fetch_finish.set()
+        await background
+        await manual
+
+    assert fetch_count == 2
+    assert live.by_name == current.by_name
+    assert live.names() == []
+    assert skills.refresh_availability.call_args_list == [
+        call(frozenset({"kb_search"})), call(frozenset()),
+    ]

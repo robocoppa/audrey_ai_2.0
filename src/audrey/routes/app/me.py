@@ -15,7 +15,6 @@ from audrey.app_state import (
     UserPreferences,
 )
 from audrey.auth import (
-    clear_auth_cache_for_email,
     require_account_principal,
     require_provider_principal,
     require_scope,
@@ -166,7 +165,6 @@ async def update_me(
         )
     except InvalidIdentityError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    clear_auth_cache_for_email(principal.email)
     return MeResponse(
         id=principal.user_id,
         email=principal.email,

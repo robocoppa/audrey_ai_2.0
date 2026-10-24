@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } fr
 import { ApiError } from "./api";
 import {
   actOnTaxCase,
+  createTaxCaseProject,
   defaultTaxYear,
   getTaxCase,
   saveTaxCase,
@@ -139,6 +140,21 @@ export function TaxReview({
     }
   }
 
+  async function groupCase() {
+    if (!taxCase || taxCase.project_id || busy || disabled || loading || loadFailed) return;
+    setBusy(true);
+    setError("");
+    try {
+      const value = await createTaxCaseProject(conversationId);
+      setTaxCase(value);
+      onCaseChange(value);
+    } catch (reason) {
+      setError("Could not create the Private project: " + messageOf(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function updateLibrary() {
     if (!taxCase || referenceUpdate?.status !== "update_available" || busy || disabled || loading || loadFailed) return;
     setBusy(true);
@@ -179,10 +195,17 @@ export function TaxReview({
             <textarea aria-label="Review goal" rows={2} maxLength={2000} required value={goal} onChange={(event) => setGoal(event.target.value)} disabled={locked} placeholder="What would you like to review?" />
           </label> : <div className="tax-review-goal"><span>Review goal</span><p>{taxCase.goal}</p></div>}
           {yearChanged && hasSavedWork ? <p className="tax-review-note">Saved information will need review for {year}.</p> : null}
+          {!taxCase ? <p className="tax-review-note">Your case, documents and saved worksheets stay together in a Private project.</p> : null}
           <div className="tax-review-actions">
             <button type="submit" disabled={locked || Boolean(taxCase && !yearChanged)}>{busy ? "Saving…" : taxCase ? "Save year" : "Use Tax review"}</button>
           </div>
         </form>
+        {taxCase && !taxCase.project_id ? <div className="tax-review-project">
+          <p className="tax-review-note">Keep this case, its documents and saved worksheets together.</p>
+          <button type="button" disabled={busy || disabled || loading || loadFailed} onClick={() => void groupCase()}>
+            {busy ? "Saving…" : "Create Private project"}
+          </button>
+        </div> : null}
         </div>
         {error ? <div className="tax-review-error" role="alert">
           <span>{error}</span>

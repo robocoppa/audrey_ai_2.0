@@ -53,7 +53,7 @@ Browser ──[Cloudflare Access + Tunnel]──> audrey-ui ──> audrey ─�
                                                   │
                                                   └─ same-origin /api and /v1 proxy
 
-Open WebUI / API clients ────────────────────────────────────> audrey /v1
+Authenticated API clients ────────────────────────────────────> audrey /v1
 
                          + Prometheus + Grafana (metrics + alerts,
                            dashboards provisioned from monitoring/)
@@ -63,8 +63,7 @@ The native `audrey-ui` container is the intended browser surface. It serves the
 compiled React application and proxies Audrey's `/api/*` and `/v1/*` routes on
 the same origin, including streaming responses and Cloudflare Access identity.
 Its host port is loopback-only for the host-network Cloudflare Tunnel. Audrey
-remains published on LAN port 8000 for authenticated API clients and Open WebUI
-compatibility; custom-tools and the remaining backends stay internal. The UI
+remains published on LAN port 8000 for authenticated API clients; custom-tools and the remaining backends stay internal. The UI
 and backend share the external Docker network `ollama-net`.
 
 ## Virtual models
@@ -148,13 +147,13 @@ See [Phase 17](docs/campaign-4/phase-17-operations-and-api.md).
 datetime injection
   → memory recall (per-user, semantic via custom-tools)
   → classify (keyword pre-filter + qwen3:4b router)
-  → complexity gate (OWUI-task detect → virtual-model force → token threshold)
+  → complexity gate (image handling → virtual-model force → token/depth signals)
   → fast path (single model + ReAct if tool-capable)
     | planner (optional sub-question decomposition)
     → deep panel (N parallel workers, all tool-capable)
     → synth (cloud or local, streamed)
-  → reflect (length + brevity-cue check)
-  → retry on failure
+  → reflect (non-streamed graph only: length + brevity-cue check)
+  → bounded retry for a thin answer
 ```
 
 Per-user fair scheduling (`FairLocalGate`) round-robins across users at the
@@ -162,8 +161,7 @@ local-GPU bottleneck. Per-user in-flight cap (default 3) prevents one user
 from saturating the queue. Cloud calls bypass the gate. Every user-visible chat
 is first committed to Audrey's local durable outbox; one bounded lifecycle-owned
 worker delivers it to the per-user chat archive (SQLite source-of-truth + Qdrant
-index) without putting remote embedding/indexing latency on the response. OWUI
-housekeeping requests such as title and tag generation are excluded. The model
+index) without putting remote embedding/indexing latency on the response. The model
 can search prior conversations via `chat_history_search`.
 
 ## Documentation

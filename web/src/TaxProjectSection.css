@@ -1,0 +1,41 @@
+.tax-project { margin-top: 1rem; }
+.tax-project-cases { display: grid; gap: 1rem; margin-top: 1rem; }
+.tax-project-case { min-width: 0; }
+.tax-project-case + .tax-project-case { padding-top: 1rem; border-top: 1px solid var(--border); }
+.tax-project-case > header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.85rem; }
+.tax-project-case h3 { margin: 0; color: var(--text); font-size: 0.9rem; }
+.tax-project-case > header p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.8rem; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.tax-project-case button, .tax-project-error button { flex: 0 0 auto; padding: 0.65rem 0.85rem; border: 1px solid var(--border); border-radius: 0.65rem; background: rgb(22 45 72 / 55%); color: var(--text); cursor: pointer; font: inherit; font-size: 0.76rem; }
+.tax-project-case button:hover, .tax-project-error button:hover { border-color: var(--accent); background: rgb(35 66 103 / 55%); }
+.tax-project-case button:focus-visible, .tax-project summary:focus-visible, .tax-project-error button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.tax-project-case button:disabled { opacity: 0.6; cursor: wait; }
+.tax-project-table-scroll { overflow: auto; border: 1px solid var(--border); border-radius: 0.7rem; }
+.tax-project table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.tax-project th, .tax-project td { text-align: left; padding: 0.7rem 0.8rem; vertical-align: top; overflow-wrap: anywhere; }
+.tax-project thead { background: rgb(22 45 72 / 40%); color: var(--muted); }
+.tax-project th { font-weight: 550; }
+.tax-project tbody tr + tr { border-top: 1px solid var(--border); }
+.tax-project td { white-space: pre-wrap; line-height: 1.5; }
+.tax-project td:last-child { width: 7rem; color: var(--muted); font-size: 0.72rem; }
+.tax-project td [data-pending="true"] { color: #c5b78c; }
+.tax-project-worksheet { margin-top: 0.75rem; border: 1px solid var(--border); border-radius: 0.7rem; background: rgb(22 45 72 / 25%); }
+.tax-project-worksheet > summary { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.85rem; color: var(--text); cursor: pointer; font-size: 0.8rem; list-style: none; }
+.tax-project-worksheet > summary::-webkit-details-marker { display: none; }
+.tax-project-worksheet > summary span::before { content: "＋"; padding-right: 0.5rem; color: var(--accent); }
+.tax-project-worksheet[open] > summary span::before { content: "−"; }
+.tax-project-worksheet > summary small { color: var(--muted); font-size: 0.72rem; text-align: right; }
+.tax-project-worksheet > div { border-top: 1px solid var(--border); padding: 0 0.85rem 0.85rem; font-size: 0.8rem; line-height: 1.6; overflow-wrap: anywhere; }
+.tax-project-worksheet h4 { margin-bottom: 0; font-size: 0.82rem; }
+.tax-project-worksheet h4 + p { margin-top: 0.3rem; white-space: pre-wrap; }
+.tax-project-source { margin-top: 0.6rem; color: var(--muted); }
+.tax-project-source summary { cursor: pointer; }
+.tax-project-source blockquote { margin: 0.5rem 0; padding-left: 0.75rem; border-left: 2px solid var(--border); white-space: pre-wrap; }
+.tax-project-calculation { color: var(--accent); }
+.tax-project-error { color: #e0acac; font-size: 0.8rem; }
+@media (max-width: 600px) {
+  .tax-project-case > header { align-items: stretch; flex-direction: column; gap: 0.75rem; }
+  .tax-project-case > header button { align-self: flex-start; }
+  .tax-project th, .tax-project td { padding: 0.6rem 0.5rem; }
+  .tax-project td:last-child { width: 4.5rem; }
+  .tax-project-worksheet > summary { align-items: flex-start; }
+}

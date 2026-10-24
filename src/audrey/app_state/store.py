@@ -94,6 +94,7 @@ class ApplicationStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self.model_catalog_revision = 0
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
@@ -241,7 +242,7 @@ class ApplicationStore:
     ) -> Principal:
         """Resolve or create one stable principal from provider evidence.
 
-        Existing OWUI users pass their exact current email as
+        Existing imported accounts retain their exact original email as
         ``legacy_storage_namespace`` so deployed collections and disk paths are
         not renamed. A verified, case-insensitive email match binds a new
         provider subject to the existing Audrey account; ambiguous legacy
@@ -437,100 +438,7 @@ class ApplicationStore:
 
         return _principal_from_row(row, auth_method=auth_method)
 
-    async def import_pending_owui_user(
-        self,
-        *,
-        subject: str,
-        email: str,
-        display_name: str,
-        apply: bool = False,
-    ) -> str:
-        """Preview or create a pending roster entry without changing existing users."""
 
-        return await asyncio.to_thread(
-            self._import_pending_owui_user_sync,
-            subject,
-            email,
-            display_name,
-            apply,
-        )
-
-    def _import_pending_owui_user_sync(
-        self,
-        subject: str,
-        email: str,
-        display_name: str,
-        apply: bool,
-    ) -> str:
-        subject = _required(subject, "OWUI user id")
-        email = _required(email, "OWUI email")
-        display_name = display_name.strip() or email
-        if len(subject) > 200 or len(email) > 320 or len(display_name) > 100:
-            raise InvalidIdentityError("OWUI account field is too long")
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE" if apply else "BEGIN")
-            try:
-                bound = self._conn.execute(
-                    "SELECT u.current_email FROM external_identities AS i "
-                    "JOIN app_users AS u ON u.user_id = i.user_id "
-                    "WHERE i.provider = 'owui' AND i.subject = ?",
-                    (subject,),
-                ).fetchone()
-                if bound is not None:
-                    outcome = (
-                        "existing" if str(bound["current_email"]).casefold()
-                        == email.casefold() else "conflict"
-                    )
-                else:
-                    matches = self._conn.execute(
-                        "SELECT user_id FROM app_users "
-                        "WHERE lower(current_email) = lower(?) LIMIT 2",
-                        (email,),
-                    ).fetchall()
-                    if len(matches) > 1:
-                        outcome = "ambiguous"
-                    elif matches:
-                        outcome = "existing"
-                    else:
-                        outcome = "pending"
-                        if apply:
-                            now = _utc_now()
-                            user_id = f"usr_{uuid.uuid4().hex}"
-                            self._conn.execute(
-                                "INSERT INTO app_users "
-                                "(user_id, storage_namespace, current_email, "
-                                "display_name, role, status, created_at, updated_at) "
-                                "VALUES (?, ?, ?, ?, 'user', 'pending', ?, ?)",
-                                (
-                                    user_id,
-                                    f"ns_{uuid.uuid4().hex}",
-                                    email,
-                                    display_name,
-                                    now,
-                                    now,
-                                ),
-                            )
-                            self._conn.execute(
-                                "INSERT INTO user_preferences "
-                                "(user_id, timezone, persona, response_preferences_json, "
-                                "created_at, updated_at) "
-                                "VALUES (?, 'UTC', '', '{}', ?, ?)",
-                                (user_id, now, now),
-                            )
-                            self._conn.execute(
-                                "INSERT INTO external_identities "
-                                "(provider, subject, user_id, email, created_at, last_seen_at) "
-                                "VALUES ('owui_import', ?, ?, ?, ?, ?)",
-                                (subject, user_id, email, now, now),
-                            )
-                if apply:
-                    self._conn.commit()
-                else:
-                    self._conn.rollback()
-            except BaseException:
-                self._conn.rollback()
-                raise
-        return outcome
 
     def _identity_row_locked(
         self,
@@ -1635,6 +1543,10 @@ class ApplicationStore:
         actor_user_id = _required(actor_user_id, "actor user id")
         model_id = _required(model_id, "model id")
         visibility = str(visibility).strip().lower()
+        # Preserve the historical SQLite CHECK encoding; APIs expose restricted.
+        # Accepting the old spelling also lets an older browser finish a save.
+        if visibility == "restricted":
+            visibility = "private"
         display_name = display_name.strip()
         role_ids = _normalize_groups(roles)
         if len(model_id) > 200 or len(display_name) > 80:
@@ -1728,6 +1640,7 @@ class ApplicationStore:
                     now=now,
                 )
                 self._conn.commit()
+                self.model_catalog_revision += 1
             except BaseException:
                 self._conn.rollback()
                 raise
@@ -1765,6 +1678,7 @@ class ApplicationStore:
                         "save the model settings before uploading a portrait"
                     )
                 self._conn.commit()
+                self.model_catalog_revision += 1
             except BaseException:
                 self._conn.rollback()
                 raise
@@ -1803,6 +1717,7 @@ class ApplicationStore:
                     (actor_user_id, _utc_now(), model_id),
                 )
                 self._conn.commit()
+                self.model_catalog_revision += 1
             except BaseException:
                 self._conn.rollback()
                 raise
@@ -1826,6 +1741,7 @@ class ApplicationStore:
                     (model_id,),
                 )
                 self._conn.commit()
+                self.model_catalog_revision += 1
             except BaseException:
                 self._conn.rollback()
                 raise
@@ -1901,6 +1817,7 @@ class ApplicationStore:
                     now=now,
                 )
                 self._conn.commit()
+                self.model_catalog_revision += 1
             except BaseException:
                 self._conn.rollback()
                 raise
@@ -1988,6 +1905,7 @@ class ApplicationStore:
                     now=now,
                 )
                 self._conn.commit()
+                self.model_catalog_revision += 1
             except BaseException:
                 if self._conn.in_transaction:
                     self._conn.rollback()
@@ -2045,6 +1963,7 @@ class ApplicationStore:
                     now=now,
                 )
                 self._conn.commit()
+                self.model_catalog_revision += 1
             except BaseException:
                 if self._conn.in_transaction:
                     self._conn.rollback()
@@ -2161,7 +2080,7 @@ def _admin_user_snapshot(record: AdminUserRecord) -> dict[str, object]:
 def _model_profile_from_row(row: sqlite3.Row) -> ModelPublicationProfile:
     return ModelPublicationProfile(
         model_id=str(row["model_id"]),
-        visibility=str(row["visibility"]),
+        visibility="restricted" if row["visibility"] == "private" else "public",
         roles=tuple(json.loads(str(row["roles_json"]))),
         display_name=str(row["display_name"]),
         portrait_mime=str(row["portrait_mime"]),

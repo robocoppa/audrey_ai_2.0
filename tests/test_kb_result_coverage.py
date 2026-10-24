@@ -30,6 +30,7 @@ from fastapi.testclient import TestClient
 
 from audrey.kb.fusion import FusedHit
 from audrey.kb.qdrant import KBHit, SearchScope
+from audrey.kb.uploads_db import UploadsDB
 from audrey.routes.kb import (
     _clip,
     _file_distribution,
@@ -382,7 +383,7 @@ async def _embed_one(text: str) -> list[float]:
 
 
 @pytest.fixture
-def app(monkeypatch) -> FastAPI:
+def app(monkeypatch, tmp_path):
     """The route over a fake retriever returning a deliberately skewed set."""
     from audrey.routes import kb as kb_module
 
@@ -394,12 +395,17 @@ def app(monkeypatch) -> FastAPI:
     app = FastAPI()
     app.include_router(kb_router)
     app.state.qdrant = object()
+    uploads = UploadsDB(tmp_path / "uploads.sqlite")
+    app.state.uploads_db = uploads
     app.state.text_embedder = SimpleNamespace(embed_one=_embed_one)
     app.state.cfg = SimpleNamespace(
-        env=SimpleNamespace(kb_service_token=SECRET, owui_url="http://owui"),
+        env=SimpleNamespace(kb_service_token=SECRET),
         raw={},
     )
-    return app
+    try:
+        yield app
+    finally:
+        uploads.close()
 
 
 def _query_line(app, caplog, query: str = "london system") -> str:

@@ -2,7 +2,7 @@
 #
 # Scope: `audrey`, `audrey-ui`, `custom-tools`, `media-worker`, and
 # `media-fetcher`. `ollama` and `qdrant` remain Unraid-managed; monitoring
-# has its own Compose file. Open WebUI is a stopped migration client.
+# has its own Compose file. The native UI serves browser clients.
 #
 # Usage (on Unraid, from /mnt/user/appdata/audrey_ai_2.0):
 #   docker compose up -d --build audrey         # rebuild + restart audrey

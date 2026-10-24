@@ -1,4 +1,4 @@
-# Lesson 9 — Tool use and the ReAct loop
+# Lesson 10 — Tool use and the ReAct loop
 
 **Estimated time:** 45-60 minutes if you read with the source files open.
 
@@ -7,8 +7,8 @@ call a tool, how does Audrey find the right server, send the call, return the
 result, and decide when to stop, and how does it make sure a tool only ever
 touches the caller's own data?"*
 
-Lesson 7 traced how a request becomes a `task_type` and a `mode`, and Lesson 8
-walked the deep pipeline that runs when `mode = deep`. This lesson picks up one
+Lesson 8 traced how a request becomes a `task_type` and a `mode`, and Lesson 9
+walked the deep and research pipelines that run when `mode = deep`. This lesson picks up one
 step lower: after the fast path or a deep worker has chosen a model. If that
 model can call tools and tools are available, Audrey hands the request to the
 **ReAct loop**: a small driver that lets the model call tools, feeds the
@@ -52,7 +52,7 @@ Not every model can take part. A model that supports function calling accepts
 a `tools=[...]` list and replies with `tool_calls` when it wants one; other
 models ignore the list or produce garbled output. Ollama's own capability flag
 isn't always right, so Audrey keeps a hand-maintained list,
-[`tool_capable_models`](../../config.yaml#L242), and runs the loop only for
+[`tool_capable_models`](../../config.yaml#L262), and runs the loop only for
 models on it.
 
 ### 1.2 Why "ReAct"?
@@ -71,9 +71,9 @@ The same loop serves three callers, each with its own settings:
 
 | Caller | Settings | Rounds and searches |
 |---|---|---|
-| The fast path, one model answering | [`agentic.react`](../../config.yaml#L687) | the defaults |
-| Each deep worker | [`deep_worker`](../../config.yaml#L775) | room for a few more tool messages |
-| Each research worker | [`research_worker`](../../config.yaml#L800) | more rounds and a larger search budget |
+| The fast path, one model answering | [`agentic.react`](../../config.yaml#L685) | the defaults |
+| Each deep worker | [`deep_worker`](../../config.yaml#L773) | room for a few more tool messages |
+| Each research worker | [`research_worker`](../../config.yaml#L798) | more rounds and a larger search budget |
 
 In all three, the loop takes the GPU gate from Lesson 6 only for each model
 call, and gives it back while tools run. A slow web search doesn't hold the
@@ -97,7 +97,7 @@ These are the files this lesson reads:
 ### 2.1 The declaration catalogue
 
 Before Audrey offers a model any tool, the tool must be declared in
-[`TOOL_DECLARATIONS`](../../src/audrey/tools/discovery.py#L97). A declaration
+[`TOOL_DECLARATIONS`](../../src/audrey/tools/discovery.py#L100). A declaration
 answers the questions that matter for safety, which are none of the model's
 business:
 
@@ -115,7 +115,7 @@ business:
   default, for the two tools that inspect a document page or a video frame.
 
 A few entries, from
-[`discovery.py:97`](../../src/audrey/tools/discovery.py#L97):
+[`discovery.py:100`](../../src/audrey/tools/discovery.py#L100):
 
 ```python
 TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
@@ -154,13 +154,13 @@ TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
 ### 2.2 Discovery
 
 Discovery runs during startup.
-[`discover_all`](../../src/audrey/tools/discovery.py#L484) asks every
+[`discover_all`](../../src/audrey/tools/discovery.py#L491) asks every
 configured tool server for its `/openapi.json` at the same time, each request
 with its own timeout, so one slow or broken server can't hold up or spoil the
 others. For each server,
-[`discover_one`](../../src/audrey/tools/discovery.py#L402) keeps only POST
+[`discover_one`](../../src/audrey/tools/discovery.py#L409) keeps only POST
 routes tagged `tools` and checks each against its declaration, at
-[`discovery.py:449`](../../src/audrey/tools/discovery.py#L449):
+[`discovery.py:456`](../../src/audrey/tools/discovery.py#L456):
 
 ```python
 if "tools" not in tags:
@@ -185,10 +185,10 @@ Each route that passes is converted for the model in two steps:
 
 - **References are inlined.** A route's request schema can point at shared
   definitions (`$ref`). Ollama doesn't follow those, so
-  [`_resolve_refs`](../../src/audrey/tools/discovery.py#L249) copies each one
+  [`_resolve_refs`](../../src/audrey/tools/discovery.py#L254) copies each one
   into place.
 - **Unfamiliar keywords are scrubbed.**
-  [`_strip_unsupported_keywords`](../../src/audrey/tools/discovery.py#L272)
+  [`_strip_unsupported_keywords`](../../src/audrey/tools/discovery.py#L277)
   keeps a short list of JSON Schema keywords (`type`, `properties`,
   `required`, `enum`, `description` and a few more) and drops the rest,
   because small models can fail silently on keywords like `format`. One
@@ -196,7 +196,7 @@ Each route that passes is converted for the model in two steps:
   to their schemas. The scrubber walks into it without filtering the names;
   filtering them against the keyword list would delete every field.
 
-The result is a [`ToolSpec`](../../src/audrey/tools/discovery.py#L175): the
+The result is a [`ToolSpec`](../../src/audrey/tools/discovery.py#L179): the
 name, description and parameters the model will see, plus what only Audrey
 sees, which is the server URL and path to POST to and the policy copied from
 the declaration. The tool server also reports which of its components are
@@ -211,7 +211,7 @@ wiping the live tools. Lesson 5 walked both.
 ### 2.3 What the model is offered
 
 The registry hands the loop only what a model may use right now, at
-[`discovery.py:211`](../../src/audrey/tools/discovery.py#L211):
+[`discovery.py:216`](../../src/audrey/tools/discovery.py#L216):
 
 ```python
 def specs(self) -> list[ToolSpec]:
@@ -234,11 +234,11 @@ sees a URL or a policy, only this:
 
 A skill can narrow the list further. When a run uses a skill, the route hands
 the loop a registry restricted to the tools that skill allows, through
-[`restrict`](../../src/audrey/tools/discovery.py#L235).
+[`restrict`](../../src/audrey/tools/discovery.py#L240).
 
 ### 2.4 The loop, top-down
 
-[`run_react`](../../src/audrey/pipeline/react.py#L552) has a long signature
+[`run_react`](../../src/audrey/pipeline/react.py#L558) has a long signature
 and a short body. Its shape:
 
 ```text
@@ -283,7 +283,7 @@ files"). The loop runs them in parallel (§2.9).
 
 ### 2.6 The dispatcher: one call in, one result out
 
-[`dispatch_one`](../../src/audrey/tools/dispatch.py#L163) turns one entry of
+[`dispatch_one`](../../src/audrey/tools/dispatch.py#L170) turns one entry of
 `tool_calls` into a `ToolResult`. In order, it:
 
 1. **Parses the arguments.** Some models send them as a JSON string instead of
@@ -310,7 +310,7 @@ request.
 ### 2.7 Spotlight — the caller's identity, not the model's
 
 This is the security center of the tool path, at
-[`dispatch.py:225`](../../src/audrey/tools/dispatch.py#L225):
+[`dispatch.py:263`](../../src/audrey/tools/dispatch.py#L263):
 
 ```python
 if (spec.user_scoped or spec.purge_gated) and (
@@ -337,7 +337,7 @@ A model can be steered into this by a hostile prompt, by instructions hidden in
 a web page a tool returned, or by plain confusion. The dispatcher doesn't argue
 with it. For a tool declared `ARGUMENT`, it overwrites `user` with the caller's
 identity; for `TAGS`,
-[`_force_user_tag`](../../src/audrey/tools/dispatch.py#L156) removes any
+[`_force_user_tag`](../../src/audrey/tools/dispatch.py#L163) removes any
 `user:` tag and appends the real one. The identity comes from authentication
 (Lesson 4): the caller's private storage id, which a later lesson on identity
 explains in full.
@@ -358,15 +358,15 @@ same identity, so it is blocked too.
 
 Tool results can be large: a knowledge-base search returning several long
 passages, or a page of search snippets. Every result is capped at
-[`max_tool_result_chars`](../../config.yaml#L725) characters, because every
+[`max_tool_result_chars`](../../config.yaml#L723) characters, because every
 tool message spends the model's context, and long results repeated across
 rounds crowd out everything else.
 
 How the cut is made matters as much as where.
-[`_truncate_payload`](../../src/audrey/tools/dispatch.py#L111) first drops
+[`_truncate_payload`](../../src/audrey/tools/dispatch.py#L118) first drops
 whole items from the result's largest list, so the model still receives valid
 JSON, plus a note, at
-[`dispatch.py:141`](../../src/audrey/tools/dispatch.py#L141):
+[`dispatch.py:148`](../../src/audrey/tools/dispatch.py#L148):
 
 ```python
 for keep in range(len(items) - 1, 0, -1):
@@ -393,9 +393,9 @@ asking again won't fix it.**
 A round's tool calls run in parallel: The loop gathers them with
 `asyncio.gather`, so a round takes as long as its slowest call, not the sum of
 all of them. Before that, each worker's web searches are counted against a
-budget, [`max_web_searches`](../../config.yaml#L771), because searches spend a
+budget, [`max_web_searches`](../../config.yaml#L769), because searches spend a
 search provider's quota and a research request runs several workers at once.
-At [`react.py:737`](../../src/audrey/pipeline/react.py#L737):
+At [`react.py:749`](../../src/audrey/pipeline/react.py#L749):
 
 ```python
 for tc in tool_calls:
@@ -425,13 +425,13 @@ those events to the browser.
 
 ### 2.10 Compaction keeps the conversation small
 
-After [`compress_after_round`](../../config.yaml#L705) rounds, and once more
+After [`compress_after_round`](../../config.yaml#L703) rounds, and once more
 before a forced final answer,
-[`_compress_history`](../../src/audrey/pipeline/react.py#L208) replaces older
+[`_compress_history`](../../src/audrey/pipeline/react.py#L214) replaces older
 tool results with a short placeholder. It counts tool **messages**, not rounds,
 because one round can produce several. The setting
-[`compress_keep_last`](../../config.yaml#L764) says how many keep their full
-text, and [`_tool_message_priority`](../../src/audrey/pipeline/react.py#L198)
+[`compress_keep_last`](../../config.yaml#L762) says how many keep their full
+text, and [`_tool_message_priority`](../../src/audrey/pipeline/react.py#L204)
 decides which:
 
 ```python
@@ -453,7 +453,7 @@ answer.
 
 A placeholder keeps the tool role and its place in the conversation. Its
 wording, from
-[`_summarize_tool_message`](../../src/audrey/pipeline/react.py#L150), is chosen
+[`_summarize_tool_message`](../../src/audrey/pipeline/react.py#L156), is chosen
 so a model quoting it can't present it as a failed or empty search:
 
 ```text
@@ -465,7 +465,7 @@ so a model quoting it can't present it as a failed or empty search:
 When the round limit runs out and the model still wants tools, removing the
 tool list isn't enough on its own: A small model can stall, or write a pretend
 tool call as plain text. So the loop changes mode explicitly, at
-[`react.py:790`](../../src/audrey/pipeline/react.py#L790):
+[`react.py:802`](../../src/audrey/pipeline/react.py#L802):
 
 ```python
 convo = _compress_history(convo, keep_last_round=compress_keep_last)
@@ -491,7 +491,7 @@ the user to wrap up is a clear signal.
 
 Each model call in the loop records the model's health and holds the GPU gate
 for that call only, at
-[`react.py:638`](../../src/audrey/pipeline/react.py#L638):
+[`react.py:650`](../../src/audrey/pipeline/react.py#L650):
 
 ```python
 try:

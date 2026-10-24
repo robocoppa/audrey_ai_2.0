@@ -117,7 +117,6 @@ def _compat_user(principal: Principal) -> AuthedUser:
     return AuthedUser(
         email=principal.storage_namespace,
         role=principal.role,
-        owui_id="",
         display_name=principal.display_name,
         principal=principal,
     )

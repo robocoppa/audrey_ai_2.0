@@ -24,7 +24,7 @@ what screenshots, diagrams, and error dumps actually need. Set
 `vision.describe_for_text_models: false` to switch the whole thing off;
 callers then fall back to the behaviour they had before.
 
-Descriptions are cached per image because OWUI resends the entire history
+Descriptions are cached per image because clients resend the entire history
 — data URI included — on every turn. Without the cache, five turns about
 one screenshot would pay for five vision calls.
 """

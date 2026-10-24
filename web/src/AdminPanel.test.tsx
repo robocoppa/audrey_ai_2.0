@@ -26,7 +26,7 @@ const DIRECT_MODEL = {
   capabilities: ["text"],
   enabled: true,
   audience: "admins",
-  visibility: "private",
+  visibility: "restricted",
   roles: [],
   portrait_url: "",
   concrete_model: "qwen3.8:27b",
@@ -171,7 +171,7 @@ describe("AdminPanel", () => {
       }
       if (path === "/api/admin/model-profiles/direct%2Fqwen3.8-27b") {
         const profile = JSON.parse(String(request?.body)) as {
-          visibility: "public" | "private";
+          visibility: "public" | "restricted";
           roles: string[];
           display_name: string;
         };

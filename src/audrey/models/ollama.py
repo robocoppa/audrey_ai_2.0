@@ -236,7 +236,7 @@ def _merge_leading_system(messages: list[dict[str, Any]]) -> list[dict[str, Any]
 
     Audrey stacks these routinely and legitimately: `node_datetime` prepends
     one, `node_memory_recall` prepends the recall hint plus chat-history
-    guidance, OWUI sends the user's persona, and the deep panel prepends a
+    guidance, clients send their system instructions, and the deep panel prepends a
     worker/researcher role on top (`deep_panel._with_role_system`). Four is an
     ordinary request. Every one of those call sites is correct on its own — the
     constraint is a property of the wire format, so it is enforced here, at the
@@ -247,7 +247,7 @@ def _merge_leading_system(messages: list[dict[str, Any]]) -> list[dict[str, Any]
     arrival, while the fast path worked. The asymmetry was the tell. Eval
     requests carry no persona (`eval_research.py` sends a bare user turn), so a
     fast-path turn holds exactly ONE system message and renders fine; a panel
-    worker gets the role prompt on top of it, hits two, and dies. Real OWUI
+    worker gets the role prompt on top of it, hits two, and dies. Client
     traffic arrives with a persona already, so the fast path is exposed there
     in a way no eval run can reproduce.
 

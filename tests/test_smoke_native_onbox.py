@@ -31,7 +31,7 @@ def _run(tmp_path: Path, env_text: str) -> subprocess.CompletedProcess[str]:
 def test_rejects_shell_export_syntax_before_docker(tmp_path):
     result = _run(
         tmp_path,
-        "export OWUI_API_KEY = legacy\n"
+        "export UNSUPPORTED_API_KEY = legacy\n"
         "AUDREY_USER_JWT=user-jwt\n"
         "AUDREY_ADMIN_JWT=admin-jwt\n",
     )
@@ -41,16 +41,16 @@ def test_rejects_shell_export_syntax_before_docker(tmp_path):
     assert "legacy" not in result.stderr
 
 
-def test_rejects_legacy_key_without_printing_its_value(tmp_path):
+def test_rejects_unknown_key_without_printing_its_value(tmp_path):
     result = _run(
         tmp_path,
-        "OWUI_API_KEY=legacy-secret\n"
+        "UNSUPPORTED_API_KEY=legacy-secret\n"
         "AUDREY_USER_JWT=user-jwt\n"
         "AUDREY_ADMIN_JWT=admin-jwt\n",
     )
 
     assert result.returncode == 2
-    assert "unsupported key OWUI_API_KEY" in result.stderr
+    assert "unsupported key UNSUPPORTED_API_KEY" in result.stderr
     assert "legacy-secret" not in result.stderr
 
 

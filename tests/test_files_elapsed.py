@@ -54,10 +54,10 @@ def _build_app(db: UploadsDB, tmp_path: Path) -> FastAPI:
     # hermetic test. These cases are about the projection and the clock, not
     # about auth — `test_files_service_list.py` owns that.
     app.dependency_overrides[require_user] = lambda: AuthedUser(
-        email=ME, role="user", owui_id="u1")
+        email=ME, role="user")
     app.state.uploads_db = db
     app.state.cfg = SimpleNamespace(
-        env=SimpleNamespace(kb_service_token=SECRET, owui_url="http://owui"),
+        env=SimpleNamespace(kb_service_token=SECRET),
         raw={"kb": {"upload_root": str(tmp_path / "uploads"),
                     "max_upload_mb": 50, "max_user_bytes": 10 * 1024**3,
                     "chunked": {"max_upload_mb": 2048, "part_size_mb": 8},

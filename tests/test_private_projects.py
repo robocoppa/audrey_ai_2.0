@@ -4,13 +4,13 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from test_native_private_workflow import document_setup as document_setup
+from test_native_private_workflow import native as native
 from test_private_document_ingestion import PRIVATE_TEXT, USER
 
 from audrey.app_state import ProjectNotFoundError
 from audrey.processing_policy import ProcessingPolicyError
 from audrey.routes.app import private_files, projects
-
-pytest_plugins = ("test_native_private_workflow",)
 
 
 @pytest.fixture(autouse=True)

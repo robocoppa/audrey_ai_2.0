@@ -10,12 +10,12 @@ shape when you see it. This is **not** a Python tutorial — it is written for t
 know the language basics and is a tour of the modern-Python features
 this project leans on heavily.
 
-This is split out from a former combined foundations lesson into two
-halves. Lesson 1 (this one) is the **language layer** — async,
-context managers, types, TypedDict. [Lesson 2](lesson-02-foundations-libraries.md)
-is the **library layer** — FastAPI, Pydantic, LangGraph, httpx,
-Qdrant, Prometheus, pytest. Read this one first; the libraries assume
-you've internalized async + types.
+Lessons 1–3 are the foundations. This one is the **language layer**:
+async, context managers, types, TypedDict.
+[Lesson 2](lesson-02-foundations-libraries.md) covers the libraries that
+shape Audrey (FastAPI, Pydantic, LangGraph), and the lesson after it the
+supporting ones (httpx, Qdrant, Prometheus, pytest). Read this one first; the
+libraries assume you've internalized async and types.
 
 You don't need to memorize anything. Skim what's already familiar,
 read carefully what's new. Each section has a "**Why Audrey needs
@@ -59,24 +59,22 @@ time. This is "blocking I/O."
 
 Audrey is a *gateway*. It rarely does meaningful CPU work itself;
 mostly it forwards requests to other services and waits for replies.
-A single chat completion can take 30 seconds (fast path, local
-quantized model) or three minutes (deep panel cloud call burning paid
-provider time). During those waits, Audrey is doing essentially
-nothing except holding a TCP socket open and waiting for tokens to
-arrive.
+A single answer can take seconds (one local model) or minutes (a deep
+panel of several models). During those waits, Audrey is doing
+essentially nothing except holding a connection open and waiting for
+tokens to arrive.
 
 If those waits *blocked* — the way a sync HTTP library would — the
-whole Python process would stall. With 5 users on the system, average
-wait time would balloon from "actual model latency" to "actual model
-latency × queue depth." A single deep-panel cloud call would freeze
-every other user behind it for three minutes.
+whole Python process would stall. With several people on the system,
+each would wait for the model *and* for everyone ahead of them. A
+single slow deep-panel call would freeze every other user behind it.
 
-With async, while user A's request is sitting on a 30-second cloud
-call, user B's short fast-path request runs in parallel on the same
-event loop, on the same thread, in the same process. The savings
-aren't theoretical — Audrey's deep panel runs **N cloud workers
-concurrently** (typically 3-5), and the only reason that works is
-that all of them are awaiting tokens at once instead of taking turns.
+With async, while user A's request is sitting on a slow cloud call,
+user B's short fast-path request makes progress on the same event
+loop, on the same thread, in the same process. The savings aren't
+theoretical: Audrey's deep panel runs **several cloud workers at
+once**, and the only reason that works is that all of them are
+awaiting tokens at the same time instead of taking turns.
 
 There's a flip side worth flagging now, because it explains some
 quirks you'll meet later in the codebase. Calling a synchronous
@@ -87,18 +85,20 @@ is paused until the sync call returns. On fast operations (a memory
 lookup, a millisecond of math) this is invisible. On slow operations
 (network I/O, disk I/O on slow storage) it's a stall.
 
-Audrey has two known cases of this in `kb/ingest.py` and
-`kb/reconcile.py`, where the code calls `Path.exists()` (a sync
-filesystem syscall) from inside `async def` functions. They're
-flagged by a linting tool — basically an automated code reviewer —
-under a rule called `ASYNC240`. Audrey accepts these warnings rather
-than fixing them: The KB lives on local SSD where `exists()` is
-sub-millisecond, and the calls happen on a periodic background sweep
-rather than the request hot path, so the stall is too short to
-matter. If the KB ever moved to slow storage, that decision would
-need to be revisited. Don't worry about the specifics now — just
-know that "sync call inside async function" is a real hazard and
-Audrey is aware of its instances.
+Audrey has two known cases of this, both in background work on the
+knowledge base: The periodic reconcile sweep (`kb/reconcile.py`) and
+the file watcher (`kb/watcher.py`) each call `Path.exists()`, a sync
+filesystem call, from inside an `async def`. The linter, an automated
+code reviewer, flags them under a rule called `ASYNC240`. Audrey
+accepts the warnings rather than fixing them: The knowledge base lives
+on a local SSD where `exists()` takes well under a millisecond, and
+both run in the background, not while anyone waits for an answer. If the files ever
+moved to slow storage, that decision would need revisiting. Where a
+slow sync call can't be avoided, such as parsing a large file, Audrey
+moves it onto a worker thread with `asyncio.to_thread`, so the event
+loop keeps running. Don't
+worry about the specifics now. Just know that "sync call inside async
+function" is a real hazard, and Audrey knows where its instances are.
 
 ### The solution
 
@@ -367,39 +367,40 @@ the same pattern, just with `async def` and an awaitable body.
 
 ### A real custom one from Audrey
 
-The fair-gate slot-acquisition is a custom async context manager —
+The GPU gate's slot acquisition is a custom async context manager,
 because the "release on exit" guarantee is exactly what you need to
-prevent slot leaks under exceptions. Simplified down to the
-context-manager skeleton:
+prevent slot leaks under exceptions. Cut down to the context-manager
+skeleton:
 
 ```python
 @asynccontextmanager
-async def acquire(self, model: str, *, location: str):
-    """Wait for a free slot for this user+model, hold it for the body,
-    release it on exit even if the body raises."""
-    fut = self._enqueue(model, location)
-    await fut                                    # wait for our turn
+async def acquire(self, model: str, *, location: str, user_id: str | None = None):
+    if location != "local":
+        yield                    # cloud calls don't compete for the GPU
+        return
+    ...                          # wait in this user's queue for a free slot
     try:
-        yield                                    # caller runs their model call here
+        yield                    # the caller's model call runs here
     finally:
-        self._release(model, location)           # always runs, even on exception
+        await self._release()    # always runs, even on an exception
 ```
 
 Read it like this:
 
-- `await fut` runs at `async with` *entry* — blocks until the gate
-  hands this request a slot.
+- Everything before the second `yield` runs at `async with` *entry*.
+  A cloud call goes straight through; a local one waits until the gate
+  hands it a slot.
 - `yield` pauses the function and lets the body of the `async with`
   block run.
-- `self._release(...)` in the `finally` runs at `async with` *exit*,
-  whether the body completed normally or raised.
+- `await self._release()` in the `finally` runs at `async with`
+  *exit*, whether the body completed normally or raised.
 
 The real version in
 [`pipeline/fair_gate.py`](../../src/audrey/pipeline/fair_gate.py)
-also takes a `user_id` (so each user gets their own queue bucket)
-and short-circuits to a no-op for cloud calls (those don't compete
-for local GPU slots). The structural shape — `try / yield /
-finally(_release)` — is identical.
+fills in the waiting: one queue per user, so a busy user can't starve
+everyone else, plus careful handling of a request cancelled at the
+moment its slot arrives. The structural shape — `try / yield /
+finally` — is the same.
 
 If you wrote that without the context-manager pattern, every caller
 would be responsible for the `try/finally` themselves — and one
@@ -408,9 +409,12 @@ that bites in production months later.
 
 ### Where you'll see it in Audrey
 
-- `async with httpx.AsyncClient(...) as client:` — every place we
-  make an outbound HTTP call (`auth.py`, `models/ollama.py`,
-  `tools/dispatch.py`, `kb/embed.py`).
+- `async with httpx.AsyncClient(...) as client:` for short-lived HTTP
+  work, such as fetching Cloudflare's signing keys
+  (`identity/cloudflare_access.py`) or one ReAct loop's tool calls
+  (`pipeline/react.py`). Long-lived clients, like the one inside
+  `OllamaClient`, are opened once at startup and closed at shutdown
+  by the app's lifespan, the same guarantee at a larger scale.
 - `async with gate.acquire(...)` in
   [`pipeline/fair_gate.py`](../../src/audrey/pipeline/fair_gate.py) —
   the slot-leak guard described above.
@@ -487,7 +491,7 @@ instances use less memory and attribute access is slightly faster.
 Mostly cosmetic; included because the codebase has many small data
 holders.
 
-`@dataclass(frozen=True)` makes instances immutable: assigning to a
+`@dataclass(frozen=True)` makes instances immutable: Assigning to a
 field after creation raises `FrozenInstanceError`. Used in places
 like `KeywordSignal` in `pipeline/classify.py`, and for Audrey's
 identity record, below.
@@ -502,8 +506,10 @@ Audrey shuffles small, structured records between layers constantly:
   person's data.
 - `KBHit` (qdrant search result: source, text, score) — produced by
   `kb/qdrant.py`, consumed by tools and routes.
-- `ReactResult` — the per-iteration state of a ReAct loop.
-- `KeywordSignal` — `pipeline/classify.py`'s frozen rule registry.
+- `ReactResult` — what a ReAct loop returns: the answer, how many
+  rounds used tools, and each tool call.
+- `KeywordSignal` — the classifier's keyword verdict: which task, how
+  strong the match, and why.
 
 If those were untyped dicts, every call site would have to *remember*
 the keys and types. One typo (`principal["usr_id"]` instead of
@@ -559,8 +565,8 @@ That's the difference between "I can debug from logs" and "I have to
 add print statements and redeploy."
 
 A dataclass also refuses to invent fields, and Audrey uses that on
-purpose. `AuthedUser`, the older identity shape that the `/v1` routes
-still receive, deliberately has no `id` field. An Audrey user id, a
+purpose. `AuthedUser`, the identity shape the `/v1` routes receive,
+deliberately has no `id` field. An Audrey user id, a
 login provider's subject and an email are all "ids" in some sense,
 so code that reached for `me.id` would have to guess which one it
 meant. Without the field, the guess fails at once with an
@@ -615,8 +621,8 @@ LangGraph because nodes only set the fields they care about.
 
 LangGraph's contract is: **state is a dict, and nodes return dicts
 that get merged into it.** Concretely, when a node returns
-`{"classification": "deep"}`, LangGraph does the equivalent of
-`state.update({"classification": "deep"})` on the running state.
+`{"task_type": "code"}`, LangGraph does the equivalent of
+`state.update({"task_type": "code"})` on the running state.
 
 A dataclass is a class, not a dict. Merging into one would require
 either:
@@ -633,13 +639,6 @@ your editor treat it as if it had declared fields.
 
 You can think of it as: dataclass-style type checking, dict-style
 runtime. Two mental models in one tool.
-
-A second smaller reason: LangGraph state often passes through
-serialization boundaries (logging, checkpointing, debugging output).
-Dicts serialize trivially with `json.dumps`. Dataclasses need
-`asdict(...)` first. For a state object that's flying through a
-pipeline ten times per request, the dict-by-default form is
-genuinely lower friction.
 
 ### Where you'll see it in Audrey
 
@@ -666,18 +665,16 @@ for reading the rest of the codebase:
 As you read this line:
 
 ```python
-async with gate.acquire("qwen3.6:35b", location="local"):
-    drafts: list[WorkerDraft] = await deep_panel(state)
+async with gate.acquire(model, location="local", user_id=user_id):
+    draft: WorkerDraft = await run_worker(model, messages)
 ```
 
 …know that it parses as "this is an async context manager guarding
-a slot acquisition, and the body runs `deep_panel` which produces a
-list of typed `WorkerDraft` records." If that lands, you're ready
-to move on.
+a slot acquisition, and the body awaits a worker that produces a
+typed `WorkerDraft` record." If that lands, you're ready to move
+on.
 
 [Lesson 2 — Foundations II: the orchestration stack](lesson-02-foundations-libraries.md)
 covers the three libraries that *shape* Audrey — FastAPI for HTTP,
 Pydantic for validation, LangGraph for pipeline orchestration. Now
 that the language pieces are in place, those sit on top cleanly.
-The lesson after that covers the satellite libraries (httpx, Qdrant,
-Prometheus, pytest).

@@ -43,16 +43,8 @@ class EnvOverrides(BaseSettings):
     # `kb.dataset_paths` wins when KB_DATASET_PATHS is unset.
     kb_dataset_paths: str | None = Field(default=None, alias="KB_DATASET_PATHS")
 
-    # Open WebUI authentication is a dormant compatibility adapter. Native
-    # Cloudflare sessions and Audrey PATs are the product paths, so unknown
-    # bearers fail locally unless an operator explicitly opts back in.
-    # `owui_url` remains available to the roster-import command.
-    owui_auth_enabled: bool = Field(default=False, alias="OWUI_AUTH_ENABLED")
-    owui_url: str = Field(default="http://open-webui:8080", alias="OWUI_URL")
-
-    # Optional native-browser identity provider. Off by default so adding the
-    # adapter cannot alter the current OWUI/PAT authentication path. When it is
-    # enabled, startup validates both values before serving traffic.
+    # Optional native-browser identity provider. Startup validates the provider
+    # settings when enabled; personal tokens remain available independently.
     cloudflare_access_enabled: bool = Field(
         default=False,
         alias="CLOUDFLARE_ACCESS_ENABLED",
@@ -68,9 +60,6 @@ class EnvOverrides(BaseSettings):
 
 
     kb_service_token: str = Field(default="", alias="KB_SERVICE_TOKEN")
-
-    # Search
-    brave_api_key: str = Field(default="", alias="BRAVE_API_KEY")
 
     # Pipeline tunables (override YAML)
     complexity_token_threshold: int | None = Field(default=None, alias="COMPLEXITY_TOKEN_THRESHOLD")

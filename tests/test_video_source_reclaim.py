@@ -285,7 +285,7 @@ def _client(db: UploadsDB, upload_root: Path, video_cfg: dict) -> TestClient:
     app.state.text_embedder = object()
     app.state.image_embedder = object()
     app.state.cfg = SimpleNamespace(
-        env=SimpleNamespace(kb_service_token=SECRET, owui_url="http://owui"),
+        env=SimpleNamespace(kb_service_token=SECRET),
         raw={"kb": {"upload_root": str(upload_root), "video": video_cfg}},
     )
     return TestClient(app)

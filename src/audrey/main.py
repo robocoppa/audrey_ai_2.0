@@ -100,10 +100,6 @@ async def lifespan(app: FastAPI):
         )
     else:
         log.info("auth: Cloudflare Access disabled")
-    log.info(
-        "auth: Open WebUI bearer adapter %s",
-        "enabled" if cfg.env.owui_auth_enabled else "disabled",
-    )
 
     application_cfg = cfg.raw.get("application", {}) or {}
     application_store = ApplicationStore(
@@ -163,31 +159,10 @@ async def lifespan(app: FastAPI):
         skill_snapshot.invalid_count,
     )
 
-    # If first discovery is empty or partially degraded, custom-tools is not
-    # fully ready yet. Retry in the background so the live registry can recover
-    # without an Audrey restart.
-    # The graph closes over the same ToolRegistry instance, so in-place
-    # mutation is enough — no rebuild needed.
-    tools_retry_task: asyncio.Task[None] | None = None
-    if (
-        tools_enabled
-        and tool_servers
-        and (
-            not tool_registry.by_name
-            or any(
-                not spec.available
-                for spec in tool_registry.policy_records()
-            )
-        )
-    ):
-        tools_retry_task = asyncio.create_task(
-            _retry_tool_discovery(
-                tool_registry,
-                tool_servers,
-                skills=skill_registry,
-            ),
-            name="audrey.tools.retry_discovery",
-        )
+    # Discovery refreshes the same registry captured by the graph. Serializing
+    # fetch and publication prevents a background snapshot from overwriting a
+    # newer manual rediscovery.
+    tools_discovery_lock = asyncio.Lock()
 
     # One lifespan-owned custom-tools transport is reused by memory recall and
     # durable archive delivery. Per-call timeouts remain owned by each caller.
@@ -283,6 +258,7 @@ async def lifespan(app: FastAPI):
     app.state.gate = gate
     app.state.inflight = inflight
     app.state.tools = tool_registry
+    app.state.tools_discovery_lock = tools_discovery_lock
     app.state.skills = skill_registry
     app.state.graph = graph
     app.state.qdrant = qdrant
@@ -418,14 +394,27 @@ async def lifespan(app: FastAPI):
         "on" if watcher is not None else "off",
         "on" if reconciler is not None else "off",
     )
+    # Start only once startup has succeeded, so a later startup exception
+    # cannot strand the monitor outside the lifespan's shutdown guard.
+    tools_discovery_task: asyncio.Task[None] | None = None
+    if tools_enabled and tool_servers:
+        tools_discovery_task = asyncio.create_task(
+            _maintain_tool_discovery(
+                tool_registry,
+                tool_servers,
+                skills=skill_registry,
+                lock=tools_discovery_lock,
+            ),
+            name="audrey.tools.discovery",
+        )
     try:
         yield
     finally:
         await native_runs.stop()
-        if tools_retry_task is not None and not tools_retry_task.done():
-            tools_retry_task.cancel()
+        if tools_discovery_task is not None and not tools_discovery_task.done():
+            tools_discovery_task.cancel()
             try:
-                await tools_retry_task
+                await tools_discovery_task
             except (asyncio.CancelledError, Exception):  # noqa: BLE001, S110 — shutdown path
                 pass
         if reconciler is not None:
@@ -443,11 +432,67 @@ async def lifespan(app: FastAPI):
         await archive_http.aclose()
 
 
+async def _refresh_tool_discovery(
+    registry: ToolRegistry,
+    tool_servers: list[str],
+    *,
+    skills: SkillRegistry | None = None,
+    lock: asyncio.Lock | None = None,
+) -> bool:
+    """Fetch and publish one validated snapshot without replacing live objects.
+
+    An empty result from configured servers is inconclusive: discovery already
+    isolates unreachable and rejected servers. Keep the existing view in that
+    case; explicit unavailable records still withdraw their individual tools.
+    """
+    async with lock if lock is not None else asyncio.Lock():
+        fresh = await discover_all(tool_servers)
+        if tool_servers and not fresh.by_name:
+            return False
+        audit_user_scoping(fresh)
+        registry.by_name.clear()
+        registry.by_name.update(fresh.by_name)
+        if skills is not None:
+            skills.refresh_availability(frozenset(registry.names()))
+        return True
+
+
+async def _maintain_tool_discovery(
+    registry: ToolRegistry,
+    tool_servers: list[str],
+    *,
+    skills: SkillRegistry | None = None,
+    lock: asyncio.Lock | None = None,
+    interval_s: float = 60.0,
+) -> None:
+    """Recover cold startup quickly, then track live sidecar capabilities.
+
+    The slow refresh also runs after a healthy startup. No request waits for
+    discovery; dependencies becoming unavailable or recovering are reflected
+    in model tools and skill availability on a subsequent snapshot.
+    """
+    if not registry.by_name or any(
+        not spec.available for spec in registry.policy_records()
+    ):
+        await _retry_tool_discovery(registry, tool_servers, skills=skills, lock=lock)
+    while True:
+        await asyncio.sleep(interval_s)
+        try:
+            refreshed = await _refresh_tool_discovery(
+                registry, tool_servers, skills=skills, lock=lock,
+            )
+            if not refreshed:
+                log.warning("tools: periodic discovery empty; keeping the live registry")
+        except Exception as exc:  # noqa: BLE001 — a later snapshot may recover
+            log.warning("tools: periodic discovery failed: %s", exc)
+
+
 async def _retry_tool_discovery(
     registry: ToolRegistry,
     tool_servers: list[str],
     *,
     skills: SkillRegistry | None = None,
+    lock: asyncio.Lock | None = None,
     attempts: int = 30,
     interval_s: float = 4.0,
 ) -> None:
@@ -457,28 +502,23 @@ async def _retry_tool_discovery(
     recovering when Audrey starts. Without this retry the live registry would
     stay empty or partial until somebody calls `/v1/tools/rediscover`.
 
-    The loop bails out when every declared tool is available, so it costs
-    nothing on a healthy startup and also recovers a partially degraded set.
-    Bounded so a permanently broken custom-tools does not generate retries
-    forever — after the window
-    expires, manual rediscover stays available. Default window:
+    The loop bails out when every declared tool is available. These rapid
+    startup retries are bounded; the lifecycle monitor continues at its slow
+    interval afterwards. Manual rediscovery also stays available. Default window:
     30 × 4s = 2 minutes, which covers the worst observed cold-start.
     """
     for attempt in range(1, attempts + 1):
         await asyncio.sleep(interval_s)
         try:
-            fresh = await discover_all(tool_servers)
+            refreshed = await _refresh_tool_discovery(
+                registry, tool_servers, skills=skills, lock=lock,
+            )
         except Exception as e:  # noqa: BLE001 — discovery is best-effort here
             log.warning("tools: retry %d/%d failed: %s", attempt, attempts, e)
             continue
-        if not fresh.by_name:
+        if not refreshed:
             log.info("tools: retry %d/%d still empty", attempt, attempts)
             continue
-        registry.by_name.clear()
-        registry.by_name.update(fresh.by_name)
-        audit_user_scoping(registry)
-        if skills is not None:
-            skills.refresh_availability(frozenset(registry.names()))
         unavailable = sorted(
             spec.name
             for spec in registry.policy_records()
@@ -496,7 +536,7 @@ async def _retry_tool_discovery(
         )
         return
     log.warning(
-        "tools: gave up after %d retries (%.0fs); use /v1/tools/rediscover to retry manually",
+        "tools: fast recovery ended after %d retries (%.0fs); slow refresh and manual rediscovery remain available",
         attempts, attempts * interval_s,
     )
 
@@ -512,8 +552,8 @@ app = FastAPI(
         "Tool dispatch uses the declarative catalogue at authenticated "
         "/v1/tools, discovered from custom-tools OpenAPI. Per-user fair "
         "scheduling at the local-GPU "
-        "gate, provider-neutral Audrey identity with an OWUI migration "
-        "adapter, Prometheus metrics at `/metrics`, KB "
+        "gate, Cloudflare Access and Audrey personal-token identity, "
+        "Prometheus metrics at `/metrics`, KB "
         "watcher + periodic reconcile keeping global collections drift-free, "
         "streaming progress banners + per-worker tools-used footer on "
         "streamed responses."
@@ -595,19 +635,19 @@ async def rediscover_tools(
     cfg = app.state.cfg
     reg = app.state.tools
     tool_servers = list(cfg.tools.get("servers", []) or [])
-    fresh = await discover_all(tool_servers)
-    if tool_servers and not fresh.by_name:
+    skills = getattr(app.state, "skills", None)
+    refreshed = await _refresh_tool_discovery(
+        reg,
+        tool_servers,
+        skills=skills,
+        lock=getattr(app.state, "tools_discovery_lock", None),
+    )
+    if not refreshed:
         log.warning("tools: rediscover returned no records; keeping the live registry")
         raise HTTPException(
             status_code=503,
             detail="Tool discovery returned no records; existing tools are unchanged.",
         )
-    reg.by_name.clear()
-    reg.by_name.update(fresh.by_name)
-    audit_user_scoping(reg)
-    skills = getattr(app.state, "skills", None)
-    if skills is not None:
-        skills.refresh_availability(frozenset(reg.names()))
     log.info(
         "tools: rediscover -> %d/%d available: %s",
         len(reg.names()), len(reg.by_name), reg.names(),

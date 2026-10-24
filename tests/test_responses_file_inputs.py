@@ -31,7 +31,7 @@ def library(monkeypatch, tmp_path):
         provider_subject="subject", email="alice@example.com", display_name="Alice",
         role="user", status="active", auth_method="cloudflare_access",
     )
-    user = AuthedUser(email="ignored-profile@example.com", role="user", owui_id="", principal=principal)
+    user = AuthedUser(email="ignored-profile@example.com", role="user", principal=principal)
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
         cfg=SimpleNamespace(raw={"vision": {"max_images_per_turn": 4}}),
     )))

@@ -1,16 +1,4 @@
-"""Tests for routes/admin.py — admin-only ops endpoints.
-
-The admin handlers are thin orchestration over things that already
-have their own test coverage (`reconcile_once`, the auth cache, the
-chat-archive client). We pin the *wiring* here: that the handler
-reads the right field from `app.state`, calls the right helper,
-returns the right shape. We don't re-test the underlying helpers.
-
-Pattern: call handler functions directly with a fake `Request` —
-avoids spinning up a full FastAPI app + auth dependency injection +
-real OWUI/Qdrant clients. Same pattern `test_auth.py` uses for
-`_probe_owui`.
-"""
+"""Administrator route wiring with offline service fakes."""
 
 from __future__ import annotations
 
@@ -77,7 +65,7 @@ def _fake_qdrant(text="kb_text", image="kb_images"):
 def _fake_admin(email: str = "admin@example.com"):
     """Build the minimal `AuthedUser` shape the handler reads."""
     # Handler only reads `me.email` for the log line.
-    return SimpleNamespace(email=email, role="admin", owui_id="abc123")
+    return SimpleNamespace(email=email, role="admin")
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -105,7 +106,12 @@ class CapabilityRegistry:
 
 
 class CapabilitySupervisor:
-    """Initialize independent stateful components and retry failed ones.
+    """Initialize, revalidate and recover independent stateful components.
+
+    Healthy collections and embedders are rechecked on a slow timer; the fast
+    recovery loop still probes Qdrant and retries failed components. This keeps
+    startup readiness from becoming permanent without warming GPU models on
+    every recovery pass.
 
     ``memory`` and ``archive`` are intentionally duck-typed.  Keeping this
     coordinator independent of their concrete implementations makes the
@@ -121,6 +127,8 @@ class CapabilitySupervisor:
         archive_maintainer: Any,
         retry_interval_s: float,
         probe_timeout_s: float,
+        recheck_interval_s: float = 300.0,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self.registry = registry
         self._memory = memory
@@ -128,6 +136,12 @@ class CapabilitySupervisor:
         self._archive_maintainer = archive_maintainer
         self._retry_interval_s = max(0.1, retry_interval_s)
         self._probe_timeout_s = max(0.1, probe_timeout_s)
+        self._recheck_interval_s = max(0.1, recheck_interval_s)
+        self._clock = clock or time.monotonic
+        self._next_memory_check = 0.0
+        self._next_archive_check = 0.0
+        self._next_embedding_check = 0.0
+        self._next_history_embedding_check = 0.0
         self._archive_source_ready = False
         self._archive_index_ready = False
         self._memory_ready = False
@@ -157,7 +171,7 @@ class CapabilitySupervisor:
             self._maintainer_started = False
 
     async def refresh(self) -> None:
-        """Run one bounded recovery pass without coupling component failures."""
+        """Run one recovery/revalidation pass without coupling failures."""
         async with self._refresh_lock:
             await self._ensure_archive_source()
 
@@ -165,54 +179,72 @@ class CapabilitySupervisor:
                 await self._memory.probe_qdrant(timeout_s=self._probe_timeout_s)
             except Exception as exc:  # noqa: BLE001 — backend clients raise a wide tree
                 self.registry.set_unavailable("qdrant", "connection_failed")
-                log.warning("qdrant capability probe failed: %s", exc)
+                # A restart may replace collections while the service is down.
+                # Recovery must revalidate their pinned vector-space identity.
+                self._memory_ready = False
+                self._archive_index_ready = False
+                self.registry.set_unavailable("memory", "backend_unavailable")
+                self.registry.set_unavailable("chat_archive", "backend_unavailable")
+                log.warning("qdrant capability probe failed (%s)", type(exc).__name__)
                 return
             self.registry.set_available("qdrant")
 
-            if not self._memory_ready:
+            if not self._memory_ready or self._clock() >= self._next_memory_check:
                 try:
                     await self._memory.init_qdrant()
                 except Exception as exc:  # noqa: BLE001 — isolate memory initialization
+                    self._memory_ready = False
                     self.registry.set_unavailable("memory", "initialization_failed")
-                    log.warning("memory capability initialization failed: %s", exc)
+                    log.warning("memory capability initialization failed (%s)", type(exc).__name__)
                 else:
                     self._memory_ready = True
                     self.registry.set_available("memory")
+                self._next_memory_check = self._clock() + self._recheck_interval_s
 
-            if self._memory_ready and not self._embedding_ready:
-                if await self._memory.warm_embedder():
-                    self._embedding_ready = True
-                    self.registry.set_available("text_embedding")
-                else:
-                    self.registry.set_unavailable(
-                        "text_embedding", "warmup_failed"
-                    )
+            if self._memory_ready and (
+                not self._embedding_ready or self._clock() >= self._next_embedding_check
+            ):
+                self._embedding_ready = await self._warm_embedder("text_embedding", self._memory)
+                self._next_embedding_check = self._clock() + self._recheck_interval_s
 
-            if self._archive_source_ready and not self._archive_index_ready:
+            if self._archive_source_ready and (
+                not self._archive_index_ready or self._clock() >= self._next_archive_check
+            ):
                 try:
                     await self._archive.init_index()
                 except Exception as exc:  # noqa: BLE001 — isolate archive index startup
+                    self._archive_index_ready = False
                     self.registry.set_unavailable(
                         "chat_archive", "index_initialization_failed"
                     )
-                    log.warning("chat archive index initialization failed: %s", exc)
+                    log.warning("chat archive index initialization failed (%s)", type(exc).__name__)
                 else:
                     self._archive_index_ready = True
                     self.registry.set_available("chat_archive")
+                self._next_archive_check = self._clock() + self._recheck_interval_s
 
             # History may use a different model from memory. A warm memory
             # embedder cannot establish readiness for history's vector space.
-            if self._archive_index_ready and not self._history_embedding_ready:
-                try:
-                    warmed = await self._archive.warm_embedder()
-                except Exception as exc:  # noqa: BLE001 — isolate the independent history model
-                    log.warning("history embedding warm-up failed (%s)", type(exc).__name__)
-                    warmed = False
-                if warmed:
-                    self._history_embedding_ready = True
-                    self.registry.set_available("history_embedding")
-                else:
-                    self.registry.set_unavailable("history_embedding", "warmup_failed")
+            if self._archive_index_ready and (
+                not self._history_embedding_ready
+                or self._clock() >= self._next_history_embedding_check
+            ):
+                self._history_embedding_ready = await self._warm_embedder(
+                    "history_embedding", self._archive,
+                )
+                self._next_history_embedding_check = self._clock() + self._recheck_interval_s
+
+    async def _warm_embedder(self, name: str, store: Any) -> bool:
+        try:
+            warmed = await store.warm_embedder()
+        except Exception as exc:  # noqa: BLE001 — isolate each embedding model
+            log.warning("%s warm-up failed (%s)", name, type(exc).__name__)
+            warmed = False
+        if warmed:
+            self.registry.set_available(name)
+        else:
+            self.registry.set_unavailable(name, "warmup_failed")
+        return warmed
 
     async def _ensure_archive_source(self) -> None:
         if self._archive_source_ready:

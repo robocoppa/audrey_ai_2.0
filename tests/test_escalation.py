@@ -6,12 +6,6 @@ short-or-unconfident is the CORRECT answer, and getting one wrong is expensive
 in a way that never shows up as an error — the user gets a slower, worse answer
 and nothing logs a complaint.
 
-That is how the `owui_task` gap survived: OWUI's chat-title turns were being
-answered correctly in 32 characters and then escalated to a planner, three deep
-workers and a synthesis pass, purely because 32 < the length floor. Observed on
-the box 2026-08-10; the panel's own drafts came back at 38, 29 and 39 chars,
-because there was nothing there to think about.
-
 The policy was a closure inside `build_graph` with no tests at all. It is now a
 pure function so each rule can be stated once, here.
 """
@@ -97,22 +91,6 @@ def test_a_real_low_confidence_classification_still_escalates():
 # ─── The suppressions ─────────────────────────────────────────────────
 
 
-def test_owui_utility_turns_never_escalate():
-    """⚠️ The regression this file exists for. A chat title is SHORT — that is
-    the whole job — so the length trigger fires on a correct answer."""
-    assert _decide(content="Chess Openings Chat", classify_confidence=1.0,
-                   owui_task=True) == "end"
-
-
-def test_owui_utility_turns_survive_the_other_trigger_too():
-    """These turns carry OWUI's template rather than a question, so the router
-    has nothing to classify and reports a low confidence. Suppressing only the
-    length trigger would have left this path open — and the box log shows both
-    firing at once (`chars=32, conf=0.25`)."""
-    long_enough = "x" * (_MIN_CHARS + 1)
-    assert _decide(content=long_enough, classify_confidence=0.25,
-                   owui_task=True) == "end"
-
 
 def test_audrey_fast_never_escalates():
     assert _decide(content="Yes.", classify_confidence=1.0,
@@ -146,7 +124,6 @@ def test_the_feature_can_be_switched_off_entirely():
 
 
 @pytest.mark.parametrize("suppressor", [
-    {"owui_task": True},
     {"virtual_model": "audrey_fast"},
     {"escalated_from_fast": True},
     {"tool_rounds": 1},

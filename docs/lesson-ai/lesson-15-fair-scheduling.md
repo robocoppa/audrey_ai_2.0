@@ -1,4 +1,4 @@
-# Lesson 14 — Fair scheduling: how Audrey shares one GPU
+# Lesson 15 — Fair scheduling: how Audrey shares one GPU
 
 **Estimated time:** 45-60 minutes if you keep
 [`pipeline/fair_gate.py`](../../src/audrey/pipeline/fair_gate.py) and
@@ -577,23 +577,6 @@ winner. Without that sweep, the racy cancellation would
 silently turn into a "slot granted to nobody" bug — the gate
 would resolve a cancelled Future, the wake-up would no-op, and
 the slot stays held forever.
-
-**6. You see `audrey_inflight_cap_breached_total` ticking up a
-few times an hour. The default `max_tracked_users` is 1024.
-What does this tell you about your user base, and would you
-change the cap?**
-
-This metric increments at
-[`inflight.py:85`](../../src/audrey/routes/inflight.py#L85)
-when the registry already holds 1024 user semaphores, a new user arrives, and
-**none** of the tracked buckets are idle enough to evict. That means the active
-or waiting user set briefly exceeded the tracking cap; Audrey accepts the
-overflow rather than blocking the request. A few ticks an hour is worth
-watching but not automatically alarming: nobody got rejected, and the cap is a
-memory-bound guideline rather than a hard admission limit. Raising the cap only
-makes sense if this reflects a real concurrent working set larger than 1024;
-otherwise the default is doing its job of bounding abuse while tolerating short
-bursts.
 
 
 ## When you're ready for the next lesson

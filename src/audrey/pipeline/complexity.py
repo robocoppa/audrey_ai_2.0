@@ -20,7 +20,7 @@ import tiktoken
 # Lines starting with `>` (Audrey banner markup) or a bare `---`
 # (banner-to-body / footer-to-body separator) are UI cruft, not part of
 # the model's actual response. They are emitted by `pipeline/banners.py`
-# into the streamed assistant content; when OWUI sends that assistant
+# into the streamed assistant content; when a client sends that assistant
 # text back as conversation history, the cruft inflates the complexity
 # gate's view. Strip both before counting tokens on assistant messages.
 def _strip_audrey_markup(text: str) -> str:
@@ -47,9 +47,7 @@ def _iter_text_parts(content: object) -> Iterable[str]:
     parts (`{"type": "text", "text": ...}`, image parts, …). This yields the
     string for a `str` content, or each part's `text` for a list — and nothing
     at all for an image part or any unexpected shape (the token gate treats an
-    unreadable message as contributing nothing). Both the token counter and the
-    OWUI-task sniffer walk content the same way; this is the one place that
-    knows its shape.
+    unreadable message as contributing nothing).
     """
     if isinstance(content, str):
         yield content
@@ -98,27 +96,6 @@ def count_last_user_tokens(messages: list[dict]) -> int:
     return 0
 
 
-# OWUI utility tasks (Title Generation, Tags, Follow Up, Autocomplete, Retrieval
-# Query rewrite, Image Prompt, Web Search Query) all submit a single user
-# message that opens with this exact header. They are issued by OWUI itself,
-# not by a human asking a question, and they ship the entire chat history
-# bundled into the body — which trips Audrey's complexity gate to deep even
-# though the work is a short-output utility task. Detect by prefix and force
-# fast in both the streaming and non-streaming gates.
-_OWUI_TASK_PREFIX = "### Task:"
-
-
-def is_owui_task_request(messages: list[dict]) -> bool:
-    """True when the latest user message is an OWUI-generated utility prompt."""
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            first_text = next(_iter_text_parts(m.get("content")), None)
-            if first_text is None:
-                return False
-            return first_text.lstrip().startswith(_OWUI_TASK_PREFIX)
-    return False
-
-
 def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
     """Returns `(complex?, token_count)`. Complex prompts route to deep panel."""
     n = count_tokens(messages)
@@ -138,8 +115,8 @@ def has_deep_intent(messages: list[dict], phrases: list[str]) -> bool:
     Substring match on the lowercased user text — phrases are written as the
     literal cue to look for. Empty `phrases` disables the check (returns
     False), so the feature is off unless `complexity.deep_intent_phrases` is
-    configured. Only the latest user turn is inspected, mirroring
-    `is_owui_task_request`: a depth cue three turns ago shouldn't force every
+    configured. Only the latest user turn is inspected: a depth cue three
+    turns ago shouldn't force every
     later short follow-up to deep.
     """
     if not phrases:
@@ -157,5 +134,4 @@ __all__ = [
     "count_tokens_by_role",
     "has_deep_intent",
     "is_complex",
-    "is_owui_task_request",
 ]

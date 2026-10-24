@@ -447,7 +447,7 @@ export function AdminPanel({
     setError("");
     try {
       const updated = await updateAdminModelProfile(model.id, {
-        visibility: roleDraft.length ? "public" : "private",
+        visibility: roleDraft.length ? "public" : "restricted",
         roles: roleDraft,
         display_name: model.label,
         ...(!model.enabled ? { enabled: true } : {}),
@@ -1144,7 +1144,7 @@ function messageOf(reason: unknown, fallback: string): string {
 
 function modelAccessLabel(model: AdminModel, roles: AdminRole[]): string {
   if (!model.enabled) return "Unavailable";
-  if (model.visibility === "private") return "Administrators only";
+  if (model.visibility === "restricted") return "Administrators only";
   const selected = model.roles.filter((id) => id !== "admins");
   if (!selected.length) return "Administrators only";
   const first = roles.find((role) => role.id === selected[0])?.name ?? selected[0];

@@ -1,4 +1,4 @@
-# Lesson 15 — the OpenAI routes, end-to-end
+# Lesson 16 — the OpenAI routes, end-to-end
 
 **Estimated time:** 60-90 minutes. Keep the
 [`routes/openai/`](../../src/audrey/routes/openai/) package open.
@@ -143,8 +143,8 @@ A single permissive message model cannot express the actual contract. A user
 turn needs content, an assistant tool-call turn may omit it, and a tool result
 must identify the call it answers. Selecting the schema from `role` lets
 Pydantic enforce those differences before the route runs. Unknown fields on a
-message are rejected; OWUI message metadata is the deliberate exception and is
-excluded before a model request.
+message are rejected; per-message `metadata`, which some clients attach, is the
+deliberate exception and is excluded before a model request.
 
 [`ChatCompletionRequest` at `schemas.py:215`](../../src/audrey/routes/openai/schemas.py#L215)
 wraps that union with the top-level request fields. Four parts earn special
@@ -214,16 +214,16 @@ Three things to notice in
     [`routes/openai/routes.py:276`](../../src/audrey/routes/openai/routes.py#L276).
     Both pipeline paths receive the same id, so a stream and a
     non-stream completion of the same conversation thread into the
-    archive correctly. Lesson 13 §2.5 covered how
-    `resolve_conversation_id` derives the id from OWUI's
-    `chat_id` or falls back to a deterministic hash.
+    archive correctly. Lesson 14 §2.4 covered how
+    `resolve_conversation_id` takes a conversation id the client
+    sent, or falls back to a deterministic hash.
 
 ### 2.3 Concept spotlight: SSE and `StreamingResponse`
 
 Server-Sent Events (SSE) is HTTP's standard one-way streaming
 protocol. The server keeps a connection open and writes successive
 `data: <payload>\n\n` frames; the client (a browser's
-`EventSource`, OWUI's chat UI, an OpenAI SDK in streaming mode)
+`EventSource`, an OpenAI SDK in streaming mode, a bot's HTTP client)
 parses them as they arrive.
 
 In FastAPI, you return a `StreamingResponse` with `media_type=
@@ -299,25 +299,6 @@ the orchestration; the route just hands it a state dict, awaits a
 result, and shapes the result into an OpenAI response. One coroutine,
 one return.
 
-The interesting wrinkle is `is_owui_task_request(messages)`. For the
-non-streaming path you're reading here, that check runs *inside the
-graph* — the complexity node calls it while choosing the mode at
-[`pipeline/graph.py:350`](../../src/audrey/pipeline/graph.py#L350),
-so `_generate_via_pipeline` itself never touches it (it just hands the
-graph a state dict and awaits the result). OWUI fires "generate title"
-and "generate tags" utility prompts that bundle the whole conversation
-as one user message. These fire in the *background* — OWUI issues them
-itself, after a turn, to populate the sidebar. No human picks a mode
-for them; the request just inherits whatever virtual model the
-conversation is pinned to (`audrey_deep`, say). So when the check
-forces fast mode for these, it isn't overriding a choice the user made
-— it's declining to act on a choice nobody made, refusing to burn a
-full deep-panel run on a string OWUI will truncate to one line. The
-streaming path runs the *same* check inline at
-[`routes/openai/pipeline.py:324`](../../src/audrey/routes/openai/pipeline.py#L324)
-(because it bypasses the graph — §2.5); this is a deliberate two-gate
-behavior, not a streaming-path one-off.
-
 ### 2.5 The streaming deep path — `_stream_deep_with_banners`
 
 Open
@@ -372,7 +353,7 @@ generator's job is to interleave both queues into one SSE stream.
 
 ### 2.6 Concept spotlight: `asyncio.Queue` as backpressure
 
-Lesson 14 introduced `asyncio.Future` as a one-shot signal. The
+Lesson 15 introduced `asyncio.Future` as a one-shot signal. The
 streaming route uses a related primitive: `asyncio.Queue`, a
 bounded FIFO that decouples producer and consumer.
 
@@ -531,7 +512,7 @@ Trace the cancel through:
   5. **The `async with inflight.slot(user_id)` and
      `gate.acquire()` blocks** unwind via the `try/finally` that
      `@asynccontextmanager` adds. The inflight semaphore is
-     released; the gate's release path runs (Lesson 14 §2.5
+     released; the gate's release path runs (Lesson 15 §2.5
      covered the gate's cancellation handling at
      `fair_gate.py:121`). Other parked waiters wake up cleanly.
 
@@ -627,10 +608,7 @@ rejects the empty list during schema validation — which happens
 get awaited. The user gets a structured 422 with a path-based error
 ("messages: List should have at least 1 item"). The fact that the
 bearer token was valid is irrelevant; the request never got that
-far. A practical implication: hitting `/v1/chat/completions` with
-bad JSON or a malformed schema doesn't even touch the auth-cache
-state, so a client spamming malformed requests can't cost you
-authentication round-trips.
+far.
 
 **2. A client sends `model: "audrey_fast"` with a 3,000-token
 prompt. What runs?**
@@ -642,15 +620,8 @@ the route sets `forced_fast = payload.model == "audrey_fast"`, and
 the subsequent branch picks fast regardless of `is_complex()`'s
 verdict. The complexity gate that normally escalates long prompts
 to deep mode (in `audrey_auto`) is bypassed. The user explicitly
-chose fast; the route respects that.
-
-This is the inverse of the OWUI utility-prompt case in §2.4: there,
-a request *nobody* chose a mode for gets forced cheap; here, a mode
-the user *explicitly* chose overrides the complexity heuristic.
-Both are deliberate, and they share one rule of thumb: invisible
-behaviors (OWUI title-gen) get forced into the cheap path; explicit
-user choices (picking `audrey_fast`) get honored even when a heuristic would
-disagree.
+chose fast; the route respects that: An explicit choice wins over a
+heuristic.
 
 **3. A streaming deep request's synth model dies mid-stream. What
 does the client see? What does the archive write look like?**
@@ -670,7 +641,7 @@ The archive write at
 runs in the `finally` block, which fires *after* the error
 handling. It captures whatever `final_content` accumulated up to
 the failure (which may be partial or empty if the failure came
-before first_token). Lesson 13 §2.6 documented the archive as
+before first_token). Lesson 14 §2.6 documented the archive as
 best-effort: this partial-write case is exactly what that
 best-effort posture is designed for. The user keeps what they
 got; the archive records what actually streamed.
@@ -734,40 +705,6 @@ The load-bearing pattern is still `async with` cleanup, plus the explicit
 `synth_task.cancel()` block. The practical audit note is that synth has the
 manual cleanup path; planning and panel phase tasks currently rely on normal
 await/cancellation propagation and are not cancelled explicitly by the route.
-
-**6. OWUI fires a "generate title" utility request with the user's
-whole conversation bundled as one user message. The user happens to
-have selected `audrey_deep`. What runs and why?**
-
-Fast mode runs, not deep. The `is_owui_task_request(messages)`
-check at
-[`routes/openai/pipeline.py:324`](../../src/audrey/routes/openai/pipeline.py#L324)
-detects OWUI's utility prompts by a single tell: the latest user
-message opens with the `### Task:` header OWUI stamps on its
-internal prompts (the conversation is bundled into the body, but
-it's the header — not the size — that the check keys on). When it
-fires, `use_deep` is forced to `False` regardless of the virtual
-model.
-
-The reasoning: OWUI's title-gen, tag-gen, and follow-up-suggestion
-prompts are *invisible* behaviors the user didn't actively pick.
-They fire every time the user sends a chat. If a user has
-`audrey_deep` selected because they want deep mode for *their*
-prompts, they don't want title-gen also burning 30 seconds and
-panel-of-workers GPU time on every turn. Forcing fast for OWUI's
-internal prompts keeps deep mode reserved for what the user
-actually asked.
-
-It works because OWUI's utility prompts are structurally distinct
-(the `### Task:` header isn't something a real user types) —
-pattern-matching has a low false-positive rate. The fragile part
-isn't the forcing-fast decision, which is plainly right; it's the
-detection. The prefix belongs to OWUI, not to Audrey, so an OWUI
-upgrade that renames it would silently break the match — no error,
-just title-gen quietly starting to route by token count again. If a
-real user *did* type that header, the check would misfire the other
-way, but that's a corner case worth accepting for the common-case
-win.
 
 
 ## When you're ready for the next lesson

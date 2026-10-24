@@ -32,7 +32,7 @@ import analyze_escalations as ae  # noqa: E402
 # Real lines, with the prefix `logging.basicConfig` actually puts on them.
 _PREFIX = "2026-08-15 17:48:20,304 INFO audrey.pipeline.graph: "
 _LOG = [
-    _PREFIX + "complexity: 463 tokens -> fast (owui_task)",
+    _PREFIX + "complexity: 463 tokens -> fast (tokens<500)",
     _PREFIX + "classify: general (short_skip:general, conf=0.50)",
     _PREFIX + "complexity: 88 tokens -> fast (short)",
     _PREFIX + "classify: general (keyword:code_fence, conf=0.95)",
@@ -61,7 +61,6 @@ class TestTheParserMatchesWhatGraphActuallyLogs:
         t = ae.parse_log(_LOG, since=None, ceiling=0.95)
         assert t.fast_turns == 3
         assert t.deep_turns == 1
-        assert t.fast_owui == 1
         assert t.escalations == 1
         assert t.panels == 1
         assert t.unparsed == {}

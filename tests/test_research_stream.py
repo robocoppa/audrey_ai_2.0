@@ -464,7 +464,7 @@ async def _cancel_research_consumer(
         await stream.aclose()
 
 
-async def test_research_disconnect_during_planning_cancels_planner(monkeypatch):
+async def test_research_disconnect_during_context_preparation_cancels_child(monkeypatch):
     app = _fake_app({})
     archive = _ResearchArchive()
     app.state.archive_client = archive
@@ -473,6 +473,7 @@ async def test_research_disconnect_during_planning_cancels_planner(monkeypatch):
     child_tasks = []
 
     async def blocked_planning(**kwargs):
+        assert kwargs["planning_enabled"] is False
         child_tasks.append(asyncio.current_task())
         started.set()
         try:

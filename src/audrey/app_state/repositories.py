@@ -615,8 +615,13 @@ class ConversationsRepository:
                         "conversation cannot be deleted while a run is active"
                     )
                 if empty_only and self._conn.execute(
-                    "SELECT 1 FROM app_messages WHERE user_id = ? AND conversation_id = ? LIMIT 1",
-                    (user_id, conversation_id),
+                    # A saved Tax review is meaningful work even before the
+                    # first chat message. Navigating to its Project must not
+                    # discard the case as an abandoned empty draft.
+                    "SELECT 1 FROM app_messages WHERE user_id = ? AND conversation_id = ? "
+                    "UNION ALL SELECT 1 FROM app_tax_cases "
+                    "WHERE user_id = ? AND conversation_id = ? LIMIT 1",
+                    (user_id, conversation_id, user_id, conversation_id),
                 ).fetchone() is not None:
                     self._conn.rollback()
                     return False

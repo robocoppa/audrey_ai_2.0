@@ -31,6 +31,7 @@ from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.fast_path import (
     _FAST_FALLBACK_LIMIT,
     _healthy_fast_candidates,
+    pick_fast_model,
     run_fast_path,
 )
 from audrey.pipeline.react import ReactResult
@@ -204,24 +205,49 @@ async def test_fast_path_fallback_capped_at_limit():
     assert health.is_healthy("c")      # untouched
 
 
-async def test_fast_path_raises_when_no_healthy_candidates():
-    registry = _registry(("a", 100, "local"))
+async def test_fast_path_probes_recovered_daemon_even_when_all_models_are_cooling(monkeypatch):
+    registry = _registry(("a", 100, "local"), ("b", 50, "local"))
+    clock = [10.0]
+    monkeypatch.setattr("audrey.models.health.time.monotonic", lambda: clock[0])
     health = HealthTracker()
-    health.record_failure("a", "cooling")  # nothing healthy
-    ollama = _ScriptedOllama({})
+    health.record_failure("b", "earlier outage")
+    clock[0] += 1
+    health.record_failure("a", "later outage")
+    # Prefer the model with the earliest recovery, rather than priority.
+    assert pick_fast_model(registry, health, task="general").name == "b"
+    assert [s.name for s in _healthy_fast_candidates(
+        registry, health, task="general", limit=2,
+    )] == ["b"]
+    ollama = _ScriptedOllama({"b": _resp("daemon is back")})
+    concrete, response = await run_fast_path(
+        ollama, registry, health, _gate(),
+        task="general", messages=[{"role": "user", "content": "q"}],
+        options={}, timeout_s=5.0,
+    )
+    assert concrete == "b"
+    assert response["message"]["content"] == "daemon is back"
+    assert ollama.calls == ["b"]
+    assert health.is_healthy("b")
 
+
+async def test_fast_path_probes_only_one_model_during_continuing_outage():
+    registry = _registry(("a", 100, "local"), ("b", 50, "local"))
+    health = HealthTracker()
+    health.record_failure("a", "outage")
+    health.record_failure("b", "outage")
+    ollama = _ScriptedOllama({"a": OllamaError("still down")})
     try:
         await run_fast_path(
-            ollama, registry, health, _gate(),  # type: ignore[arg-type]
+            ollama, registry, health, _gate(),
             task="general", messages=[{"role": "user", "content": "q"}],
             options={}, timeout_s=5.0,
         )
-    except OllamaError as e:
-        assert "No healthy model" in str(e)
+    except OllamaError as error:
+        assert str(error) == "still down"
     else:
-        raise AssertionError("expected OllamaError when nothing is healthy")
-
-    assert ollama.calls == []
+        raise AssertionError("expected continuing provider failure")
+    assert ollama.calls == ["a"]
+    assert health.snapshot()["a"]["consecutive_failures"] == 1
 
 
 async def test_structured_format_reaches_plain_call_and_suppresses_tools():

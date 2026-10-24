@@ -8,8 +8,10 @@ registry.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from dataclasses import dataclass, replace
+import time
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 from urllib.parse import quote
 
@@ -41,7 +43,7 @@ class ServedModel:
     capabilities: tuple[str, ...]
     enabled: bool
     audience: ModelAudience
-    visibility: Literal["public", "private"] = "public"
+    visibility: Literal["public", "restricted"] = "public"
     roles: tuple[str, ...] = ("users",)
     portrait_url: str = ""
     num_ctx: int | None = None
@@ -160,7 +162,11 @@ def configured_models(cfg: Config) -> tuple[ServedModel, ...]:
     overrides = native.get("entries") or {}
     models = list(_WORKFLOWS)
     if (cfg.raw.get("private_processing") or {}).get("enabled") is True:
-        models.insert(5, ServedModel(
+        # Keep Private beside the local workflow even when workflows reorder.
+        private_position = next(
+            index + 1 for index, model in enumerate(models) if model.id == "local"
+        )
+        models.insert(private_position, ServedModel(
             id="private", label="Private",
             description="Local model processing for text documents; no web or shared memory.",
             kind="workflow", mode="local", protocol_model="audrey_local", concrete_model="",
@@ -240,22 +246,71 @@ async def catalog_for_principal(
 ) -> tuple[ServedModel, ...]:
     """Return models this principal may invoke, with database policy overlays."""
 
-    policies = {
-        policy.model_id: policy
-        for policy in await store.list_model_access_policies()
-    }
-    profiles = {
-        profile.model_id: profile
-        for profile in await store.list_model_publication_profiles()
-    }
-    result: list[ServedModel] = []
-    available = inventory
-    if available is None:
-        available = (await discover_models(cfg, ollama)).models
-    order = await store.list_model_display_order()
-    indexed = enumerate(available)
+    # Cache definitions and grants only. The current principal is filtered on
+    # every call, so roles, account state and hidden access never cross users.
+    if inventory is not None:
+        models = await _ordered_models(store, inventory)
+    else:
+        models = await _cached_models(cfg, store, ollama)
+    return tuple(
+        model for model in models
+        if (include_hidden and principal.is_admin)
+        or (model.enabled and _model_allows(model, principal))
+    )
+
+
+_CATALOG_TTL_SECONDS = 30.0
+
+
+@dataclass(slots=True)
+class _CatalogCache:
+    cfg: Config
+    ollama: Any
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    revision: int = -1
+    expires_at: float = 0.0
+    models: tuple[ServedModel, ...] = ()
+
+
+async def _cached_models(
+    cfg: Config, store: ApplicationStore, ollama: Any | None,
+) -> tuple[ServedModel, ...]:
+    # The store belongs to one application instance. Do not use a module-global
+    # cache: test/deployment instances can share model names but different grants.
+    cache = getattr(store, "_model_catalog_cache", None)
+    if not isinstance(cache, _CatalogCache) or cache.cfg is not cfg or cache.ollama is not ollama:
+        cache = _CatalogCache(cfg, ollama)
+        store._model_catalog_cache = cache
+    async with cache.lock:
+        while True:
+            revision = store.model_catalog_revision
+            if cache.revision == revision and time.monotonic() < cache.expires_at:
+                return cache.models
+            discovered = await discover_models(cfg, ollama)
+            models = await _ordered_models(store, discovered.models)
+            # A concurrent admin save must not publish a snapshot built partly
+            # before its commit. Successful mutations increment under SQL's lock.
+            if store.model_catalog_revision != revision:
+                continue
+            cache.models = models
+            cache.revision = revision
+            ttl = _CATALOG_TTL_SECONDS if discovered.source == "ollama" else 5.0
+            cache.expires_at = time.monotonic() + ttl
+            return models
+
+
+async def _ordered_models(
+    store: ApplicationStore, available: tuple[ServedModel, ...],
+) -> tuple[ServedModel, ...]:
+    policies, profiles, order = await asyncio.gather(
+        store.list_model_access_policies(),
+        store.list_model_publication_profiles(),
+        store.list_model_display_order(),
+    )
+    policies_by_id = {policy.model_id: policy for policy in policies}
+    profiles_by_id = {profile.model_id: profile for profile in profiles}
     ordered = sorted(
-        indexed,
+        enumerate(available),
         key=lambda pair: (
             0 if pair[1].kind == "workflow" else 1,
             0 if pair[1].id in order and order[pair[1].id][0] == pair[1].kind else 1,
@@ -265,15 +320,11 @@ async def catalog_for_principal(
             pair[0],
         ),
     )
-    for _, model in ordered:
-        model = _apply_policy(model, policies.get(model.id))
-        model = _apply_profile(model, profiles.get(model.id))
-        if include_hidden and principal.is_admin:
-            result.append(model)
-        elif model.enabled and _model_allows(model, principal):
-            result.append(model)
-    return tuple(result)
-
+    return tuple(
+        _apply_profile(_apply_policy(model, policies_by_id.get(model.id)),
+                       profiles_by_id.get(model.id))
+        for _, model in ordered
+    )
 
 async def resolve_model(
     cfg: Config,
@@ -311,7 +362,7 @@ def _apply_policy(
         model,
         enabled=policy.enabled,
         audience=policy.audience,
-        visibility="private" if policy.audience == "admins" else "public",
+        visibility="restricted" if policy.audience == "admins" else "public",
         roles=() if policy.audience == "admins" else (policy.audience,),
     )
 
@@ -360,7 +411,7 @@ def _direct_model(
         enabled=bool(entry.get("enabled", direct_defaults.get("enabled", True))),
         audience=str(entry.get("audience", direct_defaults.get("audience", "admins"))),
         visibility=(
-            "private" if str(entry.get("audience", direct_defaults.get("audience", "admins")))
+            "restricted" if str(entry.get("audience", direct_defaults.get("audience", "admins")))
             == "admins" else "public"
         ),
         roles=(
@@ -397,7 +448,7 @@ def _model_allows(model: ServedModel, principal: Principal) -> bool:
         return False
     if principal.is_admin:
         return True
-    if model.visibility == "private":
+    if model.visibility == "restricted":
         return False
     return bool(set(model.roles) & principal.groups)
 

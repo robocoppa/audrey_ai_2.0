@@ -58,6 +58,7 @@ async function mockProjects(page: Page, legacyLocal = false, omitLocal = false) 
       }
       return json(route, { items: projectConversation ? [projectConversation] : [], next_cursor: null });
     }
+    if (path === "/api/projects/proj_private/tax-reviews") return json(route, { items: [] });
     if (path === "/api/projects/proj_private/files") return json(route, { items: projectFiles.map((file) => ({ ...file, added_at: DATE })), limits: LIMITS });
     if (path === "/api/projects/proj_private/uploads") {
       uploadPaths.push(path);

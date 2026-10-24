@@ -1560,6 +1560,16 @@ async def _create_private_run(request, principal, conversation, payload, manager
         async with runtime.scope(request.app) as execution_app:
             from audrey.kb.private_documents import read_private_document
 
+            if len(payload.attachment_ids) > 10 or len(set(payload.attachment_ids)) != len(payload.attachment_ids):
+                raise HTTPException(status_code=422, detail="Choose at most ten distinct Private documents.")
+            documents = [await read_private_document(execution_app, principal, file_id) for file_id in payload.attachment_ids]
+            if tax_case is not None and conversation.project_id is not None:
+                from audrey.tax_documents import link_tax_project_documents
+
+                # Persist file membership before resolving/pinning the Project
+                # snapshot for this new run; never change a running task's pins.
+                await link_tax_project_documents(execution_app, principal,
+                    conversation.conversation_id, payload.attachment_ids)
             execution_request = Request({**request.scope, "app": execution_app})
             project_context = await resolve_project_context(
                 execution_request, store=store, principal=principal,
@@ -1567,9 +1577,6 @@ async def _create_private_run(request, principal, conversation, payload, manager
             )
             if conversation.project_id is not None and project_context is None:
                 raise HTTPException(status_code=409, detail="The conversation's Project changed. Try again.")
-            if len(payload.attachment_ids) > 10 or len(set(payload.attachment_ids)) != len(payload.attachment_ids):
-                raise HTTPException(status_code=422, detail="Choose at most ten distinct Private documents.")
-            documents = [await read_private_document(execution_app, principal, file_id) for file_id in payload.attachment_ids]
             attachments = tuple(AttachmentSnapshot(
                 file_id=document.file_id, filename=document.filename, mime=document.mime,
                 kind="text", bytes=document.source_bytes,

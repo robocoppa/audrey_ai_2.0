@@ -6,12 +6,15 @@ import pytest
 
 from audrey.skills import SkillLimits, SkillRegistry
 from audrey.skills.selection import SkillEvidence, select_automatic_skill
+from audrey.tools.discovery import TOOL_DECLARATIONS
 
 DOC = "grounded-document-analysis"
 VIDEO = "video-analysis"
 FILES = (SkillEvidence("brief.pdf", "document"), SkillEvidence("recording.mp4", "video"))
 ROOT = Path(__file__).resolve().parent.parent
-TOOLS = frozenset({"get_file_text", "list_my_files", "kb_search", "kb_image_search"})
+# Use the shipped tool policy so bundle additions do not silently make this
+# selection fixture reject both real skills as unknown-tool bundles.
+TOOLS = frozenset(TOOL_DECLARATIONS)
 
 
 @pytest.mark.parametrize(

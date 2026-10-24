@@ -1,6 +1,6 @@
 """One-time, owner-bound import of Audrey's portable chat archive export.
 
-This is an operator migration path, not a live OWUI dependency. Imported
+This is an operator path for Audrey-owned portable exports. Imported
 messages do not re-enter the archive projection queue. Source mappings outlive
 individual conversation deletion so a rerun cannot resurrect deleted history.
 """

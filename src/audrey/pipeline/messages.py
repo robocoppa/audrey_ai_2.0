@@ -37,7 +37,7 @@ def last_user_text(messages: list[dict[str, Any]]) -> str:
 def has_image_part(messages: list[dict[str, Any]]) -> bool:
     """True if the most recent `role: "user"` turn carries an image.
 
-    OWUI (and any OpenAI-compatible client) sends an attached image as a
+    An OpenAI-compatible client sends an attached image as a
     multimodal `content` list with an `{"type": "image_url", ...}` part
     alongside the text part. Detecting this lets the gate force such turns
     onto the vision (`vl`) pool — neutral wording like "describe this"

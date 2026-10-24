@@ -564,7 +564,7 @@ async def test_memory_route_injects_authenticated_user_not_browser_identity():
         tool="memory_search",
         response={"items": [], "next_cursor": None},
     )
-    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+    me = AuthedUser(email="alice@example.com", role="user")
 
     await list_memories(request, limit=10, cursor=None, me=me)
 
@@ -582,7 +582,7 @@ async def test_remote_inventory_is_hidden_until_purge_cutoff_is_acknowledged():
         tool="memory_search",
         response={"items": [{"value": "old data"}], "next_cursor": None},
     )
-    me = AuthedUser(email="purge-gate@example.com", role="user", owui_id="a")
+    me = AuthedUser(email="purge-gate@example.com", role="user")
     block_remote_personal_reads(user=me.email, purge_id="purge-gate")
     try:
         with pytest.raises(HTTPException) as exc:
@@ -596,7 +596,7 @@ async def test_remote_inventory_is_hidden_until_purge_cutoff_is_acknowledged():
 
 
 async def test_memory_create_route_injects_owner_and_preserves_conflict():
-    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+    me = AuthedUser(email="alice@example.com", role="user")
     request, http = _request(
         tool="memory_search",
         response={
@@ -634,7 +634,7 @@ async def test_memory_create_route_injects_owner_and_preserves_conflict():
 
 
 async def test_mutation_routes_inject_authenticated_user():
-    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+    me = AuthedUser(email="alice@example.com", role="user")
 
     update_request, update_http = _request(
         tool="memory_search",
@@ -741,7 +741,7 @@ async def test_repair_status_composes_current_user_queues_without_raw_errors():
         }),
     )
     request.app.state.archive_client = SimpleNamespace(user_stats=delivery_stats)
-    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+    me = AuthedUser(email="alice@example.com", role="user")
 
     result = await get_repair_status(request, me=me)
 
@@ -806,7 +806,6 @@ async def test_repair_status_uses_stable_native_owner_and_storage_namespace():
     me = AuthedUser(
         email="renamed@example.com",
         role="user",
-        owui_id="subject",
         principal=principal,
     )
 
@@ -834,7 +833,7 @@ async def test_repair_status_reports_remote_backend_degraded():
     request.app.state.archive_client = SimpleNamespace(
         user_stats=AsyncMock(return_value=empty),
     )
-    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+    me = AuthedUser(email="alice@example.com", role="user")
 
     result = await get_repair_status(request, me=me)
 
@@ -917,7 +916,6 @@ async def test_account_purge_uses_verified_owner_and_scoped_idempotency_key(tmp_
     me = AuthedUser(
         email="alice@example.com",
         role="user",
-        owui_id="a",
         principal=principal,
     )
 
@@ -996,7 +994,7 @@ async def test_account_purge_status_is_exact_owner_and_not_found_is_404():
     request = SimpleNamespace(
         app=SimpleNamespace(state=SimpleNamespace(user_data_purges=coordinator)),
     )
-    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+    me = AuthedUser(email="alice@example.com", role="user")
 
     found = await get_account_purge(request, purge_id="purge-a", me=me)
     assert found.purge_id == "purge-a"
@@ -1014,7 +1012,7 @@ async def test_account_purge_status_is_exact_owner_and_not_found_is_404():
 async def test_mutation_not_found_is_a_current_user_404():
     request, _ = _request(tool="memory_search", response={})
     request.app.state.archive_http.post.return_value = httpx.Response(404)
-    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+    me = AuthedUser(email="alice@example.com", role="user")
 
     with pytest.raises(HTTPException) as exc:
         await delete_memory(request, key="missing", me=me)
@@ -1027,7 +1025,7 @@ async def test_chat_route_injects_authenticated_user():
         tool="chat_history_search",
         response={"schema_version": 1, "items": [], "next_cursor": None},
     )
-    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+    me = AuthedUser(email="alice@example.com", role="user")
 
     await export_chat_history(request, limit=50, cursor="next", me=me)
 
@@ -1041,7 +1039,7 @@ async def test_chat_route_injects_authenticated_user():
 async def test_sidecar_auth_failure_is_backend_failure_not_browser_401():
     request, _ = _request(tool="memory_search", response={})
     request.app.state.archive_http.post.return_value = httpx.Response(401)
-    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+    me = AuthedUser(email="alice@example.com", role="user")
 
     with pytest.raises(HTTPException) as exc:
         await list_memories(request, limit=10, cursor=None, me=me)
@@ -1051,7 +1049,7 @@ async def test_sidecar_auth_failure_is_backend_failure_not_browser_401():
 async def test_invalid_cursor_stays_a_client_error():
     request, _ = _request(tool="memory_search", response={})
     request.app.state.archive_http.post.return_value = httpx.Response(422)
-    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+    me = AuthedUser(email="alice@example.com", role="user")
 
     with pytest.raises(HTTPException) as exc:
         await list_memories(request, limit=10, cursor="bad", me=me)
@@ -1063,7 +1061,7 @@ def test_public_routes_do_not_accept_a_user_selector():
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[require_user] = lambda: AuthedUser(
-        email="alice@example.com", role="user", owui_id="a",
+        email="alice@example.com", role="user",
     )
     schema = app.openapi()
 

@@ -9,7 +9,6 @@ import json
 import sqlite3
 from types import SimpleNamespace
 
-import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -1121,7 +1120,7 @@ def test_managed_roles_and_model_publication_enforce_private_admin_only(tmp_path
             private = client.patch(
                 f"/api/admin/model-profiles/{model_id}",
                 json={
-                    "visibility": "private",
+                    "visibility": "restricted",
                     "roles": ["researchers"],
                     "display_name": "Research Qwen",
                 },
@@ -1170,55 +1169,8 @@ def test_manual_pending_account_route_rejects_duplicate_email(tmp_path):
         store.close()
 
 
-def test_owui_import_command_previews_then_creates_pending_accounts(
-    tmp_path, monkeypatch, capsys
-):
-    path = tmp_path / "app.sqlite"
-    original_client = httpx.AsyncClient
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/v1/users/all"
-        assert request.headers["Authorization"] == "Bearer test-token"
-        return httpx.Response(200, json={
-            "users": [
-                {"id": "owui-1", "email": "alice@example.com", "name": "Alice"},
-                {"id": "owui-2", "email": "bob@example.com", "name": "Bob"},
-            ],
-            "total": 2,
-        })
-
-    monkeypatch.setattr(admin_cli, "get_config", lambda: SimpleNamespace(
-        env=SimpleNamespace(owui_url="http://open-webui:8080"),
-        raw={"application": {"sqlite_path": str(path)}},
-    ))
-    monkeypatch.setattr(admin_cli, "getpass", lambda _prompt: "test-token")
-    monkeypatch.setattr(
-        admin_cli.httpx, "AsyncClient",
-        lambda **kwargs: original_client(transport=httpx.MockTransport(handler), **kwargs),
-    )
-    assert asyncio.run(admin_cli._import_owui_users()) == 0
-    assert '"would_create": 2' in capsys.readouterr().out
-    store = ApplicationStore(path)
-    try:
-        assert awaitable_users(store) == ()
-        admin = asyncio.run(_resolve(store, subject="owui-1", email="alice@example.com"))
-        asyncio.run(store.bootstrap_admin(user_id=admin.user_id))
-    finally:
-        store.close()
-    assert asyncio.run(admin_cli._import_owui_users(apply=True)) == 0
-    output = capsys.readouterr().out
-    assert '"created_pending": 1' in output
-    assert "test-token" not in output
-    store = ApplicationStore(path)
-    try:
-        pending = asyncio.run(store.list_admin_users(status="pending"))
-        assert [user.email for user in pending] == ["bob@example.com"]
-    finally:
-        store.close()
 
 
-def awaitable_users(store: ApplicationStore):
-    return asyncio.run(store.list_admin_users(status="pending"))
 
 
 async def test_require_admin_principal_rejects_non_admin():
@@ -1273,7 +1225,7 @@ def test_role_access_save_can_reactivate_without_broadening_existing_audience(tm
             assert active.json()["audience"] == "bots"
             assert model_id in {item["id"] for item in client.get("/api/models").json()["items"]}
             restricted = client.patch(f"/api/admin/model-profiles/{model_id}", json={
-                "visibility": "private", "roles": [], "display_name": "Role Qwen",
+                "visibility": "restricted", "roles": [], "display_name": "Role Qwen",
             })
             assert restricted.status_code == 200
             assert model_id not in {item["id"] for item in client.get("/api/models").json()["items"]}

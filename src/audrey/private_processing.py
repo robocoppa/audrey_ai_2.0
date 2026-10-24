@@ -217,6 +217,14 @@ async def prepare_native_private_runtime(app: Any, *, tax_review: bool = False) 
     return PrivateProcessingRuntime(policy, tax_review=tax_review)
 
 
+# These services store owner-scoped state or coordinate local work. Content
+# transports and model/tool dependencies must come from the verified overrides.
+_SHARED_PRIVATE_SERVICES = frozenset({
+    "application_store", "uploads_db", "file_operation_locks", "qdrant",
+    "reference_libraries", "reference_releases", "gate", "health", "inflight",
+})
+
+
 @dataclass(frozen=True, slots=True)
 class _ExecutionState:
     original: Any
@@ -225,6 +233,8 @@ class _ExecutionState:
     def __getattr__(self, name: str) -> Any:
         if name in self.overrides:
             return self.overrides[name]
+        if name not in _SHARED_PRIVATE_SERVICES:
+            raise ProcessingPolicyError("private_processing_unavailable")
         return getattr(self.original, name)
 
 

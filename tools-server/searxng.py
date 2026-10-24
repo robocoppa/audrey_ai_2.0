@@ -1,39 +1,21 @@
-"""SearXNG meta-search client — the self-hosted, keyless `web_search` fallback.
+"""SearXNG JSON search client used by the sidecar's `web_search` tool.
 
-Brave is the primary provider; when its key is quota-exhausted (402) or
-rate-limited (429), `web_search` falls back here. SearXNG is a self-hosted
-meta-search engine (aggregates Google/Bing/DDG/etc.) exposing a clean JSON API
-(`/search?q=…&format=json`) — no API key, no per-query cost, and no bot-blocking
-(it runs on your own infra), which is why it replaced the abandoned
-DuckDuckGo HTML scrape (that returned a 202 "anomaly" page under panel load).
+SearXNG is a self-hosted search aggregator. With both providers configured,
+`web_search` can select Brave or SearXNG by a stable query hash and try the
+other provider after an error or an empty result. SearXNG can also serve alone.
+Both clients return the same `SearchResult` shape.
 
-Configured via `SEARXNG_URL` (e.g. http://192.168.1.11:8088). Returns the same
-`SearchResult` shape as Brave so the handler stays provider-agnostic.
+Configured via `SEARXNG_URL`. The instance must enable JSON responses in its
+`settings.yml` (`search.formats: [html, json]`); that format is off by default.
 
-**Resilience (mirrors `brave.py`):** while Brave is 402'd, SearXNG is the ONLY
-live provider, and the research panel fires a burst of searches (3 workers ×
-several ReAct rounds each) at the single instance. Without retry/cache, a
-transient timeout or 429 under that burst just errors → the worker loses that
-evidence → a thin ledger → an over-timid degraded answer. So this client:
-- **retries** transient failures (timeout / 429 / 5xx) with bounded backoff —
-  NOT a JSON-decode error (retrying won't help).
-- **retries an empty result ONCE** with a gentle backoff. A SearXNG `200` with
-  zero results is usually NOT "nothing exists" — it's the instance's upstream
-  engines (Google/Bing/DDG) momentarily rate-limiting it, which clears in a
-  second or two. An HTTP-200 empty is not an error, so the transport retry above
-  never sees it; left alone it silently starves grounding (the worker concludes
-  "no sources" from a transient throttle). One extra attempt recovers most of
-  these. Deliberately just ONE, with a longer wait than the transport backoff:
-  hammering a throttled instance makes the throttle worse.
-- **caches** by QUERY (not `(query, count)` — see `search`) so identical queries
-  across workers in the same run don't each re-hit SearXNG. Short TTL — web
-  results for current topics go stale, but the win is intra-run dedup, not
-  long-term caching. **Empty results are never cached** — caching a
-  transient-throttle empty would poison every other worker's identical query for
-  the whole TTL.
+The client retries transport and HTTP failures with bounded backoff. It also
+retries an empty result once: an upstream engine may be temporarily throttled,
+so an empty response is not proof that no relevant source exists. Malformed
+JSON is an error and is not retried.
 
-Note: the SearXNG instance must have the JSON format enabled in its
-`settings.yml` (`search.formats: [html, json]`) — it's off by default.
+Its short-lived cache is keyed by query because result count only slices the
+response locally. A cached result can therefore serve different counts without
+another upstream request. Empty results are never cached.
 """
 
 from __future__ import annotations
@@ -64,11 +46,11 @@ _MAX_KEEP = 20
 
 
 class SearxngError(Exception):
-    """Raised when the SearXNG fallback itself fails (so the handler can 503)."""
+    """Raised when SearXNG fails, allowing the handler to try another provider."""
 
 
 class SearxngClient:
-    """Async SearXNG JSON-API client (the web_search fallback) with retry+cache."""
+    """Async SearXNG JSON client with bounded retries and a result cache."""
 
     def __init__(
         self,

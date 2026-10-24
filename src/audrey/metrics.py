@@ -14,7 +14,6 @@ Each metric is tied to a specific operational question:
   audrey_video_describe_seconds    — per-keyframe vision latency (phase 38 input)
   audrey_vision_stage_seconds      — where that latency actually goes, by stage
   audrey_vision_eval_tokens        — description length in tokens, not characters
-  audrey_auth_cache_size           — OWUI token cache occupancy
   audrey_user_inflight_blocked_seconds — wait at the per-user concurrency cap
   audrey_inflight_cap_breached_total — soft cap on tracked users exceeded
   audrey_tool_calls_total          — tool dispatches inside ReAct, by outcome
@@ -211,13 +210,6 @@ vision_eval_tokens = Histogram(
     "audrey_vision_eval_tokens",
     "Tokens generated per vision call.",
     buckets=_EVAL_TOKEN_BUCKETS,
-)
-
-# ─── Auth cache ───────────────────────────────────────────────────────
-
-auth_cache_size = Gauge(
-    "audrey_auth_cache_size",
-    "Number of OWUI bearer tokens currently cached.",
 )
 
 # ─── Per-user in-flight cap ───────────────────────────────────────────
@@ -499,7 +491,6 @@ __all__ = [
     "video_describe_seconds",
     "vision_stage_seconds",
     "vision_eval_tokens",
-    "auth_cache_size",
     "user_inflight_blocked_seconds",
     "inflight_cap_breached_total",
     "tool_calls_total",

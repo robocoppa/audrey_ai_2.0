@@ -415,7 +415,6 @@ def test_personal_token_needs_account_read_scope_for_me():
     app.dependency_overrides[require_account_user] = lambda: AuthedUser(
         email=principal.storage_namespace,
         role="user",
-        owui_id="",
         principal=principal,
     )
 

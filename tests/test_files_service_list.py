@@ -41,7 +41,7 @@ def _build_app(db: UploadsDB, tmp_path: Path, *, service_token: str = SECRET) ->
     app.include_router(router)
     app.state.uploads_db = db
     app.state.cfg = SimpleNamespace(
-        env=SimpleNamespace(kb_service_token=service_token, owui_url="http://owui"),
+        env=SimpleNamespace(kb_service_token=service_token),
         raw={"kb": {"upload_root": str(tmp_path / "uploads"),
                     "video": {"lease_minutes": 30, "max_attempts": 3}}},
     )

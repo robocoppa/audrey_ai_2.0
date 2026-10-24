@@ -65,7 +65,7 @@ async def provider():
         )
         registry = ModelRegistry(cfg)
         registry.location_of = lambda _model: "local"
-        user = AuthedUser(email="alice@example.com", role="user", owui_id="alice")
+        user = AuthedUser(email="alice@example.com", role="user")
         app = FastAPI()
         app.include_router(routes.router)
         app.state.cfg = cfg
@@ -244,7 +244,7 @@ async def test_saved_response_keeps_echo_but_continuation_does_not_inherit_contr
                                                     display_name="Alice", role="user", auth_method="owui_bearer")
     service.app.state.application_store = store
     service.app.dependency_overrides[require_user] = lambda: AuthedUser(
-        email=account.email, role=account.role, owui_id="alice", principal=account,
+        email=account.email, role=account.role, principal=account,
     )
     try:
         first = terminal(await service.client.post(endpoint("responses"), json=body(

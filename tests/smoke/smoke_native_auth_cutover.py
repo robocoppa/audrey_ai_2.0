@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Prove the deployed native identity paths no longer depend on Open WebUI.
+"""Verify deployed Cloudflare authentication and personal-token revocation.
 
 The smoke requires an active Cloudflare Access application assertion. It checks
-that an unknown legacy bearer is rejected locally, then creates a short-lived
+that an unknown bearer is rejected locally, then creates a short-lived
 Audrey personal token, exercises both native account and protected `/v1/files`
 reads, revokes the token, and proves revocation is immediate.
 """
@@ -27,7 +27,7 @@ BASE_URL = os.getenv("AUDREY_SMOKE_BASE_URL", "http://127.0.0.1:8000").rstrip("/
 _CREDENTIALS = SmokeCredentials.from_env()
 USER_TOKEN = _CREDENTIALS.user
 ADMIN_TOKEN = _CREDENTIALS.admin
-_DISABLED_DETAIL = "Open WebUI bearer authentication is disabled."
+_UNSUPPORTED_DETAIL = "Unsupported bearer token."
 _REVOKED_DETAIL = "Personal access token is invalid."
 
 
@@ -117,16 +117,16 @@ def main() -> int:
                 "the user assertion did not resolve through Cloudflare Access"
             )
 
-        legacy_probe = f"owui-cutover-probe-{uuid.uuid4().hex}"
-        legacy_status, legacy_body = _json_request(
+        unknown_probe = f"unsupported-bearer-probe-{uuid.uuid4().hex}"
+        unknown_status, unknown_body = _json_request(
             "/api/me",
-            token=legacy_probe,
+            token=unknown_probe,
             expected=frozenset({401}),
         )
-        if legacy_body.get("detail") != _DISABLED_DETAIL:
+        if unknown_body.get("detail") != _UNSUPPORTED_DETAIL:
             raise SmokeError(
-                "unknown bearer was not rejected by the local OWUI cutover gate: "
-                f"{legacy_body}"
+                "unknown bearer was not rejected by the local authentication gate: "
+                f"{unknown_body}"
             )
 
         _, issued = _json_request(
@@ -179,8 +179,8 @@ def main() -> int:
             "personal_token_provider": token_me["auth_provider"],
         }
         result["cutover"] = {
-            "legacy_bearer_http": legacy_status,
-            "legacy_bearer_rejected_locally": True,
+            "unknown_bearer_http": unknown_status,
+            "unknown_bearer_rejected_locally": True,
             "compatibility_file_count": len(file_items),
             "revoked_token_http": revoked_status,
         }

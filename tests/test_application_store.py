@@ -497,39 +497,6 @@ async def test_personal_token_bulk_delete_is_owner_bound_and_invalidates_secrets
         store.close()
 
 
-async def test_owui_roster_import_only_creates_unmatched_pending_accounts(tmp_path):
-    path = tmp_path / "app.sqlite"
-    store = ApplicationStore(path)
-    try:
-        active = await _resolve(store, subject="owui-existing")
-        await store.bootstrap_admin(user_id=active.user_id)
-        assert await store.import_pending_owui_user(
-            subject="owui-new", email="new@example.com", display_name="New"
-        ) == "pending"
-        assert await store.list_admin_users(status="pending") == ()
-        assert await store.import_pending_owui_user(
-            subject="owui-new", email="new@example.com", display_name="New", apply=True
-        ) == "pending"
-        assert await store.import_pending_owui_user(
-            subject="owui-new", email="new@example.com", display_name="Changed", apply=True
-        ) == "existing"
-        assert await store.import_pending_owui_user(
-            subject="owui-existing", email="ALICE@example.com", display_name="Changed", apply=True
-        ) == "existing"
-        pending = (await store.list_admin_users(status="pending"))[0]
-        assert pending.email == "new@example.com"
-        assert pending.display_name == "New"
-        assert pending.groups == ()
-        assert (await store.get_admin_user(user_id=active.user_id)).role == "admin"
-        signed_in = await _resolve(
-            store, subject="owui-new", email="new@example.com", namespace="new@example.com"
-        )
-        assert signed_in.user_id == pending.user_id
-        assert signed_in.status == "pending"
-        with sqlite3.connect(path) as conn:
-            assert conn.execute("SELECT count(*) FROM app_users").fetchone()[0] == 2
-    finally:
-        store.close()
 
 
 async def test_admin_can_add_pending_account_by_email_without_duplicates(tmp_path):

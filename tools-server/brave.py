@@ -1,7 +1,7 @@
 """Brave Search API client.
 
-Shared between the custom-tools `web_search` endpoint and Audrey's
-pre-generation search path. Stateless — constructed once at app startup.
+Used by the custom-tools `web_search` endpoint when a Brave key is configured.
+Constructed once at startup; holds a reusable HTTP client and a bounded cache.
 
 Docs: https://api.search.brave.com/app/documentation/web-search/
 """
@@ -39,16 +39,14 @@ class BraveRateLimitError(Exception):
 class BraveQuotaError(Exception):
     """Raised when Brave returns 402 Payment Required (the monthly quota is
     exhausted). Distinct from a transient 429: retrying won't help, so the
-    handler falls straight back to the SearXNG fallback provider."""
+    handler can try the other configured search provider."""
 
 
 class BraveUpstreamError(Exception):
     """Raised when a non-429 Brave HTTP error survives the retry budget.
 
-    Without this the raw `httpx.HTTPStatusError` escaped `search()` and the
-    `web_search` handler — which only catches `BraveRateLimitError`/`ValueError`
-    — let it fall through to FastAPI as a generic 500. Normalizing it here lets
-    the handler map it to a controlled 503 like the rate-limit path.
+    Normalizing the HTTP failure lets `web_search` try its other configured
+    provider, or return a controlled 503 when no provider succeeds.
     """
 
 

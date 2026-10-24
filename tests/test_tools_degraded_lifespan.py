@@ -88,6 +88,7 @@ async def test_lifespan_yields_with_qdrant_down(monkeypatch, backup_enabled):
         lambda *_args, **_kwargs: maintainer,
     )
     monkeypatch.setattr(tools_app, "BraveClient", lambda **_kwargs: brave)
+    monkeypatch.setattr(tools_app.settings, "brave_api_key", "test-placeholder")
     monkeypatch.setattr(tools_app.settings, "searxng_url", "")
     monkeypatch.setattr(tools_app.settings, "memory_backup_enabled", backup_enabled)
     monkeypatch.setattr(

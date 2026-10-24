@@ -15,22 +15,21 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Brave Search (primary web_search provider)
+    # Optional Brave Search provider
     brave_api_key: str = Field(default="", alias="BRAVE_API_KEY")
     brave_cache_ttl_hours: int = Field(default=24, alias="BRAVE_CACHE_TTL_HOURS")
 
-    # SearXNG (self-hosted meta-search; web_search fallback when Brave is
-    # quota-exhausted/rate-limited). Empty → no fallback. Point at the JSON API
+    # Optional SearXNG provider (self-hosted, no API key). Either provider can
+    # serve search on its own. Empty → disabled. Point at the JSON API
     # of a SearXNG instance on the LAN, e.g. http://192.168.1.11:8088
     searxng_url: str = Field(default="", alias="SEARXNG_URL")
 
     # Alternate web_search between Brave and SearXNG per query (halves Brave
     # quota, decorrelates the two backends so a bad window on one doesn't sink
     # every worker on a request). Query-hash picks the PRIMARY; each backend
-    # still cross-falls-back to the other on failure. When off, or when
-    # SEARXNG_URL is unset, web_search is Brave-primary with SearXNG only as a
-    # failure fallback (the pre-2026-07-09 behavior). Flip + `up -d
-    # --force-recreate custom-tools` to apply.
+    # still tries the other on failure or empty results. With both configured
+    # and alternation off, Brave is primary; with only one configured, all
+    # queries go to that provider. Recreate custom-tools after changing it.
     web_search_alternate: bool = Field(default=True, alias="WEB_SEARCH_ALTERNATE")
 
     # web_fetch (page-opener). Bounds on a model-steerable HTTP client: an overall

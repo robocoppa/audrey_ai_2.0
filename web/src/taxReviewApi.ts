@@ -141,6 +141,14 @@ export function saveTaxCase(conversationId: string, setup: TaxCaseSetup): Promis
   });
 }
 
+export function createTaxCaseProject(conversationId: string): Promise<TaxCase> {
+  return apiJson(`${casePath(conversationId)}/project`, { method: "POST" });
+}
+
+export function listProjectTaxCases(projectId: string, signal?: AbortSignal): Promise<{ items: TaxCase[] }> {
+  return apiJson(`/api/projects/${encodeURIComponent(projectId)}/tax-reviews`, { signal });
+}
+
 export type TaxCaseAction =
   | { operation: "confirm_facts"; data: { fact_ids: string[] } }
   | { operation: "reject_fact"; data: { fact_id: string } }

@@ -627,7 +627,7 @@ def compose_system_messages(
 
     Order, fixed:
       1. Incoming system messages — preserved as given. Anything the
-         user / OWUI sent at `role=system` lands first so the user's
+         caller sent at `role=system` lands first so the user's
          persona wins on tone.
       2. Task-role prompt — Phase 2a always passes `None` here. The
          slot exists so Phase 2b can drop in a fast-answerer or deep-
@@ -761,7 +761,7 @@ def with_skill_instruction(
     """Insert a task-role system message AFTER any leading system messages.
 
     Same placement rule as `compose_system_messages`' `task_role` slot and as
-    `deep_panel._with_worker_system`: whatever the user or OWUI sent at
+    `deep_panel._with_worker_system`: whatever the caller sent at
     `role=system` stays first so their persona wins on tone, and the task role
     follows it.
 

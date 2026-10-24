@@ -334,7 +334,13 @@ async def test_every_user_taking_tool_on_the_real_server_is_scoped():
         specs = await discover_one(http, "http://custom-tools:8000")
 
     registry = _registry(specs)
-    assert set(registry.by_name) == set(TOOL_DECLARATIONS)
+    assert set(registry.by_name) == {
+        name for name, declaration in TOOL_DECLARATIONS.items()
+        if not declaration.in_process_only
+    }
+    # The owner-bound Tax review tool is installed only inside a verified
+    # Private runtime; no sidecar route may advertise it for HTTP dispatch.
+    assert "tax_review" not in registry.by_name
     assert "list_my_files" in registry.by_name
     assert audit_user_scoping(registry) == []
 

@@ -25,8 +25,8 @@ play nicely with `async`/`await`.
 ### Why Audrey needs an async HTTP client
 
 Audrey is a *gateway*. It rarely does the actual work itself; mostly
-it forwards requests to other services and waits for replies. In one
-chat completion, Audrey typically makes:
+it forwards requests to other services and waits for replies. Around
+one chat completion, Audrey may make:
 
 - **Now and then, a GET to Cloudflare** for the public keys that verify
   a browser's sign-in. Audrey caches them, so most requests skip this,
@@ -35,7 +35,7 @@ chat completion, Audrey typically makes:
   Audrey uses it to check that Ollama is up and to build the list of
   models a person may pick.
 - **One or more POSTs to Ollama's `/api/chat`** to actually generate
-  tokens. Each can take 10s–3min for cloud models.
+  tokens. Each can take seconds or minutes.
 - **POSTs to custom-tools** (`http://custom-tools:8001/web_search`,
   `/kb_search`, etc.) when the model decides to call a tool.
 - **POSTs to Qdrant** for vector searches.
@@ -197,12 +197,27 @@ converts the question the same way, then finds the stored lists closest
 to it. Closeness is scored with **cosine similarity**, which runs from
 near 1 for very similar meanings down to around 0 for unrelated ones.
 
-- `qwen3-embedding:4b` (run by Ollama) turns text into 2,560 numbers. The
-  model is set under [`text_embedding`](../../config.yaml#L921) in
+Audrey uses three embedding models, each chosen for one kind of
+content:
+
+- **Documents, references and saved memories:** a large text model run
+  by Ollama, named under [`text_embedding`](../../config.yaml#L910) in
   `config.yaml`.
-- `clip-ViT-B-32` (CLIP) turns images into 512 numbers, and can put
-  text on the same map: A query like "a black dog" lands near photos
-  of black dogs, which is how a written question finds a picture.
+- **Past conversations:** a second, smaller text model, named under
+  [`history_embedding`](../../config.yaml#L922). It ranked real searches
+  of chat history better than the large model did, so history gets its
+  own.
+- **Images:** CLIP, which puts pictures and text on the same map. A
+  query like "a black dog" lands near photos of black dogs, which is
+  how a written question finds a picture.
+
+Each model draws its own map, so a collection is always searched with
+the model that indexed it, and switching a collection to another model
+means indexing it again. That's why the config pins each text model to
+an exact build (its `digest`), and why every text collection records the
+identity of the model that filled it. When the two disagree, Audrey
+refuses the collection and asks for a reindex, instead of quietly
+searching one map with another map's addresses.
 
 ### What's Qdrant?
 
@@ -238,31 +253,33 @@ Two non-options:
   with collection size.
 
 A vector database indexes the *geometry* of the embedding space, so
-a query is sub-100ms regardless of collection size. Qdrant
-specifically is what Audrey uses; a full sweep across every stored
-point takes only a handful of seconds, so per-query cost is a small
-fraction of that.
+a query stays fast as the collection grows, without comparing the
+question against every stored vector.
 
-The metadata-filter capability is also load-bearing. Per-user upload
-collections (`kb_user_text_*`) are indexed alongside global ones, and
-the filter is what keeps user A's uploads from leaking into user B's
-queries.
+Keeping people's data apart uses two tools. Each person's uploads live
+in **collections of their own** (`kb_user_text_*`, `kb_user_images_*`),
+so a search of one person's files never touches another's. Saved
+memories share one collection, and there the **metadata filter** does
+the work: every memory search matches the person's own id. Deletes of
+uploaded files filter on the person too, as a second lock.
 
 ### How they fit together in Audrey
 
 ```
-text content ──► qwen3-embedding ──► 2560-d vector ──► Qdrant.upsert(point)
-                                                              │
-                                                              ▼
-                                                        kb_text collection
+text content ──► text embedding model ──► vector ──► Qdrant.upsert(point)
+                                                            │
+                                                            ▼
+                                                      kb_text collection
 
-text query ──► qwen3-embedding ──► 2560-d query vector ──► Qdrant.search(top_k=5)
-                                                                   │
-                                                                   ▼
-                                                           5 nearest hits + payloads
+text query ──► text embedding model ──► query vector ──► Qdrant search
+                                                            │
+                                                            ▼
+                                                 nearest hits + payloads
 ```
 
-Same flow for images, but with CLIP and the `kb_images` collection.
+Same flow for images, but with CLIP and the `kb_images` collection. The
+knowledge-base lesson adds a keyword search beside this one and merges
+the two.
 
 ### Where you'll see it in Audrey
 
@@ -291,30 +308,30 @@ series.
   in seconds." `latency_seconds.observe(0.42)`. Internally it's a
   bunch of counters bucketed by value range.
 
-Each metric has a name (`audrey_requests_total`) and optional
-**labels** (`method="POST"`, `path="/v1/chat/completions"`). Labels
-let you slice the data — but each unique label combination becomes a
-separate time series, so high-cardinality labels (like user emails)
-explode storage. Audrey is careful about label cardinality
-([`metrics.py`](../../src/audrey/metrics.py) has notes).
+Each metric has a name (`audrey_pipeline_total`) and optional
+**labels** (`mode="deep"`, `outcome="ok"`). Labels let you slice the
+data, but each unique label combination becomes a separate time
+series, so high-cardinality labels (like user emails) explode storage.
+Audrey uses no per-user labels at all, for that reason and because
+they would leak emails into the metrics
+([`metrics.py`](../../src/audrey/metrics.py) says so at the top).
 
 ### Why Audrey needs Prometheus
 
-Audrey runs N concurrent generations across **5 virtual models** with
-real cloud-billing implications when deep panel runs. Operationally
-you need to be able to answer questions like:
+Audrey runs many generations at once across several model choices,
+and deep answers spend paid cloud calls. Operationally you need to be
+able to answer questions like:
 
 - **"Is the deep panel slower today than last week?"** —
   `audrey_model_seconds_bucket` over time, aggregated by model.
-- **"Is fair-gate actually fair?"** — per-user request counts and
-  wait times. A real round-robin starvation bug shipped at one
-  point and got debugged after the fact; the metric is what would
-  have *caught* it if the test hadn't.
+- **"How long do requests wait for the GPU?"** —
+  `audrey_gpu_gate_wait_seconds`. A wait that keeps growing means the
+  local GPU is the bottleneck.
 - **"Which tool errors most often?"** —
-  `audrey_tool_calls_total{tool, status}` is what cross-checks the
-  per-worker tool-summary footer the streaming response embeds.
-- **"Is anyone using virtual model X?"** — request counts per virtual
-  model. Shapes which models are worth keeping warm.
+  `audrey_tool_calls_total{tool, outcome}`.
+- **"Which models do the work?"** — `audrey_dispatch_total` counts
+  calls per model and path, which shows whether a model earns its
+  place in a pool.
 - **"Did Ollama just regress?"** — model-call latency histograms,
   alertable when the p99 jumps.
 
@@ -323,9 +340,9 @@ container logs, which is both slow and lossy (logs rotate). With
 Prometheus + Grafana, the same questions are panel queries that
 stay accurate over weeks of history.
 
-The four alert rules Audrey ships are all built on these metrics —
-they're how the system pages you when something silently breaks (a
-model goes offline, the fair-gate queue grows unboundedly, etc.).
+The alert rules Audrey ships are built on these metrics: pipeline
+error rate, tool-call errors and latency, and cloud-model errors.
+They're how the system tells you when something breaks quietly.
 
 ### How exposition works
 
@@ -333,9 +350,9 @@ Your app exposes a `/metrics` endpoint that returns the current values
 in a specific text format:
 
 ```
-# HELP audrey_requests_total Total requests served
-# TYPE audrey_requests_total counter
-audrey_requests_total{method="POST",path="/v1/chat/completions"} 142
+# HELP audrey_pipeline_total Pipeline completions
+# TYPE audrey_pipeline_total counter
+audrey_pipeline_total{mode="deep",task_type="code",outcome="ok"} 142
 ```
 
 The Prometheus server scrapes this endpoint every N seconds and
@@ -350,8 +367,8 @@ draw graphs.
   endpoint.
 - Throughout the codebase: `pipeline_total.labels(...).inc()`,
   `model_seconds.observe(elapsed)`, etc. — instrumentation sites.
-- [`monitoring/`](../../monitoring/) — Prometheus + Grafana compose
-  files (separate from the audrey-ai container).
+- [`monitoring/`](../../monitoring/) — Prometheus and Grafana, with
+  their own compose file, kept separate from Audrey's.
 
 
 
@@ -379,45 +396,13 @@ passed and what failed, showing the offending line for each failure.
 
 ### Why Audrey needs pytest
 
-Audrey ships with a hermetic test suite: it needs no live Ollama,
-Qdrant or custom-tools, and the whole run takes a minute or two on a
-laptop. Several of those tests are *regression guards* for specific bugs
-that already bit us in production:
-
-- **`test_two_user_round_robin_skips_last_granted`** — guards the
-  fair-gate scheduler. A naive round-robin could starve a user who
-  fired three back-to-back requests if a second user joined
-  mid-flight. The test reconstructs that scenario with
-  `asyncio.Event`s for ordering and asserts user B's request slips
-  into slot 2, not slot 4. Without this test, a future refactor
-  could silently reintroduce the starvation.
-- **`test_authed_user_has_no_id_field`** — guards against an
-  `AttributeError` that bit when an early version of the auth wiring
-  reached for `me.id` instead of `me.email`. A future maintainer
-  adding an `.id` field to `AuthedUser` will hit a deliberate
-  failing test that says "this was removed on purpose; if you really
-  need it back, delete this test and add a real one." The bug is
-  more visible as a refusal to re-add the field than as a runtime
-  crash months later.
-- **`test_kb_embed_ssrf.py`** — parametrized over a grid of IP
-  ranges and URL schemes — guards the SSRF check on the
-  user-supplied image URL endpoint. Without it, a regression that
-  re-allows requests to internal addresses (loopback, Docker
-  subnet, link-local AWS metadata) goes undetected until someone
-  exploits it.
-
-Without a test framework, those would be ad-hoc scripts that nobody
-runs. With `pytest tests/ -q` in the dev workflow, the whole battery
-runs in a minute or two, and a single test file in seconds, so it's
-easy to run before every commit.
-
-A second thing pytest specifically buys you: parametrization. The
-`_BREVITY_CUES` test in `test_reflect.py` covers every entry in the
-cue tuple individually — one test definition, one assertion, but
-pytest treats each cue as its own reported test case. Without
-parametrization, it'd either be one test that catches "any cue
-works" without knowing *which* broke, or a stack of nearly-identical
-hand-written tests.
+Audrey ships with a hermetic test suite: It needs no live Ollama,
+Qdrant or custom-tools, so it runs on a laptop in minutes. Many of its
+tests are *regression guards*: Each pins down a behavior that matters
+(the fair scheduler serving two people in turn, the image fetcher
+refusing internal addresses, `AuthedUser` having no ambiguous `id`
+field), so a later change can't quietly undo it. Without a test
+framework, those would be ad-hoc scripts that nobody runs.
 
 ### Useful features
 
@@ -453,7 +438,8 @@ hand-written tests.
   def test_square(input, expected):
       assert input ** 2 == expected
   ```
-  Each input becomes its own reported test case.
+  Each input becomes its own reported test case, so a failure names
+  the exact input that broke instead of "one of them".
 
 ### Async tests
 

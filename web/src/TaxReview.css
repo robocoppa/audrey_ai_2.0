@@ -156,3 +156,10 @@
   .tax-review-inline-settings input, .tax-review-inline-settings textarea { font-size: 1rem; }
   .tax-review-inline-settings .tax-review-actions button { min-height: 2.5rem; }
 }
+
+.tax-review-project { padding-top: 0.75rem; margin-top: 0.75rem; border-top: 1px solid var(--border); }
+.tax-review-project p { margin: 0 0 0.55rem; }
+.tax-review-project button { padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 0.55rem; background: rgb(22 45 72 / 55%); color: var(--text); font: inherit; font-size: 0.78rem; cursor: pointer; }
+.tax-review-project button:hover { border-color: var(--accent); }
+.tax-review-project button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tax-review-project button:disabled { opacity: 0.6; cursor: default; }

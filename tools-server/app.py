@@ -1,7 +1,7 @@
 """custom-tools FastAPI server.
 
 Endpoints, OpenAPI auto-discovered by the Audrey orchestrator:
-  POST /web_search             — Brave Search API
+  POST /web_search             — Brave and/or SearXNG search
   POST /web_fetch              — open one URL, return its readable text (SSRF-guarded)
   POST /reference_lookup       — browse retained public reference catalog entries
   POST /read_reference         — read a cited page of a retained public reference
@@ -91,12 +91,15 @@ async def lifespan(app: FastAPI):
     history_settings = load_settings(settings.embedding_config_path, role="history")
     history_profile = profile_from_mapping(history_settings)
     capabilities = CapabilityRegistry()
+    brave_key = settings.brave_api_key.strip()
+    searxng_url = settings.searxng_url.strip()
     brave = BraveClient(
-        api_key=settings.brave_api_key,
+        api_key=brave_key,
         cache_ttl_seconds=settings.brave_cache_ttl_hours * 3600,
-    )
-    # Keyless fallback used when Brave is quota-exhausted or rate-limited.
-    searxng = SearxngClient(settings.searxng_url) if settings.searxng_url else None
+    ) if brave_key else None
+    searxng = SearxngClient(searxng_url) if searxng_url else None
+    if brave is None and searxng is None:
+        capabilities.set_unavailable("web_search", "not_configured")
     memory = MemoryStore(
         qdrant_url=settings.qdrant_url,
         ollama_url=settings.ollama_url,
@@ -170,8 +173,8 @@ async def lifespan(app: FastAPI):
     memory_backups.start()
     log.info(
         "custom-tools ready. brave=%s searxng=%s audrey=%s capabilities=%s",
-        "configured" if settings.brave_api_key else "UNSET",
-        settings.searxng_url or "UNSET",
+        "configured" if brave is not None else "UNSET",
+        searxng_url or "UNSET",
         settings.audrey_url,
         capabilities.openapi_status(),
     )
@@ -180,7 +183,8 @@ async def lifespan(app: FastAPI):
     finally:
         await memory_backups.stop()
         await capability_supervisor.stop()
-        await brave.aclose()
+        if brave is not None:
+            await brave.aclose()
         if searxng is not None:
             await searxng.aclose()
         await audrey.aclose()
@@ -192,8 +196,9 @@ app = FastAPI(
     title="Audrey custom-tools",
     version="0.1.0",
     description=(
-        "Audrey's v1 tool surface. Every route is auto-discovered by the "
-        "orchestrator and exposed to models as a callable tool."
+        "Audrey's tool surface. Model-facing OpenAPI routes require matching "
+        "orchestrator declarations and available dependencies. Internal routes "
+        "are excluded from model discovery."
     ),
     lifespan=lifespan,
 )
@@ -663,7 +668,7 @@ async def _search_with_fallback(
     operation_id="web_search",
     response_model=WebSearchResponse,
     tags=["tools"],
-    summary="Search the web via Brave Search API",
+    summary="Search the web using the configured Brave and/or SearXNG providers",
     description=(
         "Query the public web for current information. Use this for questions "
         "about news, recent events, today's date-sensitive facts, or anything "
@@ -672,7 +677,7 @@ async def _search_with_fallback(
 )
 async def web_search(req: WebSearchRequest) -> WebSearchResponse:
     _require_capabilities("web_search")
-    brave: BraveClient = app.state.brave
+    brave: BraveClient | None = app.state.brave
     searxng: SearxngClient | None = app.state.searxng
 
     # One line per REQUEST, logged before any routing. The warnings further down
@@ -683,20 +688,22 @@ async def web_search(req: WebSearchRequest) -> WebSearchResponse:
     # out to 3 workers x 4 searches, and the cache below only dedups exact matches.
     log.info("web_search: q=%r count=%d", _qlog(req.query), req.count)
 
-    # Route to a PRIMARY backend, then cross-fall-back to the other on failure.
-    # With alternation off (or no SearXNG configured), primary is always Brave —
-    # the pre-2026-07-09 Brave-primary/SearXNG-fallback behavior. With it on,
-    # a per-query hash splits primaries ~50/50 between the two: this halves Brave
-    # quota and decorrelates the backends (a bad window on one no longer sinks
-    # every worker on a request), while cross-fallback preserves resilience.
-    if settings.web_search_alternate and searxng is not None and _prefer_searxng(req.query):
-        hits = await _search_with_fallback(
-            primary=searxng, other=brave, query=req.query, count=req.count,
-        )
+    # A single configured provider handles all queries. With both configured,
+    # the stable hash splits primaries when alternation is enabled; failures
+    # and empty responses still try the other provider.
+    if brave is None:
+        if searxng is None:
+            raise HTTPException(status_code=503, detail={
+                "error": "capability_unavailable", "components": ["web_search"],
+            }, headers={"Retry-After": "5"})
+        primary, other = searxng, None
+    elif settings.web_search_alternate and searxng is not None and _prefer_searxng(req.query):
+        primary, other = searxng, brave
     else:
-        hits = await _search_with_fallback(
-            primary=brave, other=searxng, query=req.query, count=req.count,
-        )
+        primary, other = brave, searxng
+    hits = await _search_with_fallback(
+        primary=primary, other=other, query=req.query, count=req.count,
+    )
     return WebSearchResponse(
         query=req.query,
         results=[WebSearchResult(title=h.title, url=h.url, snippet=h.snippet) for h in hits],

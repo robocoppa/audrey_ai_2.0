@@ -90,7 +90,7 @@ def _error(status: int, detail: str) -> HTTPException:
     return HTTPException(status_code=status, detail=detail)
 
 
-async def _context(app: Any, principal: Principal, conversation_id: str):
+async def _active_owner(app: Any, principal: Principal):
     if (
         principal.status != "active" or principal.role == "bot" or "bots" in principal.groups
         or not principal.user_id or remote_personal_reads_blocked(principal.storage_namespace)
@@ -100,6 +100,11 @@ async def _context(app: Any, principal: Principal, conversation_id: str):
     account = await store.get_admin_user(user_id=principal.user_id)
     if account is None or account.status != "active" or account.deletion_pending:
         raise _error(403, "Tax review requires an active account.")
+    return store
+
+
+async def _context(app: Any, principal: Principal, conversation_id: str):
+    store = await _active_owner(app, principal)
     conversation = await store.conversations.get(
         user_id=principal.user_id, conversation_id=conversation_id,
     )
@@ -173,6 +178,20 @@ async def get_tax_case(app: Any, principal: Principal, conversation_id: str) -> 
     return response
 
 
+async def get_project_tax_cases(app: Any, principal: Principal, project_id: str) -> list[dict]:
+    """Read saved case facts and worksheets through their current Private project."""
+    store = await _active_owner(app, principal)
+    try:
+        cases = await store.tax_cases.list_for_project(
+            user_id=principal.user_id, project_id=project_id,
+        )
+    except TaxCaseAccessError:
+        raise _error(404, "Private project not found.") from None
+    # Saved outputs remain readable when the reference library is offline; later
+    # model work still checks the case's exact current publication pin.
+    return [case_response(case) for case in cases]
+
+
 async def require_tax_case(app: Any, principal: Principal, conversation_id: str) -> dict:
     case = await _read_case(app, principal, conversation_id)
     if case is None:
@@ -183,21 +202,64 @@ async def require_tax_case(app: Any, principal: Principal, conversation_id: str)
 async def create_tax_case(
     app: Any, principal: Principal, conversation_id: str, body: CreateTaxCaseRequest,
 ) -> dict:
+    from audrey.routes.files import _settle_private_persistence
+    from audrey.tax_documents import selected_project_document_ids
+
     await _context(app, principal, conversation_id)
+    existing = await app.state.application_store.tax_cases.get(
+        user_id=principal.user_id, conversation_id=conversation_id,
+    )
+    if existing is not None:
+        if any(existing[key] != getattr(body, key) for key in ("tax_year", "jurisdiction", "goal")):
+            raise _error(409, "A different tax case already exists for this conversation.")
+        # An uncertain POST retry only returns saved work. It must not depend
+        # on an old selected document or publication still being available.
+        case = await get_tax_case(app, principal, conversation_id)
+        assert case is not None
+        return case
     release = await _published(app)
     try:
-        await app.state.application_store.tax_cases.create(
-            user_id=principal.user_id, conversation_id=conversation_id,
-            tax_year=body.tax_year, jurisdiction=body.jurisdiction, goal=body.goal,
-            reference_release=release["id"],
-        )
-    except TaxCaseConflictError:
-        raise _error(409, "A Tax review case already exists for this conversation.") from None
-    except TaxCaseError:
+        async with selected_project_document_ids(app, principal, conversation_id) as file_ids:
+            await _settle_private_persistence(app.state.application_store.tax_cases.create(
+                user_id=principal.user_id, conversation_id=conversation_id,
+                tax_year=body.tax_year, jurisdiction=body.jurisdiction, goal=body.goal,
+                reference_release=release["id"], validated_private_file_ids=file_ids,
+            ))
+    except ProcessingPolicyError as exc:
+        raise HTTPException(status_code=409, detail={"error": exc.code, "message": str(exc)}) from None
+    except TaxCaseConflictError as exc:
+        raise _error(409, str(exc)) from None
+    except TaxCaseError as exc:
+        raise _error(409, str(exc)) from None
+    # Return the saved pin even if publication changed during the database await.
+    # The normal update choice explains that transition without losing the case.
+    case = await get_tax_case(app, principal, conversation_id)
+    assert case is not None
+    return case
+
+
+async def ensure_tax_project(app: Any, principal: Principal, conversation_id: str) -> dict:
+    from audrey.routes.files import _settle_private_persistence
+    from audrey.tax_documents import selected_project_document_ids
+
+    await _context(app, principal, conversation_id)
+    try:
+        async with selected_project_document_ids(app, principal, conversation_id) as file_ids:
+            await _settle_private_persistence(app.state.application_store.tax_cases.ensure_project(
+                user_id=principal.user_id, conversation_id=conversation_id,
+                validated_private_file_ids=file_ids,
+            ))
+    except ProcessingPolicyError as exc:
+        raise HTTPException(status_code=409, detail={"error": exc.code, "message": str(exc)}) from None
+    except TaxCaseConflictError as exc:
+        raise _error(409, str(exc)) from None
+    except TaxCaseAccessError:
         raise _error(409, "The Private case context changed. Reopen the conversation.") from None
-    # Publication can change during the database await. Do not return an
-    # apparently current case after that transition; its durable pin is retained.
-    return await require_tax_case(app, principal, conversation_id)
+    except TaxCaseError as exc:
+        raise _error(409, str(exc)) from None
+    case = await get_tax_case(app, principal, conversation_id)
+    assert case is not None
+    return case
 
 
 async def _update(
@@ -703,6 +765,6 @@ def tax_review_spec(server_url: str) -> ToolSpec:
 __all__ = [
     "TAX_REVIEW_INSTRUCTION", "TAX_REVIEW_ELIGIBILITY_INSTRUCTION", "TaxReviewRequest", "CreateTaxCaseRequest", "TaxCaseActionRequest",
     "current_user_statement", "user_statement_scope",
-    "require_tax_case", "get_tax_case", "create_tax_case", "apply_tax_case_action",
+    "require_tax_case", "get_tax_case", "get_project_tax_cases", "create_tax_case", "ensure_tax_project", "apply_tax_case_action",
     "make_tax_review_handler", "tax_review_spec",
 ]

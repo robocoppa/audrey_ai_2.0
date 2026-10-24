@@ -1,8 +1,8 @@
-# Lesson 16 — The custom-tools sidecar
+# Lesson 17 — The custom-tools sidecar
 
 Throughout this course Audrey has been *calling tools* — `web_search`,
-`kb_search`, `memory_store`, `chat_history_search`. Lesson 9 showed the
-ReAct loop that decides to call them; Lesson 10 showed the wire protocol.
+`kb_search`, `memory_store`, `chat_history_search`. Lesson 10 showed the
+ReAct loop that decides to call them; Lesson 11 showed the wire protocol.
 But every one of those calls crosses a network hop to a service we've
 treated as a black box. This lesson opens it.
 
@@ -34,7 +34,7 @@ Why split it out at all, instead of putting the tools inside Audrey?
 - **It's the tool *registry*, discovered at boot.** Audrey doesn't hardcode
   what tools exist. At startup it reads the sidecar's `/openapi.json`,
   turns each route into a callable tool definition, and hands those to the
-  model. (That discovery handshake is Lesson 9's territory; here we're on
+  model. (That discovery handshake is Lesson 10's territory; here we're on
   the *other* end of it — the thing being discovered.)
 
 That last point is the one to hold onto: **the sidecar schema-visible, POST,
@@ -62,7 +62,7 @@ OpenAPI remain service plumbing, not model-callable tools.
 
 Plus [`chat_archive.py`](../../tools-server/chat_archive.py), the sidecar
 half of the chat archive. Its write path (`archive_turn`, chunking) was
-covered in [Lesson 13](lesson-13-memory-and-context-injection.md); here we
+covered in [Lesson 14](lesson-14-memory-and-context-injection.md); here we
 cover the read/maintenance side (search, prune, stats).
 
 ## 2. Read-along
@@ -185,7 +185,7 @@ Audrey's base URL.
 
 Why the round-trip back into Audrey? The knowledge base — Qdrant
 collections, the CLIP/embedding machinery — lives on Audrey's side
-(Lessons 11–12). The sidecar doesn't own the KB; it only *exposes* it as a
+(Lessons 12–13). The sidecar doesn't own the KB; it only *exposes* it as a
 model-callable tool. So the full call path for one KB search is:
 
 ```text
@@ -277,7 +277,7 @@ exception out. The 429 case remains a `BraveRateLimitError`, which the
 other HTTP status failures can currently escape as a generic server error.
 
 So from the model's seat, a rate-limited Brave looks like a tool that
-returned an error — the ReAct loop (Lesson 9) sees the failed tool result
+returned an error — the ReAct loop (Lesson 10) sees the failed tool result
 and can apologize, answer from training, or move on. The request doesn't
 die; one tool degraded. That's the failure-isolation payoff of §1.1 made
 concrete.
@@ -326,7 +326,7 @@ handshake, and workers reach for it on their own.
 
 [`db.py`](../../tools-server/db.py) backs `memory_store` / `memory_recall`
 / `memory_search`. It is Qdrant-backed, embedded with `nomic-embed-text`
-(the same 768-d text embedder the KB uses — Lesson 11). A few design
+(the same 768-d text embedder the KB uses — Lesson 12). A few design
 choices make it correct and worth understanding.
 
 **Deterministic point ids** ([db.py:64](../../tools-server/db.py#L64)).
@@ -438,7 +438,7 @@ them across requests, close them cleanly.
 
 ### 2.8 The chat archive's read side
 
-[Lesson 13](lesson-13-memory-and-context-injection.md) covered how a turn
+[Lesson 14](lesson-14-memory-and-context-injection.md) covered how a turn
 gets written — `archive_turn`, the Q+A-pair chunking, the embed-and-upsert.
 The sidecar exposes three more operations on top of that store:
 
@@ -528,28 +528,17 @@ After the retry budget exhausts, `brave.py` raises `BraveRateLimitError`
 ([`brave.py:110`](../../tools-server/brave.py#L110)), and the `web_search`
 handler converts it to a 503
 ([`app.py:596`](../../tools-server/app.py#L596)). The model doesn't see a
-crash — it sees a *failed tool result*, which the ReAct loop (Lesson 9) feeds
+crash — it sees a *failed tool result*, which the ReAct loop (Lesson 10) feeds
 back like any other: the model can apologize, try a different approach, or
 answer without the web. That's the failure-isolation payoff of the separate
 process from §1.1 — one tool degraded, the request lives.
 
-**6. You set `CHAT_ARCHIVE_CHUNK_OVERLAP_CHARS=3000` with the default
-`MAX_CHARS=2500`. What happens, and when?**
+## That's the course so far
 
-The sidecar refuses to start. The `Settings` validator
-([`settings.py:136`](../../tools-server/settings.py#L136)) raises at boot
-because overlap ≥ max_chars, naming both env vars in the message. Before this
-validator existed, the bad config would have crashed *later* — on the first
-archive write large enough to trigger a hard split, where the chunk step
-`max_chars - overlap` goes ≤ 0 — a much harder failure to trace back to its
-cause. This is fail-fast at boot turning a lurking runtime bug into an obvious
-config error (the §2.6 pattern).
-
-## One more subsystem: research mode
-
-The sidecar is the last *infrastructure* piece — but there's one subsystem left
-that composes everything you've seen into a single pipeline. When a user picks
-`audrey_research`, the request fans out to a panel, grounds its claims with the
-tools you just read, checks them, and lets code shape a trustworthy answer with
-a Sources list. [Lesson 17](lesson-17-research-mode.md) walks that pipeline end
-to end — and wraps up the course.
+This is the last lesson published so far, and the sidecar is a fitting place
+to pause: It's the far end of the request path. You've followed a message from
+the browser and the `/v1` door (Lessons 4 and 16), through routing (Lesson 8),
+the model layer (Lessons 6 and 7), deep and research modes (Lesson 9), the
+tool loop (Lessons 10 and 11), the knowledge base and per-user context
+(Lessons 12–14) and fair scheduling (Lesson 15), out to the tools this lesson
+read. Lessons on the application around the pipeline are on the way.

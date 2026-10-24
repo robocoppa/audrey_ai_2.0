@@ -5,7 +5,7 @@
 version: "7.0.0"
 
 # Native Private: verified local text/document processing and local tools.
-# Unsupported media, OCR and Projects are refused rather than sent elsewhere.
+# Unsupported media and OCR are refused rather than sent elsewhere; Private Projects are supported.
 private_processing:
   enabled: true
 
@@ -70,48 +70,42 @@ router:
 
 # ─── Native application state ─────────────────────────────────────────
 # Additive Phase 2 authority for stable Audrey users and provider bindings.
-# Existing OWUI users keep their exact current email as storage_namespace, so
-# this database can be removed on rollback without renaming deployed files,
-# collections, memories, or archive rows.
+# Accounts created before native identity retain their original storage namespaces
+# so their deployed files, collections, memories and archive rows remain accessible.
 application:
   sqlite_path: "/data/audrey_app.sqlite"
 
 # ─── Model registry ────────────────────────────────────────────────────
 # Per task type, ranked by priority (higher = preferred when healthy).
-# Speed/quality are informational hints used by the planner when building panels.
 model_registry:
   code:
     # ⚠️ 2026-08-15: qwen3.8:latest replaced THREE local entries here —
     # qwen3-coder-next:latest (100), qwen2.5-coder:32b (90) and qwen3.6:35b (80).
     # It takes the lead local slot at 100 for the FAST path; it is no longer on
-    # the `deep_panel.code` panel. ⚠️ `speed`/`quality` are inherited from the
-    # code specialist it replaced and are UNMEASURED for 3.8 — they are planner
-    # hints only, but do not quote them as if they were probed.
+    # the `deep_panel.code` panel.
     # ⚠️ 2026-08-16: `granite4.1:30b` and `cogito-2.1:671b-cloud` REMOVED — both
     # were named here but never pulled, so both were dud slots that cost a
     # GPU-gate turn before degrading. Standing rule: not pulled means gone.
     # ⚠️ `devstral-small-2:latest` briefly replaced them here and is ALSO not on
     # the box — the same mistake twice in one day, because `pull-models.sh` was
     # read as proof of what is installed. It is not. `ollama list` is.
-    - { name: "qwen3.8:latest",           priority: 100, speed: 60, quality: 95, location: local }
-    - { name: "kimi-k2.7-code:cloud",     priority:  92, speed: 90, quality: 94, location: cloud }
+    - { name: "qwen3.8:latest",           priority: 100, location: local }
+    - { name: "kimi-k2.7-code:cloud",     priority:  92, location: cloud }
     # ⚠️ 2026-08-29: `glm-5.3:cloud` REPLACES `glm-5.2:cloud` at the same
     # priority in every role glm held. `ollama list` on the box confirms 5.3 is
-    # pulled. ⚠️ `speed`/`quality` are INHERITED FROM 5.2 and are UNMEASURED for
-    # 5.3 — planner hints only; do not quote them as if they were probed.
-    - { name: "glm-5.3:cloud",            priority:  88, speed: 90, quality: 91, location: cloud }
-    - { name: "deepseek-v4-pro:cloud",    priority:  82, speed: 80, quality: 95, location: cloud }
+    # pulled. Registry priorities define routing preference, not benchmark scores.
+    - { name: "glm-5.3:cloud",            priority:  88, location: cloud }
+    - { name: "deepseek-v4-pro:cloud",    priority:  82, location: cloud }
     # The sole LOCAL worker on `deep_panel.code` from 2026-08-16. Registered
     # here because `_validate_deep_panel_pools` requires it, at a priority below
     # qwen3.8 so it is a fast-path failover, not a primary — the panel slot is
-    # the deliberate use. ⚠️ speed/quality are UNMEASURED placeholders.
+    # the deliberate use.
     # ⚠️ `devstral-small-2:latest` was briefly listed here and is NOT on the
     # box — see the note on the local pools below.
-    - { name: "nemotron-3.5-lightning:latest", priority: 80, speed: 85, quality: 84, location: local }
-    - { name: "kimi-k2.6:cloud",          priority:  78, speed: 90, quality: 92, location: cloud }
-    # v4.1 replaces the retired v4 Flash tag. Speed/quality are inherited
-    # routing hints, not measurements of the new model.
-    - { name: "deepseek-v4.1-flash:cloud",  priority:  72, speed: 92, quality: 90, location: cloud }
+    - { name: "nemotron-3.5-lightning:latest", priority: 80, location: local }
+    - { name: "kimi-k2.6:cloud",          priority:  78, location: cloud }
+    # v4.1 replaces the retired v4 Flash tag.
+    - { name: "deepseek-v4.1-flash:cloud",  priority:  72, location: cloud }
     # ⚠️ 2026-08-30: `deepseek-v3.2:cloud` (70) REMOVED — named in three places
     # (here, `fast_path.tool_capable_models`, `passthrough.allowed_models`) and
     # NOT on the box. Same standing rule as the 2026-08-16 sweep: not pulled
@@ -122,41 +116,37 @@ model_registry:
     # all, so the damage is a silently tool-less turn, not a visible error.
     # User-installed 2026-10-20. Ollama declares vision/tools/thinking:
     # https://ollama.com/library/minimax-m3.1-flash:cloud
-    # Candidate priority only: no quality/latency measurement yet. Omitted
-    # speed/quality use neutral registry defaults, not benchmark scores.
+    # Candidate priority only: no quality/latency measurement yet.
     - { name: "minimax-m3.1-flash:cloud", priority: 55, location: cloud }
 
   reasoning:
-    # Ranked by the quality column, not by locality: the local entry led this
-    # pool at 100 despite being the lowest-quality of the top group (93 vs
-    # 95/95/94). It stays the highest-priority LOCAL entry, so it is still the
-    # first failover when cloud is unhealthy or credits run out.
+    # Cloud candidates lead this pool. Qwen remains the highest-priority
+    # LOCAL entry, so it is first failover when cloud is unavailable.
     # `general` deliberately keeps its local lead — see the cost note there.
-    - { name: "deepseek-v4-pro:cloud",    priority: 100, speed: 80, quality: 95, location: cloud }
-    - { name: "kimi-k2.6:cloud",          priority:  96, speed: 90, quality: 94, location: cloud }
-    - { name: "qwen3.8:latest",           priority:  94, speed: 70, quality: 93, location: local }
-    - { name: "kimi-k2.7-code:cloud",     priority:  88, speed: 90, quality: 93, location: cloud }
+    - { name: "deepseek-v4-pro:cloud",    priority: 100, location: cloud }
+    - { name: "kimi-k2.6:cloud",          priority:  96, location: cloud }
+    - { name: "qwen3.8:latest",           priority:  94, location: local }
+    - { name: "kimi-k2.7-code:cloud",     priority:  88, location: cloud }
     # ⚠️ 2026-08-16: `deepseek-r1:32b` (85, local) and `cogito-2.1:671b-cloud`
     # (75) REMOVED — neither was pulled. `qwen3.5:35b-a3b` was put here as the
     # replacement second local and is NOT on the box either; `muse-glimmer`
-    # is, and takes the slot. ⚠️ speed/quality UNMEASURED — planner hints only.
-    - { name: "muse-glimmer:latest",      priority:  85, speed: 82, quality: 86, location: local }
-    - { name: "nemotron-3-super:cloud",   priority:  70, speed: 85, quality: 90, location: cloud }
+    # is, and takes the slot.
+    - { name: "muse-glimmer:latest",      priority:  85, location: local }
+    - { name: "nemotron-3-super:cloud",   priority:  70, location: cloud }
     # User-installed 2026-10-20. Ollama declares vision/tools/thinking:
     # https://ollama.com/library/minimax-m3.1-flash:cloud
-    # Candidate priority only: no quality/latency measurement yet. Omitted
-    # speed/quality use neutral registry defaults, not benchmark scores.
+    # Candidate priority only: no quality/latency measurement yet.
     - { name: "minimax-m3.1-flash:cloud", priority: 55, location: cloud }
 
   general:
-    - { name: "qwen3.8:latest",           priority: 100, speed: 75, quality: 92, location: local }
-    - { name: "deepseek-v4-pro:cloud",    priority:  97, speed: 80, quality: 95, location: cloud }
-    - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 93, location: cloud }
-    - { name: "kimi-k2.7-code:cloud",     priority:  88, speed: 90, quality: 92, location: cloud }
-    - { name: "deepseek-v4.1-flash:cloud",  priority:  82, speed: 92, quality: 89, location: cloud }
+    - { name: "qwen3.8:latest",           priority: 100, location: local }
+    - { name: "deepseek-v4-pro:cloud",    priority:  97, location: cloud }
+    - { name: "kimi-k2.6:cloud",          priority:  95, location: cloud }
+    - { name: "kimi-k2.7-code:cloud",     priority:  88, location: cloud }
+    - { name: "deepseek-v4.1-flash:cloud",  priority:  82, location: cloud }
     # ⚠️ 2026-08-16: `olmo-3.1:32b` (70, local) REMOVED — never pulled.
     # `muse-glimmer:latest` takes the second local slot here too.
-    - { name: "muse-glimmer:latest",      priority:  84, speed: 82, quality: 86, location: local }
+    - { name: "muse-glimmer:latest",      priority:  84, location: local }
     # ⚠️ REGISTERED SO IT CAN BE A PANEL WORKER, not to change the fast path.
     # `_validate_deep_panel_pools` rejects any deep-panel name absent from
     # this registry at BOOT — an unregistered worker otherwise passes
@@ -168,20 +158,19 @@ model_registry:
     # the grounding suite, best chars-per-token of any thinking model here
     # (0.53-1.90 vs muse 0.06-1.19), warm 2.6-12.6s. See
     # evals/MODEL-FACTS.md. ⛔ NOT for a code pool — see below.
-    - { name: "ornith-1.5:35b",           priority:  83, speed: 86, quality: 86, location: local }
-    - { name: "llama4:latest",            priority:  65, speed: 55, quality: 90, location: local }
-    # Inherited from glm-5.2 with the 2026-08-29 swap; speed/quality UNMEASURED.
-    - { name: "glm-5.3:cloud",            priority:  62, speed: 90, quality: 88, location: cloud }
+    - { name: "ornith-1.5:35b",           priority:  83, location: local }
+    - { name: "llama4:latest",            priority:  65, location: local }
+    # Inherited the registry position from glm-5.2 in the 2026-08-29 swap.
+    - { name: "glm-5.3:cloud",            priority:  62, location: cloud }
     # 2026-10-02: Kimi K3 leads every deep/research panel that uses cloud
     # workers. Keep its registry priority below every ordinary-chat candidate:
     # registration makes it a valid production panel worker, while the panel
     # lists below choose its lead position without putting paid inference on
-    # the normal fast path. Speed/quality are routing hints, not measurements.
-    - { name: "kimi-k3:cloud",             priority:  60, speed: 90, quality: 90, location: cloud }
+    # the normal fast path.
+    - { name: "kimi-k3:cloud",             priority:  60, location: cloud }
     # User-installed 2026-10-20. Ollama declares vision/tools/thinking:
     # https://ollama.com/library/minimax-m3.1-flash:cloud
-    # Candidate priority only: no quality/latency measurement yet. Omitted
-    # speed/quality use neutral registry defaults, not benchmark scores.
+    # Candidate priority only: no quality/latency measurement yet.
     - { name: "minimax-m3.1-flash:cloud", priority: 55, location: cloud }
 
   vl:
@@ -193,8 +182,8 @@ model_registry:
     # would be answered blind. qwen3-vl is the primary; llava the fallback.
     # nemotron3:33b keeps its reasoning + deep-panel-worker roles elsewhere.
     # (To add a cloud vl model later, confirm it actually accepts images.)
-    - { name: "qwen3-vl:32b",             priority: 100, speed: 70, quality: 90, location: local }
-    - { name: "llava:34b",                priority:  90, speed: 65, quality: 85, location: local }
+    - { name: "qwen3-vl:32b",             priority: 100, location: local }
+    - { name: "llava:34b",                priority:  90, location: local }
 
 # ─── Fast path ─────────────────────────────────────────────────────────
 fast_path:
@@ -318,8 +307,8 @@ deep_panel:
     #
     # ⚠️ That takes the pool back OFF `max_deep_workers_cloud` (3, pinned by
     # MAX_DEEP_WORKERS_CLOUD in .env), so there is one slot of headroom. AT the
-    # cap, a further cloud worker is dropped by `_healthy_workers` with NO log
-    # line — dead config that looks live. Adding two needs the cap raised.
+    # cap, `select_workers` omits further cloud workers and logs the limit.
+    # Adding two needs the cap raised.
     # ⚠️⚠️ **The local draft rests entirely on nemotron.** It is also the
     # weakest worker measured (top rate 0.10, code recall 0.38) — kept because
     # its cost is GPU time rather than credit and it is the pool's only defence
@@ -494,6 +483,7 @@ deep_panel_local:
 # glm took `verifier` on 2026-07-30 (it already held researcher + writer);
 # `glm-5.3` inherited all three on 2026-08-29. Kimi K3 replaced it only in
 # the researcher lists on 2026-10-02; GLM remains verifier and writer.
+# Kimi K3 is the independent writer fallback if GLM is unavailable.
 # `factchecker` is the deliberate hold-out on deepseek-v4-pro: that stage runs a
 # constrained-decoding pass pinned to the `FactCheckResult` schema, and
 # `ledger.py:203-207` records glm-5.2 as one of the models that returned
@@ -538,21 +528,21 @@ deep_panel_research:
     factchecker: "deepseek-v4-pro:cloud"
     fallback_factcheck: "kimi-k2.6:cloud"
     writer: "glm-5.3:cloud"
-    fallback_synth: "glm-5.3:cloud"
+    fallback_synth: "kimi-k3:cloud"
   reasoning:
     researchers: ["kimi-k3:cloud", "minimax-m3.1-flash:cloud", "qwen3.8:latest"]
     verifier: "glm-5.3:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     fallback_factcheck: "kimi-k2.6:cloud"
     writer: "glm-5.3:cloud"
-    fallback_synth: "glm-5.3:cloud"
+    fallback_synth: "kimi-k3:cloud"
   general:
     researchers: ["kimi-k3:cloud", "minimax-m3.1-flash:cloud", "qwen3.8:latest"]
     verifier: "glm-5.3:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     fallback_factcheck: "kimi-k2.6:cloud"
     writer: "glm-5.3:cloud"
-    fallback_synth: "glm-5.3:cloud"
+    fallback_synth: "kimi-k3:cloud"
   # vl: the research path grounds with text tools; image turns force fast
   # anyway. Kept here so the pool resolves for every task type, with a
   # text-only researcher set (the deep path rebuilds prompts text-only).
@@ -562,7 +552,7 @@ deep_panel_research:
     factchecker: "deepseek-v4-pro:cloud"
     fallback_factcheck: "kimi-k2.6:cloud"
     writer: "glm-5.3:cloud"
-    fallback_synth: "glm-5.3:cloud"
+    fallback_synth: "kimi-k3:cloud"
 
 # ─── Thinking policy for the deep panel ────────────────────────────────
 #
@@ -593,7 +583,8 @@ thinking:
   # supports: the probe measured ONE model, and the fabrication that
   # `think=false` bought in 2026-08-12 was a different model on a grounding
   # task. Naming models keeps the blast radius the size of the measurement.
-  # Applies in every deep-panel role the model holds.
+  # Applies in every deep-panel role the model holds, including streamed synthesis
+  # and the research verifier/writer. Those final-answer roles use deep_synth.
   no_thinking_models:
     - "nemotron-3.5-lightning:latest"
 
@@ -636,9 +627,8 @@ agentic:
   # Phase 26 — research claim/source ledger (audrey_research only). When on, a
   # second mechanical pass structures each researcher's prose into a
   # claims+sources ledger that later stages (fact-check, writer, hedge policy)
-  # reason over. Opt-in + staged: enabled here turns on Stage 1 (build the
-  # ledger); it's carried but only progressively consumed as later stages ship.
-  # Toggle live (no rebuild) to A/B against the prose baseline. Off by default.
+  # reason over. Enabled here, including the later fact-check and writer stages;
+  # the code defaults to off when this configuration is absent.
   research_ledger:
     enabled: true
     # Stage 4 — deterministic selective hedging. When on, each surviving claim
@@ -646,7 +636,7 @@ agentic:
     # computed from its source types + risk, handed to the writer as per-claim
     # guidance. Separate flag so it can be A/B'd against a ledger-on baseline
     # (it changes writer wording — plain statement becomes explicitly allowed).
-    # Requires `enabled: true` to have any effect. Off by default.
+    # Requires `enabled: true`; enabled here, absent-configuration default is off.
     hedge_policy: true
   # Debug/eval: when true, deep-panel answers end with a "## Panel drafts
   # (debug)" section carrying every worker's full draft (model, latency, tool
@@ -1377,7 +1367,7 @@ complexity:
     - "detailed analysis"
 
 debug:
-  log_incoming_payload: false            # when true, log role+content-length for every incoming chat message (Phase 6a OWUI shape investigation)
+  log_incoming_payload: false            # when true, log role+content-length for every incoming chat message
   log_incoming_payload_content: false    # when true, log first 500 chars of every incoming chat message — PII-bearing, leave off in normal operation
 
 # ─── Operational readiness ─────────────────────────────────────────────
@@ -1445,7 +1435,7 @@ vision:
   # model: "qwen3-vl:32b"
   timeout_s: 120                         # a dense screenshot is a slow decode
   max_images_per_turn: 4                 # local calls serialize on the GPU gate
-  cache_size: 64                         # OWUI resends the data URI every turn
+  cache_size: 64                         # compatibility clients may resend image data each turn
   # ⚠️⚠️ THIS LIST ONLY AFFECTS PASSTHROUGH. The short-circuit that reads it is
   # `if target_model and is_vision_capable(target_model, cfg)`
   # (`pipeline/vision.py:641`), and the DEEP path calls the sidecar with
@@ -1631,7 +1621,7 @@ passthrough:
     # qwen2.5-coder:32b) — deduped 2026-08-15.
     # ⚠️ 2026-08-16: granite4.1:30b, cogito-2.1:671b-cloud, deepseek-r1:32b and
     # olmo-3.1:32b removed — none were pulled. Here a phantom is quieter still:
-    # it is offered to OWUI as a selectable model and only fails when picked.
+    # it is offered to compatibility clients and only fails when picked.
     - qwen3.8:latest
     # ── Quant bake-off arms, 2026-08-25. NOT in any pool; passthrough only.
     # Same 27.3B weights as `qwen3.8:latest` (Q4_K_M, 17 GB) at a different
@@ -1718,13 +1708,13 @@ passthrough:
     # an image turn to a vl target forwards untouched, with no transcription
     # hop (`test_image_to_vision_capable_model_is_forwarded_untouched`).
     # Side effect, accepted: /v1/models lists one entry per allowed concrete,
-    # so OWUI users can now pick these two directly as well.
+    # so API clients can select either model directly as well.
     - qwen3-vl:32b
     - llava:34b
     # Direct medical text/image specialist for compatibility clients.
     # Uses the existing global compat:full policy and local GPU scheduling.
     - medgemma:27b
-  require_role: null                     # null | "admin" — gate by OWUI role
+  require_role: null                     # null | "admin" — gate by native account role
 
 # ─── Classification pre-filter ─────────────────────────────────────────
 classification:

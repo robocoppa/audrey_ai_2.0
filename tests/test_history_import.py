@@ -16,6 +16,7 @@ from audrey.app_state.history_import import (
     HistoryImportError,
     load_archive_export,
 )
+from audrey.app_state.migrations import MIGRATIONS
 
 
 def _message(
@@ -351,7 +352,7 @@ def test_preview_does_not_migrate_v11_and_apply_migrates_after_backup(
     with sqlite3.connect(db_path) as connection:
         assert connection.execute(
             "SELECT MAX(version) FROM app_schema_migrations"
-        ).fetchone()[0] == 21
+        ).fetchone()[0] == max(version for version, _sql in MIGRATIONS)
         assert connection.execute(
             "SELECT COUNT(*) FROM app_history_import_conversations"
         ).fetchone()[0] == 1

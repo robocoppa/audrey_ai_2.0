@@ -1,9 +1,8 @@
 """Model registry — ranked lists of candidate models per task type.
 
-Loaded once at startup from `config.yaml` under `model_registry`. Provides
-`first_healthy(task, predicate)` for the fast path's "pick highest-priority
-healthy model" selection, and `candidates(task)` for the deep panel's
-multi-worker dispatch.
+Loaded from `config.yaml` under `model_registry`. `candidates(task)` returns
+priority-ordered copies for fast selection and deep-panel dispatch. Callers
+apply their health policy; `first_healthy` is a convenience for a strict filter.
 """
 
 from __future__ import annotations
@@ -22,8 +21,6 @@ _VALID_LOCATIONS = {"local", "cloud"}
 class ModelSpec:
     name: str
     priority: int
-    speed: int
-    quality: int
     location: Location
 
 
@@ -40,8 +37,6 @@ class ModelRegistry:
                 ModelSpec(
                     name=entry["name"],
                     priority=int(entry.get("priority", 0)),
-                    speed=int(entry.get("speed", 50)),
-                    quality=int(entry.get("quality", 50)),
                     location=_parse_location(
                         entry.get("location", "local"),
                         task=task,

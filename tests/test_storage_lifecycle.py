@@ -392,7 +392,6 @@ async def test_rejected_chunk_retry_preserves_the_previous_part(tmp_path: Path) 
     app.dependency_overrides[require_user] = lambda: AuthedUser(
         email=USER,
         role="user",
-        owui_id="user-1",
     )
     app.state.uploads_db = db
     app.state.cfg = SimpleNamespace(

@@ -257,7 +257,7 @@ def _app(db: UploadsDB, tmp_path: Path) -> FastAPI:
     app.state.text_embedder = object()
     app.state.image_embedder = object()
     app.state.cfg = SimpleNamespace(
-        env=SimpleNamespace(kb_service_token=SECRET, owui_url="http://owui"),
+        env=SimpleNamespace(kb_service_token=SECRET),
         raw={
             "kb": {
                 "upload_root": str(tmp_path / "uploads"),

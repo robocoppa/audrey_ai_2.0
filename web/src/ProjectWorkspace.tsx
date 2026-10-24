@@ -21,6 +21,7 @@ import {
 } from "./api";
 
 import { UploadProgress } from "./UploadProgress";
+import { TaxProjectSection } from "./TaxProjectSection";
 
 type ProjectFileKind = "all" | AudreyFile["kind"];
 
@@ -424,6 +425,8 @@ export function ProjectHome({
       ) : null}
 
       {error ? <p className="project-error" role="alert">{error}</p> : null}
+
+      {isPrivate ? <TaxProjectSection projectId={project.id} onConversationSelected={onConversationSelected} /> : null}
 
       <div className="project-home-grid">
         <section className="project-panel" aria-labelledby="project-conversations-title">

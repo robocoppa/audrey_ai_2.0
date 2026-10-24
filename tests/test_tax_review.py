@@ -86,7 +86,12 @@ async def test_case_creation_derives_pin_and_project_and_owner_routes(state):
     assert (await state.client.get(state.path)).json() == {"case": None}
     case = await _create(state)
     assert case["reference_release"] == state.release["id"]
-    assert case["project_id"] is None and case["checklist"]["status"] == "needs_information"
+    project = await state.store.projects.get(user_id=state.owner.user_id, project_id=case["project_id"])
+    assert project.private_required and project.name == "Tax review 2025"
+    assert case["checklist"]["status"] == "needs_information"
+    repeated = await state.client.post(state.path, json={"tax_year": 2025, "goal": "Review a planning calculation"})
+    assert repeated.status_code == 201 and repeated.json()["id"] == case["id"]
+    assert repeated.json()["project_id"] == case["project_id"]
     assert (await state.client.post(state.path, json={"tax_year": 2025, "goal": "Again"})).status_code == 409
     state.current[0] = await state.store.resolve_external_identity(
         provider="test", subject="other", email="other@example.com", display_name="Other",
@@ -738,3 +743,95 @@ async def test_quote_cannot_resolve_missing_item_from_other_tax_year(state):
     assert refused["status"] == 422
     saved = (await state.client.get(state.path)).json()["case"]
     assert saved["facts"] == [] and saved["missing_items"][0]["status"] == "unresolved"
+
+
+async def test_project_tax_cases_retain_current_facts_and_saved_worksheet_offline(state):
+    case = await _create(state)
+    proposed = await _call(state, "propose_fact", expected_revision=case["revision"], data={
+        "label": "W-2 wages", "value": "$50,000", "kind": "user_statement",
+    })
+    confirmed = await state.client.post(state.path + "/actions", json={
+        "operation": "confirm_fact", "expected_revision": proposed["revision"],
+        "data": {"fact_id": proposed["updated_entry"]["id"]},
+    })
+    case = confirmed.json()
+    saved = await state.store.tax_cases.update(user_id=state.owner.user_id,
+        conversation_id=state.conversation.conversation_id, expected_revision=case["revision"],
+        operation="save_review", data={"summary": "A limited saved worksheet", "findings": [], "next_question": ""})
+    state.app.state.reference_releases = None
+    project_path = f"/api/projects/{case['project_id']}/tax-reviews"
+    response = await state.client.get(project_path)
+    assert response.status_code == 200, response.text
+    detail = response.json()["items"][0]
+    assert detail["revision"] == saved["revision"]
+    assert detail["facts"][0]["value"] == "$50,000"
+    assert detail["review"]["summary"] == "A limited saved worksheet"
+    assert "history" not in detail["facts"][0]
+    # Project facts are projected from the same editable case, without a second
+    # fact store. Editing updates one row and makes the saved worksheet stale.
+    state.app.state.reference_releases = state.releases
+    changed = await state.client.post(state.path + "/actions", json={
+        "operation": "edit_fact", "expected_revision": saved["revision"],
+        "data": {"fact_id": proposed["updated_entry"]["id"], "label": "W-2 wages", "value": "$52,000"},
+    })
+    assert changed.status_code == 200, changed.text
+    detail = (await state.client.get(project_path)).json()["items"][0]
+    assert len(detail["facts"]) == 1 and detail["facts"][0]["value"] == "$52,000"
+    assert "history" not in detail["facts"][0] and detail["review"]["stale"]
+    state.current[0] = await state.store.resolve_external_identity(
+        provider="test", subject="project-other", email="project-other@example.com", display_name="Other",
+        role="user", auth_method="test",
+    )
+    assert (await state.client.get(project_path)).status_code == 404
+    assert (await state.client.post(state.path + "/project")).status_code == 404
+
+
+async def test_explicit_legacy_case_project_action_and_reads_have_no_resurrection(state):
+    case = await _create(state)
+    assert await state.store.projects.delete(user_id=state.owner.user_id, project_id=case["project_id"])
+    read = await state.client.get(state.path)
+    assert read.status_code == 200 and read.json()["case"]["project_id"] is None
+    assert await state.store.projects.get(user_id=state.owner.user_id, project_id=case["project_id"]) is None
+    attached = await state.client.post(state.path + "/project")
+    assert attached.status_code == 200, attached.text
+    assert attached.json()["project_id"] and attached.json()["project_id"] != case["project_id"]
+    repeated = await state.client.post(state.path + "/project")
+    assert repeated.json()["project_id"] == attached.json()["project_id"]
+
+
+async def test_case_creation_retry_reads_saved_work_when_sources_are_offline(state, monkeypatch):
+    case = await _create(state)
+    state.app.state.reference_releases = None
+    import audrey.tax_documents as documents
+
+    def unavailable(*args):
+        raise AssertionError("An idempotent retry must not reopen old document sources")
+
+    monkeypatch.setattr(documents, "selected_project_document_ids", unavailable)
+    response = await state.client.post(state.path, json={"tax_year": 2025, "goal": "Review a planning calculation"})
+    assert response.status_code == 201, response.text
+    assert response.json()["id"] == case["id"]
+    assert response.json()["reference_update"] == {"status": "unavailable"}
+
+
+@pytest.mark.parametrize("operation", ["create", "ensure"])
+async def test_project_grouping_source_unavailable_is_explicit_safe_refusal(state, monkeypatch, operation):
+    from contextlib import asynccontextmanager
+
+    import audrey.tax_documents as documents
+
+    if operation == "ensure":
+        case = await _create(state)
+        await state.store.projects.delete(user_id=state.owner.user_id, project_id=case["project_id"])
+
+    @asynccontextmanager
+    async def unavailable(*args):
+        raise ProcessingPolicyError("private_processing_unavailable")
+        yield []
+
+    monkeypatch.setattr(documents, "selected_project_document_ids", unavailable)
+    path = state.path if operation == "create" else state.path + "/project"
+    response = await state.client.post(path, json={"tax_year": 2025, "goal": "Review"} if operation == "create" else None)
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["error"] == "private_processing_unavailable"
+    assert not await state.store.projects.list_page(user_id=state.owner.user_id, limit=10)

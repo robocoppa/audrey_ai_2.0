@@ -23,10 +23,10 @@
     POST   /v1/files/list                     — SERVICE: a named user's files,
                                                 shaped for a model (phase 40).
 
-Identity: every *user* endpoint depends on `require_user`, which proxies the
-browser's `Authorization: Bearer <jwt>` to OWUI and returns an `AuthedUser`.
-The caller's email *is* the user id — no `?user=` query param, no `X-User`
-header, no form field. Spoofing requires forging a token OWUI would accept.
+Identity: every user endpoint requires an active native session or personal
+access token and resolves the account's stable storage namespace. Ownership is
+derived from the authenticated principal, never a query parameter, form field,
+or caller-supplied user header.
 
 Safety layers (all mandatory):
 

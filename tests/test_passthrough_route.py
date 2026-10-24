@@ -75,7 +75,7 @@ def _stub_registry(location: str = "local") -> SimpleNamespace:
 
 
 def _stub_user(role: str = "user", email: str = "alice@example.com") -> SimpleNamespace:
-    return SimpleNamespace(email=email, role=role, owui_id="abc")
+    return SimpleNamespace(email=email, role=role)
 
 
 def test_resolve_rejects_when_passthrough_disabled():

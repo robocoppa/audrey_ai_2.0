@@ -40,7 +40,7 @@ def _app(db, tmp_path):
     }})
     app.dependency_overrides[require_service] = lambda: None
     app.dependency_overrides[require_user] = lambda: AuthedUser(
-        email=USER, role="user", owui_id="", display_name="Alice",
+        email=USER, role="user", display_name="Alice",
     )
     return app
 

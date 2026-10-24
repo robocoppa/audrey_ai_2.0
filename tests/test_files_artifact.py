@@ -59,7 +59,7 @@ def app(db: UploadsDB, tmp_path: Path) -> FastAPI:
     app.include_router(files_router)
     app.state.uploads_db = db
     app.state.cfg = SimpleNamespace(
-        env=SimpleNamespace(kb_service_token=SECRET, owui_url="http://owui"),
+        env=SimpleNamespace(kb_service_token=SECRET),
         raw={"kb": {"upload_root": str(tmp_path / "uploads"),
                     "max_upload_mb": 50, "max_user_bytes": 10 * 1024**3,
                     "chunked": {"max_upload_mb": 2048, "part_size_mb": 8},

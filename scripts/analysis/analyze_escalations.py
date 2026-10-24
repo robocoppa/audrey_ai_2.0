@@ -108,7 +108,7 @@ import yaml
 # repo has burned six sessions on parsers bounded loosely enough to match
 # their own payload.
 #
-#   graph.py:372  complexity: 463 tokens -> fast (owui_task)
+#   graph.py:372  complexity: 463 tokens -> fast (tokens<500)
 #   graph.py:321  classify: general (keyword:code_fence, conf=0.95)
 #   graph.py:174  escalate: fast→deep (chars=42, conf=0.60, reason=too_short)
 #   graph.py:477  deep_panel: pool=deep_panel task=general workers=3 ok=3 ...
@@ -147,7 +147,6 @@ class Tally:
 
     fast_turns: int = 0
     deep_turns: int = 0
-    fast_owui: int = 0                      # structurally suppressed subset
     complexity_reasons: Counter[str] = field(default_factory=Counter)
 
     classify_conf: list[float] = field(default_factory=list)
@@ -206,8 +205,6 @@ def parse_log(lines: object, *, since: str | None, ceiling: float) -> Tally:
             t.complexity_reasons[reason] += 1
             if m.group("mode") == "fast":
                 t.fast_turns += 1
-                if "owui_task" in reason:
-                    t.fast_owui += 1
             else:
                 t.deep_turns += 1
             continue
@@ -384,7 +381,6 @@ def build_report(t: Tally, pools: dict[str, dict[str, Any]],
         "turns": {
             "fast": t.fast_turns,
             "deep": t.deep_turns,
-            "fast_owui_task": t.fast_owui,
         },
         "escalations": {
             "count": t.escalations,
@@ -434,8 +430,7 @@ def render(rep: dict[str, Any]) -> str:
     w(f"lines read: {rep['lines_read']:,}")
     w("")
     w("── Turn census (turns that entered the graph) ──")
-    w(f"  fast : {turns['fast']:6,}   (of which OWUI utility turns: "
-      f"{turns['fast_owui_task']:,} — structurally suppressed)")
+    w(f"  fast : {turns['fast']:6,}")
     w(f"  deep : {turns['deep']:6,}   (requested directly, not escalated)")
     w("")
     w("── Escalations ──")
@@ -462,7 +457,7 @@ def render(rep: dict[str, Any]) -> str:
         w(f"  suppressed as fallback:  {cls['fallback_suppressed']:,}")
         w("  ↑ upper bound on the low_conf trigger alone. The gap between this")
         w("    and the actual rate above is what tool_rounds / memory_hits /")
-        w("    owui_task / audrey_fast are saving.")
+        w("    audrey_fast are saving.")
         w("  confidence by reason family:")
         for fam, n in sorted(cls["by_family"].items(), key=lambda kv: -kv[1]):
             w(f"    {fam:<18} {n:6,}")

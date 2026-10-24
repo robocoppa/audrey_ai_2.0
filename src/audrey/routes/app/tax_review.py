@@ -11,6 +11,8 @@ from audrey.tax_review import (
     TaxCaseActionRequest,
     apply_tax_case_action,
     create_tax_case,
+    ensure_tax_project,
+    get_project_tax_cases,
     get_tax_case,
 )
 
@@ -25,12 +27,26 @@ async def get_case(
     return {"case": await get_tax_case(request.app, principal, conversation_id)}
 
 
+@router.get("/projects/{project_id}/tax-reviews")
+async def project_cases(
+    project_id: str, request: Request, principal: Principal = Depends(_access),
+) -> dict:
+    return {"items": await get_project_tax_cases(request.app, principal, project_id)}
+
+
 @router.post("/conversations/{conversation_id}/tax-review", status_code=201)
 async def create_case(
     conversation_id: str, body: CreateTaxCaseRequest, request: Request,
     principal: Principal = Depends(_access),
 ) -> dict:
     return await create_tax_case(request.app, principal, conversation_id, body)
+
+
+@router.post("/conversations/{conversation_id}/tax-review/project")
+async def ensure_case_project(
+    conversation_id: str, request: Request, principal: Principal = Depends(_access),
+) -> dict:
+    return await ensure_tax_project(request.app, principal, conversation_id)
 
 
 @router.post("/conversations/{conversation_id}/tax-review/actions")

@@ -7,12 +7,12 @@ import sqlite3
 
 import pytest
 from test_native_private_workflow import _settle
+from test_native_private_workflow import document_setup as document_setup
+from test_native_private_workflow import native as native
 from test_private_document_ingestion import PRIVATE_TEXT
 
 from audrey.processing_policy import processing_scope
 from audrey.routes.app import private_files
-
-pytest_plugins = ("test_native_private_workflow",)
 
 
 async def _draft(s, *, project_id=None):

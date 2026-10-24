@@ -2,21 +2,12 @@
 
     POST /v1/media/describe   — one keyframe in, prose out
 
-## Why this route exists at all
+## Why this route exists
 
-The phase 36 plan had the worker call `POST /v1/chat/completions` with
-`audrey_passthrough/qwen3-vl:32b`, "acting as the uploading user via the Phase
-31 service-token act-as". That does not work: `chat_completions` depends on
-`require_user`, which demands a real OWUI bearer. Phase 31's act-as is
-`resolve_kb_caller`, and it lives only on the KB *query* routes. The worker
-holds `KB_SERVICE_TOKEN` and cannot obtain a user JWT, so it would get a 401.
-
-The fix is not to widen `require_user`. `/v1/chat/completions` is the endpoint
-every OWUI user hits, and teaching it to accept a service token plus an act-as
-header would put the entire chat surface behind a header that grants any
-identity — to close a gap for one background client. This route is the narrow
-alternative: service-token only, one verb, no message history, no streaming,
-no model selection.
+Background workers authenticate with a service token, not a browser session or
+user personal access token. This narrow endpoint describes one image on behalf
+of its recorded owner without granting access to the general chat API. It takes
+no conversation history or caller-selected model.
 
 ## What it preserves
 

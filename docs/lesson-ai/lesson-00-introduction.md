@@ -18,8 +18,8 @@ The pipeline is what makes Audrey more than a thin proxy in front of Ollama. A
 short prompt ("what time is it?") flows through the **fast path**: one model,
 one shot, streamed straight back. A harder prompt ("compare BTRFS and ZFS for a
 5-bay NAS") flows through the **deep panel**: several models draft answers in
-parallel, a synthesizer model reads all the drafts and writes one grounded
-answer, and a reflection step checks the result before it ships. **Research
+parallel, and a synthesizer model reads all the drafts and writes one
+grounded answer. **Research
 mode** goes further for questions that need sources: researchers gather
 evidence, separate stages check it, and a writer produces the answer, with a
 Sources list that code builds rather than the model. Tools are available
@@ -65,25 +65,24 @@ runs on the laptop without any live service.
 ## How the course is organized
 
 The course walks the codebase from the language features and libraries it's
-built on, through the request pipeline, to the application around it. It's published openly because the patterns may help anyone building a
-multi-model application on a home server.
+built on, through the platform and the request pipeline, to the application
+around it. It's published openly because the patterns may help anyone building
+a multi-model application on a home server.
 
-The lessons are grouped in five parts:
+The lessons are grouped in seven parts:
 
-1. **Foundations and the system map.** The Python features and libraries Audrey
-   relies on, then the platform as a whole: the containers, the life of a
-   request, configuration and startup.
-2. **The answer pipeline.** Models, routing, deep mode, tools, the knowledge
-   base, the application database and identity, per-user context, fair
-   scheduling, the OpenAI-compatible routes, the tools sidecar, and research
-   mode.
-3. **The native application.** Runs that outlive the browser connection, the
-   event stream behind every answer, the browser side, and side effects that
-   survive a restart.
-4. **Files and media.** Files as durable objects, background jobs, turning media
-   into text, reaching outside safely, and asking questions about your own
-   files.
-5. **Shaping a turn, and the second API.** Skills, Projects, and the Responses
-   API.
+1. **Foundations.** The Python features and libraries Audrey relies on.
+2. **The platform.** The containers and the life of a request, configuration
+   and startup, the application database, and identity and access.
+3. **The answer pipeline,** in the order a request meets it: routing, the model
+   layer, sharing the GPU fairly, deep and research modes, and tools.
+4. **Knowledge, memory and the tool server.** The knowledge base, each person's
+   memories and history, and the sidecar that runs the tools.
+5. **The native application.** The event stream behind every answer, runs that
+   outlive the browser connection, and side effects that survive a restart.
+6. **Files and media.** Files as durable objects, turning media into text,
+   reaching outside safely, and asking questions about your own files.
+7. **Shaping a turn, the bot API, and operating.** Skills and Projects, the
+   OpenAI-compatible API, and keeping Audrey running.
 
 Start with [Lesson 1 — Foundations I: Python language features](lesson-01-foundations.md).

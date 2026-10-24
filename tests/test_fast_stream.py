@@ -185,6 +185,18 @@ async def _events(
     return events, terminal
 
 
+async def test_plain_fast_stream_probes_when_all_candidates_are_cooling(recorded_metrics):
+    health = HealthTracker()
+    health.record_failure("a", "daemon restarted")
+    ollama = _ScriptedOllama({"a": [{
+        "message": {"content": "recovered"}, "done": True, "done_reason": "stop",
+    }]})
+    events, terminal = await _events(ollama, _registry(("a", 100, "local")), health)
+    assert "".join(event.text for event in events) == "recovered"
+    assert terminal.outcome == StreamOutcome.OK
+    assert health.is_healthy("a")
+
+
 async def test_plain_fast_success_has_one_terminal_and_matching_metrics(
     recorded_metrics,
 ):
@@ -872,13 +884,16 @@ async def test_native_preference_context_reaches_model_but_not_auto_routing(
     assert frames[-1] == "data: [DONE]\n\n"
 
 
+@pytest.mark.parametrize("cooling", [False, True])
 async def test_fast_tool_route_emits_native_observations_without_leaking_to_v1(
-    monkeypatch,
+    monkeypatch, cooling,
 ):
     cfg = _Cfg(("a", 100, "local"))
     cfg.raw["fast_path"]["tool_capable_models"] = ["a"]
     archive = _RecordingArchive()
     app = _route_app(cfg, _ScriptedOllama({}), archive)
+    if cooling:
+        app.state.health.record_failure("a", "Ollama was temporarily offline")
     app.state.tools = ToolRegistry(by_name={
         "web_search": ToolSpec(
             name="web_search",
@@ -1081,7 +1096,7 @@ async def test_tool_stream_cleanup_preserves_provider_failure(monkeypatch, provi
             _ = [frame async for frame in stream]
 
 
-async def test_nonstream_owui_utility_turn_is_not_archived():
+async def test_nonstream_task_header_is_ordinary_archived_content():
     archive = _RecordingArchive()
     cfg = _Cfg(("a", 100, "local"))
     app = SimpleNamespace(state=SimpleNamespace(
@@ -1108,51 +1123,11 @@ async def test_nonstream_owui_utility_turn_is_not_archived():
         user_turn_text="### Task:\nGenerate a title",
     )
 
-    assert archive.calls == []
+    assert len(archive.calls) == 1
 
 
-async def test_stream_compatibility_owui_utility_forces_fast_and_is_not_archived(
-    monkeypatch,
-):
-    cfg = _Cfg(("a", 100, "local"))
-    ollama = _ScriptedOllama({
-        "a": [{
-            "message": {"content": "utility result"},
-            "done": True,
-        }],
-    })
-
-    async def classify(*args, **kwargs):
-        return "general", "test", 1.0
-
-    archive = _RecordingArchive()
-    monkeypatch.setattr(route_pipeline, "classify_with_registry", classify)
-    app = _route_app(cfg, ollama, archive)
-    messages = [{"role": "user", "content": "### Task:\nGenerate a title"}]
-    payload = ChatCompletionRequest(
-        model="audrey_deep",
-        messages=messages,
-        stream=True,
-    )
-
-    frames = [
-        frame async for frame in _stream_via_pipeline(
-            app,
-            payload,
-            messages,
-            {},
-            user_id="alice@example.com",
-            conversation_id="conversation-1",
-            user_turn_text="### Task:\nGenerate a title",
-        )
-    ]
-
-    assert frames[-1] == "data: [DONE]\n\n"
-    assert archive.calls == []
-    assert ollama.calls[0]["model"] == "a"
-
-
-async def test_stream_native_task_header_obeys_the_requested_deep_mode(monkeypatch):
+@pytest.mark.parametrize("native", [False, True])
+async def test_stream_task_header_obeys_the_requested_deep_mode(monkeypatch, native):
     cfg = _Cfg(("a", 100, "local"))
     ollama = _ScriptedOllama({})
     user_text = "### Task:\nWrite a detailed migration plan"
@@ -1195,7 +1170,7 @@ async def test_stream_native_task_header_obeys_the_requested_deep_mode(monkeypat
                 assistant_message_id="message-native-task",
                 mode="deep",
                 sink=lambda _event: None,
-            ),
+            ) if native else None,
         )
     ]
 

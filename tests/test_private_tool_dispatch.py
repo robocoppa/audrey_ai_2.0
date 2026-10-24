@@ -288,3 +288,76 @@ async def test_private_kb_search_refuses_broadening_or_unverified_embeddings(doc
     if case != "foreign_hit":
         embedder.embed_one.assert_not_awaited()
         qdrant.search_hybrid.assert_not_awaited()
+
+
+@pytest.mark.parametrize("tool", ["get_file_text", "analyze_table"])
+async def test_ordinary_duplicate_name_never_shadows_private_document(documents, tool):
+    await documents.uploads.record_upload(
+        file_id=str(uuid.uuid4()), user="owner", filename="costs.csv", mime="text/csv",
+        bytes_=20, kind="text", collection="ordinary", chunks=1,
+        uploaded_at="2026-10-20T12:00:00+00:00",
+    )
+    args = {"filename": "costs.csv"}
+    if tool == "analyze_table":
+        args.update(action="aggregate", aggregations=[{"op": "sum", "column": "amount"}])
+    result = await invoke_factory(documents, tool, args)
+    assert not result.is_error
+    if tool == "get_file_text":
+        assert json.loads(result.content)["text"] == documents.content
+    else:
+        assert "20" in result.content
+
+
+async def test_duplicate_private_names_use_newest_and_disclose_selection(documents):
+    original = await documents.uploads.get_upload(documents.file_id)
+    duplicate_id = str(uuid.uuid4())
+    duplicate_path = documents.path.with_name(duplicate_id + ".csv")
+    text = "category,amount\nnew,99.00\n"
+    duplicate_path.write_text(text)
+    duplicate_path.with_suffix(".ocr.txt").write_text(text)
+    # A second real private row; no model or generated summary is needed.
+    reserved = await documents.uploads.reserve_single_upload(
+        reservation_id=duplicate_id, user="owner", bytes_=len(text), max_user_bytes=100_000,
+        now="2026-10-20T12:00:00+00:00", expired_before="2026-10-18T00:00:00+00:00",
+        private_required=True,
+    )
+    assert reserved.accepted
+    saved = await documents.uploads.commit_reserved_upload(
+        reservation_id=duplicate_id, reservation_kind="single_shot", file_id=duplicate_id,
+        user="owner", filename=original["filename"], mime="text/csv", bytes_=len(text), kind="text",
+        collection=private_text_collection("owner"), chunks=1, uploaded_at="2026-10-20T12:00:00+00:00",
+        status="ready", summary="", max_user_bytes=100_000,
+    )
+    assert saved.accepted
+    result = await invoke_factory(documents, "get_file_text", {"filename": "costs.csv"})
+    payload = json.loads(result.content)
+    assert not result.is_error
+    assert payload["text"] == text
+    assert "using the newest upload" in payload["note"]
+
+
+async def test_invalid_private_record_is_skipped_without_disabling_other_files(documents, caplog, monkeypatch):
+    good = await documents.uploads.list_user("owner")
+    # Simulate a legacy/half-migrated read projection; normal admission rejects it.
+    bad = {**good[0], "file_id": str(uuid.uuid4()), "filename": "SECRET_BAD_FILENAME.csv",
+           "collection": "wrong-private-collection"}
+    monkeypatch.setattr(documents.uploads, "list_user", AsyncMock(return_value=[bad, *good]))
+    with caplog.at_level(logging.WARNING):
+        result = await invoke_factory(documents, "list_my_files", {})
+    assert not result.is_error
+    assert [row["filename"] for row in json.loads(result.content)["files"]] == ["costs.csv"]
+    assert "SECRET_BAD_FILENAME" not in result.content + caplog.text
+    assert "wrong-private-collection" not in result.content + caplog.text
+    assert caplog.records
+    # Search also skips the bad row, then uses only the good file's identity.
+    documents.app.state.text_embedder = SimpleNamespace(
+        model="local:latest", profile=SimpleNamespace(digest="a" * 64),
+        embed_one=AsyncMock(return_value=[1.0, 0.0]),
+    )
+    documents.app.state.qdrant = SimpleNamespace(
+        collection_exists=AsyncMock(return_value=True), search_hybrid=AsyncMock(return_value=([], [])),
+    )
+    result = await invoke_factory(documents, "kb_search", {"query": "work expenses"})
+    assert not result.is_error
+    search = documents.app.state.qdrant.search_hybrid.await_args
+    assert search.kwargs["scope"].file_ids == [documents.file_id]

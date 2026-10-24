@@ -11,7 +11,7 @@ harness probes many labeled queries and reports the score distributions so the
 floor is set from data: the max off-domain score and the min on-domain score
 bound the safe window, and a candidate floor's misclassifications are counted.
 
-It hits Audrey's `/v1/kb/query` directly (NOT OWUI): that endpoint takes no auth
+It hits Audrey's `/v1/kb/query` directly: that endpoint takes no auth
 and returns per-hit scores. Run it ON THE BOX (ollama-net DNS resolves there).
 As of the 2026-07-18 security review, Audrey's `:8000` is NOT published to the
 host, so the old `http://192.168.1.11:8000` over-the-LAN form no longer works —

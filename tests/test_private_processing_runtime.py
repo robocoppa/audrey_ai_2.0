@@ -177,7 +177,11 @@ async def test_runtime_owns_safe_clients_runs_real_graph_and_keeps_shared_state(
     original = dict(vars(app.state))
     async with runtime.scope(app) as view:
         assert current_processing_policy() is policy
-        assert view.state.ordinary_marker is app.state.ordinary_marker
+        with pytest.raises(ProcessingPolicyError):
+            _ = view.state.ordinary_marker
+        assert view.state.health is app.state.health
+        assert view.state.gate is app.state.gate
+        assert view.state.inflight is app.state.inflight
         assert view.state.ollama is not app.state.ollama
         assert view.state.graph is not app.state.graph
         assert view.state.archive_client is None

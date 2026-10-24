@@ -16,6 +16,9 @@ class _Storage:
     def __init__(self) -> None:
         self.commits: list[dict] = []
 
+    async def reservation_private_required(self, reservation) -> bool:
+        return False
+
     async def commit_upload(self, reservation, **kwargs) -> None:
         self.commits.append({"reservation": reservation, **kwargs})
 

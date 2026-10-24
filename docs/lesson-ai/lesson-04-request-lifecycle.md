@@ -205,7 +205,7 @@ network can get around Cloudflare Access by browsing to the server directly.
 
 Audrey has two families of routes, and the path prefix tells you which one
 you're in. The native application's routes are grouped under `/api` at
-[`routes/app/__init__.py:14`](../../src/audrey/routes/app/__init__.py#L14):
+[`routes/app/__init__.py:16`](../../src/audrey/routes/app/__init__.py#L16):
 
 ```python
 router = APIRouter(prefix="/api")
@@ -232,7 +232,7 @@ routes for its data controls, and a personal token with the right scope may
 call the native run routes.
 
 **Who is calling, in two sentences.** Both doors start with the same FastAPI
-dependency, [`require_user`](../../src/audrey/auth.py#L308), which verifies a
+dependency, [`require_user`](../../src/audrey/auth.py#L156), which verifies a
 Cloudflare Access header against Cloudflare's public keys, or looks a bearer
 token starting `aud_pat_` up in Audrey's own database (unexpired and not
 revoked). Either way the result is a `Principal`: one Audrey account, with a
@@ -252,7 +252,7 @@ async def chat_completions(
 ):
 ```
 
-The browser's is [`run_agui_agent`](../../src/audrey/routes/app/runs.py#L1266):
+The browser's is [`run_agui_agent`](../../src/audrey/routes/app/runs.py#L1680):
 
 ```python
 @router.post("/agent")
@@ -271,9 +271,9 @@ taught. The decorator registers the function for `POST /v1/chat/completions`
 or `POST /api/agent`. The request body is parsed into a Pydantic model, and a
 body that doesn't match gets a 422 before your code runs. `Depends(...)` runs
 the identity check first; if it fails, the caller gets 401 or 403 and the
-function never runs. `/v1` routes receive an `AuthedUser`, an older shape kept
-for compatibility that carries the `Principal` inside it. Native routes receive
-the `Principal` directly; `_run_access` is `require_scope("compat:full")`, the
+function never runs. `/v1` routes receive an `AuthedUser`, which carries the
+`Principal` inside it, plus the storage name that the older file and memory
+routes key on. Native routes receive the `Principal` directly; `_run_access` is `require_scope("compat:full")`, the
 same check plus a scope requirement when the caller uses a personal token.
 
 The doors look different, but they converge. Whenever the answer is streamed,
@@ -284,7 +284,7 @@ into it. First, the pipeline itself.
 
 ### 2.3 The pipeline graph, and what a node looks like
 
-Open [`graph.py:637`](../../src/audrey/pipeline/graph.py#L637):
+Open [`graph.py:610`](../../src/audrey/pipeline/graph.py#L610):
 
 ```python
 g: StateGraph = StateGraph(PipelineState)
@@ -303,13 +303,12 @@ g.add_node("reflect", node_reflect)
 
 This is the whole pipeline laid out as a graph, one node per step. Each node is
 an `async def` function defined inside
-[`build_graph`](../../src/audrey/pipeline/graph.py#L180), the function this
-code belongs to; `grep -n "async def node_" src/audrey/pipeline/graph.py` lists
-them. (Defining them *inside* `build_graph` is deliberate, and Lesson 5 explains
-why.)
+[`build_graph`](../../src/audrey/pipeline/graph.py#L161), the function this
+code belongs to, and each is named `node_` plus its step. (Defining them
+*inside* `build_graph` is deliberate, and Lesson 5 explains why.)
 
 The topology, meaning which node runs after which, follows at
-[`graph.py:650`](../../src/audrey/pipeline/graph.py#L650):
+[`graph.py:623`](../../src/audrey/pipeline/graph.py#L623):
 
 ```python
 g.set_entry_point("datetime")
@@ -393,7 +392,7 @@ Don't memorize this; you'll see it many more times. The point for now: **the
 pipeline is a graph, and each node is a function.**
 
 What does a node look like? Here's the first one,
-[`node_datetime`](../../src/audrey/pipeline/graph.py#L257), with its docstring
+[`node_datetime`](../../src/audrey/pipeline/graph.py#L238), with its docstring
 left out:
 
 ```python
@@ -447,13 +446,14 @@ workers, the synthesizer) and emits stream events as it goes.
 
 | | The graph | The streaming driver |
 |---|---|---|
-| Defined in | [`build_graph`](../../src/audrey/pipeline/graph.py#L180) | [`_stream_via_pipeline`](../../src/audrey/routes/openai/pipeline.py#L274) |
+| Defined in | [`build_graph`](../../src/audrey/pipeline/graph.py#L161) | [`_stream_via_pipeline`](../../src/audrey/routes/openai/pipeline.py#L274) |
 | Serves | non-streaming `/v1` requests, through [`_generate_via_pipeline`](../../src/audrey/routes/openai/pipeline.py#L153) | every native run, and streaming `/v1` requests |
-| Decides fast or deep | inside the graph, in [`node_complexity`](../../src/audrey/pipeline/graph.py#L335) | itself, before classification, so the first banner goes out at once |
+| Decides fast or deep | inside the graph, in [`node_complexity`](../../src/audrey/pipeline/graph.py#L316) | itself, before classification, so the first banner goes out at once |
 | Produces | one final state, returned as one JSON response | a stream of events: banners, stages, words |
+| Checks a deep answer's length | yes, in `reflect`, with one retry | no: A streamed answer is already on screen |
 
 The streaming driver's fast-or-deep decision is a short chain of rules, starting
-at [`pipeline.py:343`](../../src/audrey/routes/openai/pipeline.py#L343)
+at [`pipeline.py:342`](../../src/audrey/routes/openai/pipeline.py#L342)
 (shortened here):
 
 ```python
@@ -484,7 +484,7 @@ The two drivers overlap in two places you should know about.
 graph itself.** The tool loop (the ReAct loop of a later lesson) lives in the
 graph, so the driver hands the turn to it and sends the finished answer as one
 piece. The comment at
-[`pipeline.py:474`](../../src/audrey/routes/openai/pipeline.py#L474) says so:
+[`pipeline.py:471`](../../src/audrey/routes/openai/pipeline.py#L471) says so:
 
 ```python
 # If the chosen model is tool-capable and tools are registered, route
@@ -495,14 +495,14 @@ piece. The comment at
 
 A fast turn on a model *without* tool support doesn't touch the graph; it
 streams word by word through
-[`stream_fast_path`](../../src/audrey/pipeline/fast_path.py#L244). Before that,
-[`_prepare_stream_context`](../../src/audrey/routes/openai/pipeline.py#L1553)
+[`stream_fast_path`](../../src/audrey/pipeline/fast_path.py#L248). Before that,
+[`_prepare_stream_context`](../../src/audrey/routes/openai/pipeline.py#L1559)
 adds the server date and recalls the authenticated person's memories. Recall
 is server work: the answering model doesn't need tool support to receive
 those facts. It receives no instructions to call tools this branch can't run.
 
 **On a deep turn, the driver repeats the graph's opening steps in its own
-code.** [`_phase_thinking`](../../src/audrey/routes/openai/pipeline.py#L1594)
+code.** [`_phase_thinking`](../../src/audrey/routes/openai/pipeline.py#L1600)
 calls the same context helper as the plain fast stream, then plans subtasks.
 Together they mirror the graph's `datetime`, `memory_recall` and `planner`
 nodes. The context helper uses `datetime_system_message`, `recall_for_request`
@@ -520,7 +520,7 @@ order.
 
 Now we can trace one message all the way through. You're in the browser, in a
 conversation that already has a few turns. You type *"what is BTRFS?"* with the
-model picker on `audrey_auto`, and press Send.
+model picker on Auto (the `audrey_auto` workflow underneath), and press Send.
 
 The whole trip, before we walk it:
 
@@ -558,11 +558,11 @@ account that's pending approval or disabled gets 403. Either way the route
 never runs.
 
 **4. The route takes the text and calls `create_run`.**
-[`_agui_user_content`](../../src/audrey/routes/app/runs.py#L999) insists the
+[`_agui_user_content`](../../src/audrey/routes/app/runs.py#L1249) insists the
 message is user text, and
-[`create_run`](../../src/audrey/routes/app/runs.py#L1029) does the real work. It
+[`create_run`](../../src/audrey/routes/app/runs.py#L1279) does the real work. It
 starts by loading the conversation, scoped to its owner, at
-[`runs.py:1037`](../../src/audrey/routes/app/runs.py#L1037):
+[`runs.py:1287`](../../src/audrey/routes/app/runs.py#L1287):
 
 ```python
 conversation = await store.conversations.get(
@@ -578,7 +578,7 @@ nothing and gets the same 404 as an id that doesn't exist. The route never
 reveals that another person's conversation exists.
 
 **5. It checks that you may use this model.**
-[`resolve_model`](../../src/audrey/model_catalog.py#L270) looks the requested model
+[`resolve_model`](../../src/audrey/model_catalog.py#L329) looks the requested model
 up in the catalog your account is allowed to use, and a model you can't use
 gets 404. Hiding a model from the picker isn't enforcement; this is.
 
@@ -588,7 +588,7 @@ saved preferences (time zone, response style), any attachments (each must be a
 ready file you own), and Project context if the conversation belongs to a
 Project. Then it loads **the conversation's history from Audrey's database**,
 again scoped to you, at
-[`runs.py:1116`](../../src/audrey/routes/app/runs.py#L1116):
+[`runs.py:1379`](../../src/audrey/routes/app/runs.py#L1379):
 
 ```python
 previous_records = await store.conversations.list_messages(
@@ -598,20 +598,20 @@ previous_records = await store.conversations.list_messages(
 ```
 
 Anything the browser might have sent as history is ignored; the docstring of
-[`AgUiRunRequest`](../../src/audrey/routes/app/runs.py#L155) says so in as many
+[`AgUiRunRequest`](../../src/audrey/routes/app/runs.py#L166) says so in as many
 words.
 
 On a new conversation, title generation is auxiliary work. The first turn
 is saved with a cleaned version of its prompt as the fallback title. Only
 after the answer task releases its resources does
-[`_generate_title_after_run`](../../src/audrey/routes/app/runs.py#L566)
+[`_generate_title_after_run`](../../src/audrey/routes/app/runs.py#L653)
 ask the small title model for a better label. A conditional database update
 protects any rename or other conversation change made while it was pending.
 The browser refreshes the title when that background work finishes; a shutdown
 can leave the fallback title, but can't undo the saved message or answer.
 
 **7. It records the turn, all or nothing.** At
-[`runs.py:1165`](../../src/audrey/routes/app/runs.py#L1165) (most arguments
+[`runs.py:1428`](../../src/audrey/routes/app/runs.py#L1428) (most arguments
 left out):
 
 ```python
@@ -623,19 +623,19 @@ started = await store.conversations.begin_run(
 )
 ```
 
-[`begin_run`](../../src/audrey/app_state/repositories.py#L644) writes your
+[`begin_run`](../../src/audrey/app_state/repositories.py#L751) writes your
 message, an empty assistant message the answer will fill, and a run record in
 one database transaction, so either all three exist or none do. If the
 conversation already has a run in progress, it refuses, and the route answers
 409 Conflict: one active run per conversation.
 
 **8. It launches the run as a task Audrey owns.** `create_run` hands everything
-to [`NativeRunManager.launch`](../../src/audrey/routes/app/runs.py#L503), which
+to [`NativeRunManager.launch`](../../src/audrey/routes/app/runs.py#L545), which
 starts the run with `asyncio.create_task` and keeps it in its own table of live
 runs. The task belongs to Audrey's process, not to your HTTP connection.
 
 **9. It answers with the run's event stream.** Back in `run_agui_agent`, at
-[`runs.py:1296`](../../src/audrey/routes/app/runs.py#L1296):
+[`runs.py:1710`](../../src/audrey/routes/app/runs.py#L1710):
 
 ```python
 # The manager owns the run independently of this response. A browser
@@ -656,7 +656,7 @@ run by id. Stop is `POST /api/runs/{run_id}/cancel`; `GET /api/runs/{run_id}`
 reports its status. If the connection drops, the run carries on.
 
 **10. The run enters the shared streaming driver.** The task runs
-[`_stream_via_selected_model`](../../src/audrey/routes/app/runs.py#L337):
+[`_stream_via_selected_model`](../../src/audrey/routes/app/runs.py#L373):
 
 ```python
 async def _stream_via_selected_model(
@@ -670,20 +670,23 @@ async def _stream_via_selected_model(
     """Dispatch native workflows normally and direct entries straight to Ollama."""
 
     if not payload.model.startswith("audrey_passthrough/"):
-        async for frame in _stream_via_pipeline(
+        async with aclosing(_stream_via_pipeline(
             app,
             payload,
             ...
             event_context=event_context,
             ...
-        ):
-            yield frame
+        )) as frames:
+            async for frame in frames:
+                yield frame
         return
 ```
 
 For one of Audrey's own models like `audrey_auto`, that's the same
 `_stream_via_pipeline` a streaming `/v1` request uses, plus an `event_context`
 saying which run, conversation and assistant message the events belong to.
+`aclosing` shuts the pipeline's stream down as soon as this function stops
+reading it, so a run that ends early doesn't leave the pipeline running.
 (The rest of the function handles **direct models**: one specific model you
 picked by name, streamed straight from Ollama with no pipeline around it.)
 
@@ -721,7 +724,7 @@ user interface (`STEP_STARTED` for a stage, `TEXT_MESSAGE_CONTENT` for answer
 text, `RUN_FINISHED` at the end), and those reach your browser.
 
 **13. The run finishes and is saved.** When the run's final event arrives,
-[`_persist_terminal`](../../src/audrey/routes/app/runs.py#L704) records the
+[`_persist_terminal`](../../src/audrey/routes/app/runs.py#L935) records the
 outcome:
 
 ```python
@@ -797,16 +800,16 @@ Telling them apart matters the day one of them is lost.
 
 | Where | What's in it | Kind |
 |---|---|---|
-| The application database ([`application.sqlite_path`](../../config.yaml#L72)) | accounts, tokens, conversations, messages, runs, preferences, Projects | authority |
-| The uploads database ([`kb.uploads_db_path`](../../config.yaml#L1031)) and the files under [`kb.upload_root`](../../config.yaml#L1013) | what each person uploaded, its processing status, and the bytes | authority |
+| The application database ([`application.sqlite_path`](../../config.yaml#L76)) | accounts, tokens, conversations, messages, runs, preferences, Projects | authority |
+| The uploads database ([`kb.uploads_db_path`](../../config.yaml#L1033)) and the files under [`kb.upload_root`](../../config.yaml#L1015) | what each person uploaded, its processing status, and the bytes | authority |
 | The knowledge-base source folders (mounted read-only into `audrey`) | the shared documents and images | authority, kept outside Audrey |
 | Qdrant's knowledge-base and upload collections | vectors for searching documents, images and uploads | projection |
-| The chat archive (the sidecar's [`ChatArchiveStore`](../../tools-server/chat_archive.py#L424): SQLite plus a Qdrant index) | a searchable copy of past turns | projection of native conversations; the only copy of `/v1` turns |
-| Qdrant's memory collection (the sidecar's [`MemoryStore`](../../tools-server/db.py#L128)) | facts people asked Audrey to remember | **authority**: the one that lives inside Qdrant |
+| The chat archive (the sidecar's [`ChatArchiveStore`](../../tools-server/chat_archive.py#L481): SQLite plus a Qdrant index) | a searchable copy of past turns | projection of native conversations; the only copy of `/v1` turns |
+| Qdrant's memory collection (the sidecar's [`MemoryStore`](../../tools-server/db.py#L146)) | facts people asked Audrey to remember | **authority**: the one that lives inside Qdrant |
 
 Two rows deserve a second look. The chat archive's copy of native conversations
 can be rebuilt on demand: the admin route
-[`rebuild_canonical_chat_projection`](../../src/audrey/routes/admin.py#L407)
+[`rebuild_canonical_chat_projection`](../../src/audrey/routes/admin.py#L329)
 re-delivers every finished native turn from the application database. Saved
 memories are the exception to "Qdrant is search": they're stored as Qdrant
 points rather than rows in the application database, so nothing can rebuild
@@ -827,15 +830,15 @@ understand something properly:
 
 | If you're asking… | Look in… |
 |---|---|
-| "Where does a browser message enter Audrey?" | [`routes/app/runs.py:1266`](../../src/audrey/routes/app/runs.py#L1266) (`run_agui_agent`) |
-| "Where does a bot's request enter?" | [`routes/openai/routes.py:120`](../../src/audrey/routes/openai/routes.py#L120) (`chat_completions`) |
-| "Who is this caller?" | [`auth.py:308`](../../src/audrey/auth.py#L308) (`require_user`) |
-| "Why did this turn go fast or deep?" | [`routes/openai/pipeline.py:274`](../../src/audrey/routes/openai/pipeline.py#L274) (`_stream_via_pipeline`), or [`pipeline/graph.py:335`](../../src/audrey/pipeline/graph.py#L335) (`node_complexity`) when not streaming |
+| "Where does a browser message enter Audrey?" | [`run_agui_agent`](../../src/audrey/routes/app/runs.py#L1680) in `routes/app/runs.py` |
+| "Where does a bot's request enter?" | [`chat_completions`](../../src/audrey/routes/openai/routes.py#L120) in `routes/openai/routes.py` |
+| "Who is this caller?" | [`require_user`](../../src/audrey/auth.py#L156) in `auth.py` |
+| "Why did this turn go fast or deep?" | [`_stream_via_pipeline`](../../src/audrey/routes/openai/pipeline.py#L274) in `routes/openai/pipeline.py`, or [`node_complexity`](../../src/audrey/pipeline/graph.py#L316) in `pipeline/graph.py` when not streaming |
 | "Why did it pick model X?" | [`pipeline/classify.py`](../../src/audrey/pipeline/classify.py) and [`models/registry.py`](../../src/audrey/models/registry.py) |
 | "Why did the answer wait before starting?" | [`pipeline/fair_gate.py`](../../src/audrey/pipeline/fair_gate.py) (the local GPU queue) and [`routes/inflight.py`](../../src/audrey/routes/inflight.py) (the per-user cap) |
 | "Where do tools get called?" | [`pipeline/react.py`](../../src/audrey/pipeline/react.py) |
-| "What does the browser actually receive?" | [`pipeline/agui.py:234`](../../src/audrey/pipeline/agui.py#L234) (`AgUiRunEventAdapter`) |
-| "Is everything up?" | [`routes/admin.py:185`](../../src/audrey/routes/admin.py#L185) (`readiness_status`, `GET /v1/admin/readiness`), which Lesson 5 introduces |
+| "What does the browser actually receive?" | [`AgUiRunEventAdapter`](../../src/audrey/pipeline/agui.py#L234) in `pipeline/agui.py` |
+| "Is everything up?" | [`readiness_status`](../../src/audrey/routes/admin.py#L107) (`GET /v1/admin/readiness`), which Lesson 5 introduces |
 
 Bookmark this. You'll come back.
 
@@ -906,7 +909,7 @@ application database. Conversations, accounts and preferences aren't in Qdrant
 at all.
 
 At the next restart, the uploads database stays the authority. The startup
-check, [`reconcile_with_qdrant`](../../src/audrey/kb/uploads_db.py#L2810),
+check, [`reconcile_with_qdrant`](../../src/audrey/kb/uploads_db.py#L2944),
 reports files whose search content is missing instead of treating them as
 deleted. Every file keeps its owner, its status and its place in the owner's
 quota, still shows in the owner's list, and can still be opened. What the

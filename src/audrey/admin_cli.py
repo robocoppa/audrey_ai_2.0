@@ -10,11 +10,8 @@ import sqlite3
 import threading
 from contextlib import closing
 from dataclasses import asdict
-from getpass import getpass
 from pathlib import Path
 from urllib.parse import quote
-
-import httpx
 
 from audrey.app_state import AccountAdministrationError, ApplicationStore
 from audrey.app_state.history_import import (
@@ -72,15 +69,6 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         required=True,
         help="New disposable restore path; the file must not exist.",
-    )
-    importer = commands.add_parser(
-        "import-owui-users",
-        help="Preview or import unmatched Open WebUI users as pending accounts.",
-    )
-    importer.add_argument(
-        "--apply",
-        action="store_true",
-        help="Create pending accounts after reviewing the default preview.",
     )
     history = commands.add_parser(
         "import-chat-export",
@@ -140,71 +128,6 @@ async def _grant_admin(user_id: str | None = None, *, email: str | None = None) 
     return 0
 
 
-async def _import_owui_users(*, apply: bool = False) -> int:
-    cfg = get_config()
-    token = getpass("Open WebUI administrator API token: ").strip()
-    if not token:
-        print(json.dumps({"status": "failed", "detail": "an admin token is required"}))
-        return 1
-    url = cfg.env.owui_url.rstrip("/") + "/api/v1/users/all"
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.get(
-                url,
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            response.raise_for_status()
-            payload = response.json()
-        if not isinstance(payload, dict) or not isinstance(payload.get("users"), list):
-            raise ValueError("OWUI users response has an unexpected shape")
-        users = payload["users"]
-        if len(users) > 100_000:
-            raise ValueError("OWUI users response is too large")
-        seen_emails: set[str] = set()
-        seen_subjects: set[str] = set()
-        validated: list[tuple[str, str, str]] = []
-        for user in users:
-            if not isinstance(user, dict):
-                raise ValueError("OWUI users response contains an invalid row")
-            subject = str(user.get("id") or "").strip()
-            email = str(user.get("email") or "").strip()
-            name = str(user.get("name") or "").strip()
-            if not subject or not email or "@" not in email:
-                raise ValueError("OWUI users response contains an incomplete account")
-            if subject in seen_subjects or email.casefold() in seen_emails:
-                raise ValueError("OWUI users response contains duplicate ids or emails")
-            seen_subjects.add(subject)
-            seen_emails.add(email.casefold())
-            validated.append((subject, email, name))
-    except (httpx.HTTPError, ValueError) as exc:
-        print(json.dumps({"status": "failed", "detail": str(exc)}))
-        return 1
-
-    application = cfg.raw.get("application", {}) or {}
-    store = ApplicationStore(application.get("sqlite_path", "/data/audrey_app.sqlite"))
-    counts = {"pending": 0, "existing": 0, "ambiguous": 0, "conflict": 0}
-    try:
-        for subject, email, name in validated:
-            outcome = await store.import_pending_owui_user(
-                subject=subject,
-                email=email,
-                display_name=name,
-                apply=apply,
-            )
-            counts[outcome] += 1
-    finally:
-        store.close()
-    print(json.dumps({
-        "status": "partial" if counts["ambiguous"] or counts["conflict"] else (
-            "applied" if apply else "preview"
-        ),
-        "source_users": len(validated),
-        "would_create" if not apply else "created_pending": counts["pending"],
-        "already_in_audrey": counts["existing"],
-        "ambiguous_audrey_email": counts["ambiguous"],
-        "subject_conflicts": counts["conflict"],
-    }, sort_keys=True))
-    return 1 if counts["ambiguous"] or counts["conflict"] else 0
 
 
 def _online_application_backup(source: Path, destination: Path) -> None:
@@ -471,8 +394,6 @@ def main() -> None:
         raise SystemExit(_backup_application_state(args.to))
     if args.command == "verify-app-state-backup":
         raise SystemExit(_verify_application_backup(args.source, args.restore_to))
-    if args.command == "import-owui-users":
-        raise SystemExit(asyncio.run(_import_owui_users(apply=args.apply)))
     if args.command == "import-chat-export":
         raise SystemExit(_import_chat_export(
             file=args.file,

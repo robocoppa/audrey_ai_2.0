@@ -24,7 +24,8 @@ based on prompt token count and the virtual-model preference.
 
 `escalate?` is the adaptive hook from `fast_path`: if the fast answer is
 too short or low-confidence, the graph re-enters in deep mode. `retry?` is
-the reflection loop — at most one extra deep-panel pass.
+the reflection loop — at most one extra deep-panel pass with the same inputs.
+Reflection runs only on this graph driver, not streamed answers.
 
 Virtual-model routing (decided by `node_complexity`):
   audrey_deep / audrey_cloud / audrey_local — always deep (panel → synthesize)
@@ -58,7 +59,6 @@ from audrey.pipeline.complexity import (
     count_tokens_by_role,
     has_deep_intent,
     is_complex,
-    is_owui_task_request,
 )
 from audrey.pipeline.context import datetime_system_message
 from audrey.pipeline.deep_panel import (
@@ -108,9 +108,7 @@ def escalation_decision(
     """Decide whether a completed fast turn should be re-run through the panel.
 
     Returns `"escalate"` or `"end"`. Module-level and pure so the policy can be
-    tested directly — it is six suppression rules now, and the one that was
-    missing (`owui_task`) cost a planner, three deep workers and a synthesis
-    pass every time OWUI named a chat.
+    tested directly.
 
     The suppressions all say the same thing in different words: escalation
     exists to rescue a fast answer that came out THIN, and each of these is a
@@ -127,23 +125,6 @@ def escalation_decision(
         return "end"
     if state.get("escalated_from_fast"):
         return "end"  # already came from an escalation; don't loop
-    if state.get("owui_task"):
-        # OWUI's own utility turns — chat title, tags, follow-up suggestions.
-        # `node_complexity` already pins these to fast; without this the
-        # escalation router undoes that decision immediately.
-        #
-        # BOTH triggers below misfire here by construction. A title IS short,
-        # so `too_short` fires on a correct answer; and these turns carry
-        # OWUI's template rather than a question, so the router has nothing to
-        # classify and returns a low confidence that trips `low_confidence`
-        # too.
-        #
-        # Observed on the box 2026-08-10: a title request logged
-        # `complexity: 463 tokens -> fast (owui_task)`, answered in 32 chars,
-        # then escalated — planner, three deep workers and a synthesis pass,
-        # all to name a chat. The workers had nothing to work with and returned
-        # drafts of 38, 29 and 39 characters.
-        return "end"
     if int(state.get("tool_rounds", 0)) > 0:
         # Fast path used tools — the answer is grounded in real data.
         # Re-running through tool-blind deep workers can only degrade it.
@@ -220,8 +201,8 @@ def build_graph(
     react_max_web_searches = int(react_cfg.get("max_web_searches", 0))
 
     # Deep-panel workers get a separate ReAct budget — tighter by default
-    # because N workers × M rounds multiplies, and local workers hold the
-    # GPU gate for the whole loop.
+    # because N workers × M rounds multiplies. Tool-using local workers
+    # release the GPU gate between model calls.
     deep_react_cfg = react_cfg.get("deep_worker", {}) or {}
     deep_react_max_rounds = int(deep_react_cfg.get("max_rounds", 2))
     deep_react_compress_after = int(deep_react_cfg.get("compress_after_round", react_compress_after))
@@ -238,7 +219,7 @@ def build_graph(
     reflection_cfg = agentic.get("reflection", {}) or {}
     reflection_enabled = bool(reflection_cfg.get("enabled", True))
     reflection_max_retries = int(reflection_cfg.get("max_retries", 1))
-    reflection_min_chars = int(reflection_cfg.get("min_answer_chars", 80))
+    reflection_min_chars = int(reflection_cfg.get("min_answer_chars", 40))
     escalation_cfg = agentic.get("escalation", {}) or {}
     escalation_enabled = bool(escalation_cfg.get("enabled", True))
     escalation_min_chars = int(escalation_cfg.get("min_chars", 100))
@@ -346,8 +327,6 @@ def build_graph(
         deep_intent = has_deep_intent(routing_messages, deep_intent_phrases)
         forced_deep = vm in ("audrey_deep", "audrey_cloud", "audrey_local", "audrey_research")
         forced_fast = vm == "audrey_fast"
-        compatibility_request = state.get("compatibility_request", True)
-        owui_task = compatibility_request and is_owui_task_request(routing_messages)
         image_turn = has_image_part(routing_messages)
         task_override: str | None = None
         describe_first = image_turn and forced_deep and describe_enabled(cfg)
@@ -361,9 +340,6 @@ def build_graph(
             mode = "fast"
             reason = "image"
             task_override = "vl"
-        elif owui_task:
-            mode = "fast"
-            reason = "owui_task"
         elif forced_deep:
             mode = "deep"
             reason = "forced_by_virtual_model"
@@ -387,12 +363,8 @@ def build_graph(
             last_user = count_last_user_tokens(routing_messages)
             parts = " ".join(f"{r}={by_role[r]}" for r in sorted(by_role))
             log.info("complexity.breakdown: %s last_user=%d", parts, last_user)
-        # `owui_task` is carried in state, not just used here, because the
-        # escalation router needs it too — a utility turn that answers briefly
-        # is answering CORRECTLY, and `too_short` reads that as a failure.
         out: dict[str, Any] = {
             "prompt_tokens": n, "complex": complex_, "mode": mode,
-            "owui_task": owui_task,
         }
         if task_override is not None:
             out["task_type"] = task_override
@@ -448,7 +420,8 @@ def build_graph(
         }
 
     async def node_planner(state: PipelineState) -> dict[str, Any]:
-        if not planning_enabled or state.get("prompt_tokens", 0) < planning_min_tokens:
+        if (state.get("virtual_model") == "audrey_research"
+                or not planning_enabled or state.get("prompt_tokens", 0) < planning_min_tokens):
             return {"subtasks": []}
         user_text = last_user_text(state["messages"])
         subs = await planner_plan(
@@ -606,10 +579,10 @@ def build_graph(
     def route_after_reflect(state: PipelineState) -> str:
         if state.get("reflect_passed"):
             return "end"
-        if state.get("reflect_reason") == "no_drafts":
-            # Deterministic failure: the panel produced no usable drafts.
-            # Retrying re-runs the same dead panel and yields no_drafts again,
-            # so end now and ship the degraded answer instead of burning a retry.
+        if (state.get("reflect_reason") == "no_drafts"
+                or state.get("synth_error") in {"no_writer", "write_failed", "write_truncated"}):
+            # Missing drafts or an unavailable/truncated research writer do
+            # not justify repeating the entire expensive research pipeline.
             return "end"
         if int(state.get("reflect_attempts", 0)) > reflection_max_retries:
             log.warning("reflect: out of retries (%d), shipping degraded answer",

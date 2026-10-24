@@ -1,60 +1,18 @@
-"""Authentication adapters and provider-neutral Audrey principal resolution.
+"""Cloudflare Access and Audrey personal-token authentication.
 
-Accepts `Authorization: Bearer <credential>` and, when explicitly enabled,
-Cloudflare Access's `Cf-Access-Jwt-Assertion` header. Audrey personal tokens
-use an `aud_pat_` discriminator and resolve locally. During the migration,
-other bearers may be proxied to the Open WebUI session endpoint
-(`GET /api/v1/auths/`, trailing slash load-bearing — OWUI 0.9.2 specifically).
-`OWUI_AUTH_ENABLED=0` removes that runtime dependency and rejects those
-bearers locally. External providers prove identity while Audrey owns the
-stable user id, role, and private-storage namespace.
-
-Flow:
-    browser --Bearer <jwt>--> cloudflared --same-origin--> audrey
-                                                            │
-                                                            ▼
-                                              GET http://open-webui:8080
-                                              /api/v1/auths/
-                                              Authorization: Bearer <jwt>
-                                                            │
-                                                            ▼
-                                              {id, email, role, ...}
-                                                            │
-                                                            ▼
-                                              ApplicationStore resolves
-                                              provider subject -> user_id
-                                                            │
-                                                            ▼
-                                              AuthedUser(..., principal)
-
-OWUI results are cached per-token for `_TTL_S` seconds (default 30s)
-to spare OWUI on bursty dashboards. The cache is a plain dict with an
-opportunistic sweep at 1024 entries — fine for our scale (dozens of
-users, not thousands).
-
-We never authenticate from cookies. OWUI also sets an
-HttpOnly `token` cookie on same-origin responses — we ignore it.
-Reasoning: (1) the upload page carries the token explicitly from
-localStorage, so we never *need* the cookie; (2) accepting cookies
-opens a CSRF path from any logged-in OWUI user's browser. Requiring
-the explicit header closes that.
-
-Invalid, expired, revoked, and disabled-account personal tokens return 401 and
-are never cached. OWUI 401 propagates as-is. 502 on any other OWUI error — we want
-the client to see "auth is broken" distinctly from "you're not logged
-in." Timeouts are short (5s); OWUI lives on `ollama-net` at sub-ms
-latency, so a 5s ceiling means OWUI is actually down, not slow.
+External providers prove identity while Audrey owns the stable user id, role,
+and storage namespace. Personal tokens resolve locally on every request so
+revocation and account changes take effect immediately. Unknown bearers and
+cookies never authenticate a caller.
 """
 
 from __future__ import annotations
 
 import hmac
 import logging
-import time
 from dataclasses import dataclass
 from typing import Annotated
 
-import httpx
 from fastapi import Depends, Header, HTTPException, Request
 
 from audrey.app_state import (
@@ -67,34 +25,22 @@ from audrey.identity import (
     CloudflareAccessUnavailableError,
     Principal,
 )
-from audrey.metrics import auth_cache_size as _auth_cache_size_gauge
 
 log = logging.getLogger(__name__)
 
-_TTL_S: float = 30.0
-_SWEEP_AT: int = 1024
-_PROBE_TIMEOUT_S: float = 5.0
 _PERSONAL_TOKEN_PREFIX = "aud_pat_"  # noqa: S105 — public format discriminator
-
-# Roles allowed past the gate. OWUI emits these as lowercase. `pending` —
-# a user the admin hasn't activated — has a valid JWT but no chat access
-# in OWUI, so we reject them too. Anything outside this set (a future
-# `disabled` state, garbled response) also fails closed.
-_ALLOWED_ROLES: frozenset[str] = frozenset({"user", "admin"})
 
 
 @dataclass(slots=True)
 class AuthedUser:
-    """Compatibility identity returned from the current OWUI adapter.
+    """Authenticated identity for native and compatible API routes.
 
-    Existing `/v1` memory and upload routes still key on exact ``email`` during
-    migration. Native `/api` resources consume ``principal`` and its stable
-    Audrey user id. There is deliberately no ambiguous ``id`` field here.
+    ``email`` carries the stable storage namespace for existing file and memory
+    APIs; ``principal`` contains the account's email and canonical user id.
     """
 
     email: str
     role: str
-    owui_id: str
     display_name: str = ""
     principal: Principal | None = None
 
@@ -103,57 +49,6 @@ class AuthedUser:
 class KBCaller:
     email: str | None
     is_service: bool
-
-
-_cache: dict[str, tuple[float, AuthedUser]] = {}
-
-
-def _sweep_cache(now: float) -> None:
-    """Drop expired entries. Opportunistic — only called when cache is large."""
-    cutoff = now - _TTL_S
-    for k, (t, _) in list(_cache.items()):
-        if t < cutoff:
-            _cache.pop(k, None)
-    _auth_cache_size_gauge.set(len(_cache))
-
-
-async def _probe_owui(owui_url: str, token: str) -> AuthedUser:
-    """Single OWUI probe call. Raises HTTPException on 401 / upstream failure."""
-    url = f"{owui_url.rstrip('/')}/api/v1/auths/"
-    try:
-        async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_S) as http:
-            r = await http.get(url, headers={"Authorization": f"Bearer {token}"})
-    except httpx.HTTPError as e:
-        log.warning("auth: OWUI unreachable at %s: %s", url, e)
-        raise HTTPException(status_code=502, detail="Auth backend unreachable.") from e
-
-    if r.status_code == 401:
-        raise HTTPException(status_code=401, detail="Token rejected by OWUI.")
-    if r.status_code >= 400:
-        log.warning("auth: OWUI probe -> %d: %s", r.status_code, r.text[:200])
-        raise HTTPException(status_code=502, detail=f"Auth probe failed ({r.status_code}).")
-
-    try:
-        body = r.json()
-    except ValueError as e:
-        raise HTTPException(status_code=502, detail="Auth probe returned non-JSON.") from e
-
-    email = body.get("email")
-    if not email:
-        raise HTTPException(status_code=502, detail="OWUI response missing email.")
-    role = str(body.get("role") or "").lower()
-    if role not in _ALLOWED_ROLES:
-        # OWUI returns 200 for `pending` users — the JWT is valid; the user
-        # just isn't activated. Reject here so they can't sneak past the
-        # gate via Audrey while OWUI itself blocks them.
-        log.info("auth: rejecting %s with role=%r (not in %s)", email, role, sorted(_ALLOWED_ROLES))
-        raise HTTPException(status_code=401, detail=f"Account not activated (role={role!r}).")
-    return AuthedUser(
-        email=str(email),
-        role=role,
-        owui_id=str(body.get("id") or ""),
-        display_name=str(body.get("name") or body.get("display_name") or ""),
-    )
 
 
 async def _resolve_personal_token(
@@ -189,55 +84,9 @@ async def _resolve_personal_token(
     return AuthedUser(
         email=principal.storage_namespace,
         role="user",
-        owui_id="",
         display_name=principal.display_name,
         principal=principal,
     )
-
-
-async def _bind_audrey_principal(
-    request: Request,
-    user: AuthedUser,
-    *,
-    allow_inactive: bool = False,
-) -> AuthedUser:
-    """Map OWUI evidence to one durable Audrey account when the store exists."""
-
-    store = getattr(request.app.state, "application_store", None)
-    if store is None:
-        return user
-    if not user.owui_id:
-        raise HTTPException(
-            status_code=502,
-            detail="Auth provider response missing stable subject.",
-        )
-    try:
-        user.principal = await store.resolve_external_identity(
-            provider="owui",
-            subject=user.owui_id,
-            email=user.email,
-            display_name=user.display_name,
-            role=user.role,
-            auth_method="owui_bearer",
-            legacy_storage_namespace=user.email,
-            sync_role=False,
-            sync_display_name=False,
-        )
-    except InvalidIdentityError as exc:
-        log.error("auth: invalid identity evidence from OWUI: %s", exc)
-        raise HTTPException(
-            status_code=502,
-            detail="Auth provider returned invalid identity evidence.",
-        ) from exc
-    except IdentityConflictError as exc:
-        log.error("auth: refusing implicit account merge: %s", exc)
-        raise HTTPException(
-            status_code=409,
-            detail="Audrey identity binding conflict.",
-        ) from exc
-    if not allow_inactive and user.principal.status != "active":
-        raise HTTPException(status_code=403, detail=_inactive_account_detail(user.principal))
-    return user
 
 
 async def _resolve_cloudflare_access(
@@ -299,7 +148,6 @@ async def _resolve_cloudflare_access(
     return AuthedUser(
         email=principal.storage_namespace,
         role=principal.role,
-        owui_id="",
         display_name=principal.display_name,
         principal=principal,
     )
@@ -316,7 +164,7 @@ async def require_user(
     """FastAPI dependency — inject `AuthedUser` into route handlers.
 
     Use as `me: AuthedUser = Depends(require_user)`. Returns 401 on
-    missing/invalid token, 502 if OWUI is down. Every route that writes
+    missing/invalid token. Every route that writes
     or lists user-scoped data MUST depend on this.
     """
     verifier = getattr(request.app.state, "cloudflare_access_verifier", None)
@@ -334,28 +182,7 @@ async def require_user(
     if token.startswith(_PERSONAL_TOKEN_PREFIX):
         return await _resolve_personal_token(request, token)
 
-    if not getattr(request.app.state.cfg.env, "owui_auth_enabled", False):
-        raise HTTPException(
-            status_code=401,
-            detail="Open WebUI bearer authentication is disabled.",
-        )
-
-    now = time.monotonic()
-    cached = _cache.get(token)
-    if cached is not None and now - cached[0] < _TTL_S:
-        return cached[1]
-
-    owui_url = request.app.state.cfg.env.owui_url
-    user = await _bind_audrey_principal(
-        request,
-        await _probe_owui(owui_url, token),
-    )
-
-    _cache[token] = (now, user)
-    _auth_cache_size_gauge.set(len(_cache))
-    if len(_cache) > _SWEEP_AT:
-        _sweep_cache(now)
-    return user
+    raise HTTPException(status_code=401, detail="Unsupported bearer token.")
 
 
 async def require_account_user(
@@ -456,9 +283,7 @@ async def require_admin_principal(
 async def require_admin(me: AuthedUser = Depends(require_user)) -> AuthedUser:
     """Like `require_user`, but additionally enforces `role == "admin"`.
 
-    OWUI v0.9.2 emits role strings as lowercase (`"admin"`, `"user"`,
-    `"pending"`). 403 — not 401 — because the caller is authenticated;
-    they just don't have permission.
+    A caller without administrator authority receives 403.
     """
     if me.role != "admin":
         raise HTTPException(status_code=403, detail="Admin role required.")
@@ -500,70 +325,10 @@ async def resolve_kb_caller(
     return KBCaller(email=me.email, is_service=False)
 
 
-def clear_auth_cache() -> int:
-    """Drop every cached AuthedUser. Returns the number of entries evicted.
-
-    Used by `POST /v1/admin/auth/clear` and tests. Self-evicts the caller's
-    own cache row too — that's intentional. Their next request re-probes
-    OWUI, which is exactly the point.
-    """
-    n = len(_cache)
-    _cache.clear()
-    _auth_cache_size_gauge.set(0)
-    return n
-
-
-def clear_auth_cache_for_email(email: str) -> int:
-    """Drop every cached entry whose `AuthedUser.email == email`.
-
-    Targeted variant of `clear_auth_cache`. A user can have multiple cached
-    tokens (multi-device, multi-session) — this clears all of theirs at once
-    without disturbing other users' entries. Returns the number evicted.
-
-    OWUI v0.9.x doesn't emit user-deletion webhooks, so when an admin deletes
-    or bans a user in OWUI, this endpoint is the supported way to evict
-    immediately rather than waiting for TTL or wiping the whole cache.
-    """
-    if not email:
-        return 0
-    target = email.strip().lower()
-    if not target:
-        return 0
-    to_evict = [k for k, (_, u) in _cache.items() if u.email.lower() == target]
-    for k in to_evict:
-        _cache.pop(k, None)
-    if to_evict:
-        _auth_cache_size_gauge.set(len(_cache))
-    return len(to_evict)
-
-
-def clear_auth_cache_for_user_id(user_id: str) -> int:
-    """Evict every cached provider session for one canonical Audrey user."""
-
-    target = str(user_id).strip()
-    if not target:
-        return 0
-    to_evict = [
-        token
-        for token, (_, user) in _cache.items()
-        if user.principal is not None and user.principal.user_id == target
-    ]
-    for token in to_evict:
-        _cache.pop(token, None)
-    if to_evict:
-        _auth_cache_size_gauge.set(len(_cache))
-    return len(to_evict)
-
-
 def _inactive_account_detail(principal: Principal) -> str:
     if principal.status == "pending":
         return "Audrey account is awaiting administrator approval."
     return "Audrey account is disabled."
-
-
-def cache_size() -> int:
-    """Current count of cached AuthedUser entries. For admin observability."""
-    return len(_cache)
 
 
 __all__ = [
@@ -580,8 +345,4 @@ __all__ = [
     "verify_service_token",
     "resolve_kb_caller",
     "require_service",
-    "clear_auth_cache",
-    "clear_auth_cache_for_email",
-    "clear_auth_cache_for_user_id",
-    "cache_size",
 ]

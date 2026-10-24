@@ -1,4 +1,4 @@
-# Lesson 12 — The KB lifecycle: watcher, reconcile, uploads
+# Lesson 13 — The KB lifecycle: watcher, reconcile, uploads
 
 **Estimated time:** 70-90 minutes if you keep
 [`kb/watcher.py`](../../src/audrey/kb/watcher.py),
@@ -11,7 +11,7 @@
 what keeps the KB in step with reality — and what catches drift when
 something slips through?"*
 
-Lesson 11 built the KB pipeline: file → chunks → embeddings → Qdrant
+Lesson 12 built the KB pipeline: file → chunks → embeddings → Qdrant
 points → searchable hits. It did the *building*. This lesson covers
 the *keeping in step* — three mechanisms that watch, repair, and
 extend the index over time.
@@ -28,7 +28,7 @@ uploads    - per-user side: browser upload → sqlite index + qdrant + bytes
 
 ### Why three different mechanisms?
 
-The pipeline from Lesson 11 takes a file and produces points. Once
+The pipeline from Lesson 12 takes a file and produces points. Once
 those points are in Qdrant, three things can happen that the
 pipeline itself doesn't notice:
 
@@ -47,7 +47,7 @@ pipeline itself doesn't notice:
 Each of those problems calls for a different mechanism. The watcher
 handles (1) in real time; the reconciler is the catch-up for (2);
 the uploads flow is its own pipeline for (3) with its own sqlite
-metadata index. They share the ingest helpers from Lesson 11 but
+metadata index. They share the ingest helpers from Lesson 12 but
 otherwise run independently.
 
 ### The "two sources of truth" problem
@@ -66,7 +66,7 @@ uploads (the startup reconcile in `uploads_db.py`). Watch for it.
 
 ### What sqlite is, and why it's here alongside Qdrant
 
-Lesson 11 introduced Qdrant. This lesson brings in a second
+Lesson 12 introduced Qdrant. This lesson brings in a second
 database — **sqlite** — for a different job. Before any code, the
 vocabulary:
 
@@ -599,9 +599,10 @@ scrolling Qdrant on every request.
 runs eight steps in order — each one assumes the previous succeeded
 and unwinds in reverse on failure:
 
-1. **Auth via `Depends(require_user)`.** OWUI validates the JWT;
-   the route never sees an unauthenticated request. The user's
-   email *is* the user id — no spoofable `?user=` param.
+1. **Auth via `Depends(require_user)`.** The caller's identity is
+   established before the route runs, so it never sees an
+   unauthenticated request, and the user comes from authentication,
+   not from a spoofable `?user=` parameter.
 2. **Ensure user collections exist**
    ([`kb/user_store.py`](../../src/audrey/kb/user_store.py)).
    Lazily creates `kb_user_text_<sanitized>` and
@@ -623,7 +624,7 @@ and unwinds in reverse on failure:
 6. **Post-stream quota check** — catches uploads that crossed the
    line during streaming (we only know the actual size after).
 7. **Ingest into Qdrant**
-   ([`kb/ingest.py`](../../src/audrey/kb/ingest.py)). The Lesson 11
+   ([`kb/ingest.py`](../../src/audrey/kb/ingest.py)). The Lesson 12
    pipeline, writing to the per-user collection and stamping each
    point's payload with `user` and `file_id`.
 8. **Record in sqlite**
@@ -760,8 +761,8 @@ I diagnose?"**
 If the 200 is real and the same authenticated user immediately calls
 `GET /v1/files`, the sqlite row should already exist: the upload route records
 sqlite before returning success. First confirm the list request is using the
-same OWUI identity and that the client is not showing stale UI state. Then
-check `audrey-ai` logs for `uploads_db.record failed` or `files: ingest
+same account and that the client is not showing stale UI state. Then
+check `audrey` logs for `uploads_db.record failed` or `files: ingest
 failed`; those would normally pair with a 500, not a 200. If neither is
 present, the upload is in sqlite and the list/read path is the thing to inspect.
 
@@ -829,4 +830,4 @@ classification, routing, deep mode, tool use, function calling, and
 the KB. The next lesson backs up to the very front of the pipeline:
 the two earliest graph nodes that prepend context (datetime and
 memory recall) before classify reads a single user word. It lives in
-[`lesson-13-memory-and-context-injection.md`](lesson-13-memory-and-context-injection.md).
+[`lesson-14-memory-and-context-injection.md`](lesson-14-memory-and-context-injection.md).

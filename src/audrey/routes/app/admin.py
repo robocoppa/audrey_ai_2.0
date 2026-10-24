@@ -10,7 +10,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from audrey.app_state import AccessRoleRecord, AccountAdministrationError, AdminUserRecord
-from audrey.auth import clear_auth_cache_for_user_id, require_admin_principal
+from audrey.auth import require_admin_principal
 from audrey.identity import Principal
 from audrey.model_catalog import catalog_for_principal, discover_models
 from audrey.routes.app.models import (
@@ -97,7 +97,7 @@ class AdminRolePatchRequest(BaseModel):
 class AdminModelProfileRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    visibility: Literal["public", "private"]
+    visibility: Literal["public", "restricted", "private"]
     roles: list[str]
     display_name: str = ""
     enabled: bool | None = None
@@ -255,7 +255,6 @@ async def approve_user(
         )
     except AccountAdministrationError as exc:
         raise _admin_error(exc) from exc
-    clear_auth_cache_for_user_id(user_id)
     return _user_response(record)
 
 
@@ -275,7 +274,6 @@ async def deny_user(
         )
     except AccountAdministrationError as exc:
         raise _admin_error(exc) from exc
-    clear_auth_cache_for_user_id(user_id)
     return _user_response(record)
 
 
@@ -297,7 +295,6 @@ async def update_user(
         )
     except AccountAdministrationError as exc:
         raise _admin_error(exc) from exc
-    clear_auth_cache_for_user_id(user_id)
     return _user_response(record)
 
 
@@ -317,7 +314,6 @@ async def delete_user(
         )
     except AccountAdministrationError as exc:
         raise _admin_error(exc) from exc
-    clear_auth_cache_for_user_id(user_id)
     coordinator.wake()
     return {"id": user_id, "status": "deleting", "purge_id": purge_id}
 

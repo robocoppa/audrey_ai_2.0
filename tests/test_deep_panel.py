@@ -486,7 +486,7 @@ async def test_node_complexity_forces_deep_for_research():
     assert out["mode"] == "deep"
 
 
-async def test_node_complexity_limits_owui_utility_routing_to_compatibility():
+async def test_node_complexity_task_header_preserves_the_requested_mode():
     cfg = get_config()
     ollama = OllamaClient(base_url="http://unused")
     compiled = gmod.build_graph(
@@ -511,10 +511,7 @@ async def test_node_complexity_limits_owui_utility_routing_to_compatibility():
     })
     await ollama.aclose()
 
-    assert compatibility["mode"] == "fast"
-    assert compatibility["owui_task"] is True
-    assert native["mode"] == "deep"
-    assert native["owui_task"] is False
+    assert compatibility["mode"] == native["mode"] == "deep"
 
 
 # ─── audrey_research staged pipeline (Phase 24) ────────────────────────
@@ -2663,3 +2660,28 @@ async def test_research_fanout_cancellation_drains_all_researchers(monkeypatch):
         max_researchers_cloud=2,
     )
     await _assert_cancel_drains_workers(stream, started, settled, child_tasks)
+
+
+@pytest.mark.parametrize("error", ["no_writer", "write_failed", "write_truncated"])
+def test_failed_research_writer_does_not_repeat_the_pipeline(error):
+    route = _route_after_reflect()
+    assert route({"reflect_passed": False, "reflect_reason": "too_short",
+                  "reflect_attempts": 1, "virtual_model": "audrey_research",
+                  "synth_error": error}) == "end"
+
+
+async def test_research_skips_unused_planner_but_regular_deep_still_plans(monkeypatch):
+    from unittest.mock import AsyncMock
+    cfg = get_config()
+    ollama = OllamaClient(base_url="http://unused")
+    planner = AsyncMock(return_value=["Useful subtask"])
+    monkeypatch.setattr(gmod, "planner_plan", planner)
+    compiled = gmod.build_graph(cfg, ollama, ModelRegistry(cfg), HealthTracker(),
+                               FairLocalGate(concurrency=1), _NoTools(), _HTTP)
+    node = compiled.nodes["planner"].bound
+    base = {"prompt_tokens": 2000, "messages": [{"role": "user", "content": "Plan this"}]}
+    assert await node.ainvoke({**base, "virtual_model": "audrey_research"}) == {"subtasks": []}
+    planner.assert_not_awaited()
+    assert await node.ainvoke({**base, "virtual_model": "audrey_deep"}) == {"subtasks": ["Useful subtask"]}
+    planner.assert_awaited_once()
+    await ollama.aclose()

@@ -1,4 +1,4 @@
-"""A Qdrant outage removes only the six declared dependent model tools."""
+"""A Qdrant outage removes only declared dependent model tools."""
 
 from __future__ import annotations
 
@@ -37,8 +37,15 @@ async def test_real_openapi_projects_only_qdrant_independent_tools(monkeypatch):
 
     registry = ToolRegistry(by_name={spec.name: spec for spec in specs})
     assert registry.names() == [
+        "analyze_table",
+        "calculate",
         "get_file_text",
+        "inspect_pdf_page",
+        "inspect_video_frame",
         "list_my_files",
+        "open_chat_history",
+        "read_reference",
+        "reference_lookup",
         "web_fetch",
         "web_search",
     ]
@@ -53,6 +60,7 @@ async def test_real_openapi_projects_only_qdrant_independent_tools(monkeypatch):
         "memory_recall",
         "memory_search",
         "memory_store",
+        "reference_search",
     }
     assert all(
         "qdrant" in (spec.unavailable_reason or "")

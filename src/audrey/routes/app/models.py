@@ -25,7 +25,7 @@ class ModelResponse(BaseModel):
     capabilities: list[str]
     enabled: bool
     audience: Literal["users", "testers", "bots", "admins"]
-    visibility: Literal["public", "private"]
+    visibility: Literal["public", "restricted"]
     roles: list[str]
     portrait_url: str
 

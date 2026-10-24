@@ -345,7 +345,7 @@ def _build_app(db: UploadsDB, monkeypatch) -> tuple[FastAPI, dict]:
     app.state.qdrant = object()
     app.state.text_embedder = SimpleNamespace(embed_one=_embed_one)
     app.state.cfg = SimpleNamespace(
-        env=SimpleNamespace(kb_service_token=SECRET, owui_url="http://owui"),
+        env=SimpleNamespace(kb_service_token=SECRET),
         raw={"kb": {"hybrid": {"enabled": True}}},
     )
     return app, captured

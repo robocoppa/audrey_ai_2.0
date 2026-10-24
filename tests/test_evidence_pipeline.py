@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+from audrey.identity import Principal
 from audrey.models.health import HealthTracker
 from audrey.pipeline import deep_panel, react
 from audrey.pipeline.fair_gate import FairLocalGate
@@ -111,6 +112,9 @@ def test_visual_model_event_is_kept_in_native_persisted_model_snapshot():
     )
     live = _LiveRun(
         owner_user_id="owner", storage_namespace="owner",
+        principal=Principal(user_id="owner", storage_namespace="owner", provider="test",
+            provider_subject="owner", email="owner@example.com", display_name="Owner",
+            role="user", status="active", auth_method="test"),
         started=SimpleNamespace(run=SimpleNamespace(run_id="run-model")), emitter=emitter,
         events=deque(), changed=asyncio.Event(), settled=asyncio.Event(),
     )

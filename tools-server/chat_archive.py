@@ -809,7 +809,7 @@ class ChatArchiveStore:
                 }
 
             # Conversation upsert: create on first sight, otherwise bump
-            # last_message_at. We don't fight OWUI for `title` ownership.
+            # last_message_at. Canonical chat metadata owns the title.
             await self._db.execute(
                 """
                 INSERT INTO conversations (conversation_id, user, title, created_at, updated_at, last_message_at)

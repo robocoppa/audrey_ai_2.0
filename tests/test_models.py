@@ -164,17 +164,37 @@ def test_health_tracker_cools_down_after_failure_and_success_resets():
     assert "model-a" not in health.snapshot()
 
 
-def test_health_tracker_exponential_backoff_is_capped():
+def test_health_tracker_exponential_backoff_is_capped(monkeypatch):
+    clock = [10.0]
+    monkeypatch.setattr("audrey.models.health.time.monotonic", lambda: clock[0])
     health = HealthTracker(base_cooldown_s=5.0, max_cooldown_s=8.0)
-
     health.record_failure("model-a", "first")
+    assert health.cooldown_remaining("model-a") == 5.0
+    clock[0] += 5.0
     health.record_failure("model-a", "second")
+    assert health.cooldown_remaining("model-a") == 8.0
+    clock[0] += 8.0
     health.record_failure("model-a", "third")
-
     snapshot = health.snapshot()["model-a"]
     assert snapshot["consecutive_failures"] == 3
-    assert 0 < snapshot["cooling_down_for_s"] <= 8.0
+    assert snapshot["cooling_down_for_s"] == 8.0
     assert snapshot["last_error"] == "third"
+
+
+def test_concurrent_outage_failures_do_not_extend_a_cooldown(monkeypatch):
+    clock = [10.0]
+    monkeypatch.setattr("audrey.models.health.time.monotonic", lambda: clock[0])
+    health = HealthTracker(base_cooldown_s=5.0)
+    health.record_failure("model-a", "outage")
+    for _ in range(10):
+        clock[0] += 0.1
+        health.record_failure("model-a", "another in-flight call")
+    snapshot = health.snapshot()["model-a"]
+    assert snapshot["consecutive_failures"] == 1
+    assert snapshot["cooling_down_for_s"] == 4.0
+    assert snapshot["last_error"] == "outage"
+    health.record_success("model-a")
+    assert health.cooldown_remaining("model-a") == 0
 
 
 # ─── OllamaClient ──────────────────────────────────────────────────────

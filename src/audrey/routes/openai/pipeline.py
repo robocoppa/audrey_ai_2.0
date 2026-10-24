@@ -52,7 +52,6 @@ from audrey.pipeline.complexity import (
     count_tokens_by_role,
     has_deep_intent,
     is_complex,
-    is_owui_task_request,
 )
 from audrey.pipeline.context import datetime_system_message
 from audrey.pipeline.deep_panel import (
@@ -63,6 +62,7 @@ from audrey.pipeline.deep_panel import (
 )
 from audrey.pipeline.fast_path import (
     FastStreamEventType,
+    pick_fast_model,
     resolve_no_thinking_prose,
     stream_fast_path,
 )
@@ -196,7 +196,7 @@ async def _generate_via_pipeline(
         "archive_client",
         None,
     )
-    if archive_client is not None and not is_owui_task_request(messages):
+    if archive_client is not None:
         await archive_client.archive_turn(
             registry=app.state.tools,
             user_id=user_id,
@@ -321,7 +321,6 @@ async def _stream_via_pipeline(
     is_deep_branch = False  # deep handles its own archive write to skip banners
     decision_messages = messages if routing_messages is None else routing_messages
     compatibility_request = event_context is None
-    owui_task = compatibility_request and is_owui_task_request(decision_messages)
 
     try:
         async with inflight.slot(user_id):
@@ -351,10 +350,6 @@ async def _stream_via_pipeline(
                 # caller named the model they want, so honour it. The image
                 # gets transcribed below and the panel they chose reasons
                 # over the text instead of being overridden by the vl pool.
-                use_deep = False
-            elif owui_task:
-                # OWUI utility tasks (title gen, tags, follow-up suggestions)
-                # always want a short, cheap answer — force fast.
                 use_deep = False
             elif forced_deep:
                 use_deep = True
@@ -387,9 +382,8 @@ async def _stream_via_pipeline(
                     cfg=cfg, registry=model_tools,
                 )
                 log.info(
-                    "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=deep%s%s",
+                    "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=deep%s",
                     payload.model, task, reason, conf, n,
-                    " owui_task=1" if owui_task else "",
                     " deep_intent=1" if (deep_intent and not complex_) else "",
                 )
                 if complexity_cfg.get("log_breakdown", False):
@@ -456,9 +450,8 @@ async def _stream_via_pipeline(
                     cfg=cfg, registry=model_tools,
                 )
             log.info(
-                "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=fast%s%s",
+                "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=fast%s",
                 payload.model, task, reason, conf, n,
-                " owui_task=1" if owui_task else "",
                 " image=1" if image_turn else "",
             )
             if complexity_cfg.get("log_breakdown", False):
@@ -467,7 +460,11 @@ async def _stream_via_pipeline(
                 parts = " ".join(f"{r}={by_role[r]}" for r in sorted(by_role))
                 log.info("complexity.breakdown: %s last_user=%d", parts, last_user)
 
-            spec = registry.first_healthy(task, health.is_healthy)
+            try:
+                spec = pick_fast_model(registry, health, task=task)
+            except OllamaError:
+                # An empty registry retains the normal Fast terminal error.
+                spec = None
             if spec is not None:
                 chosen_concrete = spec.name
 
@@ -740,7 +737,7 @@ async def _stream_via_pipeline(
         # Archive only the fast/tool-capable branches here; deep branch
         # owns its own archive write because banner frames must not be
         # included in the captured assistant text.
-        if not is_deep_branch and not owui_task and archive_client is not None:
+        if not is_deep_branch and archive_client is not None:
             await archive_client.archive_turn(
                 registry=app.state.tools,
                 user_id=user_id,
@@ -1131,7 +1128,7 @@ async def _stream_deep_with_banners(
         pipeline_outcome = runner.terminal.outcome.value
         # `workers/ok/tool_grounded` mirror `graph.py`'s `deep_panel:` line so
         # one grep covers both pipelines. Without them the streaming path —
-        # the one OWUI actually uses for questions — reported nothing about
+        # the path used by native chat — reported nothing about
         # the panel at all, and "did the workers use tools" could only be
         # answered by attributing `react:` lines to turns via
         # timestamp-minus-elapsed. Count WORKERS, not zero-tool rounds: the
@@ -1165,7 +1162,7 @@ async def _stream_research_with_banners(
     (`run_research_pipeline_streaming`) runs as one background task; its events
     drive the three phase banners and stream the Writer's tokens live as the
     answer. Mirrors the non-streaming `node_research` in `pipeline/graph.py` —
-    keep the two in sync.
+    keep the two in sync. Graph reflection/retries are not run by this driver.
     """
     cfg = app.state.cfg
     ollama: OllamaClient = app.state.ollama
@@ -1220,7 +1217,7 @@ async def _stream_research_with_banners(
     try:
         yield session.role_frame()
         session.stage_started("planning", label="Planning")
-        # ── Stage 0: Planning (memory recall + planner, reused verbatim) ──
+        # ── Stage 0: Context preparation (memory recall, no unused planner call) ──
         memory_cfg = agentic.get("memory", {}) or {}
         memory_enabled = bool(memory_cfg.get("enabled", True))
         planning_cfg = agentic.get("planning", {}) or {}
@@ -1237,7 +1234,7 @@ async def _stream_research_with_banners(
                     memory_enabled=memory_enabled,
                     memory_top_k=int(memory_cfg.get("top_k", 3)),
                     memory_timeout_s=float(memory_cfg.get("timeout_s", 5)),
-                    planning_enabled=bool(planning_cfg.get("enabled", True)),
+                    planning_enabled=False,
                     planning_min_tokens=int(planning_cfg.get("min_prompt_tokens", 40)),
                     planning_max_subtasks=int(planning_cfg.get("max_subtasks", 3)),
                     prompt_tokens=prompt_tokens,
