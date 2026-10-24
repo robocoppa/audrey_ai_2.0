@@ -449,7 +449,6 @@ async def test_private_graph_dispatches_calculator_without_environment_proxy_or_
                     "virtual_model": "audrey_fast",
                     "messages": [{"role": "user", "content": "Calculate 1250 times 1.08"}],
                     "user_id": "owner",
-                    "compatibility_request": False,
                 }
             )
             assert final["content"] == "1350"

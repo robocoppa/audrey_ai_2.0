@@ -16,6 +16,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "lessons" / "check-lesson-links.py"
 
 
@@ -724,3 +726,217 @@ def test_label_symbol_cited_at_its_decorator_passes(tmp_path):
     )
     proc = _run(repo)
     assert proc.returncode == 0, proc.stdout
+
+
+# ─── Explicit Markdown title anchors ────────────────────────────────
+
+
+@pytest.mark.parametrize("title", ['"def hello("', "'def hello('"])
+def test_link_title_checks_exact_start_prefix(tmp_path, title):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src/lib.py", "def hello(name):\n    return name\n")
+    _write(repo / "docs/lessons/01.md", f"[lib.py:1](../../src/lib.py#L1 {title})")
+    proc = _run(repo)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "ok: 1" in proc.stdout
+    assert "unanchored heuristic: 0" in proc.stdout
+
+
+def test_title_anchor_does_not_pass_at_an_unrelated_landmark_or_inside_range(tmp_path):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src/lib.py", "def other():\n    pass\ndef hello():\n    pass\n")
+    _write(repo / "docs/lessons/01.md",
+           '[lib.py:1-4](../../src/lib.py#L1-L4 "def hello(")')
+    proc = _run(repo)
+    assert proc.returncode == 1, proc.stdout
+    assert "exact cited start 1" in proc.stdout
+    assert "fix: change #L1-L4 → #L3-L6" in proc.stdout
+
+
+def test_explicit_title_precedes_an_existing_matching_snippet(tmp_path):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src/lib.py", "def other():\n    pass\n")
+    _write(repo / "docs/lessons/01.md",
+           '[lib.py:1](../../src/lib.py#L1 "def removed(")\n\n'
+           '```python\ndef other():\n    pass\n```')
+    proc = _run(repo)
+    assert proc.returncode == 1, proc.stdout
+    assert "content anchor not found in file" in proc.stdout
+    assert "fix:" not in proc.stdout
+
+
+@pytest.mark.parametrize(("title", "source"), [
+    (r'"VALUE = \"a)b\""', 'VALUE = "a)b"'),
+    ("'VALUE = \\'it is\\' '", "VALUE = 'it is'"),
+    (r'"VALUE = \"C:\\temp\""', r'VALUE = "C:\temp"'),
+    ('"VALUE = &quot;quoted&quot;"', 'VALUE = "quoted"'),
+])
+def test_title_quoting_punctuation_and_markdown_escapes(tmp_path, title, source):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src/lib.py", source)
+    _write(repo / "docs/lessons/01.md", f"[lib.py:1](../../src/lib.py#L1 {title})")
+    proc = _run(repo)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "cites checked: 1" in proc.stdout
+    assert "unanchored heuristic: 0" in proc.stdout
+
+
+@pytest.mark.parametrize(("filename", "destination"), [
+    ("lib copy.py", "<../../src/lib copy.py#L1>"),
+    ("lib(copy).py", "../../src/lib(copy).py#L1"),
+    ("lib(copy).py", r"../../src/lib\(copy\).py#L1"),
+])
+def test_title_paths_with_spaces_and_parentheses(tmp_path, filename, destination):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src" / filename, "def hello():\n    pass\n")
+    _write(repo / "docs/lessons/01.md", f'[file:1]({destination} "def hello(")')
+    proc = _run(repo)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "ok: 1" in proc.stdout
+
+
+def test_multiple_title_links_and_unanchored_count_are_distinct(tmp_path):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src/lib.py", "def hello():\n    pass\ndef other():\n    pass\n")
+    _write(repo / "docs/lessons/01.md",
+           '[lib.py:1](../../src/lib.py#L1 "def hello(") and '
+           '[lib.py:3](../../src/lib.py#L3 "def other(")\n\n'
+           '[lib.py:1](../../src/lib.py#L1)')
+    proc = _run(repo)
+    assert proc.returncode == 0, proc.stdout
+    assert "cites checked: 3" in proc.stdout
+    assert "unanchored heuristic: 1 (shape only; content not verified)" in proc.stdout
+
+
+def test_empty_title_does_not_silently_verify_anything(tmp_path):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src/lib.py", "def hello():\n    pass\n")
+    _write(repo / "docs/lessons/01.md", '[lib.py:1](../../src/lib.py#L1 "")')
+    proc = _run(repo)
+    assert proc.returncode == 1, proc.stdout
+    assert "empty content anchor" in proc.stdout
+
+
+# ─── Opt-in substantive snippet fidelity ────────────────────────────
+
+
+def test_fidelity_detects_drift_below_unchanged_first_line_only_when_requested(tmp_path):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src/lib.py", "def hello():\n    return 2\n")
+    _write(repo / "docs/lessons/01.md",
+           '[lib.py:1](../../src/lib.py#L1)\n\n'
+           '```python\ndef hello():\n    return 1\n```')
+    ordinary = _run(repo)
+    assert ordinary.returncode == 0, ordinary.stdout
+    assert "SNIPPET" not in ordinary.stdout
+    fidelity = _run(repo, "--snippet-fidelity")
+    assert fidelity.returncode == 1, fidelity.stdout
+    assert "cites checked: 1" in fidelity.stdout
+    assert "snippet fidelity findings: 1" in fidelity.stdout
+    assert "doc line 5: 'return 1'" in fidelity.stdout
+    assert "review intentional simplifications" in fidelity.stdout
+
+
+@pytest.mark.parametrize(("cite", "snippet"), [
+    ('[lib.py:1](../../src/lib.py#L1 "def hello(")',
+     "value = 1\nreturn value"),
+    ('[lib.py:2](../../src/lib.py#L2 "value =")',
+     "value = 1\nreturn value"),
+    ('[lib.py:1-3](../../src/lib.py#L1)',
+     "def hello():\n    value = 1\n    return value"),
+])
+def test_fidelity_accepts_unindented_body_and_label_ranges(tmp_path, cite, snippet):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src/lib.py", "def hello():\n    value = 1\n    return value\n")
+    _write(repo / "docs/lessons/01.md", f"{cite}\n\n```python\n{snippet}\n```")
+    proc = _run(repo, "--snippet-fidelity")
+    assert proc.returncode == 0, proc.stdout
+    assert "snippet fidelity findings: 0" in proc.stdout
+
+
+@pytest.mark.parametrize("fragment", ["#L1", "#L1-L2"])
+def test_fidelity_cannot_match_a_stale_line_in_another_definition(tmp_path, fragment):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src/lib.py", "def hello():\n    return 2\ndef other():\n    return 1\n")
+    _write(repo / "docs/lessons/01.md",
+           f'[lib.py:1](../../src/lib.py{fragment})\n\n'
+           '```python\ndef hello():\n    return 1\n```')
+    proc = _run(repo, "--snippet-fidelity")
+    assert proc.returncode == 1, proc.stdout
+    assert "cited block 1-2" in proc.stdout
+    assert "'return 1'" in proc.stdout
+
+
+def test_fidelity_ignores_comments_blanks_and_omission_markers(tmp_path):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src/lib.py", "def hello():\n    value = 1\n    return value\n")
+    _write(repo / "docs/lessons/01.md",
+           '[lib.py:1](../../src/lib.py#L1 "def hello(")\n\n'
+           '```python\n# Teaching note not in source\ndef hello():\n\n'
+           '    ...\n    // explanation\n    value = 1\n    return value\n```')
+    proc = _run(repo, "--snippet-fidelity")
+    assert proc.returncode == 0, proc.stdout
+    assert "snippet fidelity findings: 0" in proc.stdout
+
+
+@pytest.mark.parametrize("snippet", [
+    "def hello(...):\n    return 1",
+    "def hello(name):\n    return 1  # teaching annotation",
+    "def hello(name):\n    return 1\n    return 1",
+    "return 1\ndef hello(name):",
+])
+def test_fidelity_reports_shortening_annotations_reordering_and_repeated_lines(tmp_path, snippet):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src/lib.py", "def hello(name):\n    return 1\n")
+    _write(repo / "docs/lessons/01.md",
+           '[lib.py:1](../../src/lib.py#L1 "def hello(")\n\n'
+           f'```python\n{snippet}\n```')
+    assert _run(repo).returncode == 0
+    proc = _run(repo, "--snippet-fidelity")
+    assert proc.returncode == 1, proc.stdout
+    assert "SNIPPET" in proc.stdout
+    assert "not found in order" in proc.stdout
+
+
+def test_fidelity_skips_non_source_fence_and_does_not_poach_next_cite(tmp_path):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src/lib.py", "def hello():\n    pass\ndef other():\n    pass\n")
+    _write(repo / "docs/lessons/01.md",
+           '[lib.py:1](../../src/lib.py#L1 "def hello(")\n'
+           '[lib.py:3](../../src/lib.py#L3 "def other(")\n\n'
+           '```python\ndef other():\n    pass\n```\n\n'
+           '[lib.py:1](../../src/lib.py#L1 "def hello(")\n\n'
+           '```text\nThis is prose, not source.\n```')
+    proc = _run(repo, "--snippet-fidelity")
+    assert proc.returncode == 0, proc.stdout
+    assert "cites checked: 3" in proc.stdout
+
+
+@pytest.mark.parametrize(("comment_count", "closed", "expected"), [
+    (499, True, 0), (500, True, 0), (501, True, 1), (2, False, 1),
+])
+def test_fidelity_scan_limit_reports_incomplete_instead_of_silent_success(
+    tmp_path, comment_count, closed, expected,
+):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src/lib.py", "def hello():\n    pass\n")
+    _write(repo / "docs/lessons/01.md",
+           '[lib.py:1](../../src/lib.py#L1 "def hello(")\n\n```python\n'
+           + "# omitted for teaching\n" * comment_count + ("```" if closed else ""))
+    proc = _run(repo, "--snippet-fidelity")
+    assert proc.returncode == expected, proc.stdout
+    if expected:
+        assert "fence incomplete" in proc.stdout
+
+
+
+def test_fidelity_explicit_one_line_range_does_not_expand_to_definition(tmp_path):
+    repo = _setup_minimal_repo(tmp_path)
+    _write(repo / "src/lib.py", "def hello():\n    return 1\n")
+    _write(repo / "docs/lessons/01.md",
+           '[lib.py:1](../../src/lib.py#L1-L1 "def hello(")\n\n'
+           '```python\ndef hello():\n    return 1\n```')
+    proc = _run(repo, "--snippet-fidelity")
+    assert proc.returncode == 1, proc.stdout
+    assert "cited block 1-1" in proc.stdout
+    assert "'return 1'" in proc.stdout

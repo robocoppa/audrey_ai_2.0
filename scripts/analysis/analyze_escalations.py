@@ -28,10 +28,10 @@ WHAT THE NUMBERS MEAN
                     and are correctly absent from both sides of the ratio.
 
   would-escalate    the share of classifications sitting below
-                    `confidence_ceiling`, ignoring every suppression but
-                    `fallback:`. The gap between this and the actual rate is
-                    the work the six suppression rules are doing. Read it as
-                    a mechanism, not a forecast — it is an upper bound.
+                    `confidence_ceiling`, excluding failed/skipped router
+                    placeholders. It ignores the other suppression rules, so
+                    it is an upper bound on the confidence trigger, not a
+                    forecast of actual escalation.
 
   cloud worker      per panel, from `config.yaml`: `<pool>.<task>.workers`
   calls             filtered to cloud models, plus the synthesizer. This is
@@ -152,7 +152,8 @@ class Tally:
     classify_conf: list[float] = field(default_factory=list)
     classify_reasons: Counter[str] = field(default_factory=Counter)
     classify_below_ceiling: int = 0         # the low_conf trigger's population
-    classify_fallback: int = 0              # suppressed: reason startswith "fallback:"
+    classify_fallback: int = 0              # suppressed: all routing attempts failed
+    classify_short_skip: int = 0            # suppressed: router intentionally skipped
 
     escalations: int = 0
     escalate_reasons: Counter[str] = field(default_factory=Counter)
@@ -215,12 +216,13 @@ def parse_log(lines: object, *, since: str | None, ceiling: float) -> Tally:
             reason = m.group("reason")
             t.classify_conf.append(conf)
             t.classify_reasons[_reason_family(reason)] += 1
-            # Mirror `escalation_decision` exactly: `conf > 0`, strictly below
-            # the ceiling, and not the all-attempts-failed fallback. ⚠️ Only
-            # `fallback:` is suppressed — `fallback_keyword:` is a different
-            # reason one underscore away, and it DOES escalate.
+            # Mirror the runtime confidence trigger: failed/skipped router
+            # placeholders do not measure uncertainty. A fallback keyword hit
+            # remains a real signal and is not part of these suppressions.
             if reason.startswith("fallback:"):
                 t.classify_fallback += 1
+            elif reason.startswith(("short_skip:", "short_skip_keyword:")):
+                t.classify_short_skip += 1
             elif 0.0 < conf < ceiling:
                 t.classify_below_ceiling += 1
             continue
@@ -357,7 +359,7 @@ def build_report(t: Tally, pools: dict[str, dict[str, Any]],
                  locations: dict[str, str], ceiling: float) -> dict[str, Any]:
     """Everything the text and JSON renderers both need, computed once."""
     lo, hi = wilson(t.escalations, t.fast_turns)
-    would_n = t.classify_below_ceiling + t.classify_fallback
+    would_n = t.classify_below_ceiling + t.classify_fallback + t.classify_short_skip
     would_lo, would_hi = wilson(t.classify_below_ceiling, len(t.classify_conf))
 
     cloud_calls = 0
@@ -396,6 +398,7 @@ def build_report(t: Tally, pools: dict[str, dict[str, Any]],
             "observed": len(t.classify_conf),
             "below_ceiling": t.classify_below_ceiling,
             "fallback_suppressed": t.classify_fallback,
+            "short_skip_suppressed": t.classify_short_skip,
             "would_escalate_rate": (
                 t.classify_below_ceiling / len(t.classify_conf)
                 if t.classify_conf else 0.0
@@ -455,6 +458,7 @@ def render(rep: dict[str, Any]) -> str:
           f"= {100 * cls['would_escalate_rate']:.1f}% "
           f"(95% CI {100 * wlo:.1f}–{100 * whi:.1f}%)")
         w(f"  suppressed as fallback:  {cls['fallback_suppressed']:,}")
+        w(f"  suppressed short skip:   {cls['short_skip_suppressed']:,}")
         w("  ↑ upper bound on the low_conf trigger alone. The gap between this")
         w("    and the actual rate above is what tool_rounds / memory_hits /")
         w("    audrey_fast are saving.")

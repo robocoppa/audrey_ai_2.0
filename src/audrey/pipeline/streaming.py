@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterable, Coroutine
+from collections.abc import AsyncIterable, Coroutine, Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -117,6 +117,58 @@ class StreamArchiveTarget:
         )
 
 
+class StreamSignalQueue[ItemT](asyncio.Queue[ItemT]):
+    """Queue whose readiness signal never takes an item away from its owner."""
+
+    def __init__(self, maxsize: int = 0) -> None:
+        super().__init__(maxsize=maxsize)
+        self._ready = asyncio.Event()
+
+    def put_nowait(self, item: ItemT) -> None:
+        super().put_nowait(item)
+        self._ready.set()
+
+    def get_nowait(self) -> ItemT:
+        item = super().get_nowait()
+        if self.empty():
+            self._ready.clear()
+        return item
+
+    async def wait_ready(self) -> None:
+        """Wait for buffered data without consuming it."""
+        if not self.empty():
+            return
+        await self._ready.wait()
+
+
+async def wait_for_stream_activity(
+    queues: Iterable[StreamSignalQueue[Any]],
+    producer_task: asyncio.Task[Any],
+) -> None:
+    """Wait for data or completion, preserving queue contents and producer ownership."""
+    queues = tuple(queues)
+    if producer_task.done() or any(not queue.empty() for queue in queues):
+        return
+    waiters = [
+        asyncio.create_task(queue.wait_ready(), name="stream-queue-ready")
+        for queue in queues
+    ]
+    try:
+        await asyncio.wait(
+            [*waiters, producer_task], return_when=asyncio.FIRST_COMPLETED,
+        )
+    finally:
+        for waiter in waiters:
+            if not waiter.done():
+                waiter.cancel()
+        if waiters:
+            await asyncio.gather(*waiters, return_exceptions=True)
+
+
+class StreamQueueWake(Exception):  # noqa: N818 — control signal, not an error
+    """An independent queue is ready; its owner should drain it."""
+
+
 @dataclass(slots=True)
 class StreamEventChannel[EventT]:
     """Bounded delivery channel tied to its one producer task.
@@ -126,31 +178,32 @@ class StreamEventChannel[EventT]:
     the producer is enough to settle it, without first making queue space.
     """
 
-    _queue: asyncio.Queue[EventT]
+    _queue: StreamSignalQueue[EventT]
     producer_task: asyncio.Task[None]
 
-    async def poll(self) -> EventT | None:
-        """Poll once while leaving time for an independent banner queue."""
-        if not self._queue.empty():
-            return self._queue.get_nowait()
-        if self.producer_task.done():
-            await self.producer_task
-            return None
-        await asyncio.sleep(0.05)
-        if not self._queue.empty():
-            return self._queue.get_nowait()
-        if self.producer_task.done():
-            await self.producer_task
-            return None
-        raise TimeoutError
+    async def poll(
+        self, wake_queue: StreamSignalQueue[Any] | None = None,
+    ) -> EventT | None:
+        """Return an event or completion; a banner-only wake raises StreamQueueWake.
+
+        Buffered events precede producer completion, including a producer error.
+        The optional independent queue is only a wake signal: its owner retains
+        every banner, including when this wait is cancelled.
+        """
+        queues = (self._queue,) if wake_queue is None else (self._queue, wake_queue)
+        while True:
+            if not self._queue.empty():
+                return self._queue.get_nowait()
+            if self.producer_task.done():
+                await self.producer_task
+                return None
+            if wake_queue is not None and not wake_queue.empty():
+                raise StreamQueueWake
+            await wait_for_stream_activity(queues, self.producer_task)
 
     async def receive(self) -> EventT | None:
         """Return the next event, or None after a clean producer exit."""
-        while True:
-            try:
-                return await self.poll()
-            except TimeoutError:
-                continue
+        return await self.poll()
 
 
 class StreamStageRunner:
@@ -197,7 +250,7 @@ class StreamStageRunner:
         """Pump an async event source into a bounded request-owned channel."""
         if maxsize < 1:
             raise ValueError("stream event channel maxsize must be positive")
-        queue: asyncio.Queue[EventT] = asyncio.Queue(maxsize=maxsize)
+        queue: StreamSignalQueue[EventT] = StreamSignalQueue(maxsize=maxsize)
 
         async def _pump() -> None:
             async for event in source:
@@ -246,6 +299,9 @@ __all__ = [
     "StreamArchiveTarget",
     "StreamEventChannel",
     "StreamOutcome",
+    "StreamQueueWake",
+    "StreamSignalQueue",
     "StreamStageRunner",
     "StreamTerminal",
+    "wait_for_stream_activity",
 ]

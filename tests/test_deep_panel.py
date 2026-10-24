@@ -499,19 +499,13 @@ async def test_node_complexity_task_header_preserves_the_requested_mode():
         "content": "### Task:\nWrite a detailed migration plan",
     }]
 
-    compatibility = await node.ainvoke({
+    result = await node.ainvoke({
         "virtual_model": "audrey_deep",
         "messages": messages,
-        "compatibility_request": True,
-    })
-    native = await node.ainvoke({
-        "virtual_model": "audrey_deep",
-        "messages": messages,
-        "compatibility_request": False,
     })
     await ollama.aclose()
 
-    assert compatibility["mode"] == native["mode"] == "deep"
+    assert result["mode"] == "deep"
 
 
 # ─── audrey_research staged pipeline (Phase 24) ────────────────────────

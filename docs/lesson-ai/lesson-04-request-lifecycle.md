@@ -816,7 +816,7 @@ points rather than rows in the application database, so nothing can rebuild
 them. What protects them is a backup. The sidecar snapshots the memory
 collection when it starts and then once a day, and keeps a configured number
 of the newest snapshots
-([`memory_backup_retain`](../../tools-server/settings.py#L98)) in a private
+([`memory_backup_retain`](../../tools-server/settings.py#L97)) in a private
 folder outside Qdrant's storage. Each snapshot is bundled with a copy of the
 chat archive's database, because that's where the sidecar records which
 accounts have been purged (deleted along with their data), and a restore must

@@ -21,6 +21,7 @@ from audrey.app_state.tax_cases import (
     is_user_statement_excerpt,
     tax_case_checklist,
     tax_case_review,
+    tax_review_scope,
     user_statement_scope,
     validate_operation,
 )
@@ -35,7 +36,7 @@ from audrey.user_data_visibility import remote_personal_reads_blocked
 
 TAX_REVIEW_ELIGIBILITY_INSTRUCTION = """Before applying a source's rule or amount to this case, inventory its relevant eligibility conditions and exclusions. For each, locate the actual confirmed saved fact and its field/value. An omitted, empty or null field is unknown, not false, not an exemption from the condition, and not proof of eligibility. Explicitly supplied false and zero are real values. If a necessary fact is absent, leave the affected deduction, eligibility conclusion and dependent result unresolved; record the substantive gap and ask one grouped question for only the missing facts. Do not invent a default profile or rely on a model's earlier claim that no facts are missing. Arithmetic correctness does not establish eligibility. A quoted general rule or comparison that does not apply the rule to this person need not ask for their personal eligibility facts. Preserve owner confirmation and proposed source applicability; identifying a condition does not confirm a fact or certify a return."""
 
-TAX_REVIEW_INSTRUCTION = """Review only the saved case goal, using one local writer. Inspect the case and selected files. Save directly stated chat facts with record_user_fact without asking the user to confirm them again. Use propose_fact for document extractions, interpretations or ambiguous information; those still need review before relying on them. Retain exact dated official support, compute named-input decimal arithmetic, and save a goal-scoped worksheet with save_review, even when it can only report missing information. Each substantive finding needs saved fact/evidence/calculation IDs inside tool calls. Use next_question only for a user-supplied fact or choice needed to complete the saved goal; leave it empty when no user answer is needed. Preserve substantive missing information rather than inventing findings. Perform only one case mutation per tool-call round, and use the revision returned by the preceding write. You have at most twelve tool rounds in a foreground turn: if the remaining scope needs more work, save the useful partial worksheet and state what still needs review. Continue review resumes from saved records; do not repeat completed work. This is a selected-passage review, not certification of a complete tax return. Tax-year applicability remains proposed/unknown unless separately established; never describe the coverage checklist as a legal accuracy check.
+TAX_REVIEW_INSTRUCTION = """Review only the saved case goal, using one local writer. The supported scope is selected-source review and illustrative arithmetic, not determining eligibility for a deduction or credit. Attribute a rule amount to its retained source; describe a worksheet using a model-selected deduction as conditional, never as an allowed deduction or confirmed entitlement. Even a checked worksheet only means the bounded support check finished; it does not expand this scope. Inspect the case and selected files. Save directly stated chat facts with record_user_fact without asking the user to confirm them again. Use propose_fact for document extractions, interpretations or ambiguous information; those still need review before relying on them. Retain exact dated official support, compute named-input decimal arithmetic, and save a goal-scoped worksheet with save_review, even when it can only report missing information. Each substantive finding needs saved fact/evidence/calculation IDs inside tool calls. Use next_question only for a user-supplied fact or choice needed to complete the saved goal; leave it empty when no user answer is needed. Preserve substantive missing information rather than inventing findings. Perform only one case mutation per tool-call round, and use the revision returned by the preceding write. You have at most twelve tool rounds in a foreground turn: if the remaining scope needs more work, save the useful partial worksheet and state what still needs review. Continue review resumes from saved records; do not repeat completed work. This is a selected-passage review, not certification of a complete tax return. Tax-year applicability remains proposed/unknown unless separately established; never describe the coverage checklist as a legal accuracy check.
 
 Before your final answer, save_review checks substantive worksheet findings against reread evidence with a separate local assessment. If its result requests repair, fix only the flagged claims/support and save once more. The attempt permits at most two checks within the same time/token budget. A limited or unresolved assessment means partial work: explain the limitation and do not repeat disputed claims as facts. Owner confirmations remain separate; a model assessment never verifies tax-law correctness or changes year applicability. Save useful partial findings even when confirmation or evidence is missing.
 
@@ -498,15 +499,21 @@ def _tool_result(
                 result["notice"] = "This record exceeds the bounded inspection size; only its identity and status are shown. Review the saved case in the browser."
         returned = len(result["entries"])
         result.update(returned=returned, next_offset=offset + returned if offset + returned < len(entries) else None)
+    result["supported_scope"] = tax_review_scope()
     review = tax_case_review(case)
     if review is not None:
-        result["review"] = {key: review[key] for key in ("status", "stale", "review_revision")}
+        result["review"] = {key: review[key] for key in (
+            "status", "stale", "review_revision", "scope", "eligibility_status", "notice",
+        )}
     if operation == "save_review":
         # This is the writer's last tool result before final prose. Keep the
         # presentation rule here too: a derived coverage status is not itself
         # a request for another user decision or proof of legal correctness.
         result["response_guidance"] = (
             "Give the useful saved result in plain language, then only material limitations. "
+            "Attribute rule amounts to their sources and describe calculations using model-selected deductions "
+            "as conditional worksheets, not allowed deductions or established eligibility. "
+            "A checked support assessment does not determine eligibility for deductions or credits. "
             "Keep revisions, record IDs, operation names, checklist labels and passing-check summaries out of the answer. "
             "Ask only for an actually missing user fact or choice; a derived needs_input or limited_evidence status "
             "alone does not create a question. Direct statements already saved with record_user_fact need no repeat confirmation. "
@@ -731,7 +738,7 @@ def tax_review_spec(server_url: str) -> ToolSpec:
         properties.update(fields)
         required = [key for key in schema.get("required", []) if key not in {"tax_year_status", "result"}]
         descriptions.append(f"{operation} requires {', '.join(required)}.")
-    properties["findings"].update(description="Goal-scoped findings linked to saved facts, evidence, calculations and return items. No certification flag; server derives limitations. Use next_question only for a missing user-supplied fact or choice.")
+    properties["findings"].update(description="Source descriptions and conditional worksheet findings linked to saved facts, evidence, calculations and return items. Do not claim an allowed deduction or established eligibility. No certification flag; server derives limitations. Use next_question only for a missing user-supplied fact or choice.")
     properties["next_question"].update(description="One question only when a missing user-supplied fact or choice is necessary for the saved goal; otherwise leave empty. Source reads and catalog applicability gaps are Audrey's work, not user decisions.")
     properties["expression"].update(maxLength=512, description="Arithmetic using every named input, e.g. wages - deduction; record constants as named inputs too.")
     properties["rounding"].update(enum=["none", "half_up_cent", "half_even_cent"])

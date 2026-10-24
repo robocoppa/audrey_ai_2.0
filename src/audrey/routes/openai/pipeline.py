@@ -46,7 +46,7 @@ from audrey.pipeline.chat_archive import (
     ChatArchiveQueue,
     StreamCollector,
 )
-from audrey.pipeline.classify import classify_with_registry
+from audrey.pipeline.classify import DEFAULT_ROUTER_MODEL, classify_with_registry
 from audrey.pipeline.complexity import (
     count_last_user_tokens,
     count_tokens_by_role,
@@ -81,7 +81,10 @@ from audrey.pipeline.run_events import RunEventContext
 from audrey.pipeline.run_observations import RunEventToolObserver
 from audrey.pipeline.streaming import (
     StreamArchiveTarget,
+    StreamQueueWake,
+    StreamSignalQueue,
     StreamStageRunner,
+    wait_for_stream_activity,
 )
 from audrey.pipeline.synthesize import synthesize_stream
 from audrey.pipeline.vision import describe_enabled, describe_for_text_model
@@ -173,7 +176,6 @@ async def _generate_via_pipeline(
         "max_tokens": payload.max_tokens,
         "response_format": response_format,
         "user_id": user_id,
-        "compatibility_request": True,
     }
     async with inflight.slot(user_id):
         try:
@@ -320,7 +322,6 @@ async def _stream_via_pipeline(
     chosen_concrete: str = "?"
     is_deep_branch = False  # deep handles its own archive write to skip banners
     decision_messages = messages if routing_messages is None else routing_messages
-    compatibility_request = event_context is None
 
     try:
         async with inflight.slot(user_id):
@@ -497,9 +498,8 @@ async def _stream_via_pipeline(
                     "max_tokens": payload.max_tokens,
                     "user_id": user_id,
                     "tool_observer": tool_observer,
-                    "compatibility_request": compatibility_request,
                 }
-                banner_q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=128)
+                banner_q: StreamSignalQueue[str | None] = StreamSignalQueue(maxsize=128)
 
                 async def _banner_emit(text: str) -> None:
                     await banner_q.put(text)
@@ -825,7 +825,7 @@ async def _stream_deep_with_banners(
     # ticker's background task is decoupled from the route generator's
     # frame emission. Bounded queue: slow consumer backpressures the ticker,
     # never the model.
-    banner_q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=128)
+    banner_q: StreamSignalQueue[str | None] = StreamSignalQueue(maxsize=128)
 
     async def emit(text: str) -> None:
         await banner_q.put(text)
@@ -864,6 +864,7 @@ async def _stream_deep_with_banners(
                     prompt_tokens=prompt_tokens,
                     router_cfg=router_cfg,
                     cfg=cfg,
+                    gate=gate,
                 ),
                 name="deep-planning",
             )
@@ -976,8 +977,8 @@ async def _stream_deep_with_banners(
                             )
                             drained = True
                     try:
-                        evt = await synth_events.poll()
-                    except TimeoutError:
+                        evt = await synth_events.poll(wake_queue=banner_q)
+                    except StreamQueueWake:
                         if not drained and synth_task.done():
                             # Generator finished without ever yielding
                             # first_token (shouldn't happen — generator
@@ -1205,7 +1206,7 @@ async def _stream_research_with_banners(
     )
     _delta_frame = session.content_frame
 
-    banner_q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=128)
+    banner_q: StreamSignalQueue[str | None] = StreamSignalQueue(maxsize=128)
 
     async def emit(text: str) -> None:
         await banner_q.put(text)
@@ -1240,6 +1241,7 @@ async def _stream_research_with_banners(
                     prompt_tokens=prompt_tokens,
                     router_cfg=router_cfg,
                     cfg=cfg,
+                    gate=gate,
                 ),
                 name="research-planning",
             )
@@ -1291,8 +1293,8 @@ async def _stream_research_with_banners(
                     if item is not None:
                         yield session.status_frame(item, stage="researching")
                 try:
-                    evt = await research_events.poll()
-                except TimeoutError:
+                    evt = await research_events.poll(wake_queue=banner_q)
+                except StreamQueueWake:
                     continue
                 if evt is None:
                     break
@@ -1327,8 +1329,8 @@ async def _stream_research_with_banners(
                     if item is not None:
                         return ("banner", item)
                 try:
-                    evt = await research_events.poll()
-                except TimeoutError:
+                    evt = await research_events.poll(wake_queue=banner_q)
+                except StreamQueueWake:
                     continue
                 return ("event", evt)
 
@@ -1507,18 +1509,8 @@ async def _stream_research_with_banners(
         )
 
 
-async def _queue_get_with_timeout(q: asyncio.Queue[Any]) -> Any:
-    """Poll one queue without parking cancellation on a Queue.get Future."""
-    if not q.empty():
-        return q.get_nowait()
-    await asyncio.sleep(0.05)
-    if q.empty():
-        raise TimeoutError
-    return q.get_nowait()
-
-
 async def _drain_q_until_task(
-    q: asyncio.Queue[str | None],
+    q: StreamSignalQueue[str | None],
     task: asyncio.Task[Any],
     delta_frame: Callable[[str], str],
 ):
@@ -1531,13 +1523,11 @@ async def _drain_q_until_task(
     this generator returns.
     """
     while not task.done() or not q.empty():
-        try:
-            item = await _queue_get_with_timeout(q)
-        except TimeoutError:
-            continue
-        if item is None:
-            continue
-        yield delta_frame(item)
+        await wait_for_stream_activity((q,), task)
+        while not q.empty():
+            item = q.get_nowait()
+            if item is not None:
+                yield delta_frame(item)
 
 
 async def _drain_q_now(
@@ -1601,7 +1591,7 @@ async def _phase_thinking(
     *, ollama, tools, http, model_tools, user_id: str, messages,
     memory_enabled, memory_top_k, memory_timeout_s,
     planning_enabled, planning_min_tokens, planning_max_subtasks,
-    prompt_tokens, router_cfg, cfg=None,
+    prompt_tokens, router_cfg, cfg=None, gate=None,
 ):
     """Run datetime injection + memory recall + planner. Returns (messages_with_context, subtasks).
 
@@ -1628,11 +1618,13 @@ async def _phase_thinking(
         user_text = last_user_text(messages)
         subtasks = await planner_plan(
             ollama,
-            planner_model=router_cfg.get("model", "qwen3:4b"),
+            planner_model=router_cfg.get("model", DEFAULT_ROUTER_MODEL),
             user_text=user_text,
             timeout_s=float(router_cfg.get("timeout_s", 20)),
             max_subtasks=planning_max_subtasks,
             cfg=cfg,
+            gate=gate,
+            user_id=user_id or None,
         )
     return msgs, subtasks
 

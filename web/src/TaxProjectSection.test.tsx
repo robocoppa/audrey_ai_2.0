@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, expect, it, vi } from "vitest";
 
 import { TaxProjectSection } from "./TaxProjectSection";
-import { type TaxCase } from "./taxReviewApi";
+import { TAX_REVIEW_SCOPE_NOTICE, type TaxCase } from "./taxReviewApi";
 import fixtures from "./test/fixtures/tax-review-cases.json";
 
 function json(body: unknown, status = 200) {
@@ -27,6 +27,22 @@ it("shows canonical current facts and saved output without creating editable cop
   expect(within(worksheet).getByText(saved.review!.summary)).toBeVisible();
   expect(fetchMock.mock.calls[0][0]).toBe("/api/projects/proj_tax/tax-reviews");
   expect(fetchMock.mock.calls.every((call) => !call[1]?.method || call[1].method === "GET")).toBe(true);
+});
+
+it("keeps a saved project worksheet's scope visible before its findings without adding confirmation", async () => {
+  const checked = { ...saved, review: { ...saved.review!, status: "review_saved", stale: false,
+    next_question: "", verification: { status: "checked" },
+  } };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ items: [checked] })));
+  render(<TaxProjectSection projectId="proj_tax" onConversationSelected={vi.fn()} />);
+  fireEvent.click(await screen.findByText("Saved worksheet"));
+  const worksheet = screen.getByText("Saved worksheet").closest("details")!;
+  const scope = within(worksheet).getByText(TAX_REVIEW_SCOPE_NOTICE);
+  expect(scope).toBeVisible();
+  expect(scope.compareDocumentPosition(within(worksheet).getByText(checked.review.summary)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(worksheet).queryByRole("button")).not.toBeInTheDocument();
+  expect(within(worksheet).queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(within(worksheet).queryByRole("textbox")).not.toBeInTheDocument();
 });
 
 it("opens the source conversation using its current project membership", async () => {

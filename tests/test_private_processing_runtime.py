@@ -190,7 +190,6 @@ async def test_runtime_owns_safe_clients_runs_real_graph_and_keeps_shared_state(
         final = await view.state.graph.ainvoke({
             "messages": [{"role": "user", "content": "Say hello"}],
             "virtual_model": "audrey_fast", "user_id": "owner",
-            "compatibility_request": False,
         })
         assert final["content"] == "complete"
         title = await view.state.conversation_titles.generate(user_id="owner", user_content=_PRIVATE)

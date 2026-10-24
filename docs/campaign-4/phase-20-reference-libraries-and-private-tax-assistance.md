@@ -926,10 +926,32 @@ not provide a matched token/latency report. Keep the outcome and native eligibil
 limitation; do not reopen the concluded scalar probe.
 
 The editable facts workflow above is accepted. Automatic Private project
-grouping is the current browser followup; then resume the bounded accuracy decision
-and tax-year comparison. The facts UI does not itself fix premature
-application of a deduction; decide a narrow native correction or supported-scope
-limit from the observed failure.
+grouping remains a browser followup. The October 24 decision limits supported Tax
+review work to selected-source review and conditional arithmetic worksheets.
+It does not determine eligibility for a deduction or credit. This is a supported
+scope decision, not evidence that the premature-deduction behavior was corrected.
+
+Every saved-review projection has server-owned `scope: evidence_and_arithmetic`
+and `eligibility_status: not_determined`, even for a historical or checked review.
+These fields are not model/browser mutation inputs. The existing notice states
+the boundary before findings in the Toolbox and project worksheet; older API
+responses use the same UI fallback. Reads neither rewrite records nor introduce
+missing-information prompts. Confirmed user facts, proposed return items, source
+applicability and exact calculations keep their existing authority and statuses.
+
+The tool supplies the scope from its first inspection and after writes. Writer
+guidance attributes source amounts and keeps model-selected deductions and their
+calculations conditional. A `checked` report measures the existing bounded support
+assessment, and a completed task finishes that scoped work; neither establishes
+entitlement. This does not suppress every unsupported sentence in streamed model
+prose or guarantee that every source condition was inventoried. No new eligibility
+engine, model or reviewer call is added.
+
+Backend and UI are locally verified. After pull on Tower, rebuild audrey and
+audrey-ui; no sidecar/schema/config/index/profile change is needed for this slice.
+Open an existing saved worksheet in the Toolbox and its project to observe the
+scope notice; no upload, new facts or repeated confirmation is needed. Then make
+the one known tax-year comparison using the existing native review flow.
 
 Record outcomes and available costs once, including failures. Correct a concrete
 native defect if demonstrated, or narrow the supported task; do not reopen the isolated

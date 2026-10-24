@@ -250,7 +250,7 @@ class _FakeOllama:
 
 
 _ROUTER_CFG = {
-    "model": "qwen3:4b",
+    "model": "qwen3.5:4b",
     "timeout_s": 5,
     "max_failures_before_fallback": 1,
 }
@@ -344,7 +344,7 @@ async def test_short_no_keyword_prompt_skips_router_llm():
     ollama = _FakeOllama()
     task, reason, conf = await classify(
         ollama,
-        router_model="qwen3:4b",
+        router_model="qwen3.5:4b",
         router_timeout_s=5,
         max_router_strikes=1,
         user_text="hey there",
@@ -365,7 +365,7 @@ async def test_short_prompt_with_weak_keyword_skips_llm_but_keeps_signal():
     ollama = _FakeOllama()
     task, reason, conf = await classify(
         ollama,
-        router_model="qwen3:4b",
+        router_model="qwen3.5:4b",
         router_timeout_s=5,
         max_router_strikes=1,
         user_text="pip install ruff",  # _CODE_WEAK, short
@@ -385,7 +385,7 @@ async def test_long_prompt_still_calls_router_even_when_skip_enabled():
     ollama = _FakeOllama()
     task, reason, _conf = await classify(
         ollama,
-        router_model="qwen3:4b",
+        router_model="qwen3.5:4b",
         router_timeout_s=5,
         max_router_strikes=1,
         user_text=(
@@ -407,7 +407,7 @@ async def test_skip_disabled_by_default_zero_threshold():
     ollama = _FakeOllama()
     _task, reason, _conf = await classify(
         ollama,
-        router_model="qwen3:4b",
+        router_model="qwen3.5:4b",
         router_timeout_s=5,
         max_router_strikes=1,
         user_text="hi",
@@ -425,7 +425,7 @@ async def test_strong_keyword_still_wins_over_skip():
     ollama = _FakeOllama()
     task, reason, conf = await classify(
         ollama,
-        router_model="qwen3:4b",
+        router_model="qwen3.5:4b",
         router_timeout_s=5,
         max_router_strikes=1,
         user_text="review this code",  # _REVIEW_OVERRIDE → reasoning, strong
@@ -542,3 +542,15 @@ class TestVlNeedsAnActualImage:
         assert task == "general"
         assert reason == "router:general"
         assert "vl_without_image" not in reason
+
+
+async def test_missing_router_model_uses_the_current_small_default():
+    from audrey.pipeline.classify import DEFAULT_ROUTER_MODEL
+
+    ollama = _FakeOllama()
+    await classify_with_registry(
+        ollama, user_text="Please help me with this request.",
+        messages=[{"role": "user", "content": "Please help me with this request."}],
+        router_cfg={},
+    )
+    assert ollama.chat_calls[0]["model"] == DEFAULT_ROUTER_MODEL == "qwen3.5:4b"

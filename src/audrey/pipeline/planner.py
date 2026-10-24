@@ -14,12 +14,15 @@ Protected model, digest and transport-policy refusals still block the request.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+from contextlib import nullcontext
 from typing import Any
 
 from audrey.models.ollama import OllamaClient, OllamaError
+from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.prompts import PLANNER_SYSTEM, prompt_from_config
 from audrey.processing_policy import ProcessingPolicyError
 
@@ -38,11 +41,16 @@ async def plan(
     timeout_s: float,
     max_subtasks: int,
     cfg: Any = None,
+    gate: FairLocalGate | None = None,
+    user_id: str | None = None,
 ) -> list[str]:
     """Return a list of sub-questions, or `[]` to skip planning.
 
     Provider unavailability degrades to `[]` so the same panel can run the
     original prompt unchanged. Protected trust-policy violations propagate.
+    Production callers supply the local GPU gate and authenticated user bucket.
+    Waiting and generation share the optional planning deadline; an occupied GPU
+    can skip decomposition instead of evicting another user's local generation.
 
     `cfg` is optional. When supplied, `agentic.prompts.planner` overrides
     the default system prompt; missing/empty falls back to the default.
@@ -58,12 +66,15 @@ async def plan(
         {"role": "user", "content": user_text[:4000]},
     ]
     try:
-        resp = await ollama.chat(
-            model=planner_model,
-            messages=messages,
-            options={"temperature": 0.0},
-            timeout_s=timeout_s,
-        )
+        async with asyncio.timeout(timeout_s):
+            async with (gate.acquire(planner_model, location="local", user_id=user_id)
+                        if gate is not None else nullcontext()):
+                resp = await ollama.chat(
+                    model=planner_model,
+                    messages=messages,
+                    options={"temperature": 0.0},
+                    timeout_s=timeout_s,
+                )
     except ProcessingPolicyError as exc:
         # The protected client redacts provider timeouts/unavailability into
         # this stable code. Planning is optional: the same verified local
@@ -72,6 +83,9 @@ async def plan(
         if exc.code != "private_model_unavailable":
             raise
         log.warning("planner: local provider unavailable, skipping decomposition")
+        return []
+    except TimeoutError:
+        log.warning("planner: optional planning deadline reached, skipping decomposition")
         return []
     except OllamaError as e:
         log.warning("planner: ollama error, skipping decomposition: %s", e)

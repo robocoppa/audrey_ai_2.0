@@ -602,12 +602,10 @@ class _FixedGraph:
 class _ObservedGraph:
     def __init__(self) -> None:
         self.observer_seen: bool | None = None
-        self.compatibility_request: bool | None = None
 
     async def ainvoke(self, state):
         observer = state["tool_observer"]
         self.observer_seen = observer is not None
-        self.compatibility_request = state["compatibility_request"]
         if observer is not None:
             call_id = observer.started({
                 "function": {
@@ -938,7 +936,6 @@ async def test_fast_tool_route_emits_native_observations_without_leaking_to_v1(
     ]
 
     assert graph.observer_seen is True
-    assert graph.compatibility_request is False
     observed = [
         event for event in events
         if event.type.startswith("tool.") or event.type == "source.observed"
@@ -999,7 +996,6 @@ async def test_compatibility_tool_route_does_not_create_native_observer(monkeypa
     ]
 
     assert graph.observer_seen is False
-    assert graph.compatibility_request is True
     rendered = "".join(frames)
     assert "fast observed answer" in rendered
     assert frames[-1] == "data: [DONE]\n\n"

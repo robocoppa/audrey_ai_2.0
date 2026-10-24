@@ -4,6 +4,7 @@ from __future__ import annotations
 from test_tax_review import _call, _create, _evidence
 from test_tax_review import state as state
 
+from audrey.app_state.tax_cases import tax_review_scope
 from audrey.tax_review import tax_review_spec
 
 
@@ -31,7 +32,10 @@ async def test_saved_result_separates_applicability_limit_from_a_user_question(s
         "next_question": "",
     })
     assert result["review"]["status"] == "limited_evidence"
+    assert result["supported_scope"] == tax_review_scope()
+    assert result["review"]["eligibility_status"] == "not_determined"
     guidance = result["response_guidance"]
+    assert "conditional worksheets, not allowed deductions or established eligibility" in guidance
     assert "derived needs_input or limited_evidence status alone does not create a question" in guidance
     assert "do not say that catalog metadata makes the passage undated" in guidance
     assert "Keep revisions, record IDs" in guidance and "click Continue review" in guidance
@@ -39,6 +43,17 @@ async def test_saved_result_separates_applicability_limit_from_a_user_question(s
     assert saved["review"]["next_question"] == ""
     assert saved["evidence"][0]["tax_year_status"] == "proposed"
     assert any("has not been verified" in item for item in saved["review"]["limitations"])
+
+
+async def test_scope_available_before_review_without_creating_user_decisions(state):
+    original = await _create(state)
+    result = await _call(state, "inspect")
+    assert result["supported_scope"] == tax_review_scope()
+    assert "review" not in result
+    saved = (await state.client.get(state.path)).json()["case"]
+    assert saved["revision"] == original["revision"]
+    assert saved["facts"] == [] and saved["missing_items"] == []
+    assert saved["review"] is None
 
 
 async def test_saved_user_fact_question_is_retained_with_response_guidance(state):

@@ -76,7 +76,18 @@ export interface TaxReviewWorksheet {
   reference_release: string;
   review_revision: number;
   document_scope?: string;
+  scope?: "evidence_and_arithmetic";
+  eligibility_status?: "not_determined";
   notice?: string;
+}
+
+export const TAX_REVIEW_SCOPE_NOTICE = "This worksheet reviews selected sources and calculations; it does not determine eligibility for deductions or credits. It does not establish that a tax return is complete or legally correct.";
+
+export function taxReviewScopeNotice(review: TaxReviewWorksheet): string {
+  // Older responses can contain a generic notice without the eligibility limit.
+  return review.scope === "evidence_and_arithmetic" && review.notice?.trim()
+    ? review.notice
+    : TAX_REVIEW_SCOPE_NOTICE;
 }
 
 export interface TaxCase {

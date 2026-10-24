@@ -7,10 +7,9 @@ But every one of those calls crosses a network hop to a service we've
 treated as a black box. This lesson opens it.
 
 That service is the **custom-tools sidecar**: a small, separate FastAPI
-app, in its own container, that exposes Audrey's entire tool surface. It is
-the last subsystem the course hasn't covered. By the end you should be able
-to add a tool, fix one, and reason about which side of the wire a failure
-lives on.
+app, in its own container, that serves the tools Audrey's models call. By
+the end you should be able to add a tool, fix one, and reason about which
+side of the wire a failure lives on.
 
 ## 1. Context
 
@@ -18,117 +17,142 @@ lives on.
 
 The sidecar is **not part of Audrey**. It's a second process:
 [`tools-server/app.py`](../../tools-server/app.py) is its own
-`FastAPI(...)` instance, with its own dependencies, its own lifespan, and
-its own container in `compose.yaml`. Audrey talks to it over HTTP on the
-internal network, the same way it talks to Ollama or Qdrant.
+`FastAPI(...)` instance, with its own dependencies, lifespan and container.
+Audrey talks to it over HTTP on the internal network, the same way it talks
+to Ollama or Qdrant. Why split it out?
 
-Why split it out at all, instead of putting the tools inside Audrey?
+- **Dependency isolation.** What a tool needs stays with the tool. The
+  HTML-to-text extractor behind `web_fetch`, for one, exists only in the
+  sidecar's image.
+- **Failure isolation.** A tool that wedges — a hung search, a Qdrant
+  timeout — degrades *one tool*, not the orchestrator. Inside the sidecar
+  the idea repeats one level down: A backend that fails takes out the tools
+  that need it, never the process. Even web search is optional; with no
+  search provider configured, only `web_search` is missing (§2.4).
+- **It's the tool *registry*, kept live.** Audrey doesn't hardcode which
+  tools exist. It reads the sidecar's `/openapi.json` at startup and again
+  every minute, and turns each declared tool route into a tool definition
+  for the model. The same document reports which of the sidecar's
+  components are working, so a tool whose backend is down stops being
+  offered until the backend recovers. (Lesson 10 covered discovery from
+  Audrey's side; this is the other end.)
 
-- **Dependency isolation.** The sidecar pulls in the Brave Search SDK, the
-  Qdrant client, and `aiosqlite`. None of those belong in the orchestrator,
-  whose job is routing and pipeline control. Keeping them out of Audrey's
-  process keeps Audrey's image and import graph lean.
-- **Failure isolation.** A tool that wedges — a hung Brave request, a
-  Qdrant timeout — degrades *one tool*, not the whole orchestrator. Audrey
-  catches the HTTP failure and the rest of the pipeline keeps running.
-- **It's the tool *registry*, discovered at boot.** Audrey doesn't hardcode
-  what tools exist. At startup it reads the sidecar's `/openapi.json`,
-  turns each route into a callable tool definition, and hands those to the
-  model. (That discovery handshake is Lesson 10's territory; here we're on
-  the *other* end of it — the thing being discovered.)
+That last point is the one to hold onto: **the sidecar's schema-visible
+POST routes tagged `tools` are the model's tools**, as long as Audrey holds
+a declaration for each (§2.1). Health and internal routes, and routes
+hidden from OpenAPI, remain service plumbing.
 
-That last point is the one to hold onto: **the sidecar schema-visible, POST,
-`tools`-tagged routes are the model's tools.** Add a route, and — if you shape it
-right — the model gains a tool. Health/internal routes and routes hidden from
-OpenAPI remain service plumbing, not model-callable tools.
+> **Startup order.** `compose.yaml` starts Audrey only after the sidecar
+> passes its healthcheck, which calls the
+> [`health`](../../tools-server/app.py#L550) route. If the first discovery
+> still comes back empty or partial, Audrey retries every few seconds for
+> about two minutes, then settles into its once-a-minute refresh. Lesson 5
+> walked that loop.
 
-> **The `tools=0` boot race.** Because discovery happens once at Audrey
-> startup, if the sidecar isn't healthy yet when Audrey boots, Audrey comes
-> up advertising *zero* tools. `compose.yaml` orders Audrey's start after
-> the sidecar's healthcheck to avoid this; the admin rediscover route is
-> the manual recovery if it happens anyway. You saw this from Audrey's side
-> in earlier lessons — the sidecar's `/health` route ([app.py:506](../../tools-server/app.py#L506))
-> is what that healthcheck hits.
+### 1.2 The files
 
-### 1.2 The five files
+| Job | File | What it holds |
+|---|---|---|
+| The app | [`app.py`](../../tools-server/app.py), [`settings.py`](../../tools-server/settings.py) | The core tool routes and their schemas, the lifespan, the capability check; environment-driven settings |
+| Search and the web | [`brave.py`](../../tools-server/brave.py), [`searxng.py`](../../tools-server/searxng.py), [`fetch.py`](../../tools-server/fetch.py) | The two search providers behind `web_search`; the guarded page fetcher behind `web_fetch` |
+| State the sidecar owns | [`db.py`](../../tools-server/db.py), [`chat_archive.py`](../../tools-server/chat_archive.py) | Durable memory in Qdrant; the chat archive, with SQLite as its source and Qdrant as its index |
+| | [`text_embedding.py`](../../tools-server/text_embedding.py), [`memory_backup.py`](../../tools-server/memory_backup.py) | The pinned embedding transport both stores use; scheduled memory snapshots |
+| Health | [`capabilities.py`](../../tools-server/capabilities.py) | Which components work right now, and the supervisor that keeps that true |
+| Proxies back to Audrey | [`evidence_tools.py`](../../tools-server/evidence_tools.py), [`reference_tools.py`](../../tools-server/reference_tools.py) | Evidence tools (tables, PDF pages, video frames, past conversations) and reference-library tools, which forward to Audrey's own routes |
+| Local compute | [`calculator.py`](../../tools-server/calculator.py) | The bounded calculator, built on a core shared with Audrey |
 
-| File | Role |
-|---|---|
-| [`app.py`](../../tools-server/app.py) | The FastAPI app: every tool route, its request/response schemas, the lifespan that wires up clients. |
-| [`brave.py`](../../tools-server/brave.py) | The Brave Search client behind `web_search` — caching + retry. |
-| [`fetch.py`](../../tools-server/fetch.py) | The SSRF-guarded page fetcher behind `web_fetch`. |
-| [`db.py`](../../tools-server/db.py) | The Qdrant-backed durable memory store behind `memory_*`. |
-| [`settings.py`](../../tools-server/settings.py) | Env-driven config (Pydantic Settings). |
-
-Plus [`chat_archive.py`](../../tools-server/chat_archive.py), the sidecar
-half of the chat archive. Its write path (`archive_turn`, chunking) was
-covered in [Lesson 14](lesson-14-memory-and-context-injection.md); here we
-cover the read/maintenance side (search, prune, stats).
+This lesson reads the app, search, memory and health. `fetch.py` gets a
+short look (§2.5); a later lesson on outbound requests reads it in full.
+The chat archive's write path was covered in
+[Lesson 14](lesson-14-memory-and-context-injection.md), and its read side
+is §2.8. The proxy tools belong with the lessons on files and reference
+libraries.
 
 ## 2. Read-along
 
 ### 2.1 The anatomy of a tool route
 
-Every tool the model can call is one FastAPI route, and they all share the
-same four-part shape. `web_search` is the cleanest example. Its request
-schema is at [app.py:218](../../tools-server/app.py#L218):
-
-```python
-class WebSearchRequest(BaseModel):                      # ① request schema
-    query: Annotated[str, Field(min_length=1, max_length=500, ...)]
-    count: Annotated[int, Field(ge=1, le=10, ...)] = 5
-```
-
-and its route decorator + handler at [app.py:623](../../tools-server/app.py#L623):
+Every tool the model can call is one FastAPI route here plus one
+declaration in Audrey. `web_search` is the cleanest example; its route is
+at [app.py:666](../../tools-server/app.py#L666):
 
 ```python
 @app.post(
     "/web_search",
     operation_id="web_search",                          # ② tool name
     response_model=WebSearchResponse,                   # ③ response schema
-    tags=["tools"],                                    # ④ discovery-visible tag
-    summary="Search the web via Brave Search API",      # ⑤ model-facing docs
-    description="Query the public web for current information. ...",
+    tags=["tools"],                                     # ④ discovery-visible tag
+    summary="Search the web using the configured Brave and/or SearXNG providers",
+    description="Query the public web for current information. ...",  # ⑤ model-facing docs
 )
-async def web_search(req: WebSearchRequest) -> WebSearchResponse:
+async def web_search(req: WebSearchRequest) -> WebSearchResponse:  # ① request schema
+    _require_capabilities("web_search")                 # ⑥ capability check
     ...
 ```
 
-Each part has a job, and most of them are for the model or the discovery machinery, not for you:
+Each part has a job, and most of them are for the model or the discovery
+machinery, not for you:
 
-1. **The request schema** becomes the tool's JSON-Schema parameters. The
-   `Field` constraints (`min_length`, `le=10`) are advertised to the model
-   *and* enforced by FastAPI — a model that sends `count: 50` gets a 422
-   before your handler runs.
-2. **`operation_id`** is the literal tool name the model calls. Without it,
-   FastAPI auto-generates an ugly name from the function + path; with it,
-   the OpenAPI→Ollama-tool converter produces a clean `web_search`. **This
-   is load-bearing** — change it and you rename the tool, breaking any
-   prompt or memory that referenced the old name.
-3. **`response_model`** shapes what comes back. It also documents the return
-   shape in `/openapi.json`, though the model mostly cares about the call.
-4. **`tags=["tools"]`** is the discovery-visible intent marker. Audrey's discovery
-   only turns POST operations tagged `tools` into `ToolSpec`s, so an otherwise
-   valid route without that tag stays out of the model's tool list.
-5. **`summary` / `description`** are the model-facing documentation. The
-   `description` is sent to the model as the tool's description on *every
-   request that advertises this tool*. This is prompt real estate — it's
-   where you tell the model *when* to use the tool, not just what it does.
-   (Look at `chat_history_search`'s description at
-   [app.py:923](../../tools-server/app.py#L923): half of it is "use only
-   when…" — actively steering the model away from over-calling it.)
+1. **The request schema**,
+   [`WebSearchRequest`](../../tools-server/app.py#L261), becomes the tool's
+   JSON-Schema parameters. Its `Field` constraints are advertised to the
+   model *and* enforced by FastAPI: A model that sends `count: 50` gets a
+   422 before your handler runs.
+2. **`operation_id`** is the literal tool name, and the key Audrey looks the
+   declaration up by. **It's load-bearing**: Change it and you rename the
+   tool, orphaning its declaration and breaking any prompt or skill that
+   names it.
+3. **`response_model`** shapes what comes back and documents it in
+   `/openapi.json`.
+4. **`tags=["tools"]`** marks intent. Discovery only considers POST
+   operations tagged `tools`.
+5. **`summary` / `description`** are model-facing documentation, sent on
+   *every request that offers the tool*. This is prompt real estate, where
+   you tell the model *when* to use the tool. (The description on
+   [`chat_history_search`](../../tools-server/app.py#L980) is half "use only
+   when…", steering the model away from over-calling it.)
+6. **The capability check** is the handler's first line. It names the
+   components the route can't work without, and
+   [`_require_capabilities`](../../tools-server/app.py#L230) refuses the
+   call if any is down, with a 503 that lists them and a `Retry-After`
+   header. "Can't run right now" is a different answer from "ran and
+   failed".
+7. **The declaration** lives in Audrey, in
+   [`TOOL_DECLARATIONS`](../../src/audrey/tools/discovery.py#L100): how the
+   person's identity is bound into a call, and which components the tool
+   depends on. Three entries, from
+   [discovery.py:123](../../src/audrey/tools/discovery.py#L123):
 
-That's the contract. Get all five right and the model gains a working tool;
-get `operation_id` wrong and the tool is misnamed; get the `description`
-wrong and the model calls it at the wrong times.
+```python
+_declare("web_search", dependencies=("web_search",)),
+_declare("web_fetch", dependencies=("web_fetch",)),
+_declare(
+    "kb_search",
+    user_scope=ToolUserScope.ARGUMENT,
+    dependencies=("audrey_kb", "qdrant", "text_embedding"),
+),
+```
+
+Discovery checks each `tools` route against its declaration. A `user`
+field the declaration doesn't bind, or a binding the schema can't carry, is
+a policy error, and a `tools` route with *no* declaration rejects every tool
+from the server, not just the new one. Lesson 10 explained why failing
+closed is right; the working rule is that a declaration ships with its route
+or before it, never after.
+
+The check and the declaration name the same components on purpose, because
+they do different jobs. The declaration decides whether the tool is
+*offered*: Discovery leaves out any tool whose dependency the sidecar
+reports down. The check decides whether a *call* is served, which matters in
+the gap before Audrey notices a failure (§2.7). When a route gains a
+dependency, both lists gain it.
 
 ### 2.2 Concept spotlight: hiding routes from the model
 
 Not every route should be a tool. The chat archive has three routes the
 model must **never** call — writing a turn, pruning old data, reading
-stats. Those are for Audrey's archive client and the admin operator only.
-
-The mechanism is one flag ([app.py:1432](../../tools-server/app.py#L1432)):
+stats. They're for Audrey's archive client and the admin operator only, and
+the mechanism is one flag ([app.py:1491](../../tools-server/app.py#L1491)):
 
 ```python
 @app.post("/chat_history/archive", include_in_schema=False, tags=["internal"])
@@ -137,401 +161,446 @@ async def chat_history_archive(req: ArchiveTurnRequest) -> dict[str, Any]:
 ```
 
 `include_in_schema=False` keeps the route out of `/openapi.json`. Since
-Audrey builds the model's tool list *from* `/openapi.json`, a route that
-isn't in the schema is invisible to discovery — the model literally cannot
-see it, so it cannot call it. The route still works over HTTP for anyone
-who knows the path (Audrey's archive client posts to `/chat_history/archive`
-after every turn), but it's not a tool.
+Audrey builds the model's tool list from that document, the model cannot see
+the route, so it cannot call it. The route still works over HTTP for anyone
+who knows the path; Audrey's archive client posts to it after every turn.
+When you add a route, that one flag decides which side of the line it's on.
 
-This is the sidecar's privilege boundary: **schema-visible routes are
-tools; `include_in_schema=False` routes are internal plumbing.** When you
-add a route, that one flag decides which side of the line it's on.
+Hiding a route isn't protecting it, though, and the tool routes aren't
+protected either. Many of them take a `user` value and trust it, which is
+safe only because nothing outside the internal network can reach the
+sidecar. It publishes no port (the comment on
+[`custom-tools`](../../compose.yaml#L135) in `compose.yaml` says why),
+Audrey is its only caller, and Audrey fills in `user` itself before every
+call (§2.6). The routes that export or delete a person's data add a second
+lock, a check of Audrey's service token
+([`_require_internal_service`](../../tools-server/app.py#L1203)). The rule
+that follows: Never publish the sidecar's port, not even for debugging.
 
-### 2.3 The three kinds of tool
+### 2.3 The four kinds of tool
 
 The model-facing tools look uniform from §2.1, but underneath they fall
-into three groups with very different implementations:
+into four groups:
 
 | Kind | Tools | What the handler does |
 |---|---|---|
-| **Proxy** | `kb_search`, `kb_image_search` | Forwards back to Audrey's `/v1/kb/query`. |
-| **External** | `web_search`, `web_fetch` | Reach the outside web — Brave via `brave.py`, a model-chosen page via `fetch.py` (§2.5). |
-| **Stateful** | `memory_*`, `chat_history_search` | Reads/writes Qdrant + SQLite via `db.py` / `chat_archive.py`. |
+| **Proxy** | `kb_search`, `kb_image_search`, `list_my_files`, `get_file_text`, the evidence and reference-library tools | Forwards to one of Audrey's own routes |
+| **External** | `web_search`, `web_fetch` | Reaches the outside web: a search provider (§2.4) or a model-chosen page (§2.5) |
+| **Stateful** | `memory_*`, `chat_history_search` | Reads and writes state the sidecar owns, in Qdrant and SQLite (§2.6, §2.8) |
+| **Local compute** | `calculate` | Evaluates an expression in-process, with nothing behind it |
 
-The **proxy** kind is worth pausing on because it's counterintuitive: the
-sidecar calls *back into Audrey*. Here's the whole of `kb_search`
-([app.py:722](../../tools-server/app.py#L722)), which is representative:
+The **proxy** kind is the largest, and the counterintuitive one: The
+sidecar calls *back into Audrey*. Here's the core of
+[`kb_search`](../../tools-server/app.py#L767):
 
 ```python
 async def kb_search(req: KBSearchRequest) -> KBSearchResponse:
-    client: httpx.AsyncClient = app.state.audrey      # httpx client → Audrey
-    payload: dict[str, Any] = {"query": req.query, "top_k": req.top_k}
-    if req.user:
-        payload["user"] = req.user                    # merge user uploads
+    _require_capabilities("audrey_kb", "qdrant", "text_embedding")
+    client: httpx.AsyncClient = app.state.audrey      # built in the lifespan
+    ...                                               # payload: query, top_k, user
     try:
         r = await client.post("/v1/kb/query", json=payload)
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"Audrey KB unreachable: {e}")
     if r.status_code >= 400:
         raise HTTPException(status_code=r.status_code, detail=r.text)
-    body = r.json()
-    return KBSearchResponse(query=req.query, results=body.get("results", []))
+    ...                                               # relay results and any notice
 ```
 
-That's the entire handler. It does three things: build the payload, POST it
-to Audrey's `/v1/kb/query`, and relay the response. The `httpx` client it
-uses (`app.state.audrey`) was constructed in the lifespan, pointed at
-Audrey's base URL.
-
-Why the round-trip back into Audrey? The knowledge base — Qdrant
-collections, the CLIP/embedding machinery — lives on Audrey's side
-(Lessons 12–13). The sidecar doesn't own the KB; it only *exposes* it as a
-model-callable tool. So the full call path for one KB search is:
+The knowledge base — its collections, embedders and upload records — lives
+on Audrey's side (Lessons 12–13). The sidecar doesn't own it; it *exposes*
+it as a tool. So one KB search runs:
 
 ```text
 model → Audrey (ReAct loop) → sidecar (kb_search) → Audrey (/v1/kb/query) → Qdrant
 ```
 
-Audrey calls out to the sidecar, which calls back into Audrey. It looks
-circular, but the two hops do different jobs: the first turns "the model
-wants to search" into "a tool call," and the second does the actual
-retrieval. The sidecar is a thin adapter between those two — it's what lets
-the model *name* a capability that physically lives in the orchestrator.
+It looks circular, but the hops do different jobs: The first turns "the
+model wants to search" into a tool call, and the second does the retrieval.
 
-The error handling tells you where a failure lives. Two distinct cases:
+**How Audrey trusts the second hop.** `/v1/kb/query` also serves people,
+and for them it searches as whoever is signed in. The sidecar's client
+carries Audrey's service token in an `X-Audrey-Service-Token` header, and
+[`kb_query`](../../src/audrey/routes/kb.py#L435) honors the `user` in the
+body only from a caller holding that token; anyone else searches as
+themselves. So the chain holds end to end: Audrey's dispatch puts the
+authenticated person in `user`, the sidecar relays it, and Audrey accepts it
+only from the sidecar.
 
-- **`httpx.RequestError` → 502** ([app.py:734](../../tools-server/app.py#L734)).
-  The sidecar couldn't *reach* Audrey at all — connection refused, DNS,
-  timeout. The bug is Audrey-side or network, not the sidecar.
-- **Audrey answered with `>= 400` → relay that status verbatim.** Audrey's
-  KB route itself rejected the query (bad payload, KB not ready). The
-  sidecar passes the status straight through rather than masking it.
+The status code tells you where a failure lives. A **503 naming
+components** is the sidecar's own capability check, refusing before it
+tries. A **502** means the sidecar couldn't reach Audrey at all: a refused
+connection, DNS, a timeout. **Any other error status** is Audrey's KB route
+rejecting the query, relayed as is. `kb_image_search` has the same shape
+against `/v1/kb/query/image`, and the other proxies follow the same pattern
+against their own Audrey routes.
 
-So a 502 from `kb_search` means "the proxy works, its upstream doesn't,"
-while any other 4xx is Audrey's own verdict on the query. `kb_image_search`
-([app.py:762](../../tools-server/app.py#L762)) is the same shape against
-`/v1/kb/query/image`, with one extra guard: it requires exactly one of
-`query` / `image_url` / `image_b64` and 422s if the model sends none.
+### 2.4 Web search: two providers, either one enough
 
-The following sections take the External and Stateful kinds in depth.
+`web_search` can use two providers: Brave, a paid API with a key and a
+monthly quota, and SearXNG, a self-hosted search aggregator with no key and
+no per-query cost. Either one is enough. The sidecar's
+[`lifespan`](../../tools-server/app.py#L87) builds a client only for a
+provider that's configured, and with neither, it marks the `web_search`
+capability unavailable and starts everything else. A missing search key is
+a reason to lose search, not a reason to lose memory and the knowledge base
+with it.
 
-### 2.4 `brave.py`: an external API client, done carefully
-
-[`brave.py`](../../tools-server/brave.py) wraps the Brave Search API. It's
-small but it models how to call a rate-limited, paid third-party service
-without abusing it. Two mechanisms carry the weight.
-
-**A TTL cache** ([brave.py:141](../../tools-server/brave.py#L141)). The
-client keeps an in-memory `OrderedDict` keyed by `(query, count)`, each
-entry stamped with a `time.monotonic()` expiry. The read path is small but
-does three things at once:
-
-```python
-async def _cache_get(self, key):
-    async with self._cache_lock:                 # ① one writer at a time
-        entry = self._cache.get(key)
-        if entry is None:
-            return None
-        expires_at, results = entry
-        if time.monotonic() >= expires_at:       # ② expired → evict + miss
-            self._cache.pop(key, None)
-            return None
-        self._cache.move_to_end(key)             # ③ mark recently-used (LRU)
-        return results
-```
-
-① The `asyncio.Lock` matters because the sidecar serves concurrent
-requests: two coroutines could otherwise mutate the `OrderedDict` mid-read.
-② Expiry is checked lazily, on read — there's no background sweeper; a stale
-entry simply misses and gets refetched. ③ `move_to_end` makes the dict an
-LRU: the write path (`_cache_put`) calls `popitem(last=False)` to drop the
-*least* recently used entry when the cache exceeds `cache_max_entries`, so
-memory is bounded regardless of how many distinct queries come through.
-
-The point of all this is the free tier: Brave's quota is small, and a
-24h TTL means a query asked twice in a day costs one API call. The cache
-is keyed on `(query, count)` because a different `count` is a genuinely
-different result set.
-
-**Retry with backoff** ([brave.py:119](../../tools-server/brave.py#L119)).
-The actual fetch wraps the HTTP call in `tenacity`'s `AsyncRetrying`:
+**Picking a provider.** The handler picks a primary and a fallback for each
+query ([app.py:694](../../tools-server/app.py#L694)):
 
 ```python
-async for attempt in AsyncRetrying(
-    retry=retry_if_exception_type((BraveRateLimitError, httpx.HTTPStatusError)),
-    stop=stop_after_attempt(4),                  # at most 4 tries
-    wait=wait_exponential(multiplier=1, min=1, max=15),   # 1s, 2s, 4s, …
-    reraise=True,
-):
-    with attempt:
-        resp = await _do()
+if brave is None:
+    if searxng is None:
+        raise HTTPException(status_code=503, ...)
+    primary, other = searxng, None
+elif settings.web_search_alternate and searxng is not None and _prefer_searxng(req.query):
+    primary, other = searxng, brave
+else:
+    primary, other = brave, searxng
 ```
 
-`_do()` raises `BraveRateLimitError` on a 429 and `raise_for_status()` on
-other HTTP errors; both are in the `retry=` set, so a transient failure backs
-off and tries again — 1s, then 2s, then 4s, capped at 15s. The exponential wait
-is what makes this *polite*: hammering a rate-limited API with immediate retries
-just deepens the limit. If all four attempts fail, `reraise=True` lets the last
-exception out. The 429 case remains a `BraveRateLimitError`, which the
-`web_search` handler catches and returns as 503 ([app.py:596](../../tools-server/app.py#L596));
-other HTTP status failures can currently escape as a generic server error.
+A single configured provider takes every query. With both, and alternation
+on (the default), [`_prefer_searxng`](../../tools-server/app.py#L557)
+hashes the normalized query with `blake2b` and lets one bit pick. The hash
+is stable, unlike Python's per-process salted `hash()`, so a query goes to
+the same provider restart after restart: Repeats hit that provider's cache,
+and no shared counter is needed. The split halves the paid provider's quota
+use, and it decorrelates the two, so a bad minute on one provider no longer
+sinks every search a deep panel fires at once.
 
-So from the model's seat, a rate-limited Brave looks like a tool that
-returned an error — the ReAct loop (Lesson 10) sees the failed tool result
-and can apologize, answer from training, or move on. The request doesn't
-die; one tool degraded. That's the failure-isolation payoff of §1.1 made
-concrete.
+**Falling back.**
+[`_search_with_fallback`](../../tools-server/app.py#L603) asks the other
+provider when the primary fails with a recoverable error (Brave's quota, a
+rate limit or an upstream failure, or any SearXNG error) and when it
+succeeds with *no results*:
 
-> **Teaching aside — where the count limit actually binds.** Three layers
-> touch `count`: the request schema caps it at 10
-> ([app.py:220](../../tools-server/app.py#L220)), the cache key clamps to
-> 20, and `_fetch` passes it straight to Brave. They disagree — but it
-> doesn't matter, because the schema cap is the *real* ceiling: FastAPI
-> rejects `count > 10` with a 422 before any other layer sees it. The
-> lower-level clamps are belt-and-suspenders for a hypothetical caller that
-> bypasses the schema. The lesson: when several layers validate the same
-> value, the *outermost enforced* one is the contract; the inner ones are
-> defense in depth.
+| Primary | The other provider | The model gets |
+|---|---|---|
+| results | not asked | the primary's results |
+| no results | results | the other's results |
+| no results | no results, an error, or none configured | an empty list, with a 200 |
+| a recoverable error | answers | whatever the other returned |
+| a recoverable error | an error, or none configured | a 503 |
+
+Two principles sit in that table. **An empty result isn't proof that
+nothing exists**: An aggregator that returns nothing is often being
+throttled by its own upstream engines, so empty earns a second opinion. And
+**an empty result isn't an error**: When both providers looked and found
+nothing, the model gets an honest empty list, not a 503. "I looked and found
+nothing" and "I couldn't look" are different answers. (Memory search draws
+the same line, §2.6.)
+
+**Each client protects itself**, in its own way, because the providers
+differ:
+
+| | Brave ([`brave.py`](../../tools-server/brave.py)) | SearXNG ([`searxng.py`](../../tools-server/searxng.py)) |
+|---|---|---|
+| Cache | a day by default, keyed on query and count, because `count` is sent upstream | short, keyed on the query alone, because `count` only slices the answer locally; an empty answer is never cached |
+| Retries | rate limits and HTTP errors, with exponential backoff; an exhausted quota isn't retried, so the fallback starts at once | transport and HTTP errors, with a shorter backoff, plus one extra try for an empty answer |
+
+Both caches are LRU-bounded. SearXNG's extra try for an empty answer, and
+its refusal to cache one, come from the first principle: An empty answer is
+often transient, and a cached one would starve every identical query until
+the entry expired.
+
+From the model's seat, a search outage is a tool that returned an error.
+The ReAct loop (Lesson 10) feeds it back like any other result, and the
+model answers from what it has or says it couldn't search. One tool
+degraded; the request lives.
 
 ### 2.5 `fetch.py`: when the model picks the URL
 
-`web_search` returns a title, URL, and a ~150-character snippet — enough to
-cite, not to *read*. `web_fetch` ([`fetch.py`](../../tools-server/fetch.py))
-opens one page and returns its main text, so a worker can pull the exact date or
-quote a snippet leaves out.
-
-It's a second External tool, but with a twist that makes it the file's most
-security-sensitive route: **the model supplies the URL.** The handler becomes a
-fetcher aimed wherever the model says — running on the internal network, next to
-Qdrant and Ollama. Get a research query to fetch a hostile URL and it could be
-steered at those internal services. That attack is **SSRF** (server-side request
-forgery), and `fetch.py` is a stack of guards against it:
+`web_search` returns a title, a URL and a short snippet: enough to cite, not
+to *read*. `web_fetch` ([`fetch.py`](../../tools-server/fetch.py)) opens one
+page and returns its main text. That makes it the sidecar's most
+security-sensitive route, because **the model supplies the URL**, and the
+fetcher runs on the internal network next to Qdrant and Ollama. Steering it
+at those services is **SSRF** (server-side request forgery), and `fetch.py`
+is a stack of guards against it:
 
 | Guard | Stops |
 |---|---|
 | scheme allowlist (http/https) | `file://`, `gopher://` |
-| resolve the host, judge the *IP* | `qdrant:6333`, `127.0.0.1`, `2130706433` |
-| revalidate every redirect hop | `evil.com` → `302` → `qdrant:6333` |
-| 2 MB cap · 15 s timeout · content-type gate | oversized / slow / binary bodies |
+| resolve the host once, require every address to be public, connect to that address | `qdrant:6333`, `127.0.0.1`, `2130706433`, and a name that re-resolves inward between check and connect |
+| follow redirects by hand, re-checking each hop | `evil.com` → `302` → `qdrant:6333` |
+| size caps on the download and the decompressed body, a content-type gate, timeouts, a concurrency cap | oversized, compressed-bomb, slow or binary responses, and bursts |
 
-The redirect row is the subtle one: let `httpx` follow redirects itself and the
-host check passes on the *first* URL while the redirect quietly lands on the
-internal target — so `fetch.py` follows them by hand, re-checking each hop. One
-gap stays open and documented: DNS rebinding, where a host resolves safe, then
-re-resolves to something internal at connect time. And like every tool here,
-`web_fetch` isn't named in a prompt — it rides in on the §1.1 discovery
-handshake, and workers reach for it on their own.
+Two rows close classic holes: Followed automatically, a redirect could land
+inside after the first URL passed the check, and a second DNS lookup at
+connect time could answer "internal" after the check saw "public" (DNS
+rebinding). A later lesson on outbound requests reads the file in full.
 
 ### 2.6 `db.py`: the durable memory store
 
-[`db.py`](../../tools-server/db.py) backs `memory_store` / `memory_recall`
-/ `memory_search`. It is Qdrant-backed, embedded with `nomic-embed-text`
-(the same 768-d text embedder the KB uses — Lesson 12). A few design
-choices make it correct and worth understanding.
+[`db.py`](../../tools-server/db.py) backs `memory_store`, `memory_recall`
+and `memory_search`. Memories live in Qdrant, embedded with the model
+pinned in the shared config's `text_embedding` profile, the same one
+Audrey's knowledge base uses for text.
 
-**Deterministic point ids** ([db.py:64](../../tools-server/db.py#L64)).
-Each memory's Qdrant point id is `uuid5(NAMESPACE_URL, f"{user}|{key}")` —
-a *deterministic* hash of the (user, key) pair. So re-storing the same
-(user, key) produces the *same* id, and the upsert overwrites rather than
-duplicating. This is how `memory_store` is idempotent: store "favorite
-language: Python" twice and you have one point, not two.
+**The vector space is pinned, and checked.** Lesson 3 introduced the idea;
+this is the enforcement. Every embedding call,
+[`embed_text`](../../tools-server/text_embedding.py#L37), checks the
+installed model's digest against the pinned one, before embedding and again
+after. And [`_ensure_collection`](../../tools-server/db.py#L226) refuses a
+collection whose size, distance or recorded identity doesn't match the
+profile. Vectors from two models still compare numerically, but the numbers
+mean nothing; refusing, and asking for a reindex, beats searching quietly
+wrong.
 
-**What actually gets embedded** ([`_embedding_text`, db.py:69](../../tools-server/db.py#L69)).
-A memory is a `(key, value, tags)` triple, but you can't embed a dict — you
-need one string to send to `nomic-embed-text`. The store builds it as
-`f"{key}: {value} [tags: {stripped_tags}]"`, and the construction is
-deliberate:
+**Writes.** A memory is a `(key, value, tags)` triple. Its point id,
+[`_point_id`](../../tools-server/db.py#L66), is `uuid5` over `user|key`, so
+storing the same key again overwrites instead of duplicating. The text that
+gets embedded, from [`_embedding_text`](../../tools-server/db.py#L88), is
+`"{key}: {value} [tags: …]"`: the key first, as a lexical hook for short
+queries, and the `user:` tag stripped, because it's scope metadata, not
+meaning.
 
-- **`key` goes first** so short queries get a lexical hook. A query like
-  "favorite language" should match a memory keyed `favorite_language` even
-  if the value text is sparse.
-- **The `user:<id>` tag is *stripped* before embedding.** It's scope
-  metadata, not semantic content — embedding "user:alice" would add noise
-  that pulls unrelated memories together just because they share an owner.
-  Topic tags (`topic:hardware`) stay in, because those *are* meaningful
-  signal.
+**Reads.** `recall` is an exact-key payload lookup that never embeds
+anything. [`search`](../../tools-server/db.py#L611) first tries the whole
+query as a key, treating spaces, underscores and hyphens as one separator
+([`_literal_key_variants`](../../tools-server/db.py#L71)), because a model
+that saved `favorite_language` may later search for "favorite language".
+Only when no key matches does it run a vector search, above a similarity
+floor from the same profile. The floor is high on purpose: A memory hit is
+injected into the prompt as a fact about the person, so a wrong hit misleads
+the model, and missing a memory is the cheaper mistake.
 
-So the user tag does double duty: it's pulled out for the exact-match
-*filter* (below) and pulled out of the *embedding*. Same token, two
-removals, two different reasons.
-
-**`recall` and `search` are different operations.** Both are scoped to a
-user, but they answer different questions:
-
-| | `recall(key, user)` | `search(query, user, top_k)` |
-|---|---|---|
-| Question | "what's stored under *this exact key*?" | "what memories are *about this*?" |
-| Mechanism | Qdrant **scroll** — payload filter, no vector | **vector search** + payload filter + threshold |
-| Returns | one entry (newest if duplicates) | up to `top_k` ranked entries |
-
-`recall` ([db.py:337](../../tools-server/db.py#L337)) is a pure payload
-lookup — it never embeds anything, just scrolls for points where `key` and
-`user` both match. `search` ([db.py:585](../../tools-server/db.py#L585))
-embeds the query, runs a cosine vector search filtered to the user, and
-drops anything below `MEMORY_SIMILARITY_THRESHOLD`. That threshold is set
-*tight* (0.5) on purpose: a memory false-positive is injected into the
-prompt as "a fact about the user," so a wrong hit actively misleads the
-model — worse than no hit. (Contrast the chat archive's looser threshold in
-§2.8, where the stakes are lower.)
-
-**User scoping that can't be fooled by substrings.** Memories are
-per-user; the scope must be exact, or one user's memory leaks into
-another's. The free-form `tags` string carries `user:<id>`, but filtering
-on a substring of `tags` is fragile — `user:al` would match `user:alice`.
-So at write time the store *extracts* the user id
-([`_parse_user`, db.py:56](../../tools-server/db.py#L56)) and duplicates it
-into a dedicated `user` payload field with a keyword index. Every read
-filters on that exact field ([recall, db.py:337](../../tools-server/db.py#L337);
-[search, db.py:585](../../tools-server/db.py#L585)). The docstrings on both
-read methods carry the same warning: never relax the `user` filter.
-
-**The model never controls user scope.** This is the key safety property.
-Some user-scoped tools expose a `user` argument in their schema; `memory_store`
-uses tags instead. Either way, Audrey's dispatch rewrites the scope before the
-call reaches the sidecar: it overrides `user` for user-scoped read/search tools
-and forces the authenticated `user:<id>` tag for `memory_store`. A model cannot
-write to or read from another user's memory by inventing a different scope value;
-the sidecar trusts that the scope Audrey sends is already authenticated.
-
-**Legacy migration on boot** ([db.py:229](../../tools-server/db.py#L229)).
-An earlier version of memory used SQLite. On first startup, if a legacy
-`memory.db` exists, `init()` reads every row, embeds it, upserts to Qdrant,
-then renames the file to `memory.db.migrated`. It's idempotent — the rename
-means a second boot finds no `memory.db` and does nothing. This is a
-one-shot data migration that lives in the application's startup path rather
-than a separate script, which is fine for a single-replica sidecar.
-
-### 2.7 `settings.py` and the lifespan: wiring it together
-
-[`settings.py`](../../tools-server/settings.py) is Pydantic Settings —
-every knob is an env var with a default (see Lesson 2 for the pattern, and
-Lesson 5 for Audrey's larger version). The interesting part is what
-happens at *load*: a validator that refuses to start with a bad config.
+**Scope: exact, and purge-aware.** At write time the store copies the user
+id out of the `user:` tag into its own keyword-indexed field, because a
+substring filter on `tags` would let `user:al` match `user:alice`. Every
+read filters through [`_user_filter`](../../tools-server/db.py#L119):
 
 ```python
-@model_validator(mode="after")
-def _check_chunk_overlap(self) -> Settings:
-    if self.chat_archive_chunk_overlap_chars >= self.chat_archive_chunk_max_chars:
-        raise ValueError("CHAT_ARCHIVE_CHUNK_OVERLAP_CHARS ... must be less than ...")
-    return self
+def _user_filter(user: str, *, visible_after: str = "") -> qm.Filter:
+    ...
+    must: list[qm.FieldCondition] = [
+        qm.FieldCondition(key="user", match=qm.MatchValue(value=user)),
+    ]
+    if visible_after:
+        must.append(qm.FieldCondition(
+            key="updated_at",
+            range=qm.DatetimeRange(gt=visible_after),
+        ))
+    return qm.Filter(must=must)
 ```
 
-([settings.py:135](../../tools-server/settings.py#L135)) The chat archive's
-text splitter steps through long text by `max_chars - overlap`. If overlap
-were ever set `>=` max_chars, that step would be zero or negative and the
-splitter would crash — but only later, on a write large enough to need
-splitting. The validator turns a *latent runtime crash* into an *immediate,
-legible boot failure*: misconfigure the two env vars and the sidecar
-refuses to start, naming both knobs. This is the "fail fast at boot"
-principle — surface a config error at the earliest possible moment, not on
-some unlucky request hours later.
+`visible_after` is the person's purge cutoff, recorded in the chat archive's
+database when someone purges their stored data. Older memories stay hidden
+from then on, even while the deletion is still working through, and newer
+ones are new activity, so they show. A memory with no timestamp fails the
+range check and stays hidden: The filter fails closed. The cutoff living in
+the archive is why the memory reads declare `chat_archive_source` as a
+dependency.
 
-The **lifespan** ([app.py:75](../../tools-server/app.py#L75)) is where the
-clients are born. On startup it constructs the `BraveClient`, the
-`MemoryStore`, an httpx client pointed at Audrey (for the proxy tools), and
-the `ChatArchiveStore`; calls each one's `init()`; and hangs them on
-`app.state`. Every handler then reaches them via `app.state.brave`,
-`app.state.memory`, and so on. On shutdown the `finally` block closes each
-client. This is the standard FastAPI lifespan shape (Lesson 5 §startup
-covered Audrey's): construct expensive, long-lived clients *once*, share
-them across requests, close them cleanly.
+**The model never controls the scope.** Audrey's dispatch binds identity
+exactly as each declaration says
+([dispatch.py:280](../../src/audrey/tools/dispatch.py#L280)):
+
+```python
+if user_id and spec.user_scope is ToolUserScope.TAGS:
+    args["tags"] = _force_user_tag(str(args.get("tags") or ""), user_id)
+elif user_id and spec.user_scope is ToolUserScope.ARGUMENT:
+    args["user"] = user_id
+```
+
+For argument-scoped tools such as `memory_search`, the model's `user` is
+replaced with the authenticated person; for the tag-scoped `memory_store`,
+any `user:` tag the model wrote is replaced. A scoped tool with no
+authenticated caller isn't called at all. The sidecar trusts the scope it
+receives because, as §2.2 showed, Audrey is its only caller.
+
+**"I couldn't look" isn't "you have none."** When the embedder fails,
+[`memory_search`](../../tools-server/app.py#L903) answers 503, not an empty
+list, which would claim there's nothing to recall. Auto-recall treats the
+error as skip-and-continue, so a turn never breaks; the skip just stops
+being silent.
+
+**Backups.**
+[`MemoryBackupScheduler`](../../tools-server/memory_backup.py#L384) takes a
+snapshot of the memory collection at startup and then daily by default, and
+no chat waits for it. Each bundle also copies the chat archive's database,
+because the purge cutoffs live there: Restored memories without them could
+show what a person had purged. Checking a bundle is a separate operator step
+that restores it into a disposable collection, verifies every point's owner
+and id, and deletes it; nothing can restore over the live collection.
+
+### 2.7 Startup, supervision and shutdown
+
+[`settings.py`](../../tools-server/settings.py) is Pydantic Settings (Lesson
+2 has the pattern). A validator,
+[`_check_chunk_overlap`](../../tools-server/settings.py#L133), refuses two
+contradictions at boot: an archive chunk overlap at or above the chunk size,
+which would crash a large write hours later, and a size cap the code doesn't
+enforce, which would silently do nothing. It's Lesson 5's rule in a second
+process: Fail fast when running would be a lie, and degrade when a useful
+subset still works.
+
+The [`lifespan`](../../tools-server/app.py#L87) builds the long-lived
+clients once: the configured search clients, the memory store, an `httpx`
+client for Audrey that carries the service token, and the chat archive with
+its maintenance worker. It hangs them on `app.state` and starts two
+background jobs, the backup scheduler and the capability supervisor.
+
+**Capabilities.** [`capabilities.py`](../../tools-server/capabilities.py)
+keeps a small registry of named components. Stateless ones such as
+`web_fetch` or `audrey_kb` start available, because their clients work as
+soon as they exist. Stateful ones (`qdrant`, `memory`, the two embedders and
+the archive) start pending, and become available only when their own checks
+pass. The [`CapabilitySupervisor`](../../tools-server/capabilities.py#L108)
+runs a pass at startup and then every few seconds, checking each component
+on its own so one failure never blocks another. The telling branch is
+Qdrant failing ([capabilities.py:178](../../tools-server/capabilities.py#L178)):
+
+```python
+try:
+    await self._memory.probe_qdrant(timeout_s=self._probe_timeout_s)
+except Exception as exc:  # noqa: BLE001 — backend clients raise a wide tree
+    self.registry.set_unavailable("qdrant", "connection_failed")
+    # A restart may replace collections while the service is down.
+    # Recovery must revalidate their pinned vector-space identity.
+    self._memory_ready = False
+    self._archive_index_ready = False
+    self.registry.set_unavailable("memory", "backend_unavailable")
+    self.registry.set_unavailable("chat_archive", "backend_unavailable")
+    ...
+    return
+```
+
+Losing Qdrant marks the components that live in it unavailable, and also
+*forgets* that their collections were checked. A Qdrant that comes back may
+not hold what it held before, so recovery re-runs §2.6's identity check
+before anything is marked available again.
+
+**Two speeds.** A failed component is retried on every pass. A healthy one
+is rechecked on a slow timer, five minutes by default. The recheck exists
+because a component that was healthy at startup can break later, and a
+readiness flag nobody re-examines turns into a lie. The timer is slow
+because rechecking an embedder means running it, which costs GPU time.
+History's embedder is checked separately from memory's: It can be a
+different model, and a warm memory embedder proves nothing about it.
+
+**Publishing the state.** FastAPI normally caches `/openapi.json`; the
+sidecar swaps in [`_dynamic_openapi`](../../tools-server/app.py#L212),
+which rebuilds it per request and attaches the registry's snapshot as
+`x-audrey-capabilities`. Audrey's discovery reads the snapshot alongside
+each declaration's dependencies: A tool whose dependency is down stays in
+Audrey's registry, marked unavailable, and isn't offered. Audrey refreshes
+once a minute ([`_maintain_tool_discovery`](../../src/audrey/main.py#L460)),
+and each refresh also re-evaluates skills, so a skill whose tools vanished
+shows as degraded. The loop, its fast retries after a cold start, and an
+admin's manual rediscovery all go through one function under one lock, so
+an older snapshot can't land after a newer one. And an empty snapshot never
+replaces the live list: Empty can mean a restarting sidecar or a rejected
+catalogue, so it's inconclusive, while an explicit "unavailable" still
+withdraws its tools.
+
+**Propagation is eventual.** If Qdrant drops, the sidecar notices within
+seconds and Audrey stops offering the affected tools within about a minute.
+If a healthy embedder breaks, the sidecar notices at its next recheck, so
+the worst case is about six minutes. In between, a call meets the capability
+check, which answers 503 and names the component. Withdrawal keeps the model
+from being offered a tool that can't work; the request-time check keeps the
+window honest.
+
+**Shutdown** stops the background jobs first (backups, then the supervisor,
+which also stops the archive's maintenance worker), then closes the clients,
+skipping any search client that was never built. It's the rule Lesson 5
+showed for Audrey: Stop the work before the clients it uses.
 
 ### 2.8 The chat archive's read side
 
 [Lesson 14](lesson-14-memory-and-context-injection.md) covered how a turn
-gets written — `archive_turn`, the Q+A-pair chunking, the embed-and-upsert.
-The sidecar exposes three more operations on top of that store:
+gets written. Three more operations sit on top of that store:
 
-- **`search`** ([chat_archive.py:904](../../tools-server/chat_archive.py#L904))
-  backs the `chat_history_search` tool. It embeds the query, vector-searches
-  Qdrant filtered by `user` (plus an optional `created_at` date range), and
-  returns snippet-first hits. Its similarity threshold is set *looser* than
-  durable memory's — chat-history recall is human-triggered ("did we talk
-  about X?"), so a few marginal hits are acceptable, whereas a
-  `memory_search` false positive would poison the prompt with a wrong
-  "fact about the user." Same machinery, different threshold, for a
-  principled reason.
-- **`prune`** ([chat_archive.py:1815](../../tools-server/chat_archive.py#L1815))
-  applies retention: if `retention_days > 0`, it deletes Qdrant points
-  *first*, then the SQLite rows older than the cutoff. (Vectors before
-  source, so a crash mid-prune leaves recoverable source rows, never
-  orphaned vectors pointing at deleted text.) Reached only via the admin
-  route.
-- **`stats`** ([chat_archive.py:2036](../../tools-server/chat_archive.py#L2036))
-  returns row counts including `chunks_unindexed` — chunks in SQLite that
-  never made it into Qdrant (an embed/upsert failure at write time). A
-  non-zero value is the signal that the index has drifted from the source
-  and needs a reindex.
+- **`search`** ([`search`](../../tools-server/chat_archive.py#L1161)) backs
+  `chat_history_search`. It runs ranked keyword matching over the SQLite
+  source first, which also finds chunks still waiting to be indexed, then
+  fills the remaining slots with semantic hits, filtered by `user`, the
+  purge cutoff and an optional date range. Keyword hits carry no score and
+  still come back when the embedder is down. The semantic floor, from
+  history's own embedding profile, favors recall: Lookup is human-triggered
+  ("did we talk about X?") and the answer checks the excerpts, whereas a
+  memory false positive becomes a "fact" in the prompt.
+- **`prune`** ([`prune`](../../tools-server/chat_archive.py#L2084)) applies
+  retention through an outbox: a bounded batch is deleted from Qdrant first,
+  and the SQLite rows are finalized only once Qdrant has acknowledged.
+  Vectors go before source, so a crash midway leaves recoverable rows, never
+  vectors pointing at deleted text. A maintenance pass does this every few
+  minutes; the admin route runs one on demand.
+- **`stats`** ([`stats`](../../tools-server/chat_archive.py#L2305)) returns
+  row counts, including `chunks_unindexed`: chunks that haven't made it into
+  Qdrant yet. Maintenance retries them, so a count that stays high means
+  indexing keeps failing.
 
-These three are the `include_in_schema=False` internal routes from §2.2 —
-the model can't call them; Audrey's admin surface and archive client can.
+The last two sit behind the internal routes from §2.2.
 
 ## 3. Comprehension questions
 
-**1. You add a new route `@app.post("/summarize_url")` to the sidecar and
-redeploy, but the model never calls it. List three things that could be
-wrong.**
+**1. You add a route `/summarize_url` to the sidecar, tagged `tools` and
+with its own `operation_id`, and redeploy the sidecar. The model never calls
+it. What could be wrong?**
 
-Three independent failure points, all from §2.1–§2.2. (a) A missing or
-wrong `operation_id` — without it FastAPI auto-generates an unusable name,
-so even if the tool is discovered the model can't call it cleanly (contrast
-the explicit `operation_id="web_search"` at
-[`app.py:625`](../../tools-server/app.py#L625)). (b) `include_in_schema=False`
-left on (the flag at [`app.py:1454`](../../tools-server/app.py#L1454) on the
-internal routes), which hides the route from `/openapi.json`, so discovery
-never sees it. (c) Discovery already ran: Audrey reads `/openapi.json` *once
-at startup*, so a route added after that boot is invisible until you hit the
-admin rediscover route or restart Audrey — the `tools=0`-style staleness from
-§1.1.
+Start with Audrey's log. If the route has no entry in
+[`TOOL_DECLARATIONS`](../../src/audrey/tools/discovery.py#L100), discovery
+rejects the sidecar's whole catalogue and logs an error naming the route. A
+running Audrey treats that empty answer as inconclusive and keeps its last
+good tool list, so nothing else looks broken, but the new tool never appears
+and availability stops updating. On its next restart, Audrey starts with no
+sidecar tools at all. Without that error, check that the route is in the
+schema (§2.2) and that no dependency in its declaration is reported down,
+which keeps a declared tool listed but unoffered (§2.7). Waiting isn't the
+fix: A correctly declared route appears within about a minute.
 
 **2. `kb_search` returns a 502 to the model. Whose fault — the sidecar or
 Audrey?**
 
-Audrey's (or the network between them), not the sidecar. `kb_search` is a
-*proxy* tool ([`app.py:722`](../../tools-server/app.py#L722)): its handler
-reaches *back into* Audrey's `/v1/kb/query` via the
-`app.state.audrey` httpx client. A 502 means that upstream call failed — the
-sidecar is up and serving, but the Audrey KB endpoint it depends on isn't
-answering. This is the proxy kind's signature from §2.3: a failure here lives
-on the *other* side of the wire than the tool's name suggests.
+Audrey's, or the network between them. `kb_search` is a *proxy* tool
+([`kb_search`](../../tools-server/app.py#L767)) that reaches back into
+Audrey's `/v1/kb/query`, and a 502 means that upstream call got no answer;
+the sidecar itself is up. Compare a 503 naming `qdrant` or
+`text_embedding`: That's the sidecar's own capability check, refusing before
+it tries. This is the proxy kind's signature from §2.3: A failure can live
+on the other side of the wire from the one the tool's name suggests.
 
-**3. Why can the model call `chat_history_search` but not
-`chat_history/prune`?**
+**3. Qdrant restarts and is unreachable for two minutes. Which tools leave
+the model's list, which keep working, and what happens when it's back?**
 
-`chat_history_search` ([`app.py:916`](../../tools-server/app.py#L916)) is a
-normal route — visible in `/openapi.json`, so discovery turns it into a tool.
-`chat_history/prune` ([`app.py:1454`](../../tools-server/app.py#L1454)) is
-declared `include_in_schema=False`, so it never appears in the schema Audrey
-reads — the model has no name to call. The route still works over HTTP for the
-admin operator who knows the path; it's just not a *tool*. This is the §2.2
-privilege boundary: schema-visible routes are tools, `include_in_schema=False`
-routes are internal plumbing.
+Within seconds the supervisor's probe fails, and the sidecar marks `qdrant`,
+`memory` and the archive's index unavailable (§2.7). Within about a minute,
+Audrey's refresh withdraws every tool whose declaration depends on one of
+those: the two knowledge-base searches, the three memory tools,
+`chat_history_search` and the reference search. Web search, the calculator
+and the file tools stay on offer, because their declarations don't name
+Qdrant; a call that slips into the gap gets a 503 naming the component. When
+Qdrant answers again, the supervisor re-checks the collections' vector-space
+identity before marking them available, and Audrey's next refresh offers the
+tools again. Nothing restarts, and nobody rediscovers by hand.
 
-**4. A user reports seeing another user's stored memory in a recall. Where
+**4. A person reports seeing someone else's stored memory in a recall. Where
 do you look first?**
 
-The `user` payload filter, in two places. First, `recall` and `search` must
-filter on the exact `user` keyword field — see the `FieldCondition(key="user", …)`
-in `recall` ([`db.py:354`](../../tools-server/db.py#L354)) and `search`
-([`db.py:613`](../../tools-server/db.py#L613)) — never a substring of `tags`.
-Second, confirm Audrey's dispatch is still overriding the model-supplied `user`
-argument with the *authenticated* user: the `_USER_SCOPED_TOOLS` membership
-check at [`dispatch.py:224`](../../src/audrey/tools/dispatch.py#L224) is what
-forces that override. If the model's own `user` value ever reached the store
-unmodified, scoping would be defeated — a model could read another account by
-guessing its id.
+At the scope, in each of its three layers. In the store, every read must
+filter on the exact `user` field through
+[`_user_filter`](../../tools-server/db.py#L119), never a substring of
+`tags`. In Audrey's dispatch, `memory_recall` and `memory_search` must still
+be declared argument-scoped, so the model's `user` is overwritten (§2.6); a
+declaration that stopped binding `user` while the schema still carries it
+would be refused at discovery. And in the network: The routes trust the
+`user` they're sent, so if anything besides Audrey can reach the sidecar,
+for example through a published port, anyone there can name any account.
 
-**5. Brave starts rate-limiting you mid-conversation. What does the model
-see, and what keeps it from taking down the whole request?**
+**5. Brave starts answering with 429s in the middle of a research run, and
+SearXNG is configured. What does the model see?**
 
-After the retry budget exhausts, `brave.py` raises `BraveRateLimitError`
-([`brave.py:110`](../../tools-server/brave.py#L110)), and the `web_search`
-handler converts it to a 503
-([`app.py:596`](../../tools-server/app.py#L596)). The model doesn't see a
-crash — it sees a *failed tool result*, which the ReAct loop (Lesson 10) feeds
-back like any other: the model can apologize, try a different approach, or
-answer without the web. That's the failure-isolation payoff of the separate
-process from §1.1 — one tool degraded, the request lives.
+Usually nothing at all. For queries that hash to Brave as primary, Brave's
+client retries with backoff and gives up, the handler falls back to
+SearXNG, and the model gets SearXNG's results; queries that hash to SearXNG
+never touch Brave. An exhausted quota (a 402) skips the retries, so the
+fallback starts at once. Only if SearXNG fails too does the model get a 503,
+which the ReAct loop treats as a failed tool result, and the run goes on.
+Without SearXNG configured, the 429s reach the model as 503s once Brave's
+retries run out.
 
 ## That's the course so far
 

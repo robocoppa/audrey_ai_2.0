@@ -1283,6 +1283,24 @@ def _review_support(
     return needs_input, limitations
 
 
+def tax_review_scope() -> dict[str, str]:
+    """Server-owned capability boundary, independent of a model's assessment.
+
+    A supported finding can describe a source or reproduce arithmetic without
+    establishing all the personal conditions for a deduction or credit. Keep
+    that distinction on historical reviews too, without rewriting saved data.
+    """
+    return {
+        "scope": "evidence_and_arithmetic",
+        "eligibility_status": "not_determined",
+        "notice": (
+            "This worksheet reviews selected sources and calculations; it does not determine "
+            "eligibility for deductions or credits. It does not establish that a tax return "
+            "is complete or legally correct."
+        ),
+    }
+
+
 def tax_case_review(case: dict[str, Any]) -> dict[str, Any] | None:
     """Expose a saved goal-scoped worksheet without certifying tax correctness."""
     review = case.get("review")
@@ -1321,7 +1339,7 @@ def tax_case_review(case: dict[str, Any]) -> dict[str, Any] | None:
         "stale": stale,
         "limitations": [*needs_input, *limitations],
         "document_scope": "Selected passages only. Remaining document pages have not been fully reviewed.",
-        "notice": "This saved review does not establish that a tax return is complete or legally correct.",
+        **tax_review_scope(),
     }
 
 
@@ -1524,5 +1542,6 @@ __all__ = [
     "validate_operation",
     "tax_case_checklist",
     "tax_case_review",
+    "tax_review_scope",
     "validate_tax_case",
 ]

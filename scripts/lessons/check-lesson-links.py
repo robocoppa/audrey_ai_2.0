@@ -12,7 +12,15 @@ or
     [<label>](relative/path#L42-L51)
 
 in your docs, the script opens the target file and verifies the cite.
-Three strategies, in order of strength:
+A quoted Markdown link title is an explicit content anchor:
+
+    [file.py:42](relative/path#L42 "def hello(")
+
+It must match the beginning of the exact cited start line, ignoring outer
+whitespace. Single- and double-quoted titles and Markdown punctuation
+escapes are supported. Ranges do not relax this start-line requirement.
+
+For untitled links, three strategies, in order of strength:
 
   1. **Snippet match (strongest).** When the cite is followed shortly
      by a fenced code block in the same doc, the script treats that
@@ -44,7 +52,25 @@ Three strategies, in order of strength:
      but yields false positives on deliberate "into the body" cites
      (an `if`, a `raise`, a field assignment); in fallback mode it only
      emits a soft `DRIFT?`, never a confident fix. The bare `file.py:NN`
-     cites that carry no symbol in their label land here.
+     cites that carry no symbol in their label land here. The summary
+     separately counts these unanchored heuristic checks; passing the
+     shape check does not verify the cited content.
+
+OPTIONAL SNIPPET FIDELITY
+
+    --snippet-fidelity
+
+Compare every substantive line of a following source fence with the cited
+source block, in order, ignoring indentation and outer whitespace. Blank
+lines, whole-line comments, standalone ellipses and triple-quote delimiters
+are ignored. Other lines, including inline comments, must match in full;
+shortened signatures and teaching simplifications can therefore be reported
+as SNIPPET findings. They require review, not automatic source changes.
+The explicit URL/label range bounds the check; otherwise use the block opened
+at the cite (or its nearest containing block), falling back to the cited line.
+A match elsewhere in the file cannot hide stale content in the cited block.
+Fences are scanned for at most 500 lines; an unterminated/longer fence is
+reported as incomplete. This mode is off by default and exits 1 on findings.
 
 WHAT IT DOES NOT DO
 
@@ -78,7 +104,7 @@ ENVIRONMENT (override if your repo is shaped differently)
 EXIT CODES
 
     0   No drift found (or only soft "drift?" hints in fallback mode).
-    1   At least one cite is broken or has a confident fix proposal.
+    1   At least one cite is broken, drifted, or has a requested SNIPPET finding.
     2   Usage error / missing dependency.
 
 PROJECT-AGNOSTIC NOTES
@@ -93,6 +119,7 @@ in LANDMARK_PATTERNS below to cover other languages.
 from __future__ import annotations
 
 import argparse
+import html
 import os
 import re
 import subprocess
@@ -158,9 +185,13 @@ LANDMARK_RE = re.compile(r"^\s*(?:" + "|".join(LANDMARK_PATTERNS) + r")")
 # YAML keys: a separate check because they have their own shape.
 YAML_KEY_RE = re.compile(r"^\s*[A-Za-z0-9_-]+:\s*(#.*)?$")
 
-# Cite extractor: matches a Markdown link whose URL has a #L<num>
-# anchor, optionally a range. Captures the label text and the URL.
-CITE_RE = re.compile(r"\[([^\]]+)\]\(([^)]*#L\d+(?:-L\d+)?)\)")
+# Keep matching bounded to one Markdown line. Parse the destination/title
+# with a scanner so parentheses and escaped quotes inside a title cannot
+# truncate the URL or cause nested-regex backtracking.
+_LINK_START_RE = re.compile(r"\[([^\]\n]+)\]\(")
+_LINE_ANCHOR_RE = re.compile(r"(.+)#(L\d+(?:-L\d+)?)$")
+_MARKDOWN_ESCAPE_RE = re.compile(r"\\([!\"#$%&'()*+,./:;<=>?@\[\\\]^_`{|}~-])")
+_SNIPPET_FIDELITY_MAX_LINES = 500
 
 # Identifier extractor for the link label. When a cite's visible label is
 # a backticked code symbol — `require_user`, `ChatArchiveStore.archive_turn`,
@@ -191,12 +222,15 @@ class Cite:
     snippet: str | None  # first code line of the following fenced block, if any
     label_symbol: str | None  # code identifier from the link label, if any
     label_end: int | None = None  # range end stated in the label, if any
+    title_anchor: str | None = None  # exact-start prefix from the link title
+    snippet_lines: tuple[tuple[int, str], ...] = ()  # (doc line, source line)
+    snippet_incomplete: bool = False  # fence exceeded the bounded scan
 
 
 @dataclass
 class Finding:
     cite: Cite
-    severity: str       # "BROKEN" | "DRIFT" | "DRIFT?" | "OK"
+    severity: str       # "BROKEN" | "DRIFT" | "SNIPPET" | "DRIFT?" | "OK"
     message: str
     proposed_line: int | None  # when severity == DRIFT and we have a confident fix
 
@@ -245,29 +279,89 @@ def parse_anchor(anchor: str) -> tuple[int, int]:
 # ─── Doc parsing ─────────────────────────────────────────────────────
 
 
-def extract_cites(doc: Path) -> Iterable[Cite]:
-    """Walk the doc line by line, emit one Cite per `#L<n>` link.
+def _markdown_unescape(value: str) -> str:
+    return html.unescape(_MARKDOWN_ESCAPE_RE.sub(r"\1", value))
 
-    The snippet is set when the cite is followed (within
-    SNIPPET_LOOKAHEAD lines) by an opening code fence (```), in which
-    case the next non-empty content line is captured as the snippet's
-    first line. Snippet capture is conservative — we never look across
-    a blank-line-then-prose gap, so cites with no nearby snippet just
-    get snippet=None and fall through to the landmark heuristic.
+
+def _line_links(line: str) -> Iterable[tuple[str, str, str | None]]:
+    """Yield line-cite label, destination and optional quoted content anchor.
+
+    Unquoted destinations may contain balanced/escaped parentheses. Angle
+    brackets permit spaces in a path. Titles stay on the same Markdown line;
+    malformed quoted titles are ignored rather than silently losing an anchor.
+    """
+    for match in _LINK_START_RE.finditer(line):
+        pos = match.end()
+        start = pos
+        if pos < len(line) and line[pos] == "<":
+            close = line.find(">", pos + 1)
+            if close == -1:
+                continue
+            raw_url = line[pos + 1:close]
+            pos = close + 1
+        else:
+            depth = 0
+            while pos < len(line):
+                char = line[pos]
+                if char == "\\" and pos + 1 < len(line):
+                    pos += 2
+                    continue
+                if char == "(":
+                    depth += 1
+                elif char == ")":
+                    if depth == 0:
+                        break
+                    depth -= 1
+                elif char.isspace() and depth == 0:
+                    break
+                pos += 1
+            raw_url = line[start:pos]
+        url = _markdown_unescape(raw_url)
+        if _LINE_ANCHOR_RE.fullmatch(url) is None:
+            continue
+        spaced = pos < len(line) and line[pos].isspace()
+        while pos < len(line) and line[pos].isspace():
+            pos += 1
+        title = None
+        if spaced and pos < len(line) and line[pos] in ('"', "'"):
+            quote = line[pos]
+            pos += 1
+            title_start = pos
+            while pos < len(line) and line[pos] != quote:
+                pos += 2 if line[pos] == "\\" and pos + 1 < len(line) else 1
+            if pos >= len(line):
+                continue
+            title = _markdown_unescape(line[title_start:pos]).strip()
+            pos += 1
+            while pos < len(line) and line[pos].isspace():
+                pos += 1
+        if pos < len(line) and line[pos] == ")":
+            yield match.group(1), url, title
+
+
+def extract_cites(doc: Path, *, snippet_fidelity: bool = False) -> Iterable[Cite]:
+    """Extract line-cites and the following fence, without crossing another cite.
+
+    Full fences are captured only for requested fidelity checks. The default
+    path retains the existing short first-substantive-line anchor search.
     """
     lines = doc.read_text().splitlines()
     for i, line in enumerate(lines):
-        for match in CITE_RE.finditer(line):
-            label, url = match.group(1), match.group(2)
-            rel_path, anchor = url.split("#", 1)
-            target = resolve_cite_path(doc, rel_path)
+        for label, url, title in _line_links(line):
+            parsed = _LINE_ANCHOR_RE.fullmatch(url)
+            assert parsed is not None
+            rel_path, anchor = parsed.groups()
             start, end = parse_anchor(anchor)
-            snippet = _find_following_snippet(lines, i)
+            snippet_lines, incomplete = (
+                _following_snippet_lines(lines, i) if snippet_fidelity else ((), False)
+            )
             yield Cite(
-                doc=doc, doc_line=i + 1, url=url, target=target,
-                start=start, end=end, snippet=snippet,
+                doc=doc, doc_line=i + 1, url=url,
+                target=resolve_cite_path(doc, rel_path), start=start, end=end,
+                snippet=_find_following_snippet(lines, i),
                 label_symbol=_extract_label_symbol(label),
-                label_end=_extract_label_end(label, start),
+                label_end=_extract_label_end(label, start), title_anchor=title,
+                snippet_lines=snippet_lines, snippet_incomplete=incomplete,
             )
 
 
@@ -310,56 +404,48 @@ def _extract_label_end(label: str, start: int) -> int | None:
     return None
 
 
-def _find_following_snippet(lines: list[str], cite_line_idx: int) -> str | None:
-    """Find the first code line of the fenced block following a cite.
-
-    Returns None when:
-      - no fenced block opens within SNIPPET_LOOKAHEAD lines, or
-      - the fenced block's language tag indicates non-source content
-        (``` ``text``, ``` ``mermaid``, ``` ``diagram``, ``` ``markdown``)
-        — those are pseudocode / diagrams, not snippets the script
-        should look for in the target file, or
-      - the first content line is too generic to be a useful anchor
-        (e.g. `\"\"\"` opening a docstring). We advance past those lines
-        to find a substantive first content line, falling back to None
-        if nothing substantive appears in the first ~6 lines of the
-        block.
-
-    The "first line inside the fence" is trimmed of trailing whitespace
-    only; leading whitespace is preserved so the match logic can
-    normalize for indentation.
-    """
+def _following_fence(lines: list[str], cite_line_idx: int) -> int | None:
+    """Locate a nearby source fence, without borrowing a later cite's fence."""
     end = min(cite_line_idx + SNIPPET_LOOKAHEAD + 1, len(lines))
     for j in range(cite_line_idx + 1, end):
-        fence_line = lines[j].lstrip()
-        # If another cite appears before any fence, the upcoming fence
-        # belongs to *that* cite, not this one. Stop the search so we
-        # don't poach a later cite's snippet. Common in list-style
-        # walkthroughs: "1. X at file:1 / 2. Y at file:2 / ```snippet```"
-        # — the snippet belongs to step 2, not step 1.
-        if CITE_RE.search(lines[j]):
+        if next(_line_links(lines[j]), None) is not None:
             return None
-        if not fence_line.startswith("```"):
-            continue
-        # Read the language tag (everything after ```). Empty tag means
-        # "plain" — could be code or could be prose; treat as ambiguous
-        # and try to use it (covers untagged python snippets).
-        tag = fence_line[3:].strip().lower()
-        if tag in _NON_SOURCE_FENCE_TAGS:
-            return None
-        # Scan inside the fence for a useful first line.
-        for k in range(j + 1, min(j + 1 + _SNIPPET_FIRST_LINE_SCAN, len(lines))):
-            content = lines[k].rstrip()
-            if content.lstrip().startswith("```"):
-                return None  # empty/closed fence — no usable snippet
-            stripped = content.strip()
-            if not stripped:
-                continue
-            if stripped in _GENERIC_SNIPPET_OPENERS:
-                continue  # `"""` etc — keep scanning for substance
-            return content
-        return None
+        fence = lines[j].lstrip()
+        if fence.startswith("```"):
+            return None if fence[3:].strip().lower() in _NON_SOURCE_FENCE_TAGS else j
     return None
+
+
+def _find_following_snippet(lines: list[str], cite_line_idx: int) -> str | None:
+    """Keep the original bounded first-substantive-line anchor semantics."""
+    start = _following_fence(lines, cite_line_idx)
+    if start is None:
+        return None
+    for k in range(start + 1, min(start + 1 + _SNIPPET_FIRST_LINE_SCAN, len(lines))):
+        content = lines[k].rstrip()
+        if content.lstrip().startswith("```"):
+            return None
+        if content.strip() and content.strip() not in _GENERIC_SNIPPET_OPENERS:
+            return content
+    return None
+
+
+def _following_snippet_lines(
+    lines: list[str], cite_line_idx: int,
+) -> tuple[tuple[tuple[int, str], ...], bool]:
+    start = _following_fence(lines, cite_line_idx)
+    if start is None:
+        return (), False
+    captured = []
+    limit = min(start + 1 + _SNIPPET_FIDELITY_MAX_LINES, len(lines))
+    for k in range(start + 1, limit):
+        if lines[k].lstrip().startswith("```"):
+            return tuple(captured), False
+        captured.append((k + 1, lines[k]))
+    # Accept a closing fence immediately after 500 content lines.
+    if limit < len(lines) and lines[limit].lstrip().startswith("```"):
+        return tuple(captured), False
+    return tuple(captured), True
 
 
 # Fence language tags whose contents are not source code. Cites
@@ -403,6 +489,23 @@ def check_cite(cite: Cite) -> Finding:
         )
 
     cited_text = text[cite.start - 1]
+
+    # An explicit title always anchors the exact start, even for ranges or
+    # when the following snippet happens to match a different definition.
+    if cite.title_anchor is not None:
+        anchor = cite.title_anchor
+        if not anchor:
+            return Finding(cite, "DRIFT", "empty content anchor in link title", None)
+        if cited_text.strip().startswith(anchor):
+            return Finding(cite, "OK", "explicit title anchor matches cited start", None)
+        candidates = [i + 1 for i, line in enumerate(text) if line.strip().startswith(anchor)]
+        found = _nearest(candidates, cite.start) if candidates else None
+        detail = (f"; content anchor found at line {found}" if found is not None else
+                  "; content anchor not found in file")
+        return Finding(
+            cite, "DRIFT", f"title content anchor {anchor!r} does not match exact "
+            f"cited start {cite.start}: {cited_text.strip()!r}{detail}", found,
+        )
 
     # Strategy 1: snippet match. If we know what the displayed snippet's
     # first line is, that's a much stronger anchor than "is this a
@@ -521,11 +624,67 @@ def check_cite(cite: Cite) -> Finding:
     # positives happen for deliberate "into the body" cites, hence
     # "DRIFT?" (with the question mark) rather than confident "DRIFT".
     if _is_landmark(cited_text):
-        return Finding(cite, "OK", "landmark heuristic passed", None)
+        return Finding(cite, "OK", "unanchored landmark heuristic only; content not verified", None)
     return Finding(
         cite, "DRIFT?",
         f"cited line is not a landmark: {cited_text.strip()!r}",
         None,
+    )
+
+
+def _fidelity_substantive(line: str) -> bool:
+    line = line.strip()
+    return bool(line) and line not in (_GENERIC_SNIPPET_OPENERS | {"...", "…"}) and not (
+        line.startswith(("#", "//", "/*", "*/", "* "))
+    )
+
+
+def check_snippet_fidelity(cite: Cite) -> Finding | None:
+    """Report full-line snippet differences as an opt-in review aid.
+
+    Ordered subsequence matching permits omissions and explanation comments,
+    but does not permit a stale line to match a different function below it.
+    """
+    if not cite.snippet_lines and not cite.snippet_incomplete:
+        return None
+    try:
+        text = cite.target.read_text().splitlines()
+    except OSError:
+        return None  # the normal check reports missing/unreadable files
+    if not 1 <= cite.start <= len(text) or cite.end < cite.start:
+        return None
+    range_end = max(cite.end, cite.label_end or cite.start)
+    if "-L" in cite.url or cite.label_end is not None:
+        end = min(range_end, len(text))
+    else:
+        end = _block_end(text, cite.start)
+        if end is None:
+            # A body-line cite can still show the rest of its containing block.
+            for opener in range(cite.start - 1, 0, -1):
+                if _indent(text[opener - 1]) < _indent(text[cite.start - 1]):
+                    block_end = _block_end(text, opener)
+                    if block_end is not None and block_end >= cite.start:
+                        end = block_end
+                        break
+        end = end or cite.start
+    source = [line.strip() for line in text[cite.start - 1:end]]
+    next_match = 0
+    missing = []
+    for doc_line, line in cite.snippet_lines:
+        if not _fidelity_substantive(line):
+            continue
+        normalized = line.strip()
+        try:
+            next_match = source.index(normalized, next_match) + 1
+        except ValueError:
+            missing.append(f"doc line {doc_line}: {normalized!r}")
+    if cite.snippet_incomplete:
+        missing.append("fence incomplete: no closing fence within 500 content lines")
+    if not missing:
+        return None
+    return Finding(
+        cite, "SNIPPET", f"full lines not found in order in cited block {cite.start}-{end} "
+        "(review intentional simplifications):\n    " + "\n    ".join(missing), None,
     )
 
 
@@ -704,6 +863,11 @@ def parse_args() -> argparse.Namespace:
         "--list-only", action="store_true",
         help="Print (doc, cite, target) tuples without checking.",
     )
+    ap.add_argument(
+        "--snippet-fidelity", action="store_true",
+        help="Also compare full substantive snippet lines in the cited block; "
+             "intentional simplifications can be reported. Off by default.",
+    )
     return ap.parse_args()
 
 
@@ -729,24 +893,33 @@ def main() -> int:
         filter_set = {Path(p).resolve() for p in args.paths}
 
     findings: list[Finding] = []
+    cites_checked = 0
+    unanchored = 0
     for doc in docs:
-        for cite in extract_cites(doc):
+        for cite in extract_cites(doc, snippet_fidelity=args.snippet_fidelity):
             if filter_set is not None and cite.target not in filter_set:
                 continue
             if args.list_only:
                 print(f"{doc}\t{cite.url}\t{cite.target}")
                 continue
+            cites_checked += 1
+            unanchored += int(cite.title_anchor is None and cite.snippet is None
+                              and cite.label_symbol is None)
             findings.append(check_cite(cite))
+            if args.snippet_fidelity:
+                fidelity = check_snippet_fidelity(cite)
+                if fidelity is not None:
+                    findings.append(fidelity)
 
     if args.list_only:
         return 0
 
     # Print findings in severity order; group BROKEN + DRIFT (real
     # problems) before DRIFT? (heuristic noise) and OK (silent).
-    severity_rank = {"BROKEN": 0, "DRIFT": 1, "DRIFT?": 2, "OK": 3}
+    severity_rank = {"BROKEN": 0, "DRIFT": 1, "SNIPPET": 2, "DRIFT?": 3, "OK": 4}
     findings.sort(key=lambda f: (severity_rank[f.severity], str(f.cite.doc)))
 
-    counts = {"OK": 0, "BROKEN": 0, "DRIFT": 0, "DRIFT?": 0}
+    counts = {"OK": 0, "BROKEN": 0, "DRIFT": 0, "DRIFT?": 0, "SNIPPET": 0}
     for f in findings:
         counts[f.severity] += 1
         if f.severity != "OK":
@@ -754,12 +927,16 @@ def main() -> int:
 
     print("─────────────────────────────────────────")
     print(
-        f"cites checked: {sum(counts.values())}  "
+        f"cites checked: {cites_checked}  "
         f"ok: {counts['OK']}  drift: {counts['DRIFT']}  "
         f"drift?: {counts['DRIFT?']}  broken: {counts['BROKEN']}"
     )
-    # Confident problems fail the run; "drift?" hints don't.
-    return 1 if counts["BROKEN"] + counts["DRIFT"] > 0 else 0
+    print(f"unanchored heuristic: {unanchored} (shape only; content not verified)")
+    if args.snippet_fidelity:
+        print(f"snippet fidelity findings: {counts['SNIPPET']}")
+    # Confident anchor problems and requested fidelity findings fail the run;
+    # heuristic hints remain advisory.
+    return 1 if counts["BROKEN"] + counts["DRIFT"] + counts["SNIPPET"] > 0 else 0
 
 
 if __name__ == "__main__":

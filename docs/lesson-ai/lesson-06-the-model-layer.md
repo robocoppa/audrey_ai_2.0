@@ -153,7 +153,7 @@ gate = FairLocalGate(concurrency=gpu_concurrency)
 ```
 
 `lifespan` then hands those objects to the graph at
-[`main.py:195`](../../src/audrey/main.py#L195) and stores them on
+[`main.py:170`](../../src/audrey/main.py#L170) and stores them on
 `app.state` for the routes. Every request uses the same client, the same
 registry, the same health tracker and the same gate.
 

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { TaxReview } from "./TaxReview";
-import { defaultTaxYear, type TaxCase } from "./taxReviewApi";
+import { defaultTaxYear, TAX_REVIEW_SCOPE_NOTICE, type TaxCase } from "./taxReviewApi";
 
 // Snapshots were created through TaxCasesRepository.create/update and tax_case_checklist.
 import fixtures from "./test/fixtures/tax-review-cases.json";
@@ -222,6 +222,31 @@ it("keeps the saved worksheet available on demand and warns when it needs updati
   expect(screen.getByText(saved.review.next_question)).toBeVisible();
   expect(screen.getByText(saved.review.limitations[0])).toBeVisible();
   expect(screen.getByRole("region", { name: "Tax review case" })).not.toHaveTextContent(/rel_hidden|calc_private|review_revision/u);
+});
+
+it.each(["legacy", "current"] as const)("shows the %s scope limit before a saved worksheet without adding a decision", async (version) => {
+  const notice = version === "current"
+    ? "Selected source support was checked; deduction and credit eligibility is not determined."
+    : TAX_REVIEW_SCOPE_NOTICE;
+  const saved = { ...fixtures.group_reviewed, review: { ...fixtures.group_reviewed.review,
+    status: "review_saved", stale: false, next_question: "", verification: { status: "checked" },
+    notice: version === "current" ? notice : "An older generic worksheet notice.",
+    ...(version === "current" ? { scope: "evidence_and_arithmetic", eligibility_status: "not_determined" } : {}),
+  } };
+  const fetchMock = vi.fn().mockResolvedValueOnce(json({ case: saved }));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<TaxReview {...props()} expanded={false} />);
+  fireEvent.click(await screen.findByText("Review worksheet"));
+  const worksheet = screen.getByText("Review worksheet").closest("details")!;
+  const scope = within(worksheet).getByText(notice);
+  const summary = within(worksheet).getByText(saved.review.summary);
+  expect(scope).toBeVisible();
+  expect(scope.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(worksheet).queryByRole("button")).not.toBeInTheDocument();
+  expect(within(worksheet).queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(within(worksheet).queryByRole("textbox")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Confirm|Continue/u })).not.toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
 it("disables settings mutations during an active run or upload", async () => {

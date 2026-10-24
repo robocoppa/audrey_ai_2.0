@@ -499,8 +499,8 @@ async def _retry_tool_discovery(
     """Retry discovery while the initial registry is empty or degraded.
 
     Custom-tools may be missing or may have optional dependencies still
-    recovering when Audrey starts. Without this retry the live registry would
-    stay empty or partial until somebody calls `/v1/tools/rediscover`.
+    recovering when Audrey starts. These rapid retries shorten recovery
+    before the lifecycle monitor settles into its minute-by-minute refresh.
 
     The loop bails out when every declared tool is available. These rapid
     startup retries are bounded; the lifecycle monitor continues at its slow

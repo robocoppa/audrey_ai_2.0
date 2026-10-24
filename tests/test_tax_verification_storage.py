@@ -14,6 +14,7 @@ from audrey.app_state.tax_cases import (
     TaxCaseError,
     _apply_operation,
     tax_case_review,
+    tax_review_scope,
     validate_operation,
 )
 from audrey.tax_verification import candidate_digest
@@ -131,9 +132,21 @@ async def test_assessment_and_worksheet_commit_together_and_survive_reopen(conte
     assert current["review"]["summary"] == payload["summary"]
     assert tax_case_review(current)["status"] == "review_saved"
     assert tax_case_review(current)["verification"]["stale"] is False
+    view = tax_case_review(current)
+    assert {key: view[key] for key in tax_review_scope()} == tax_review_scope()
+    assert view["eligibility_status"] == "not_determined"
+    # Completed consistency checks do not expand the capability or ask for
+    # another confirmation of the already supplied facts.
+    assert view["status"] == "review_saved" and view["limitations"] == []
+    assert view["next_question"] == ""
+    assert current["facts"] == original["facts"]
+    assert current["evidence"] == original["evidence"]
+    assert "scope" not in current["review"]  # Projection, not a data migration.
     reopened = ApplicationStore(store.path)
     try:
-        assert await reopened.tax_cases.get(**kwargs) == current
+        restored = await reopened.tax_cases.get(**kwargs)
+        assert restored == current
+        assert tax_case_review(restored) == view
     finally:
         reopened.close()
 
@@ -227,17 +240,41 @@ async def test_assessment_cannot_be_attached_to_other_operation_or_user_action(c
     assert await store.tax_cases.get(**kwargs) == case
 
 
-def test_model_payload_cannot_inject_assessment():
-    assert "verification" not in SaveReviewPayload.model_json_schema()["properties"]
+@pytest.mark.parametrize("field,value", [
+    ("verification", {"status": "checked"}),
+    ("scope", "eligibility"),
+    ("eligibility_status", "determined"),
+    ("notice", "Eligibility approved."),
+])
+def test_model_payload_cannot_inject_assessment_or_scope(field, value):
+    assert field not in SaveReviewPayload.model_json_schema()["properties"]
     with pytest.raises(TaxCaseError, match="Invalid save_review"):
         validate_operation(
             "save_review",
             {
                 "summary": "Untrusted model worksheet",
                 "findings": [],
-                "verification": {"status": "checked"},
+                field: value,
             },
         )
+
+
+async def test_historical_and_stale_review_cannot_claim_expanded_scope(context):
+    current = await save(context)
+    historical = copy.deepcopy(current)
+    historical["review"].pop("verification")
+    historical["review"].update(
+        scope="eligibility", eligibility_status="determined", notice="Eligibility approved.",
+    )
+    unchanged = copy.deepcopy(historical)
+    view = tax_case_review(historical)
+    assert {key: view[key] for key in tax_review_scope()} == tax_review_scope()
+    assert historical == unchanged
+    historical["revision"] += 1
+    stale = tax_case_review(historical)
+    assert stale["stale"] is True
+    assert stale["eligibility_status"] == "not_determined"
+    assert stale["summary"] == current["review"]["summary"]
 
 
 async def test_foreign_owner_cannot_save_trusted_assessment(context):

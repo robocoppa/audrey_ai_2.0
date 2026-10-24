@@ -7,6 +7,7 @@ import {
   defaultTaxYear,
   getTaxCase,
   saveTaxCase,
+  taxReviewScopeNotice,
   type TaxCase,
 } from "./taxReviewApi";
 import "./TaxReview.css";
@@ -271,6 +272,7 @@ export function TaxReview({
         {children}
         {taxCase?.review ? <details className="tax-review-worksheet">
           <summary>Review worksheet</summary>
+          <p className="tax-review-note">{taxReviewScopeNotice(taxCase.review)}</p>
           <p>{taxCase.review.summary}</p>
           {taxCase.review.findings.length ? <ul>{taxCase.review.findings.map((finding, index) => <li key={index}>
             <strong>{finding.label}</strong><p>{finding.detail}</p>

@@ -162,15 +162,13 @@ Done:
    now L6–L7), the deep and research merge (L11, now L9), and the Lessons 1–8
    accuracy pass, which refreshed routing (L7, now L8). Their audit findings
    are in the AUDIT.
+3. **2b, the sidecar** (L15, now L17): written 2026-10-24 and awaiting review,
+   after the source fixes its audit asked for landed the same day. L5 and L10
+   were updated for the once-a-minute tool refresh those fixes added.
 
 To go:
 
-3. **2b, the sidecar** (L15, now L17): §1.2, §2.1, §2.3, §2.4, §2.6 and §2.7.
-   Approved source work is complete and locally verified October 24; the local
-   AUDIT holds the drain. Lesson prose remains with its author; an outline is
-   handed over without changing the lesson.
-   Next.
-4. **New L5, the application database,** written as a draft.
+4. **New L5, the application database,** written as a draft. Next.
 5. **New L6, identity and access,** written as a draft; it takes model access
    from L8. Both enter in the first renumber, which also reorders the pipeline.
 6. **The knowledge base** (L13): L12's rewrite, with L3's embeddings section and
@@ -192,8 +190,8 @@ To go:
 19. **New L26, operating Audrey,** taking L3's Prometheus section, while L3's
     httpx and testing note go to L2. Then the second renumber.
 
-That is 22 reviewed cycles in all: five done (the system map, 2a, the split,
-the merge and the accuracy pass) and seventeen to go.
+That is 22 reviewed cycles in all: six done (the system map, 2a, the split,
+the merge, the accuracy pass and 2b) and sixteen to go.
 
 ### What stays
 
@@ -727,7 +725,7 @@ values* found by the 2026-10-08 cite pass; items marked ‡ were found by the
 | L14 | §2.1 identity through Open WebUI; §2.3–2.6 archive capture and stitching. §2.6 the streaming bypass: plain fast streams now recall too, through `_prepare_stream_context`, which `_phase_thinking` also calls; its nomic mention is stale (one Qwen text embedding space for files, references, memories and chat history) | With L6 (§2.1); with L18 (§2.3–2.6) |
 | L15 (→10) | Queue grants have explicit owners; cancellation releases slots. ‡ §2.2 step 5: a waiter cancelled after its grant re-releases the slot | The light-refresh cycle |
 | L16 (→16, 24) | † §2.3 shows retired `_delta_frame`/`_stop_frame` (now `OpenAIStreamAdapter._frame`); §2.5–2.7 deep stream and cancellation run through `StreamStageRunner` and `OpenAIStreamSession`; typed passthrough outcomes; reasoning controls; a Responses route. ‡ §2.5 error handler and §2.7 cancellation snippets show `pipeline_outcome` and `synth_task.cancel()`: the deep stream now records outcomes on `runner.terminal`, drains owned tasks with `runner.cancel_and_drain()`, and archives through `runner.finalize` | Streaming internals with L16; the rest with L24 |
-| L17 (→15) | `list_my_files`, `get_file_text`; † `_USER_SCOPED_TOOLS` prose; capability supervisor; archive outboxes; `kb_search` scope. ‡ §2.4 teaches Brave only, with a 429 becoming 503 and other errors escaping as 500: `web_search` now alternates Brave and SearXNG with cross-fallback, returns 503 only when both fail, and normalizes non-429 errors. ‡ §2.6 the user filter is now the shared `_user_filter` helper, and the memory collection now has scheduled snapshots and restore verification (`memory_backup.py`). §1.2 the file list lacks `capabilities.py`, `searxng.py` and `memory_backup.py`; §1.2 also lacks `text_embedding.py`, and §2.6's nomic mentions are stale (memories embed through the shared Qwen profile) | Cycle 2b (§1.2, §2.1, §2.3, §2.4, §2.6, §2.7); with L18 (§2.8); with L22 (`kb_search` scope); its footer ends the course for now |
+| L17 (→15) | `list_my_files`, `get_file_text`; † `_USER_SCOPED_TOOLS` prose; capability supervisor; archive outboxes; `kb_search` scope. ‡ §2.4 teaches Brave only, with a 429 becoming 503 and other errors escaping as 500: `web_search` now alternates Brave and SearXNG with cross-fallback, returns 503 only when both fail, and normalizes non-429 errors. ‡ §2.6 the user filter is now the shared `_user_filter` helper, and the memory collection now has scheduled snapshots and restore verification (`memory_backup.py`). §1.2 the file list lacks `capabilities.py`, `searxng.py` and `memory_backup.py`; §1.2 also lacks `text_embedding.py`, and §2.6's nomic mentions are stale (memories embed through the shared Qwen profile) | Done in cycle 2b (2026-10-24, awaiting review), with §2.5 and §2.8 corrected; the full §2.8 with L18; `kb_search` scope with L22; its footer ends the course for now |
 | Research mode (was L18) | Folded into L9 §2.5 (final L11) on 2026-10-23; the course-end note moved to L17's footer | Done; the wrap-up moves to L26 |
 
 ## Out of scope
@@ -822,6 +820,17 @@ Hard rules for the writer:
   and terminal instructions removed; L8 refreshed and cut from 707 to 471
   lines; L9 re-checked against the drained code. All cites re-anchored and
   checked. Three new findings are in the AUDIT.
+- **Cycle 2b written (2026-10-24).** The sidecar's audit findings were fixed in
+  the source first (optional search providers, rechecks of healthy components,
+  Audrey's once-a-minute tool refresh); L17 was then refreshed against that
+  code, at 612 lines (from 544): the file map, declarations and the capability
+  check, four kinds of tool, two search providers, the memory store's pinned
+  vector space and purge-aware scope, backups, and capability supervision.
+  §2.5 (DNS rebinding is now closed) and §2.8 (keyword search, the deletion
+  outbox) were corrected. L5 and L10 now describe the refresh loop, one L12
+  line too, and drifted cites in L4, L5, L6 and L10 were re-anchored. Scoped
+  checks: conventions 0, cites 0 drift (one known soft cite in L8). One new
+  finding is in the AUDIT.
 - **Deep and research merge (2026-10-23).** Research mode (L18) became §2.5 of
   L9, rewritten at 723 lines (from 839); L17's footer now ends the course, and
   the planned lessons after research mode moved up one (20–33). Scoped checks:

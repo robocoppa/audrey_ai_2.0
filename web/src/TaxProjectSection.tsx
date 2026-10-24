@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 
 import { getConversation, type Conversation } from "./api";
-import { listProjectTaxCases, type TaxCase } from "./taxReviewApi";
+import { listProjectTaxCases, taxReviewScopeNotice, type TaxCase } from "./taxReviewApi";
 import "./TaxProjectSection.css";
 
 type Props = {
@@ -80,7 +80,8 @@ function ProjectCases({ projectId, onConversationSelected }: Props) {
         </table></div> : <p className="project-panel-copy">Facts you share with Audrey will appear here.</p>}
         {review ? <details className="tax-project-worksheet">
           <summary><span>Saved worksheet</span><small>{review.stale ? "Needs updating" : review.status === "needs_input" ? "Your input is needed" : review.status === "limited_evidence" ? "Evidence is limited" : "Saved"}</small></summary>
-          <div><p>{review.summary}</p>
+          <div><p className="project-panel-copy">{taxReviewScopeNotice(review)}</p>
+            <p>{review.summary}</p>
             {review.findings.map((finding, index) => <section key={index}><h4>{finding.label}</h4><p>{finding.detail}</p>
               {finding.calculation_ids.map((id) => taxCase.calculations.find((calculation) => calculation.id === id))
                 .filter((calculation) => calculation !== undefined).map((calculation) => <p className="tax-project-calculation" key={calculation.id}>

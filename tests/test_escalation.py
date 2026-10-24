@@ -142,3 +142,37 @@ def test_an_empty_state_does_not_crash():
     assert escalation_decision(
         {}, enabled=True, min_chars=_MIN_CHARS, conf_ceiling=_CONF_CEILING,
     ) == "escalate"  # no content == 0 chars == thin, which is the honest read
+
+
+@pytest.mark.parametrize("reason", ["short_skip:general", "short_skip_keyword:code_weak"])
+def test_short_skip_placeholder_confidence_is_not_uncertainty(reason):
+    assert _decide(content="x" * 101, classify_confidence=0.5,
+                   classify_reason=reason) == "end"
+
+
+@pytest.mark.parametrize("reason", ["short_skip:general", "short_skip_keyword:code_weak"])
+def test_successful_brief_answer_to_a_brief_request_stays_fast(reason):
+    assert escalation_decision(
+        {"content": "Hello!", "classify_reason": reason,
+         "classify_confidence": 0.5, "request_prompt_tokens": 2,
+         "fast_done_reason": "stop"},
+        enabled=True, min_chars=100, conf_ceiling=0.95,
+        short_prompt_token_threshold=8,
+    ) == "end"
+
+
+@pytest.mark.parametrize("extra", [
+    {"request_prompt_tokens": 40},
+    {"request_prompt_tokens": None},
+    {"content": ""},
+    {"error": "model_failed"},
+    {"fast_done_reason": "length"},
+])
+def test_short_skip_does_not_hide_context_or_incomplete_answers(extra):
+    state = {"content": "Yes.", "classify_reason": "short_skip:general",
+             "classify_confidence": 0.5, "request_prompt_tokens": 2,
+             "fast_done_reason": "stop", **extra}
+    assert escalation_decision(
+        state, enabled=True, min_chars=100, conf_ceiling=0.95,
+        short_prompt_token_threshold=8,
+    ) == "escalate"

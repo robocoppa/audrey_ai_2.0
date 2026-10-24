@@ -53,9 +53,10 @@ from audrey.config import Config
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
-from audrey.pipeline.classify import classify_with_registry
+from audrey.pipeline.classify import DEFAULT_ROUTER_MODEL, classify_with_registry
 from audrey.pipeline.complexity import (
     count_last_user_tokens,
+    count_tokens,
     count_tokens_by_role,
     has_deep_intent,
     is_complex,
@@ -104,6 +105,7 @@ def escalation_decision(
     enabled: bool,
     min_chars: int,
     conf_ceiling: float,
+    short_prompt_token_threshold: int = 0,
 ) -> str:
     """Decide whether a completed fast turn should be re-run through the panel.
 
@@ -138,19 +140,27 @@ def escalation_decision(
         return "end"
     content = (state.get("content") or "").strip()
     conf = float(state.get("classify_confidence", 0.0))
-    # `classify.py` returns `("general", "fallback:general", 0.25)` when every
-    # routing attempt failed — the SAME 0.25 a genuinely-unsure classification
-    # produces. That is "no signal", not "weak signal", and it is exactly what
-    # the `conf > 0` guard already says about the 0.0 case; the fallback just
-    # says it with a different number. Observed on the box 2026-08-10: two
-    # `ReadTimeout` strikes, `classify fell all the way through`, conf=0.25.
-    #
-    # Only the CONFIDENCE trigger is suppressed. `too_short` is a statement
-    # about the answer, not about the router, and the fast path did produce
-    # one — so a thin answer still earns a rescue here.
-    classify_failed = str(state.get("classify_reason", "")).startswith("fallback:")
-    too_short = len(content) < min_chars
-    low_confidence = conf < conf_ceiling and conf > 0 and not classify_failed
+    reason = str(state.get("classify_reason", ""))
+    # Fallback and router-skipped confidences are placeholders, not measured
+    # uncertainty. Weak keywords after a failed router remain a real signal.
+    short_skipped = reason.startswith(("short_skip:", "short_skip_keyword:"))
+    confidence_unknown = reason.startswith("fallback:") or short_skipped
+    # A short request can correctly receive a short answer. Only suppress the
+    # length heuristic when the entire ORIGINAL request fits the router's short
+    # threshold. Prior context, an empty answer, errors and truncation keep the
+    # existing rescue behavior. Missing request metadata stays conservative.
+    request_tokens = state.get("request_prompt_tokens")
+    brief_answer_expected = (
+        short_skipped
+        and short_prompt_token_threshold > 0
+        and request_tokens is not None
+        and request_tokens <= short_prompt_token_threshold
+        and bool(content)
+        and not state.get("error")
+        and state.get("fast_done_reason") != "length"
+    )
+    too_short = len(content) < min_chars and not brief_answer_expected
+    low_confidence = 0 < conf < conf_ceiling and not confidence_unknown
     if too_short or low_confidence:
         log.info("escalate: fast→deep (chars=%d, conf=%.2f, reason=%s)",
                  len(content), conf, "too_short" if too_short else "low_conf")
@@ -249,7 +259,11 @@ def build_graph(
         path too — they have to stay in sync.
         """
         sys_msg = datetime_system_message()
-        return {"messages": [sys_msg, *state["messages"]]}
+        original_messages = state.get("routing_messages") or state["messages"]
+        return {
+            "messages": [sys_msg, *state["messages"]],
+            "request_prompt_tokens": count_tokens(original_messages),
+        }
 
     async def node_memory_recall(state: PipelineState) -> dict[str, Any]:
         """Keyword-search the user's memories, inject hits + store-hint as system message.
@@ -426,11 +440,13 @@ def build_graph(
         user_text = last_user_text(state["messages"])
         subs = await planner_plan(
             ollama,
-            planner_model=router_cfg.get("model", "qwen3:4b"),
+            planner_model=router_cfg.get("model", DEFAULT_ROUTER_MODEL),
             user_text=user_text,
             timeout_s=router_timeout,
             max_subtasks=planning_max_subtasks,
             cfg=cfg,
+            gate=gate,
+            user_id=state.get("user_id") or None,
         )
         if subs:
             log.info("planner: %d subtasks: %s", len(subs), [s[:60] for s in subs])
@@ -574,6 +590,7 @@ def build_graph(
             enabled=escalation_enabled,
             min_chars=escalation_min_chars,
             conf_ceiling=escalation_conf_ceiling,
+            short_prompt_token_threshold=int(router_cfg.get("skip_llm_under_tokens", 0)),
         )
 
     def route_after_reflect(state: PipelineState) -> str:

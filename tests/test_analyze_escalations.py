@@ -100,7 +100,7 @@ class TestALineThatLooksOursButDoesNotParseIsReported:
 
 
 class TestTheFallbackSuppressionIsOneUnderscoreWide:
-    """`escalation_decision` suppresses `fallback:` — and only that.
+    """Fallback keywords remain measured signals after a router failure.
 
     `classify.py` emits both `fallback:general` (0.25, every routing attempt
     failed → no signal → suppressed) and `fallback_keyword:...` (0.6, a real
@@ -347,7 +347,8 @@ class TestEndToEnd:
         assert rep["turns"]["fast"] == 3
         assert rep["escalations"]["count"] == 1
         assert abs(rep["escalations"]["rate"] - 1 / 3) < 1e-9
-        assert rep["classification"]["below_ceiling"] == 2   # 0.50 and 0.70
+        assert rep["classification"]["below_ceiling"] == 1   # measured router 0.70
+        assert rep["classification"]["short_skip_suppressed"] == 1
         assert rep["classification"]["observed"] == 3
 
     def test_escalated_share_of_panels_needs_no_pairing(self):
@@ -357,3 +358,15 @@ class TestEndToEnd:
         t = ae.parse_log(_LOG, since=None, ceiling=0.95)
         rep = ae.build_report(t, {}, {}, 0.95)
         assert rep["panels"]["escalated_share"] == 1.0
+
+
+def test_router_skipped_confidence_is_excluded_from_the_report_trigger():
+    tally = ae.parse_log([
+        _PREFIX + "classify: general (short_skip:general, conf=0.50)",
+        _PREFIX + "classify: code (short_skip_keyword:code_weak, conf=0.60)",
+        _PREFIX + "classify: general (router:general, conf=0.50)",
+    ], since=None, ceiling=0.95)
+    report = ae.build_report(tally, {}, {}, 0.95)
+    assert tally.classify_below_ceiling == 1
+    assert report["classification"]["short_skip_suppressed"] == 2
+    assert "suppressed short skip:   2" in ae.render(report)

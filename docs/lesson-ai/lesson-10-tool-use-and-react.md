@@ -52,7 +52,7 @@ Not every model can take part. A model that supports function calling accepts
 a `tools=[...]` list and replies with `tool_calls` when it wants one; other
 models ignore the list or produce garbled output. Ollama's own capability flag
 isn't always right, so Audrey keeps a hand-maintained list,
-[`tool_capable_models`](../../config.yaml#L262), and runs the loop only for
+[`tool_capable_models`](../../config.yaml#L251), and runs the loop only for
 models on it.
 
 ### 1.2 Why "ReAct"?
@@ -71,9 +71,9 @@ The same loop serves three callers, each with its own settings:
 
 | Caller | Settings | Rounds and searches |
 |---|---|---|
-| The fast path, one model answering | [`agentic.react`](../../config.yaml#L685) | the defaults |
-| Each deep worker | [`deep_worker`](../../config.yaml#L773) | room for a few more tool messages |
-| Each research worker | [`research_worker`](../../config.yaml#L798) | more rounds and a larger search budget |
+| The fast path, one model answering | [`agentic.react`](../../config.yaml#L675) | the defaults |
+| Each deep worker | [`deep_worker`](../../config.yaml#L763) | room for a few more tool messages |
+| Each research worker | [`research_worker`](../../config.yaml#L788) | more rounds and a larger search budget |
 
 In all three, the loop takes the GPU gate from Lesson 6 only for each model
 call, and gives it back while tools run. A slow web search doesn't hold the
@@ -153,7 +153,7 @@ TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
 
 ### 2.2 Discovery
 
-Discovery runs during startup.
+Discovery runs during startup, and again every minute while Audrey runs.
 [`discover_all`](../../src/audrey/tools/discovery.py#L491) asks every
 configured tool server for its `/openapi.json` at the same time, each request
 with its own timeout, so one slow or broken server can't hold up or spoil the
@@ -203,10 +203,12 @@ the declaration. The tool server also reports which of its components are
 working. A tool whose dependency is down stays in the registry, marked
 unavailable.
 
-If discovery comes back empty at startup, because custom-tools is still
-starting, a background task retries for a while, and an admin can ask again
-with `POST /v1/tools/rediscover`, which refuses an empty answer rather than
-wiping the live tools. Lesson 5 walked both.
+If discovery comes back empty or partial at startup, because custom-tools is
+still starting, a background task retries every few seconds for about two
+minutes, then keeps refreshing once a minute, so tools also drop out and come
+back as their dependencies fail and recover. An admin can ask for a refresh at
+any time with `POST /v1/tools/rediscover`. Every refresh refuses an empty
+answer rather than wiping the live tools. Lesson 5 walked the loop.
 
 ### 2.3 What the model is offered
 
@@ -238,7 +240,7 @@ the loop a registry restricted to the tools that skill allows, through
 
 ### 2.4 The loop, top-down
 
-[`run_react`](../../src/audrey/pipeline/react.py#L558) has a long signature
+[`run_react`](../../src/audrey/pipeline/react.py#L557) has a long signature
 and a short body. Its shape:
 
 ```text
@@ -358,7 +360,7 @@ same identity, so it is blocked too.
 
 Tool results can be large: a knowledge-base search returning several long
 passages, or a page of search snippets. Every result is capped at
-[`max_tool_result_chars`](../../config.yaml#L723) characters, because every
+[`max_tool_result_chars`](../../config.yaml#L713) characters, because every
 tool message spends the model's context, and long results repeated across
 rounds crowd out everything else.
 
@@ -393,9 +395,9 @@ asking again won't fix it.**
 A round's tool calls run in parallel: The loop gathers them with
 `asyncio.gather`, so a round takes as long as its slowest call, not the sum of
 all of them. Before that, each worker's web searches are counted against a
-budget, [`max_web_searches`](../../config.yaml#L769), because searches spend a
+budget, [`max_web_searches`](../../config.yaml#L759), because searches spend a
 search provider's quota and a research request runs several workers at once.
-At [`react.py:749`](../../src/audrey/pipeline/react.py#L749):
+At [`react.py:748`](../../src/audrey/pipeline/react.py#L748):
 
 ```python
 for tc in tool_calls:
@@ -425,13 +427,13 @@ those events to the browser.
 
 ### 2.10 Compaction keeps the conversation small
 
-After [`compress_after_round`](../../config.yaml#L703) rounds, and once more
+After [`compress_after_round`](../../config.yaml#L693) rounds, and once more
 before a forced final answer,
-[`_compress_history`](../../src/audrey/pipeline/react.py#L214) replaces older
+[`_compress_history`](../../src/audrey/pipeline/react.py#L213) replaces older
 tool results with a short placeholder. It counts tool **messages**, not rounds,
 because one round can produce several. The setting
-[`compress_keep_last`](../../config.yaml#L762) says how many keep their full
-text, and [`_tool_message_priority`](../../src/audrey/pipeline/react.py#L204)
+[`compress_keep_last`](../../config.yaml#L752) says how many keep their full
+text, and [`_tool_message_priority`](../../src/audrey/pipeline/react.py#L203)
 decides which:
 
 ```python
@@ -453,7 +455,7 @@ answer.
 
 A placeholder keeps the tool role and its place in the conversation. Its
 wording, from
-[`_summarize_tool_message`](../../src/audrey/pipeline/react.py#L156), is chosen
+[`_summarize_tool_message`](../../src/audrey/pipeline/react.py#L155), is chosen
 so a model quoting it can't present it as a failed or empty search:
 
 ```text
@@ -465,7 +467,7 @@ so a model quoting it can't present it as a failed or empty search:
 When the round limit runs out and the model still wants tools, removing the
 tool list isn't enough on its own: A small model can stall, or write a pretend
 tool call as plain text. So the loop changes mode explicitly, at
-[`react.py:802`](../../src/audrey/pipeline/react.py#L802):
+[`react.py:801`](../../src/audrey/pipeline/react.py#L801):
 
 ```python
 convo = _compress_history(convo, keep_last_round=compress_keep_last)
@@ -491,7 +493,7 @@ the user to wrap up is a clear signal.
 
 Each model call in the loop records the model's health and holds the GPU gate
 for that call only, at
-[`react.py:650`](../../src/audrey/pipeline/react.py#L650):
+[`react.py:649`](../../src/audrey/pipeline/react.py#L649):
 
 ```python
 try:
@@ -573,10 +575,11 @@ fix?**
 Every tool from custom-tools disappears, not just the new one. Discovery finds
 a `tools` route with no declaration and rejects that server's whole catalogue,
 logging an error that names the route. Models get no web search, memory or file
-tools. Because discovery came back empty, the background retry tries again, and
-gets the same refusal each time. The fix is to deploy Audrey with the
-declaration; its startup discovery then loads every tool again. The lasting
-rule: A tool's declaration ships with its route or before it, never after.
+tools. Because discovery came back empty, the background task keeps trying,
+every few seconds at first and then once a minute, and gets the same refusal
+each time. The fix is to deploy Audrey with the declaration; its startup
+discovery then loads every tool again. The lasting rule: A tool's declaration
+ships with its route or before it, never after.
 
 **2. In a session signed in as `alice@example.com`, a model calls
 `memory_search` with another person's id in `user`. Separately, a code path

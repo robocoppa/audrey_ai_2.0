@@ -1,6 +1,7 @@
 # Phase 01 — platform hardening
 
-**Status:** Complete and deployed.
+**Status:** Core complete and deployed. October 24 runtime followups are
+implemented and locally verified; Tower deployment remains with the user.
 
 ## Delivered
 
@@ -47,6 +48,33 @@ both a model-facing route and its matching security declaration.
 The October 24 maintenance followup is locally verified; rebuild audrey and
 custom-tools after pull. No browser build, schema migration, model pull or index
 run is required for this followup.
+
+## Pipeline scheduling and stream delivery
+
+Skipped or failed classification does not supply a confidence signal. A brief
+successful answer to a brief original request can stay on Fast without a
+length-based rescue. Real conversation context still counts; empty, failed or
+truncated answers retain the existing escalation behavior. Audrey's injected
+date and memory instructions do not count as original request length for this
+exception. Classification and planning share the configured router default.
+
+Optional local planning uses the same per-user GPU queue as local answers.
+Waiting and generation share its configured deadline; reaching that deadline
+skips decomposition and preserves the original panel question. Cancellation and
+protected policy refusals are not treated as successful planning.
+
+Stream delivery waits for queue readiness or its producer's completion. Banner
+and model-event queues remain separate and bounded. Readiness does not remove
+items; cancelling a wait disposes its helper tasks without consuming queued
+content or taking ownership of the producer. Buffered content drains before
+the producer's terminal result. A banner notification cannot hide a real
+producer timeout. Progress, normal Stop and disconnect cleanup retain their
+existing behavior without a recurring 50 ms wakeup.
+
+The remaining October 24 audit followup is locally verified; rebuild audrey and
+custom-tools after pull. These changes require no UI build, config migration,
+model pull or index run. The local course AUDIT records the completed drain;
+course tooling changes take effect directly in the laptop checkout.
 
 ## Constraints
 

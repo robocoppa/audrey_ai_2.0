@@ -5,8 +5,8 @@ Two-stage:
      Strong signals (e.g. triple-backtick code block, `def foo(`) pick a
      task directly. Weak signals are held in reserve as a router-failure
      fallback — they do not influence the router call itself.
-  2. **Router model** — `qwen3:4b` produces a JSON verdict. On two strikes
-     (timeout, parse error, unknown label) we fall back to the best keyword
+  2. **Router model** — the configured small model produces a JSON verdict.
+     On two strikes (timeout, parse error, unknown label) we fall back to the best keyword
      signal (strong or weak), or "general" if nothing matched.
 
 **Review override:** "review this code" / "analyze this snippet" → reasoning,
@@ -28,6 +28,8 @@ from audrey.pipeline.prompts import CLASSIFIER_SYSTEM, prompt_from_config
 from audrey.pipeline.state import TaskType
 
 log = logging.getLogger(__name__)
+
+DEFAULT_ROUTER_MODEL = "qwen3.5:4b"
 
 # ─── Keyword signals ──────────────────────────────────────────────────
 
@@ -361,7 +363,7 @@ async def classify_with_registry(
     tool_names = set(registry.names()) if registry is not None else set()
     task, reason, conf = await classify(
         ollama,
-        router_model=router_cfg.get("model", "qwen3:4b"),
+        router_model=router_cfg.get("model", DEFAULT_ROUTER_MODEL),
         router_timeout_s=float(router_cfg.get("timeout_s", 20)),
         max_router_strikes=int(router_cfg.get("max_failures_before_fallback", 2)),
         user_text=user_text,

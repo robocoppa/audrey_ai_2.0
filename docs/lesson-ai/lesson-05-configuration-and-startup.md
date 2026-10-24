@@ -193,11 +193,12 @@ recreated rather than only restarted, so it starts from the new file.
 custom-tools for `/openapi.json`. Its [`depends_on`](../../compose.yaml#L48)
 entry, with `condition: service_healthy`, keeps Audrey from starting until
 custom-tools passes its healthcheck. If discovery still comes back empty or
-partial, Audrey retries in the background (§2.5).
+partial, Audrey retries in the background, and from then on it refreshes the
+tool list once a minute (§2.5).
 
 Now open [`src/audrey/main.py`](../../src/audrey/main.py). When uvicorn imports
 `audrey.main:app`, Python executes the module top to bottom and creates the
-FastAPI [`app`](../../src/audrey/main.py#L500) object near the end of the file.
+FastAPI [`app`](../../src/audrey/main.py#L544) object near the end of the file.
 Importing the module does not mean Audrey is ready yet. The app exists, but
 the expensive shared objects are built later, by `lifespan`.
 
@@ -226,7 +227,7 @@ class is [`EnvOverrides`](../../src/audrey/config.py#L24), which inherits from
 `pydantic_settings.BaseSettings`.
 
 The merge happens in
-[`Config._apply_env_overrides`](../../src/audrey/config.py#L158). Read it top to bottom
+[`Config._apply_env_overrides`](../../src/audrey/config.py#L155). Read it top to bottom
 — it's just a list of "if env var X was set, write its value into the
 right slot of the YAML dict." The YAML dict is the merged result;
 `Config.raw` exposes it.
@@ -236,7 +237,7 @@ right slot of the YAML dict." The YAML dict is the merged result;
 You set `GPU_CONCURRENCY=2` in the environment Python sees at boot.
 Here's what happens:
 
-1. `lifespan()` calls [`get_config()`](../../src/audrey/config.py#L737).
+1. `lifespan()` calls [`get_config()`](../../src/audrey/config.py#L734).
 2. `get_config()` creates `EnvOverrides()`.
 3. Pydantic Settings sees `GPU_CONCURRENCY=2`, matches it to
    `gpu_concurrency`, and converts it to an integer.
@@ -281,7 +282,7 @@ else:
 ```
 
 The reason is in the docstring of
-[`active_env_overrides`](../../src/audrey/config.py#L206): an override silently
+[`active_env_overrides`](../../src/audrey/config.py#L203): an override silently
 displaces a value committed in `config.yaml`, so the file stops describing what
 is running and nothing in it admits that. One log line makes "what is this box
 actually running?" a search instead of a deduction.
@@ -321,9 +322,9 @@ reconcile settings. YAML is good at this kind of shape.
 **(2) The YAML is checked into git; the env vars aren't.** A new
 deployment can `git clone` and immediately have a sensible default
 config. The deployment-specific bits (the addresses of Ollama and Qdrant,
-the Brave API key, the Cloudflare Access settings, the internal service
-token) go in `.env`, which is gitignored: they're deployment secrets and
-shouldn't follow the repo around.
+the Cloudflare Access settings, the internal service token) go in `.env`,
+which is gitignored: they're deployment secrets and shouldn't follow the
+repo around.
 
 This is also why `TOOL_SERVERS` and `KB_DATASET_PATHS` default to
 `None` in `EnvOverrides`. If those env vars are unset, the YAML lists
@@ -421,7 +422,7 @@ Not every startup failure means the same thing.
 
 If `config.yaml` is missing or malformed, Audrey cannot know which models,
 tools, timeouts, and routing rules to use. There is no honest degraded mode.
-[`_load_yaml()`](../../src/audrey/config.py#L254) lets that exception crash
+[`_load_yaml()`](../../src/audrey/config.py#L251) lets that exception crash
 startup, and so do the checks `get_config()` runs on several config sections.
 The same goes for Cloudflare Access switched on without its settings, and for
 an application database that can't be opened or migrated: without them, Audrey
@@ -448,10 +449,11 @@ Several of the objects in the table keep working after startup. The KB watcher
 reacts to file changes under the dataset folders; the reconciler periodically
 removes vectors whose source files disappeared. The durable-delivery workers
 retry their queues until each item is done: file deletions, archive
-deliveries, account purges. `NativeRunManager` holds every live run.
+deliveries, account purges. `NativeRunManager` holds every live run, and a
+discovery task keeps the tool list current (§2.5).
 
 Ordering matters at startup too. The uploads reconcile,
-[`reconcile_with_qdrant`](../../src/audrey/main.py#L216), must finish before
+[`reconcile_with_qdrant`](../../src/audrey/main.py#L195), must finish before
 uvicorn accepts traffic, because it isn't safe alongside uploads that are in
 progress. It restores missing legacy catalog rows, preserves existing
 ownership and lifecycle metadata, and reports missing search content. Empty
@@ -459,16 +461,16 @@ or partially lost search collections never delete upload records. The
 lifespan runs this before `yield`, so that ordering is structural.
 
 At shutdown, the `finally` block at
-[`main.py:419`](../../src/audrey/main.py#L419) stops things in a deliberate
+[`main.py:412`](../../src/audrey/main.py#L412) stops things in a deliberate
 order:
 
 ```python
 finally:
     await native_runs.stop()
-    if tools_retry_task is not None and not tools_retry_task.done():
-        tools_retry_task.cancel()
+    if tools_discovery_task is not None and not tools_discovery_task.done():
+        tools_discovery_task.cancel()
         try:
-            await tools_retry_task
+            await tools_discovery_task
         except (asyncio.CancelledError, Exception):  # noqa: BLE001, S110 — shutdown path
             pass
     if reconciler is not None:
@@ -548,7 +550,7 @@ One subtle part of `main.py` is easy to miss if you are new to Python
 closures.
 
 During startup, Audrey compiles the graph at
-[`main.py:191`](../../src/audrey/main.py#L191):
+[`main.py:170`](../../src/audrey/main.py#L170):
 
 ```python
 graph = build_graph(
@@ -575,23 +577,26 @@ def make_reader(registry):
 returned, because it captured that object.
 
 Audrey's graph does the same thing with `tool_registry`. So when tools are
-rediscovered, the existing registry object has to be refreshed in place. Here
-is the admin route that does it,
-[`rediscover_tools`](../../src/audrey/main.py#L594):
+rediscovered, the existing registry object has to be refreshed in place.
+Every refresh goes through
+[`_refresh_tool_discovery`](../../src/audrey/main.py#L435), whose core is at
+[`main.py:448`](../../src/audrey/main.py#L448):
 
 ```python
-fresh = await discover_all(tool_servers)
-if tool_servers and not fresh.by_name:
-    log.warning("tools: rediscover returned no records; keeping the live registry")
-    raise HTTPException(
-        status_code=503,
-        detail="Tool discovery returned no records; existing tools are unchanged.",
-    )
-reg.by_name.clear()
-reg.by_name.update(fresh.by_name)
+async with lock if lock is not None else asyncio.Lock():
+    fresh = await discover_all(tool_servers)
+    if tool_servers and not fresh.by_name:
+        return False
+    audit_user_scoping(fresh)
+    registry.by_name.clear()
+    registry.by_name.update(fresh.by_name)
+    if skills is not None:
+        skills.refresh_availability(frozenset(registry.names()))
+    return True
 ```
 
-Look at the last two lines first. The thing **not** to do is this:
+Look at the `clear()` and `update()` pair first. The thing **not** to do is
+this:
 
 ```python
 app.state.tools = fresh
@@ -599,20 +604,31 @@ app.state.tools = fresh
 
 That would make the FastAPI app point at the new registry, but the
 already-compiled graph would still hold the old registry in its closure.
-Mutating `reg.by_name` keeps the object identity the same while changing its
-contents, so the graph sees the refreshed tools on the next request.
+Mutating `registry.by_name` keeps the object identity the same while changing
+its contents, so the graph sees the refreshed tools on the next request. The
+skill registry is refreshed in place too, so a skill whose tools disappeared
+shows as degraded.
 
 Now the guard above them. `clear()` followed by `update()` replaces whatever
 the registry held with whatever discovery returned. If custom-tools happened to
-be restarting, discovery would return nothing, and an admin trying to *fix*
-the tools would wipe the working ones. So an empty answer is refused with a 503
-and the live registry stays as it was.
+be restarting, discovery would return nothing and wipe the working tools. So
+an empty answer returns `False` and the live registry stays as it was; the
+admin route, [`rediscover_tools`](../../src/audrey/main.py#L626), turns that
+`False` into a 503.
 
-The same in-place refresh runs without anyone asking, too. If the first
-discovery at startup comes back empty, or with some tools unavailable,
-[`_retry_tool_discovery`](../../src/audrey/main.py#L442) retries in the
-background for about two minutes, mutating the same registry when it succeeds.
-After that window, the admin route is the way to retry.
+The admin route isn't the only caller. Once startup has succeeded, a
+background task,
+[`_maintain_tool_discovery`](../../src/audrey/main.py#L460), takes over. If
+the first discovery came back empty, or with some tools unavailable, it
+retries every few seconds for about two minutes. After that, or straight away
+after a healthy start, it refreshes once a minute for the life of the process,
+so a tool whose backend fails drops out of the model's list, and comes back,
+without a restart. The lock makes these refreshes take turns, so a background
+snapshot fetched before an admin's rediscovery can't land after it.
+
+The task starts as the last step before `yield`, and that position matters.
+The `try`/`finally` that cancels it wraps only the `yield`, so a task started
+earlier would be stranded if a later startup step raised.
 
 This is one of those details that feels small until it breaks tool use. Once
 you know the closure exists, the in-place mutation is not just clever; it is

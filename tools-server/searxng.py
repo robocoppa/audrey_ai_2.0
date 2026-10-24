@@ -61,7 +61,7 @@ class SearxngClient:
         cache_max_entries: int = 512,
     ) -> None:
         if not base_url:
-            raise ValueError("SEARXNG_URL is empty; set it to enable the fallback.")
+            raise ValueError("SEARXNG_URL is empty; set it to enable the SearXNG provider.")
         self._base_url = base_url.rstrip("/")
         self._cache_ttl = cache_ttl_seconds
         self._cache_max = cache_max_entries
@@ -126,7 +126,7 @@ class SearxngClient:
                     with attempt:
                         data = await _do()
             except httpx.HTTPError as e:
-                raise SearxngError(f"SearXNG fallback failed: {e}") from e
+                raise SearxngError(f"SearXNG search failed: {e}") from e
             except ValueError as e:  # JSON decode
                 raise SearxngError(f"SearXNG returned non-JSON: {e}") from e
             return _parse_results(data, count)

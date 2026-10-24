@@ -9,6 +9,12 @@ they are not ongoing task lists.
 
 ## Current work
 
+**Audit followup completed October 24.** The local course AUDIT records the
+completed drain of its remaining queue. Source/tooling is locally verified;
+runtime contracts are in [Phase 1](phase-01-platform-hardening.md). Deploy audrey
+and custom-tools. This does not reopen accepted product work or change the
+Tax review queue below.
+
 **Accepted foundation:** the owned IRS library, Private Projects and local file
 processing, conversation recovery, Tax review worksheet/task lifecycle and Toolbox
 presentation remain closed. The editable direct-chat facts workflow is accepted.
@@ -52,12 +58,21 @@ is in [Phase 1](phase-01-platform-hardening.md#tool-availability-at-runtime).
 Deploy audrey and custom-tools together. Lesson files are left to the author;
 this handoff provides an outline only. Product queue order stays below.
 
-**Then — finish bounded 20E.2 native validation.** Decide a narrow correction
-or scope limit for the observed premature deduction. Follow with the previously
-incorrect tax-year comparison, checking claims against retained passages. Record observed outcomes and available costs
-once. Source/year links, user authority and code arithmetic remain separate;
-neither UI polish nor model agreement establishes tax accuracy. No new rule
-engine, model change or repeated probe gate is queued.
+**20E.2 scope decision implemented October 24.** Tax review supports selected
+source review and conditional arithmetic worksheets; it does not determine
+eligibility for deductions or credits. The server projects this boundary on new
+and historical worksheets, the Toolbox and project views show it before findings,
+and tool feedback instructs the writer to keep model-selected rule amounts conditional. A completed task
+or checked support assessment does not establish entitlement. The premature
+deduction remains a known model limitation, not a corrected accuracy result.
+Locally verified; deploy audrey and audrey-ui. No schema, config, model, sidecar,
+embedding or IRS-index change is required for this slice.
+
+**Then — finish bounded 20E.2 native validation.** Make one previously incorrect
+tax-year comparison, checking claims against retained passages. Record the outcome
+and available costs once. No scalar-probe rerun, generic eligibility detector,
+new model or full-return acceptance is queued. Browser project acceptance remains
+pending; observe its new scope notice with the existing saved worksheet.
 
 **Toolbox worksheet layout followup:** reserve a complete worksheet-summary row
 on short screens and scroll the expanded content rather than clipping its action.
@@ -110,7 +125,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Facts accepted; automatic Private case projects built; bounded native accuracy work remains |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Facts accepted; Private case projects and conditional worksheet scope built; one tax-year comparison remains |
 
 ## Build queue
 
@@ -153,9 +168,11 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
   facts/worksheet and project document access.
 - [x] **Runtime maintenance:** approved audit source changes and retired-client
   cleanup implemented; see the local course AUDIT for the drain.
-- [ ] **20E.2:** decide a narrow fix or scope limit for premature deduction in
-  the observed native worksheet, then assess the known tax-year comparison once.
-  The correct final arithmetic alone does not close the eligibility failure.
+- [x] **20E.2 supported scope:** source review and conditional arithmetic;
+  eligibility is not determined. Scope metadata and worksheet presentation are
+  implemented and locally verified. The earlier premature deduction stays recorded.
+- [ ] **20E.2 comparison:** assess the known tax-year comparison once against
+  retained official passages. No full-return or eligibility-accuracy acceptance.
 
 Tax year/jurisdiction and reference release remain in the case record. Project
 views read that canonical record rather than duplicate it in Project instructions. OCR/media, fine-tuning and state

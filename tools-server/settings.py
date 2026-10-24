@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     data_dir: Path = Field(default=Path("/app/data"), alias="TOOLS_DATA_DIR")
 
     # All production text embeddings come from the mounted canonical config.
-    # Legacy model/dimension fields remain for generic constructors and tests;
+    # Legacy model, dimension and score fields remain for constructors and tests;
     # runtime app wiring deliberately ignores these retired environment flags.
     embedding_config_path: Path = Field(default=(Path(__file__).resolve().parent.parent / "config.yaml"
                  if (Path(__file__).resolve().parent.parent / "config.yaml").is_file()
@@ -84,9 +84,8 @@ class Settings(BaseSettings):
     memory_collection: str = Field(default="kb_memory", alias="MEMORY_COLLECTION")
     memory_embed_model: str = Field(default="nomic-embed-text", alias="MEMORY_EMBED_MODEL")
     memory_embed_dim: int = Field(default=768, alias="MEMORY_EMBED_DIM")
-    # Cosine similarity floor. `memory_search` drops anything below this.
-    # Tighter than KB because memory false-positives poison the prompt as
-    # "facts about the user" — a false hit actively misleads the model.
+    # Retired environment setting, retained for constructor compatibility.
+    # Production memory_search uses config.yaml text_embedding.memory_min_score.
     memory_similarity_threshold: float = Field(default=0.5, alias="MEMORY_SIMILARITY_THRESHOLD")
 
     # Private collection snapshots, outside Qdrant storage. No chat waits

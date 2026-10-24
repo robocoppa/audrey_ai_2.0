@@ -12,7 +12,8 @@ Point IDs are deterministic: `uuid5(user, key)` — re-storing the same
 
 `recall(key)` is a payload-only scroll (no vector search); `search(user,
 query, top_k)` first checks literal key spellings, then falls back to vector
-search filtered by `user == <id>` and threshold `MEMORY_SIMILARITY_THRESHOLD`.
+search filtered by `user == <id>` and the constructor's similarity floor.
+Production wiring supplies `text_embedding.memory_min_score` from config.yaml.
 
 Startup: if a legacy `memory.db` SQLite file exists, read every row, embed,
 and upsert into Qdrant. Rename the file to `memory.db.migrated` only after
@@ -620,7 +621,8 @@ class MemoryStore:
 
         Exact whole-key spellings are evidence without an embedding score.
         Other queries embed `query`, vector-search with `user == <user>`
-        payload filter, and drop results below `MEMORY_SIMILARITY_THRESHOLD`.
+        payload filter, and drop results below the constructor's similarity
+        floor (`text_embedding.memory_min_score` in production).
         Both paths apply the same owner and purge-cutoff filters.
 
         Raises `EmbedError` when the query can't be embedded. It used to

@@ -48,7 +48,7 @@ plan.
 - [Lesson 16 — The OpenAI routes, end-to-end](lesson-16-openai-routes.md)
 - [Lesson 17 — The custom-tools sidecar](lesson-17-custom-tools-sidecar.md)
 
-Lessons 11–17 are being brought up to date one at a time. Until a
+Lessons 11–16 are being brought up to date one at a time. Until a
 lesson's refresh lands, parts of it may describe an earlier version of Audrey.
 
 **Lesson numbers changed on 2026-10-23,** when the model layer became two
