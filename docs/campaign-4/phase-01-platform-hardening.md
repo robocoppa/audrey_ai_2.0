@@ -1,7 +1,7 @@
 # Phase 01 — platform hardening
 
 **Status:** Core complete and deployed. October 24 runtime followups are
-implemented and locally verified; Tower deployment remains with the user.
+implemented and locally verified; the user accepted the runtime browser handoff October 24.
 
 ## Delivered
 

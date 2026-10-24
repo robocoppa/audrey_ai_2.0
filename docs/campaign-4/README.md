@@ -11,8 +11,8 @@ they are not ongoing task lists.
 
 **Audit followup completed October 24.** The local course AUDIT records the
 completed drain of its remaining queue. Source/tooling is locally verified;
-runtime contracts are in [Phase 1](phase-01-platform-hardening.md). Deploy audrey
-and custom-tools. This does not reopen accepted product work or change the
+runtime contracts are in [Phase 1](phase-01-platform-hardening.md). The user accepted
+the runtime handoff October 24. This does not reopen accepted product work or change the
 Tax review queue below.
 
 **Accepted foundation:** the owned IRS library, Private Projects and local file
@@ -40,11 +40,15 @@ the closed scalar probe stays closed.
 **Facts workflow accepted October 23.** Direct chat facts, the editable Toolbox
 table and clear missing-information questions passed. Do not repeat that flow.
 
-**Current — Tax review projects built.** Starting a case creates a Private
-`Tax review <year>` project, or reuses the current owned Private project. The
-project shows canonical facts and saved worksheets and retains document links.
-Existing ungrouped cases have an explicit Create Private project action; reads
-do not recreate deleted projects. Browser acceptance remains pending.
+**Tax review projects and scope accepted October 24.** The user reported the
+remaining checks passed. Automatic Private grouping, canonical facts/worksheets,
+document access and scope presentation stay closed. The audit runtime handoff
+also passed. Only the tax-year comparison below remains in the current queue.
+
+**Composer Stop polish built October 24.** A red square icon replaces the word
+Stop in a button matching Send's shape and dimensions. Accessible naming and
+cancellation stay intact; existing desktop/mobile cancel/reload checks pass.
+Rebuild audrey-ui for this UI-only change.
 
 **Runtime maintenance built October 23.** The approved model/Private/research
 audit is addressed and locally verified; the local course `AUDIT.md` holds the drain.
@@ -65,14 +69,15 @@ and historical worksheets, the Toolbox and project views show it before findings
 and tool feedback instructs the writer to keep model-selected rule amounts conditional. A completed task
 or checked support assessment does not establish entitlement. The premature
 deduction remains a known model limitation, not a corrected accuracy result.
-Locally verified; deploy audrey and audrey-ui. No schema, config, model, sidecar,
-embedding or IRS-index change is required for this slice.
+The user accepted this presentation October 24. No accuracy claim follows
+from that acceptance; the one source-comparison outcome remains unreported.
 
 **Then — finish bounded 20E.2 native validation.** Make one previously incorrect
 tax-year comparison, checking claims against retained passages. Record the outcome
 and available costs once. No scalar-probe rerun, generic eligibility detector,
-new model or full-return acceptance is queued. Browser project acceptance remains
-pending; observe its new scope notice with the existing saved worksheet.
+new model or full-return acceptance is queued. Use one fresh Private Tax review
+case for 2025 and the comparison prompt in Phase 20. No upload or script is needed;
+keep the conversation until the answer and cited passages have been assessed.
 
 **Toolbox worksheet layout followup:** reserve a complete worksheet-summary row
 on short screens and scroll the expanded content rather than clipping its action.
@@ -125,7 +130,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
 | 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A complete |
 | 19 | [Calculations and deeper evidence tools](phase-19-evidence-tools.md) | Complete; user accepted October 13 |
-| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Facts accepted; Private case projects and conditional worksheet scope built; one tax-year comparison remains |
+| 20 | [Reference libraries and private tax assistance](phase-20-reference-libraries-and-private-tax-assistance.md) | Facts, Private case projects and scope accepted; one tax-year comparison remains |
 
 ## Build queue
 
@@ -164,13 +169,13 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
   No further scalar-probe rerun is queued; other five passes stay recorded.
 - [x] **Facts followup:** editable current facts, direct chat statements and
   clear missing-information flow accepted.
-- [ ] **Tax project acceptance:** verify automatic Private grouping, saved
-  facts/worksheet and project document access.
+- [x] **Tax project acceptance:** automatic Private grouping, saved
+  facts/worksheet and project document access accepted October 24.
 - [x] **Runtime maintenance:** approved audit source changes and retired-client
   cleanup implemented; see the local course AUDIT for the drain.
 - [x] **20E.2 supported scope:** source review and conditional arithmetic;
   eligibility is not determined. Scope metadata and worksheet presentation are
-  implemented and locally verified. The earlier premature deduction stays recorded.
+  implemented and user-accepted October 24. The earlier premature deduction stays recorded.
 - [ ] **20E.2 comparison:** assess the known tax-year comparison once against
   retained official passages. No full-return or eligibility-accuracy acceptance.
 

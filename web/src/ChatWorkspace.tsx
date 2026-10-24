@@ -2627,8 +2627,14 @@ function AudreyThread({
                       {!recoveredRunActive ? (
                         <ComposerPrimitive.Cancel
                           className="cancel-button"
+                          aria-label="Stop"
+                          title="Stop response"
                           onClick={() => { userRequestedCancelRef.current = true; }}
-                        >Stop</ComposerPrimitive.Cancel>
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <rect x="6.5" y="6.5" width="11" height="11" rx="1.4" />
+                          </svg>
+                        </ComposerPrimitive.Cancel>
                       ) : null}
                       <ComposerPrimitive.Send
                         className="send-button"

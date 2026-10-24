@@ -7,6 +7,12 @@ Shared overlay menus are built; browser acceptance is pending.
 
 The centered dock has a 56 rem desktop maximum: message field plus Send/Stop above an equal-height **Model**, **Project**, **Add files**, and **Tools & skills** rail. Compact screens use two columns, keeping Project beside Model and Files beside Tools. All four controls share the same surface, value color/typography, spacing, and outer focus treatment on mobile and desktop. Project selection moves the current conversation through the existing owner-scoped API.
 
+Send and Stop share a circular footprint on desktop and mobile. While a
+response is running, Stop uses a white filled square on a red gradient, retaining
+its accessible Stop name and Stop response tooltip. This October 24 presentation
+change preserves cancellation and refresh recovery; existing browser checks pass.
+Only audrey-ui rebuilds after pull.
+
 The message box glows while its text field is focused for typing.
 Hovering, pressing, or keyboard focusing a dropdown highlights that control.
 

@@ -1764,13 +1764,19 @@ a:focus-visible {
   border-radius: 999px;
 }
 
-.send-button {
+.send-button,
+.cancel-button {
   display: grid;
   place-items: center;
+  flex: none;
   width: 2.35rem;
   height: 2.35rem;
-  background: var(--brand-gradient);
+  padding: 0;
   color: #fff;
+}
+
+.send-button {
+  background: var(--brand-gradient);
 }
 
 .send-button svg {
@@ -1784,10 +1790,13 @@ a:focus-visible {
 }
 
 .cancel-button {
-  padding: 0.45rem 0.65rem;
-  background: transparent;
-  color: var(--danger);
-  font-size: 0.75rem;
+  background: linear-gradient(135deg, #d7445f 0%, #bb2d48 100%);
+}
+
+.cancel-button svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  fill: currentColor;
 }
 
 .archived-notice {

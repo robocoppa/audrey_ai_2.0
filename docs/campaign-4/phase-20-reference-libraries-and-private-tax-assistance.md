@@ -925,8 +925,9 @@ an empty continuation answer and a confusing retained prompt history. It does
 not provide a matched token/latency report. Keep the outcome and native eligibility
 limitation; do not reopen the concluded scalar probe.
 
-The editable facts workflow above is accepted. Automatic Private project
-grouping remains a browser followup. The October 24 decision limits supported Tax
+The editable facts workflow, automatic Private project grouping and scope
+presentation are accepted; the user reported the remaining checks passed October 24.
+The October 24 decision limits supported Tax
 review work to selected-source review and conditional arithmetic worksheets.
 It does not determine eligibility for a deduction or credit. This is a supported
 scope decision, not evidence that the premature-deduction behavior was corrected.
@@ -947,11 +948,27 @@ entitlement. This does not suppress every unsupported sentence in streamed model
 prose or guarantee that every source condition was inventoried. No new eligibility
 engine, model or reviewer call is added.
 
-Backend and UI are locally verified. After pull on Tower, rebuild audrey and
-audrey-ui; no sidecar/schema/config/index/profile change is needed for this slice.
-Open an existing saved worksheet in the Toolbox and its project to observe the
-scope notice; no upload, new facts or repeated confirmation is needed. Then make
-the one known tax-year comparison using the existing native review flow.
+Backend and UI verification passed and the user accepted the project/scope
+flow October 24. Do not repeat those browser checks. The next remaining item is
+the one known tax-year comparison in the native review flow:
+
+1. Open a fresh Private conversation and choose Tax review. Use return year 2025
+   and goal "Compare 2025 with 2024 federal tax changes."
+2. Send one message:
+
+   > Using only the owned IRS library, compare tax year 2025 with 2024. Cover
+   > personal exemptions, the basic standard deduction, qualified tips and
+   > overtime deductions, EITC for families with three or more qualifying children,
+   > and the alternative-fuel refueling credit cutoff. Cite the publication and
+   > PDF page for supported claims. Distinguish tax years from effective dates,
+   > and identify anything you cannot verify or where sources conflict. This is
+   > a source comparison, not an assessment of my personal eligibility.
+
+3. Keep that conversation and supply the answer and cited sources for one
+   assessment. No upload, source refresh, reindex or new script is needed. A
+   successful tool call proves retrieval, not accuracy. Unsupported values,
+   unresolved source conflicts and missing prior-year support stay explicit;
+   an honestly limited result is not a complete comparison pass.
 
 Record outcomes and available costs once, including failures. Correct a concrete
 native defect if demonstrated, or narrow the supported task; do not reopen the isolated
@@ -1009,6 +1026,15 @@ wrong-year changes and pre-amendment values in the same comparison case: the
 [IRS termination table](https://www.irs.gov/newsroom/faqs-for-modification-of-sections-25c-25d-25e-30c-30d-45l-45w-and-179d-under-public-law-119-21-139-stat-72-july-4-2025-commonly-known-as-the-one-big-beautiful-bill-obbb)
 sets that cutoff at June 30, 2026. A prompt or plumbing fix alone does not close
 this accuracy case.
+
+October 24 source cross-check: [Publication 6144, PDF page 2](https://www.irs.gov/pub/irs-pdf/p6144.pdf)
+itself prints June 30, 2025 for the refueling-property cutoff, whereas the
+[dedicated IRS FAQ, section 30C](https://www.irs.gov/newsroom/faqs-for-modification-of-sections-25c-25d-25e-30c-30d-45l-45w-and-179d-under-public-law-119-21-139-stat-72-july-4-2025-commonly-known-as-the-one-big-beautiful-bill-obbb)
+prints June 30, 2026. A quotation of the first source is not proof that the
+date is correct. Keep that distinction when assessing the comparison; preserve
+original PDFs and unresolved conflicts rather than silently editing the archive.
+This cross-check supplies assessment context, not an application retrieval result
+or another index/collection task.
 
 Official design references: [IRS document-gathering guidance](https://www.irs.gov/filing/gather-your-documents)
 for the inventory/interview, [Publication 17 overview](https://www.irs.gov/forms-pubs/about-publication-17)
