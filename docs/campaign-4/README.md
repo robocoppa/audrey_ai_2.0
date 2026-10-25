@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 24, 2026.** English user input only. Passed work stays closed.
+**Updated October 25, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -94,6 +94,16 @@ export failure; deletion/purge removes derived files. Saved-write tool feedback
 now identifies case persistence explicitly. Locally verified; one browser check
 remains. After pull rebuild audrey and audrey-ui; no sidecar/config/schema/model
 or index change. DOCX and Nextcloud remain optional future work.
+
+**Tax mode restoration fixed October 25.** The user's two inline answers did not
+save a worksheet, so save/download acceptance remains open. A reproducible UI
+path restored the saved case after reload without restoring its Tax review
+selection, sending ordinary Private requests without the case tool. Saved cases
+now reopen in Tax review; unresolved loading/setup blocks accidental sends, an
+explicit Automatic choice is preserved within the opened view, and retries keep
+the attempted skill. Browser/component checks, typecheck and build pass locally.
+Rebuild only audrey-ui after pull for this fix, then check one saved-case reload
+and save/download. No model/budget/backend/index change or broader comparison run.
 
 No broader repeat test is queued. A later
 decision to improve broader autonomous review starts from this saved run's

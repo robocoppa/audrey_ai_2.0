@@ -45,7 +45,7 @@ import { AudreyLoader } from "./AudreyLoader";
 import { ScrollToLatest } from "./ScrollToLatest";
 import { SwipeConversationRow } from "./SwipeConversationRow";
 import { UploadProgress } from "./UploadProgress";
-import { TaxReview } from "./TaxReview";
+import { TaxReview, type TaxReviewLoadState } from "./TaxReview";
 import { TaxWorkbookLink } from "./TaxWorkbookDownload";
 import { ConversationToolbox } from "./ConversationToolbox";
 import { PrivateTaskProgress } from "./PrivateTaskProgress";
@@ -141,7 +141,7 @@ function ProjectIcon({ className }: { className?: string }) {
 type ThreadState =
   | { status: "idle" }
   | { status: "loading" }
-  | { status: "ready"; messages: ConversationMessage[] }
+  | { status: "ready"; messages: ConversationMessage[]; retrySkillId?: string }
   | { status: "error"; message: string };
 
 type RunActivity = {
@@ -176,6 +176,7 @@ type ActivityLedger = {
 type LastAttempt = {
   text: string;
   attachmentIds: string[];
+  skillId?: string;
 };
 
 type ConversationView = "active" | "archived";
@@ -1301,9 +1302,11 @@ function ConversationThread({
     async function restoreThread() {
       try {
         let { items } = await listMessages(conversation.id);
+        let retrySkillId: string | undefined;
         const latestAssistant = items.filter(({ role }) => role === "assistant").at(-1);
         if (latestAssistant && latestAssistant.status !== "completed" && latestAssistant.run_id) {
           const run = await getRun(latestAssistant.run_id);
+          retrySkillId = run.skill_id;
           if (run.conversation_id !== conversation.id) throw new Error("Run belongs to another conversation.");
           if (run.status === "running") {
             if (active) {
@@ -1319,7 +1322,7 @@ function ConversationThread({
           // auxiliary title finished. Showing history must not wait for it.
           setTitleRunId(latestAssistant.run_id);
         }
-        if (active) setThread({ status: "ready", messages: items });
+        if (active) setThread({ status: "ready", messages: items, retrySkillId });
       } catch (reason) {
         if (active) setThread({ status: "error", message: messageOf(reason) });
       }
@@ -1343,7 +1346,7 @@ function ConversationThread({
         if (run.status !== "running") {
           const messages = await listMessages(conversation.id);
           if (!active) return;
-          setThread({ status: "ready", messages: messages.items });
+          setThread({ status: "ready", messages: messages.items, retrySkillId: run.skill_id });
           setThreadRevision((revision) => revision + 1);
           setRecoveredRunId(null);
           setRunActive(false);
@@ -1426,7 +1429,7 @@ function ConversationThread({
       const run = await cancelRun(recoveredRunId);
       if (run.status !== "running") {
         const messages = await listMessages(conversation.id);
-        setThread({ status: "ready", messages: messages.items });
+        setThread({ status: "ready", messages: messages.items, retrySkillId: run.skill_id });
         setThreadRevision((revision) => revision + 1);
         setRecoveredRunId(null);
         setRunActive(false);
@@ -1678,6 +1681,7 @@ function ConversationThread({
           modelId={selectedModelId}
           showProgress={showProgress}
           initialMessages={thread.messages}
+          initialRetrySkillId={thread.retrySkillId}
           replacementDraft={pendingDraft}
           onDraftRestored={() => {
             setPendingDraft(undefined);
@@ -1719,6 +1723,7 @@ function AudreyThread({
   modelId,
   showProgress,
   initialMessages,
+  initialRetrySkillId,
   replacementDraft,
   onDraftRestored,
   readOnly,
@@ -1745,6 +1750,7 @@ function AudreyThread({
   modelId: string;
   showProgress: boolean;
   initialMessages: ConversationMessage[];
+  initialRetrySkillId?: string;
   replacementDraft?: ComposerDraft;
   onDraftRestored: () => void;
   readOnly: boolean;
@@ -1760,7 +1766,10 @@ function AudreyThread({
 }) {
   const isPrivate = privateRequired || modelId === "private";
   const [runError, setRunError] = useState("");
-  const [skillId, setSkillId] = useState("");
+  // Null waits for the initial saved-case lookup; an empty string is an
+  // explicit Automatic choice that later case refreshes must preserve.
+  const [skillId, setSkillId] = useState<string | null>(null);
+  const [taxCaseLoadState, setTaxCaseLoadState] = useState<TaxReviewLoadState>("loading");
   const [taxCase, setTaxCase] = useState<TaxCase | null>(null);
   const [privateTask, setPrivateTask] = useState<PrivateTask | null | undefined>(undefined);
   const acceptPrivateTask = useCallback((task: PrivateTask | null) => {
@@ -1809,12 +1818,14 @@ function AudreyThread({
     return user ? {
       text: user.content,
       attachmentIds: user.attachments.map(({ id }) => id),
+      skillId: initialRetrySkillId,
     } : null;
   });
   const [retrying, setRetrying] = useState(false);
   const [queuedRetry, setQueuedRetry] = useState<{
     text: string;
     attachments: AudreyFile[];
+    skillId: string;
   } | null>(null);
   const dispatchedRetryRef = useRef<object | null>(null);
   const [activePicker, setActivePicker] = useState<ComposerPickerName | null>(null);
@@ -1854,7 +1865,10 @@ function AudreyThread({
   const durableReviewActive = privateTask?.status === "queued" || privateTask?.status === "running";
   const durableRetryHandled = Boolean(isPrivate && taxCase && (privateTask === undefined
     || privateTask && ["queued", "running", "paused", "waiting_for_user"].includes(privateTask.status)));
-  const submissionBlocked = modeDisabled || attachmentBusy || retrying || Boolean(uploadIssue) || queuedTaxReview !== null || durableReviewActive;
+  const controlsBlocked = modeDisabled || attachmentBusy || retrying || Boolean(uploadIssue) || queuedTaxReview !== null || durableReviewActive;
+  const taxCaseLookupBlocked = isPrivate && skillId !== "" && taxCaseLoadState !== "ready";
+  const taxCaseSetupBlocked = isPrivate && skillId === "tax-review" && !taxCase && taxCaseLoadState === "ready";
+  const submissionBlocked = controlsBlocked || taxCaseLookupBlocked || taxCaseSetupBlocked;
   const selectedImageCount = selectedAttachments.filter(({ kind }) => kind === "image").length;
   const visibleAttachmentFiles = useMemo(() => {
     const search = attachmentSearch.trim().toLocaleLowerCase();
@@ -1871,10 +1885,13 @@ function AudreyThread({
   const selectedSkill = skills.find((skill) => skill.id === skillId);
   const effectiveSkillId = isPrivate
     ? skillId === "tax-review" && taxCase ? "tax-review" : ""
-    : skillId === "tax-review" ? "" : skillId;
-  const skillControlValue = isPrivate ? effectiveSkillId === "tax-review" ? "Tax review" : "Automatic" : selectedSkill?.name
+    : skillId === "tax-review" ? "" : skillId ?? "";
+  const skillControlValue = taxCaseLookupBlocked
+    ? taxCaseLoadState === "loading" ? "Loading tax settings" : "Choose tools"
+    : isPrivate ? skillId === "tax-review" ? "Tax review" : "Automatic" : selectedSkill?.name
     ?? (selectedSkillMode === null ? "Not available" : "Automatic");
   const acceptTaxCase = useCallback((value: TaxCase | null) => {
+    setSkillId((current) => current === null ? value ? "tax-review" : "" : current);
     setTaxCase((current) => current && value && current.id === value.id && current.revision > value.revision
       ? current : value);
   }, []);
@@ -2293,11 +2310,22 @@ function AudreyThread({
   }, [queuedTaxReview, effectiveSkillId, readOnly, modeDisabled, attachmentBusy, retrying, recoveredRunActive, activity.status, runtime, setActivity]);
 
   async function retryLastQuestion() {
-    if (!lastAttempt || retrying || modeDisabled || attachmentBusy || readOnly) return;
+    if (!lastAttempt || retrying || modeDisabled || attachmentBusy || readOnly || taxCaseLookupBlocked) return;
     preserveComposerAttachmentsRef.current = false;
     setRetrying(true);
     setRunError("");
     try {
+      const retrySkillId = lastAttempt.skillId ?? effectiveSkillId;
+      if (retrySkillId === "tax-review" && (!isPrivate || !taxCase || taxCaseLoadState !== "ready")) {
+        throw new Error("Load the saved tax case before retrying this Tax review.");
+      }
+      if (retrySkillId && retrySkillId !== "tax-review") {
+        const skill = skills.find(({ id }) => id === retrySkillId);
+        if (isPrivate || !skill || skill.availability !== "available" || selectedSkillMode === null
+          || !skill.supported_modes.includes(selectedSkillMode)) {
+          throw new Error("The original skill is unavailable for the selected model.");
+        }
+      }
       if (lastAttempt.attachmentIds.length > 0 && !supportsFiles) {
         throw new Error("The selected model accepts text only. Choose a file-capable model to retry this question.");
       }
@@ -2313,7 +2341,8 @@ function AudreyThread({
       }
       setSelectedAttachments(attachments);
       setUploadIssue("");
-      setQueuedRetry({ text: lastAttempt.text, attachments });
+      setSkillId(retrySkillId);
+      setQueuedRetry({ text: lastAttempt.text, attachments, skillId: retrySkillId });
     } catch (reason) {
       setRetrying(false);
       setRunError("Could not retry: " + messageOf(reason));
@@ -2322,7 +2351,7 @@ function AudreyThread({
   }
 
   useEffect(() => {
-    if (!queuedRetry || dispatchedRetryRef.current === queuedRetry) return;
+    if (!queuedRetry || effectiveSkillId !== queuedRetry.skillId || dispatchedRetryRef.current === queuedRetry) return;
     // Defer until the runtime has installed the agent for the validated IDs.
     const timer = window.setTimeout(() => {
       if (dispatchedRetryRef.current === queuedRetry) return;
@@ -2350,7 +2379,7 @@ function AudreyThread({
       }
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [queuedRetry, runtime, setActivity]);
+  }, [queuedRetry, effectiveSkillId, runtime, setActivity]);
 
   async function toggleAttachmentPicker() {
     if (attachmentPickerOpen) {
@@ -2508,10 +2537,11 @@ function AudreyThread({
         conversationId={conversationId}
         expanded={taxReviewExpanded}
         active={effectiveSkillId === "tax-review"}
-        disabled={readOnly || submissionBlocked || activity.status === "running" || recoveredRunActive}
+        disabled={readOnly || controlsBlocked || activity.status === "running" || recoveredRunActive}
         refreshVersion={taxReviewRefresh}
         onExpandedChange={setTaxReviewExpanded}
         onCaseChange={acceptTaxCase}
+        onLoadStateChange={setTaxCaseLoadState}
         onSaved={() => { setSkillId("tax-review"); setToolboxDismissed(false); }}
         onReview={() => startTaxReview()}
         taskControls={taxCase ? <PrivateTaskProgress
@@ -2578,13 +2608,21 @@ function AudreyThread({
                 {((showProgress && activity.status !== "complete") || activity.status === "error") ? (
                   <RunActivityStatus activity={activity} error={runError} />
                 ) : null}
+                {taxCaseLookupBlocked ? <div className="attachment-issue" role={taxCaseLoadState === "error" ? "alert" : "status"}>
+                  <span>{taxCaseLoadState === "error"
+                    ? "Could not load tax review settings. Reload settings or choose Automatic to continue."
+                    : "Loading tax review settings before sending…"}</span>
+                  {taxCaseLoadState === "error" ? <button type="button"
+                    disabled={controlsBlocked} onClick={() => setTaxReviewRefresh((current) => current + 1)}>Reload tax settings</button> : null}
+                </div> : null}
+                {taxCaseSetupBlocked ? <p className="attachment-status" role="status">Finish Tax review setup in the Toolbox before sending.</p> : null}
                 {isPrivate && taxCase && selectedAttachments.length > 0 ? <p className="attachment-status">Tax review uses files already sent here or added to the project. Send newly selected files before reviewing them.</p> : null}
                 {lastAttempt && !durableRetryHandled && (restoredIncomplete || activity.status === "error" || runError) ? (
                   <button
                     className="retry-button"
                     type="button"
                     onClick={() => void retryLastQuestion()}
-                    disabled={retrying || modeDisabled || attachmentBusy}
+                    disabled={retrying || modeDisabled || attachmentBusy || taxCaseLookupBlocked}
                   >{retrying ? "Checking attachments…" : "Retry last question"}</button>
                 ) : null}
                 <ThreadPrimitive.Empty>
@@ -2650,7 +2688,7 @@ function AudreyThread({
                     }
                     preserveComposerAttachmentsRef.current = false;
                     const text = composerInputRef.current?.value.trim() ?? "";
-                    if (text) setLastAttempt({ text, attachmentIds: selectedAttachments.map(({ id }) => id) });
+                    if (text) setLastAttempt({ text, attachmentIds: selectedAttachments.map(({ id }) => id), skillId: effectiveSkillId });
                   }}
                 >
                   <div className="composer-input-row">
@@ -2719,7 +2757,7 @@ function AudreyThread({
                       className="composer-rail-control skill-button"
                       type="button"
                       onClick={toggleSkillPicker}
-                      disabled={submissionBlocked || selectedSkillMode === null}
+                      disabled={controlsBlocked || selectedSkillMode === null}
                       title={isPrivate ? "Choose automatic local tools or configure a Tax review" : selectedSkillMode === null
                         ? `${selectedModel.label} does not support Audrey skills`
                         : "Choose automatic tool use or a focused Audrey skill"}
@@ -2890,7 +2928,7 @@ function AudreyThread({
                     <div className="skill-options" role="group" aria-label="Tools and skills choices">
                       <button
                         type="button"
-                        aria-pressed={!skillId}
+                        aria-pressed={skillId === "" || (!isPrivate && skillId === null)}
                         onClick={() => {
                           setSkillId("");
                           setTaxReviewExpanded(false);
@@ -2903,9 +2941,9 @@ function AudreyThread({
                       </button>
                       {isPrivate ? <button
                         type="button"
-                        aria-pressed={effectiveSkillId === "tax-review"}
+                        aria-pressed={skillId === "tax-review"}
                         onClick={() => {
-                          if (taxCase) setSkillId("tax-review");
+                          setSkillId("tax-review");
                           setTaxReviewExpanded(true);
                           setToolboxDismissed(false);
                           setActivePicker(null);

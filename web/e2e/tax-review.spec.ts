@@ -18,8 +18,23 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCount?: number; autoProject?: boolean } = {}) {
-  let taxCase: TaxCase | null = options.savedTask ? fixtureCase("created") : null;
+async function mockTaxApi(page: Page, options: {
+  savedTask?: boolean;
+  savedCase?: boolean;
+  savedFailure?: "tax-review" | "automatic";
+  holdCase?: boolean;
+  caseError?: boolean;
+  failFirstAgent?: boolean;
+  historyCount?: number;
+  autoProject?: boolean;
+} = {}) {
+  let taxCase: TaxCase | null = options.savedTask || options.savedCase || options.savedFailure ? fixtureCase("created") : null;
+  let caseError = options.caseError ?? false;
+  let caseReads = 0;
+  let releaseCase!: () => void;
+  const caseGate = new Promise<void>((resolve) => { releaseCase = resolve; });
+  if (!options.holdCase) releaseCase();
+  const failedRuns = new Set(options.savedFailure ? ["run_tax_saved"] : []);
   let privateTask: PrivateTask | null = options.savedTask ? {
     id: "task_saved_review", conversation_id: ID, revision: 7, status: "running", stop_reason: "",
     progress: 1, updated_at: DATE, native_run_id: "run_tax_saved",
@@ -32,7 +47,7 @@ async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCou
   const agentBodies: Array<Record<string, unknown>> = [];
   const conversation = {
     id: ID, title: "Private tax review", private_required: true, default_mode: "local", default_model_id: "private",
-    project_id: null as string | null, created_at: DATE, updated_at: DATE, last_message_at: null as string | null, archived_at: null,
+    project_id: null as string | null, created_at: DATE, updated_at: DATE, last_message_at: options.savedCase || options.savedTask || options.savedFailure ? DATE : null as string | null, archived_at: null,
   };
   const taxProject = { id: "proj_tax", name: "Tax review 2025", instructions: "", private_required: true, created_at: DATE, updated_at: DATE };
   const ordinary = { ...conversation, id: OTHER, title: "Ordinary conversation", private_required: false, default_mode: "auto", default_model_id: "auto", last_message_at: DATE };
@@ -54,7 +69,7 @@ async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCou
     if (path === "/api/conversations") return json(route, request.method() === "POST" ? conversation : { items: [conversation, ordinary], next_cursor: null });
     if (path === `/api/conversations/${ID}`) return json(route, conversation);
     if (path === `/api/conversations/${OTHER}`) return json(route, ordinary);
-    if (path.endsWith("/messages")) return json(route, { items: options.savedTask ? [
+    if (path.endsWith("/messages")) return json(route, { items: path === `/api/conversations/${ID}/messages` && (options.savedTask || options.savedFailure) ? [
       { id: "msg_tax_saved_user", run_id: "run_tax_saved", sequence: 1, role: "user", status: "completed", content: TAX_REVIEW_PROMPT, created_at: DATE, updated_at: DATE, attachments: [] },
       { id: "msg_tax_saved_assistant", run_id: "run_tax_saved", sequence: 2, role: "assistant", status: privateTask?.status === "running" ? "in_progress" : "incomplete", content: "Saved review checkpoint.", created_at: DATE, updated_at: DATE, attachments: [] },
     ] : [], next_cursor: null });
@@ -68,7 +83,11 @@ async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCou
       return json(route, { task: privateTask });
     }
     if (path === `/api/conversations/${ID}/tax-review`) {
-      if (request.method() === "GET") return json(route, { case: taxCase });
+      if (request.method() === "GET") {
+        caseReads += 1;
+        await caseGate;
+        return caseError ? json(route, { detail: "Tax settings temporarily unavailable." }, 503) : json(route, { case: taxCase });
+      }
       const body = request.postDataJSON();
       requests.push({ path, body });
       if (options.autoProject) conversation.project_id = taxProject.id;
@@ -102,6 +121,14 @@ async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCou
       conversation.last_message_at = DATE;
       skills.push(url.searchParams.get("skill"));
       const runId = "run_tax_" + skills.length;
+      if (options.failFirstAgent && skills.length === 1) {
+        failedRuns.add(runId);
+        const events = [
+          { type: "RUN_STARTED", threadId: ID, runId },
+          { type: "RUN_ERROR", code: "provider_error", message: "Run failed." },
+        ];
+        return route.fulfill({ status: 200, contentType: "text/event-stream", body: events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") });
+      }
       const body = request.postDataJSON();
       const last = body.messages?.at(-1)?.content ?? "";
       if (taxCase && url.searchParams.get("skill") === "tax-review") {
@@ -131,22 +158,31 @@ async function mockTaxApi(page: Page, options: { savedTask?: boolean; historyCou
       ];
       return route.fulfill({ status: 200, contentType: "text/event-stream", body: events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") });
     }
-    if (path.startsWith("/api/runs/run_tax_")) return json(route, { id: path.split("/").at(-1), conversation_id: ID,
-      status: options.savedTask && privateTask?.status === "running" ? "running"
-        : options.savedTask && privateTask?.status === "paused" ? "cancelled" : "succeeded",
-      error_code: privateTask?.status === "paused" ? "private_task_paused" : "", title_pending: false });
+    if (path.startsWith("/api/runs/run_tax_")) {
+      const runId = path.split("/").at(-1)!;
+      const skillId = runId === "run_tax_saved" ? options.savedFailure === "automatic" ? "" : "tax-review"
+        : skills[Number(runId.slice("run_tax_".length)) - 1] ?? "";
+      return json(route, { id: runId, conversation_id: ID, skill_id: skillId,
+        status: failedRuns.has(runId) ? "failed" : options.savedTask && privateTask?.status === "running" ? "running"
+          : options.savedTask && privateTask?.status === "paused" ? "cancelled" : "succeeded",
+        error_code: failedRuns.has(runId) ? "provider_error" : privateTask?.status === "paused" ? "private_task_paused" : "", title_pending: false });
+    }
     await route.abort("failed");
   });
-  return { requests, skills, agentBodies, askQuestion() {
-    if (!taxCase) throw new Error("Create the case first.");
-    taxCase = { ...taxCase, revision: taxCase.revision + 1, missing_items: [{ id: "need_age", label: "Age",
-      question: "What was your age at the end of 2025?", status: "unresolved" }] };
-  }, offerLibraryUpdate() {
-    if (!taxCase) throw new Error("Create the case before offering a library update.");
-    taxCase = { ...taxCase, reference_update: { status: "update_available", release_id: "rel_updated_library" } };
-  }, saveProjectWorksheet() {
-    taxCase = { ...fixtureCase("group_reviewed"), project_id: conversation.project_id };
-  } };
+  return { requests, skills, agentBodies, releaseCase,
+    get caseReads() { return caseReads; },
+    setCaseError(value: boolean) { caseError = value; },
+    askQuestion() {
+      if (!taxCase) throw new Error("Create the case first.");
+      taxCase = { ...taxCase, revision: taxCase.revision + 1, missing_items: [{ id: "need_age", label: "Age",
+        question: "What was your age at the end of 2025?", status: "unresolved" }] };
+    }, offerLibraryUpdate() {
+      if (!taxCase) throw new Error("Create the case before offering a library update.");
+      taxCase = { ...taxCase, reference_update: { status: "update_available", release_id: "rel_updated_library" } };
+    }, saveProjectWorksheet() {
+      taxCase = { ...fixtureCase("group_reviewed"), project_id: conversation.project_id };
+    } };
+
 }
 
 function toolbox(page: Page, width: number): Locator {
@@ -173,13 +209,25 @@ async function closeToolbox(panel: Locator) {
   await expect(panel.page().getByRole("button", { name: "Toolbox", exact: true })).toBeFocused();
 }
 
+async function chooseToolsMode(page: Page, mode: "Automatic" | "Tax review") {
+  await page.getByRole("button", { name: /^Tools and skills:/u }).click();
+  await page.getByRole("dialog", { name: "Choose how Audrey uses tools" })
+    .getByRole("button", { name: new RegExp(`^${mode}`, "u") }).click();
+}
+
 for (const viewport of [{ width: 1280, height: 900 }, { width: 1280, height: 600 }, { width: 390, height: 667 }]) {
   test(`Toolbox setup and current facts work at ${viewport.width}x${viewport.height}`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     await page.clock.setFixedTime(new Date(DATE));
     const observed = await mockTaxApi(page, { historyCount: 8 });
     await page.goto("./");
-    await page.getByRole("button", { name: "Tools and skills: Automatic" }).click();
+    const automaticTools = page.getByRole("button", { name: "Tools and skills: Automatic" });
+    await expect(automaticTools).toBeVisible();
+    const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+    const setupDraft = "Help me organize my tax documents.";
+    await composer.fill(setupDraft);
+    await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeEnabled();
+    await automaticTools.click();
     await page.getByRole("dialog", { name: "Choose how Audrey uses tools" }).getByRole("button", { name: /Tax review/u }).click();
     const rail = toolbox(page, viewport.width);
     await expect(rail).toBeVisible();
@@ -198,7 +246,17 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 1280, height: 600
     await expect(rail.getByText(/Tax review can make mistakes/u)).toBeVisible();
     await expect(settings.getByLabel("Tax year", { exact: true })).toHaveValue("2025");
     await expect(settings.getByLabel("Review goal", { exact: true })).not.toBeFocused();
+    await closeToolbox(rail);
+    await composer.fill(setupDraft);
+    await expect(page.getByText("Finish Tax review setup in the Toolbox before sending.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
+    await composer.press("Enter");
+    await expect(composer).toHaveValue(setupDraft);
+    expect(observed.agentBodies).toHaveLength(0);
+    await openToolbox(page, viewport.width);
+    await expect(settings).toBeVisible();
     await settings.getByLabel("Review goal", { exact: true }).fill("Review deductions");
+    await expect(settings.getByRole("button", { name: "Use Tax review" })).toBeEnabled();
     await settings.getByRole("button", { name: "Use Tax review" }).click();
     await expect(settings).toHaveCount(0);
     const panel = rail.getByRole("region", { name: "Tax review case" });
@@ -226,7 +284,8 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 1280, height: 600
     await page.screenshot({ path: testInfo.outputPath("toolbox-tab.png") });
     await expect(page.getByText("Some features degraded", { exact: true })).toHaveCount(0);
 
-    const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+    await expect(composer).toHaveValue(setupDraft);
+    await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeEnabled();
     await composer.fill(TAX_REVIEW_PROMPT);
     await page.getByRole("button", { name: "Send message", exact: true }).click();
     await expect(page.getByText("Review findings saved 1.")).toBeVisible();
@@ -444,3 +503,167 @@ test("a saved workbook link appears after the tax answer without replacing the n
   expect((await downloaded).suggestedFilename()).toBe("tax-review-2025.xlsx");
   await expect(composer).toHaveValue("Keep this next question unsent.");
 });
+
+
+test("saved Tax review remains selected after navigation and reload for a normal composer turn", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const observed = await mockTaxApi(page, { savedCase: true });
+  await page.goto("./");
+  await expect(page.getByRole("button", { name: "Tools and skills: Tax review" })).toBeVisible();
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await composer.fill("Keep my tax draft while I check another conversation.");
+  const history = page.getByRole("navigation", { name: "Conversation history", exact: true });
+  await history.getByRole("button", { name: /^Ordinary conversation/u }).click();
+  await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeVisible();
+  await history.getByRole("button", { name: /^Private tax review/u }).click();
+  await expect(page.getByRole("button", { name: "Tools and skills: Tax review" })).toBeVisible();
+  await expect(composer).toHaveValue("Keep my tax draft while I check another conversation.");
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Tools and skills: Tax review" })).toBeVisible();
+  await composer.fill("Check the arithmetic in my saved tax case.");
+  await composer.press("Enter");
+  await expect(page.getByText("Review findings saved 1.", { exact: true })).toBeVisible();
+  expect(observed.skills).toEqual(["tax-review"]);
+  expect(JSON.stringify(observed.agentBodies[0])).toContain("Check the arithmetic in my saved tax case.");
+});
+
+test("an explicit Automatic choice survives tax settings changes and conversation navigation", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const observed = await mockTaxApi(page, { savedCase: true });
+  await page.goto("./");
+  await expect(page.getByRole("button", { name: "Tools and skills: Tax review" })).toBeVisible();
+  await chooseToolsMode(page, "Automatic");
+  const rail = await openToolbox(page, 1280);
+  await rail.getByRole("button", { name: /Tax review · 2025/u }).click();
+  const settings = rail.getByRole("region", { name: "Tax review settings", exact: true });
+  await settings.getByLabel("Tax year", { exact: true }).fill("2024");
+  await settings.getByRole("button", { name: "Save year", exact: true }).click();
+  await expect(settings).toHaveCount(0);
+  await expect(rail.getByRole("button", { name: /Tax review · 2024/u })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeVisible();
+  const history = page.getByRole("navigation", { name: "Conversation history", exact: true });
+  await history.getByRole("button", { name: /^Ordinary conversation/u }).click();
+  await history.getByRole("button", { name: /^Private tax review/u }).click();
+  await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeVisible();
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await composer.fill("Use the automatic local tools for this question.");
+  await composer.press("Enter");
+  await expect(page.getByText("Review findings saved 1.", { exact: true })).toBeVisible();
+  expect(observed.skills).toEqual([null]);
+});
+
+test("a pending saved-case lookup blocks Send and Enter until Tax review is restored", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const observed = await mockTaxApi(page, { savedCase: true, holdCase: true });
+  try {
+    await page.goto("./");
+    await expect.poll(() => observed.caseReads).toBeGreaterThan(0);
+    const tools = page.getByRole("button", { name: "Tools and skills: Loading tax settings" });
+    await expect(tools).toBeEnabled();
+    const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+    await composer.fill("Review my saved figures after settings load.");
+    await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
+    await composer.press("Enter");
+    await expect(composer).toHaveValue("Review my saved figures after settings load.");
+    expect(observed.agentBodies).toHaveLength(0);
+    observed.releaseCase();
+    await expect(page.getByRole("button", { name: "Tools and skills: Tax review" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeEnabled();
+    await composer.press("Enter");
+    await expect(page.getByText("Review findings saved 1.", { exact: true })).toBeVisible();
+    expect(observed.skills).toEqual(["tax-review"]);
+  } finally {
+    observed.releaseCase();
+  }
+});
+
+test("choosing Automatic deliberately bypasses a pending saved-case lookup", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const observed = await mockTaxApi(page, { savedCase: true, holdCase: true });
+  try {
+    await page.goto("./");
+    await expect.poll(() => observed.caseReads).toBeGreaterThan(0);
+    await chooseToolsMode(page, "Automatic");
+    const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+    await composer.fill("Use Automatic while the saved settings are unavailable.");
+    await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeEnabled();
+    await composer.press("Enter");
+    await expect(page.getByText("Review findings saved 1.", { exact: true })).toBeVisible();
+    expect(observed.skills).toEqual([null]);
+    observed.releaseCase();
+    const rail = await openToolbox(page, 1280);
+    await expect(rail.getByRole("button", { name: /Tax review · 2025/u })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeVisible();
+  } finally {
+    observed.releaseCase();
+  }
+});
+
+test("a failed saved-case lookup blocks ordinary sends until reloaded or explicitly set to Automatic", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const observed = await mockTaxApi(page, { savedCase: true, caseError: true });
+  const loadError = page.getByText("Could not load tax review settings. Reload settings or choose Automatic to continue.", { exact: true });
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await page.goto("./");
+  await expect(loadError).toBeVisible();
+  await composer.fill("Wait for the saved tax settings.");
+  await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
+  await composer.press("Enter");
+  await expect(composer).toHaveValue("Wait for the saved tax settings.");
+  expect(observed.agentBodies).toHaveLength(0);
+  observed.setCaseError(false);
+  await page.getByRole("button", { name: "Reload tax settings", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Tools and skills: Tax review" })).toBeVisible();
+  await expect(loadError).toHaveCount(0);
+  await composer.press("Enter");
+  await expect(page.getByText("Review findings saved 1.", { exact: true })).toBeVisible();
+  expect(observed.skills).toEqual(["tax-review"]);
+
+  observed.setCaseError(true);
+  await page.reload();
+  await expect(loadError).toBeVisible();
+  await chooseToolsMode(page, "Automatic");
+  await composer.fill("Continue with Automatic by my choice.");
+  await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeEnabled();
+  await composer.press("Enter");
+  await expect(page.getByText("Review findings saved 2.", { exact: true })).toBeVisible();
+  expect(observed.skills).toEqual(["tax-review", null]);
+});
+
+for (const originalSkill of ["tax-review", "automatic"] as const) {
+  test(`retry keeps the original ${originalSkill} skill after the picker changes`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const observed = await mockTaxApi(page, { savedCase: true, failFirstAgent: true });
+    await page.goto("./");
+    await expect(page.getByRole("button", { name: "Tools and skills: Tax review" })).toBeVisible();
+    if (originalSkill === "automatic") await chooseToolsMode(page, "Automatic");
+    const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+    await composer.fill(TAX_REVIEW_PROMPT);
+    await composer.press("Enter");
+    const retry = page.getByRole("button", { name: "Retry last question", exact: true });
+    await expect(retry).toBeEnabled();
+    await chooseToolsMode(page, originalSkill === "tax-review" ? "Automatic" : "Tax review");
+    await retry.click();
+    await expect(page.getByText("Review findings saved 2.", { exact: true })).toBeVisible();
+    const expectedSkill = originalSkill === "tax-review" ? "tax-review" : null;
+    expect(observed.skills).toEqual([expectedSkill, expectedSkill]);
+    expect(JSON.stringify(observed.agentBodies[1])).toContain(TAX_REVIEW_PROMPT);
+  });
+
+  test(`retry restores the saved ${originalSkill} run skill after reload`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const observed = await mockTaxApi(page, { savedFailure: originalSkill });
+    await page.goto("./");
+    await expect(page.getByRole("button", { name: "Tools and skills: Tax review" })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Tools and skills: Tax review" })).toBeVisible();
+    // The current mode deliberately differs from the original failed request.
+    if (originalSkill === "tax-review") await chooseToolsMode(page, "Automatic");
+    const retry = page.getByRole("button", { name: "Retry last question", exact: true });
+    await expect(retry).toBeEnabled();
+    await retry.click();
+    await expect(page.getByText("Review findings saved 1.", { exact: true })).toBeVisible();
+    expect(observed.skills).toEqual([originalSkill === "tax-review" ? "tax-review" : null]);
+    expect(JSON.stringify(observed.agentBodies[0])).toContain(TAX_REVIEW_PROMPT);
+  });
+}

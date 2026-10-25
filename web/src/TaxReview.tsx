@@ -13,6 +13,8 @@ import {
 import { TaxWorkbookDownload } from "./TaxWorkbookDownload";
 import "./TaxReview.css";
 
+export type TaxReviewLoadState = "loading" | "ready" | "error";
+
 export function TaxReview({
   conversationId,
   expanded,
@@ -21,6 +23,7 @@ export function TaxReview({
   refreshVersion,
   onExpandedChange,
   onCaseChange,
+  onLoadStateChange,
   onSaved,
   taskControls,
   presentation = "dialog",
@@ -33,6 +36,7 @@ export function TaxReview({
   refreshVersion: number;
   onExpandedChange: (expanded: boolean) => void;
   onCaseChange: (value: TaxCase | null) => void;
+  onLoadStateChange?: (state: TaxReviewLoadState) => void;
   onSaved: () => void;
   onReview?: () => void;
   taskControls?: ReactNode;
@@ -57,6 +61,7 @@ export function TaxReview({
 
   useEffect(() => {
     const controller = new AbortController();
+    onLoadStateChange?.("loading");
     getTaxCase(conversationId, controller.signal).then(({ case: value }) => {
       if (controller.signal.aborted) return;
       setTaxCase(value);
@@ -65,16 +70,18 @@ export function TaxReview({
       setGoal(value?.goal ?? "");
       setError("");
       setLoadFailed(false);
+      onLoadStateChange?.("ready");
     }).catch((reason: unknown) => {
       if (!controller.signal.aborted) {
         setLoadFailed(true);
+        onLoadStateChange?.("error");
         setError("Could not load tax review: " + messageOf(reason));
       }
     }).finally(() => {
       if (!controller.signal.aborted) setLoadedKey(loadKey);
     });
     return () => controller.abort();
-  }, [conversationId, loadKey, onCaseChange]);
+  }, [conversationId, loadKey, onCaseChange, onLoadStateChange]);
 
   useEffect(() => {
     if (!expanded || presentation === "toolbox") return;

@@ -1042,13 +1042,28 @@ tax-rule implementations still require the applicable retained official source.
 
 ### 20F — saved review files
 
-**Built October 24; targeted browser acceptance pending.** The canonical case
-remains Audrey's working record. A successful new worksheet save adds a
+**Built October 24; save/download acceptance remains open October 25.** The
+user's two replies supplied inline worksheets and denied persistence, without a
+saved workbook link. They do not establish retained evidence or a saved worksheet.
+The canonical case remains Audrey's working record. A successful new worksheet save adds a
 server-created workbook link to the saved native answer. The client reconciles
 that link after completion without resetting the next message or attachments.
 The Toolbox and Private project offer Download workbook for existing saved
 reviews, including partial work. No workbook is generated merely by opening a
 case or saving facts.
+
+**October 25 UI restoration fix:** reopening a saved case now selects Tax review
+once its initial lookup succeeds. Previously the Toolbox returned while the
+composer silently remained Automatic; that request legitimately used the ordinary
+Private panel without tax_review. Normal Send/Enter waits for unresolved case
+loading or explicit Tax setup. Failures offer Reload settings or a deliberate
+Automatic choice. Later case refreshes preserve that explicit choice; retries
+restore the attempted skill, using saved run metadata after reload. Private chats
+without a case resolve to Automatic. The fix changes no backend or model settings.
+Focused browser/component checks, typecheck/build and changed-surface lint pass;
+the existing unrelated ChatWorkspace lint baseline is unchanged. Rebuild only
+audrey-ui for this followup. The actual earlier run trace was not supplied;
+the code/browser reproduction identifies a matching failure path.
 
 The authenticated prepare route binds the displayed case revision and captures
 an immutable local JSON snapshot. The download route renders that snapshot on
@@ -1100,13 +1115,17 @@ chat links and preserving an unsent draft/attachment during final reconciliation
 Type checking and the production build pass; the existing unrelated UI lint
 baseline is unchanged. This is local verification, not deployed acceptance.
 
-After the user's normal commit/push/pull, rebuild audrey and audrey-ui on Tower.
-No schema/config/sidecar/model or IRS-index work is needed. In the browser, use
-one existing Private Tax review, explicitly retain a supporting passage and save
-its worksheet, then download from chat and the Project. Refresh and reopen the
-file; change one fact to check the old link stays unchanged and the current
-Toolbox export shows the update with any stale worksheet notice. No upload or
-broad tax-comparison rerun is required. This is the one pending product check.
+Initial 20F deployment rebuilds audrey and audrey-ui on Tower. The October 25
+restoration followup needs only audrey-ui after the normal commit/push/pull.
+No schema/config/sidecar/model or IRS-index work is needed. In the browser,
+reload the same saved Private Tax conversation and check Tools and skills says
+Tax review before sending through the normal composer. Ask to retain the Form
+8911 page-1 passage and save only that worksheet item, leaving other topics open.
+A pass requires the server-created workbook link and the exact passage/citation
+inside its Evidence sheet; inline prose is insufficient. Keep the conversation
+until this save/download check is resolved. No upload or broad comparison rerun
+is needed. Existing exact-revision/download/fact-edit checks remain part of the
+export acceptance, not extra model-quality runs.
 
 ## Deployment and testing
 
