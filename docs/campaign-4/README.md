@@ -105,6 +105,15 @@ the attempted skill. Browser/component checks, typecheck and build pass locally.
 Rebuild only audrey-ui after pull for this fix, then check one saved-case reload
 and save/download. No model/budget/backend/index change or broader comparison run.
 
+
+**Deployed save diagnosis October 25:** the runtime source matches this checkout.
+Earlier turns omitted Tax review; the latest selected it and called the case tool,
+but all evidence writes were refused and no worksheet save was attempted. The
+case is empty; the durable task has budget remaining. Existing validation refusals
+now have content-free diagnostic codes retained in native tool errors. Acceptance
+stays open: rebuild only audrey for this diagnostic change, then repeat one scoped
+save and inspect its new error codes. No model, prompt, budget or export change.
+
 No broader repeat test is queued. A later
 decision to improve broader autonomous review starts from this saved run's
 actual tool trace, task usage and stop reason. Do not automatically raise caps,

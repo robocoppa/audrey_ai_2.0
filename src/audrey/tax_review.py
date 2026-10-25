@@ -97,8 +97,16 @@ class TaxCaseActionRequest(BaseModel):
     data: dict[str, Any]
 
 
-def _error(status: int, detail: str) -> HTTPException:
-    return HTTPException(status_code=status, detail=detail)
+class _TaxReviewError(HTTPException):
+    """A fixed server-defined reason, safe to retain without case contents."""
+
+    def __init__(self, status: int, detail: str, code: str | None) -> None:
+        super().__init__(status_code=status, detail=detail)
+        self.code = code
+
+
+def _error(status: int, detail: str, *, code: str | None = None) -> HTTPException:
+    return _TaxReviewError(status, detail, code)
 
 
 async def _active_owner(app: Any, principal: Principal):
@@ -342,7 +350,7 @@ async def _update(
     except TaxCaseAccessError:
         raise _error(409, "The Private case context changed. Reopen the conversation.") from None
     except TaxCaseError:
-        raise _error(422, "This Tax review entry or dependency is invalid.") from None
+        raise _error(422, "This Tax review entry or dependency is invalid.", code="tax_entry_invalid") from None
     await _read_case(app, principal, conversation_id)
     return result
 
@@ -389,29 +397,35 @@ async def apply_tax_case_action(
 
 
 async def _verified_evidence(app: Any, case: dict, data: dict) -> dict:
-    if (
-        data["catalog"] != "current" or data["reference_release"] != case["reference_release"]
-        or data["jurisdiction"] != case["jurisdiction"]
-        or not re.fullmatch(r"[0-9a-f]{64}", data["document_id"])
-        or not re.fullmatch(r"[0-9a-f]{64}", data["revision"])
+    # Keep refusals distinguishable in the existing sanitized tool trace.
+    # Never put the supplied identifiers, quotation or exception text in a code.
+    for invalid, code in (
+        (data["catalog"] != "current", "tax_evidence_catalog_invalid"),
+        (data["reference_release"] != case["reference_release"], "tax_evidence_release_mismatch"),
+        (data["jurisdiction"] != case["jurisdiction"], "tax_evidence_jurisdiction_mismatch"),
+        (not re.fullmatch(r"[0-9a-f]{64}", data["document_id"]), "tax_evidence_document_id_invalid"),
+        (not re.fullmatch(r"[0-9a-f]{64}", data["revision"]), "tax_evidence_revision_invalid"),
     ):
-        raise _error(422, "Evidence must identify an official document in the pinned IRS release.")
+        if invalid:
+            raise _error(422, "Evidence must identify an official document in the pinned IRS release.", code=code)
     registry = getattr(app.state, "reference_libraries", None)
     if registry is None:
-        raise _error(503, "Local official reference reading is unavailable.")
+        raise _error(503, "Local official reference reading is unavailable.", code="tax_reference_reader_unavailable")
     try:
         document = await asyncio.to_thread(
             app.state.reference_releases.document, case["reference_release"], data["document_id"],
         )
         metadata = document.get("metadata", document) if document else {}
-        if not document or metadata.get("revision_sha256") != data["revision"]:
-            raise _error(422, "The document revision is outside the pinned IRS release.")
+        if not document:
+            raise _error(422, "The document revision is outside the pinned IRS release.", code="tax_evidence_not_in_release")
+        if metadata.get("revision_sha256") != data["revision"]:
+            raise _error(422, "The document revision is outside the pinned IRS release.", code="tax_evidence_revision_mismatch")
         # Read exact bytes through the bounded local PDF reader, including its
         # checksum validation. Search passages and model-written quotes alone
         # never establish that a passage actually occurs on this page.
         passage = data["passage"]
         if len(passage) > 2000:
-            raise _error(422, "Retain an exact supporting passage of at most 2000 characters.")
+            raise _error(422, "Retain an exact supporting passage of at most 2000 characters.", code="tax_evidence_passage_too_long")
         result = await asyncio.to_thread(
             registry.read, "irs-federal", data["document_id"], catalog="current",
             page=data["page"], offset=data["offset"], limit=4000, revision_sha256=data["revision"],
@@ -422,14 +436,14 @@ async def _verified_evidence(app: Any, case: dict, data: dict) -> dict:
             or result.get("page") != data["page"]
             or result.get("offset") != data["offset"]
         ):
-            raise _error(422, "The exact official document revision could not be verified.")
+            raise _error(422, "The exact official document revision could not be verified.", code="tax_evidence_read_identity_mismatch")
         text = str(result.get("text") or "")
         position = text.find(passage)
         found = text[position:position + len(passage)] if position >= 0 else None
         if found is None:
-            raise _error(422, "The supporting passage was not found on the requested official page.")
+            raise _error(422, "The supporting passage was not found on the requested official page.", code="tax_evidence_passage_not_found")
     except (ReferenceLibraryError, ReleaseError):
-        raise _error(422, "The exact local official document passage could not be verified.") from None
+        raise _error(422, "The exact local official document passage could not be verified.", code="tax_evidence_read_failed") from None
     return {
         **data, "passage": found,
         "tax_year_status": "proposed" if data.get("tax_year") is not None else "unknown",
@@ -788,7 +802,8 @@ def make_tax_review_handler(
                           and (not data.get("fact_id") or item["id"] == data["fact_id"])), None)
             return _tool_result(updated, operation=body.operation, entry=entry)
         except HTTPException as exc:
-            return {"error": "case_changed" if exc.status_code == 409 else "tax_review_unavailable",
+            code = exc.code if isinstance(exc, _TaxReviewError) else None
+            return {"error": code or ("case_changed" if exc.status_code == 409 else "tax_review_unavailable"),
                     "status": exc.status_code, "detail": exc.detail}
 
     return handler

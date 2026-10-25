@@ -1062,8 +1062,15 @@ restore the attempted skill, using saved run metadata after reload. Private chat
 without a case resolve to Automatic. The fix changes no backend or model settings.
 Focused browser/component checks, typecheck/build and changed-surface lint pass;
 the existing unrelated ChatWorkspace lint baseline is unchanged. Rebuild only
-audrey-ui for this followup. The actual earlier run trace was not supplied;
-the code/browser reproduction identifies a matching failure path.
+audrey-ui for this followup. The subsequent Tower trace confirms the two earlier
+requests omitted the skill. Its latest request selects Tax review correctly but
+has three evidence writes refused, leaving an empty case and no worksheet save.
+The durable task still has budget; workbook export is not reached. Imported source
+hashes match the checkout. Fixed content-free validation error codes now survive
+in native tool error_code, without recording quotations or full arguments. This
+diagnostic change preserves validation and HTTP status/detail; rebuild only
+audrey, then inspect one new scoped save attempt. Prior generic failures cannot
+be decoded retroactively. Save/download acceptance remains open.
 
 The authenticated prepare route binds the displayed case revision and captures
 an immutable local JSON snapshot. The download route renders that snapshot on

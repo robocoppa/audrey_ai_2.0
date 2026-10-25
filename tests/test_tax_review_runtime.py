@@ -184,7 +184,8 @@ async def test_tax_review_is_rejected_for_ordinary_conversations_before_generati
     assert native.captured == []
 
 
-async def test_local_case_failure_payload_is_classified_as_failed_tool(native):
+@pytest.mark.parametrize("code", ["case_changed", "tax_evidence_passage_not_found", "tax_evidence_revision_mismatch"])
+async def test_local_case_failure_payload_is_classified_as_failed_tool(native, code):
     from audrey.processing_policy import processing_scope
     from audrey.tools.private_dispatch import private_tool_scope
 
@@ -192,14 +193,34 @@ async def test_local_case_failure_payload_is_classified_as_failed_tool(native):
     _enable(state)
     async with state.env.runtime.scope(state.app) as execution_app:
         async def failed(_args):
-            return {"error": "case_changed", "detail": "Inspect the current case revision."}
+            return {"error": code, "status": 422, "detail": "private-input-must-not-appear-in-observations"}
         with processing_scope(state.env.runtime.policy), private_tool_scope(
             user_id=state.owner.storage_namespace, handlers={"tax_review": failed},
         ):
             result = await dispatch_one(execution_app.state.archive_http, execution_app.state.tools, {
                 "function": {"name": "tax_review", "arguments": {"operation": "inspect"}},
             }, max_result_chars=6000, timeout_s=2, user_id=state.owner.storage_namespace)
-    assert result.is_error and json.loads(result.content)["error"] == "case_changed"
+    assert result.is_error and json.loads(result.content)["error"] == code
+    from audrey.pipeline.run_events import RunEventEmitter, dump_run_event
+    from audrey.pipeline.run_observations import RunEventToolObserver
+
+    events = []
+    emitter = RunEventEmitter(
+        run_id="run-diagnostic", conversation_id="conversation-diagnostic",
+        assistant_message_id="message-diagnostic", mode="local",
+        virtual_model="audrey_private", sink=events.append,
+    )
+    emitter.run_started()
+    emitter.message_started()
+    observer = RunEventToolObserver(emitter)
+    call_id = observer.started({"function": {"name": "tax_review", "arguments": {
+        "operation": "record_evidence", "data": {"passage": "private-passage"},
+    }}})
+    observer.finished(call_id, result)
+    assert events[-1].error == code
+    wire = json.dumps([dump_run_event(event) for event in events])
+    assert "private-input-must-not-appear-in-observations" not in wire
+    assert "private-passage" not in wire
 
 
 async def test_tax_review_timeout_is_terminal_and_retains_case(native, monkeypatch):

@@ -197,16 +197,57 @@ async def test_evidence_is_reread_from_actual_pdf_and_year_remains_proposed(stat
     assert inspected["entries"][0]["tax_year_status"] == "proposed"
 
 
-@pytest.mark.parametrize("changes", [
-    {"passage": "Fabricated rule passage."}, {"revision": "b" * 64},
-    {"document_id": "c" * 64}, {"catalog": "prior"}, {"reference_release": "rel_other"},
-    {"page": 2}, {"offset": 3},
+@pytest.mark.parametrize(("changes", "code"), [
+    ({"passage": "Fabricated rule passage."}, "tax_evidence_passage_not_found"),
+    ({"revision": "b" * 64}, "tax_evidence_revision_mismatch"),
+    ({"document_id": "c" * 64}, "tax_evidence_not_in_release"),
+    ({"catalog": "prior"}, "tax_evidence_catalog_invalid"),
+    ({"reference_release": "rel_other"}, "tax_evidence_release_mismatch"),
+    ({"page": 2}, "tax_evidence_passage_not_found"),
+    ({"offset": 3}, "tax_evidence_passage_not_found"),
+    ({"document_id": "wrong-document"}, "tax_evidence_document_id_invalid"),
+    ({"revision": "wrong-revision"}, "tax_evidence_revision_invalid"),
+    ({"jurisdiction": "other"}, "tax_evidence_jurisdiction_mismatch"),
+    ({"passage": "x" * 2001}, "tax_evidence_passage_too_long"),
 ])
-async def test_fabricated_or_unpinned_reference_evidence_cannot_be_saved(state, changes):
+async def test_fabricated_or_unpinned_reference_evidence_cannot_be_saved(state, changes, code):
     await _create(state)
     result = await _call(state, "record_evidence", expected_revision=1, data=_evidence(state, **changes))
-    assert result["status"] == 422, result
-    assert (await state.client.get(state.path)).json()["case"]["evidence"] == []
+    assert result["status"] == 422 and result["error"] == code, result
+    case = (await state.client.get(state.path)).json()["case"]
+    assert case["revision"] == 1 and case["evidence"] == []
+
+
+@pytest.mark.parametrize(("fault", "code", "status"), [
+    ("unavailable", "tax_reference_reader_unavailable", 503),
+    ("read_failed", "tax_evidence_read_failed", 422),
+    ("identity_mismatch", "tax_evidence_read_identity_mismatch", 422),
+    ("invalid_dependency", "tax_entry_invalid", 422),
+])
+async def test_evidence_backend_refusals_keep_only_safe_diagnostic_codes(state, monkeypatch, fault, code, status):
+    from audrey.references.library import ReferenceReadError
+
+    await _create(state)
+    evidence = _evidence(state)
+    if fault == "unavailable":
+        state.app.state.reference_libraries = None
+    elif fault == "read_failed":
+        monkeypatch.setattr(state.app.state.reference_libraries, "read", Mock(
+            side_effect=ReferenceReadError("private-reader-path-and-content"),
+        ))
+    elif fault == "identity_mismatch":
+        registry = state.app.state.reference_libraries
+        original = registry.read
+        monkeypatch.setattr(registry, "read", lambda *args, **kwargs: {
+            **original(*args, **kwargs), "revision_sha256": "b" * 64,
+        })
+    else:
+        evidence["conflicts_with"] = ["unknown-evidence"]
+    result = await _call(state, "record_evidence", expected_revision=1, data=evidence)
+    assert result["status"] == status and result["error"] == code, result
+    assert "private-reader-path-and-content" not in json.dumps(result)
+    case = (await state.client.get(state.path)).json()["case"]
+    assert case["revision"] == 1 and case["evidence"] == []
 
 
 async def test_evidence_model_cannot_set_verified_applicability(state):
