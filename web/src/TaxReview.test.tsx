@@ -237,6 +237,7 @@ it.each(["legacy", "current"] as const)("shows the %s scope limit before a saved
   vi.stubGlobal("fetch", fetchMock);
   render(<TaxReview {...props()} expanded={false} />);
   fireEvent.click(await screen.findByText("Review worksheet"));
+  expect(screen.getByRole("button", { name: "Download workbook" })).toBeVisible();
   const worksheet = screen.getByText("Review worksheet").closest("details")!;
   const scope = within(worksheet).getByText(notice);
   const summary = within(worksheet).getByText(saved.review.summary);

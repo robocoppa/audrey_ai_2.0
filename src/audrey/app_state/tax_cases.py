@@ -348,6 +348,24 @@ class TaxCasesRepository:
         self._conn = connection
         self._lock = lock
 
+    async def case_id_for_deletion(self, *, user_id: str, conversation_id: str) -> str | None:
+        """Return only the exact owner's cleanup key, including archived cases.
+
+        Normal reads still require the complete active Private context. Deletion
+        must erase derived files even when that context no longer permits work.
+        """
+        return await asyncio.to_thread(self._case_id_for_deletion_sync, user_id, conversation_id)
+
+    def _case_id_for_deletion_sync(self, user_id: str, conversation_id: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT t.case_id FROM app_tax_cases t JOIN app_conversations c "
+                "ON c.conversation_id=t.conversation_id AND c.user_id=t.user_id "
+                "WHERE t.user_id=? AND t.conversation_id=?",
+                (user_id, conversation_id),
+            ).fetchone()
+            return str(row[0]) if row is not None else None
+
     async def get(self, *, user_id: str, conversation_id: str) -> dict[str, Any] | None:
         return await asyncio.to_thread(self._get_sync, user_id, conversation_id)
 

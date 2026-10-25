@@ -1,0 +1,12 @@
+.tax-workbook-download { display: grid; justify-items: start; gap: 0.45rem; }
+.tax-workbook-download .tax-workbook-button { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.6rem 0.75rem; border: 1px solid var(--border-strong); border-radius: 0.55rem; background: var(--surface-raised); color: var(--text-soft); font: inherit; font-size: 0.76rem; cursor: pointer; }
+.tax-workbook-download .tax-workbook-button:hover { border-color: var(--accent); background: var(--surface-active); }
+.tax-workbook-download .tax-workbook-button:focus-visible, .tax-workbook-error button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.tax-workbook-download .tax-workbook-button:disabled { opacity: 0.6; cursor: default; }
+.tax-workbook-button svg { flex: none; width: 1rem; height: 1rem; stroke: currentColor; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.tax-workbook-download .tax-workbook-note { margin: 0; color: var(--muted); font-size: 0.7rem; line-height: 1.5; }
+.tax-workbook-error { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; color: var(--danger); font-size: 0.73rem; line-height: 1.5; }
+.tax-workbook-error button { padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 0.45rem; background: var(--surface-raised); color: var(--text-soft); font: inherit; cursor: pointer; }
+.tax-workbook-link .tax-workbook-error { display: block; margin-top: 0.3rem; }
+.tax-project-case > .tax-workbook-download { margin: 0 0 0.85rem; }
+@media (max-width: 600px) { .tax-workbook-download .tax-workbook-button { min-height: 2.5rem; } }

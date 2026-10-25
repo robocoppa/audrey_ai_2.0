@@ -60,6 +60,7 @@ from audrey.routes.references import router as references_router
 from audrey.routes.tool_history import router as tool_history_router
 from audrey.routes.user_data import router as user_data_router
 from audrey.skills import SkillRegistry
+from audrey.tax_exports import TaxReviewExports
 from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, discover_all
 from audrey.tools.dispatch import audit_user_scoping
 from audrey.user_data_purge import UserDataPurgeCoordinator
@@ -251,6 +252,10 @@ async def lifespan(app: FastAPI):
 
     app.state.cfg = cfg
     app.state.application_store = application_store
+    tax_review_exports = TaxReviewExports(
+        root=application_store.path.parent / "tax-review-exports"
+    )
+    app.state.tax_review_exports = tax_review_exports
     app.state.cloudflare_access_verifier = cloudflare_access_verifier
     app.state.ollama = ollama
     app.state.registry = registry
@@ -341,6 +346,7 @@ async def lifespan(app: FastAPI):
         registry=tool_registry,
         upload_root=upload_root,
         application_store=application_store,
+        tax_review_exports=tax_review_exports,
         retry_interval_s=float(purge_cfg.get("retry_interval_s", 30.0)),
         batch_size=int(purge_cfg.get("batch_size", 50)),
     )

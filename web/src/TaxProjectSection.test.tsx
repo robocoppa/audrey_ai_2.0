@@ -19,6 +19,7 @@ it("shows canonical current facts and saved output without creating editable cop
   for (const fact of saved.facts.filter(({ status }) => status !== "rejected")) {
     expect(within(table).getByRole("rowheader", { name: fact.label })).toBeVisible();
   }
+  expect(screen.getByRole("button", { name: "Download workbook" })).toBeVisible();
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Confirm|Edit/u })).not.toBeInTheDocument();
   const worksheet = screen.getByText("Saved worksheet").closest("details")!;

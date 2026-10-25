@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { getConversation, type Conversation } from "./api";
 import { listProjectTaxCases, taxReviewScopeNotice, type TaxCase } from "./taxReviewApi";
+import { TaxWorkbookDownload } from "./TaxWorkbookDownload";
 import "./TaxProjectSection.css";
 
 type Props = {
@@ -71,6 +72,7 @@ function ProjectCases({ projectId, onConversationSelected }: Props) {
           <button type="button" onClick={() => void openCase(taxCase)} disabled={opening !== null}>
             {opening === taxCase.id ? "Opening…" : "Open review conversation"}
           </button></header>
+        {review ? <TaxWorkbookDownload taxCase={taxCase} onReload={() => setVersion((value) => value + 1)} /> : null}
         {facts.length ? <div className="tax-project-table-scroll"><table aria-label={`${taxCase.tax_year} saved tax facts`}>
           <thead><tr><th scope="col">Fact</th><th scope="col">Value</th><th scope="col">Status</th></tr></thead>
           <tbody>{facts.map((fact) => <tr key={fact.id}>

@@ -16,7 +16,7 @@ import logging
 import shutil
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from audrey.app_state import ApplicationStore
 from audrey.kb.file_deletion import FileDeletionWorker, delete_disk_files
@@ -28,6 +28,9 @@ from audrey.user_data_visibility import (
     block_remote_personal_reads,
     unblock_remote_personal_reads,
 )
+
+if TYPE_CHECKING:
+    from audrey.tax_exports import TaxReviewExports
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +59,7 @@ class UserDataPurgeCoordinator:
         registry: ToolRegistry,
         upload_root: Path,
         application_store: ApplicationStore | None = None,
+        tax_review_exports: TaxReviewExports | None = None,
         retry_interval_s: float = 30.0,
         batch_size: int = 50,
     ) -> None:
@@ -70,6 +74,7 @@ class UserDataPurgeCoordinator:
         self._registry = registry
         self._upload_root = upload_root
         self._application_store = application_store
+        self._tax_review_exports = tax_review_exports
         self._retry_interval_s = retry_interval_s
         self._batch_size = batch_size
         self._wake = asyncio.Event()
@@ -308,6 +313,10 @@ class UserDataPurgeCoordinator:
         for user_id, purge_id, namespace in pending:
             try:
                 await store.purge_local_user_data(user_id=user_id)
+                if self._tax_review_exports is not None:
+                    # Disk cleanup shares the durable account-deletion retry:
+                    # identity removal waits until private snapshots are gone.
+                    await self._tax_review_exports.delete_owner(user_id=user_id)
                 receipt = await self._db.get_user_data_purge(purge_id)
                 if receipt is None:
                     status = await self.request(user=namespace, purge_id=purge_id)

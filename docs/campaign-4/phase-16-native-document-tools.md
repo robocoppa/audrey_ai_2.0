@@ -9,3 +9,7 @@ Audrey's document scope remains upload, extraction, summaries, search, display/d
 Already-deployed schema 20 remains in migration history. Its inert document tables have no attached repository, public routes, or claiming worker. Backup accounting and privacy purge retain coverage so existing databases remain restorable and removable data is not stranded.
 
 Bot workspace changes are maintained and tested in that service's workflow, separately from Audrey Campaign 4.
+
+Saved Tax review XLSX downloads belong to
+[Phase 20](phase-20-reference-libraries-and-private-tax-assistance.md#20f--saved-review-files).
+General document authoring and the retired job/approval APIs remain outside Audrey.

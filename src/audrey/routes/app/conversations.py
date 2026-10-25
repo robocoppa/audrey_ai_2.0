@@ -414,14 +414,29 @@ async def delete_conversation(
     request: Request,
     principal: Principal = Depends(_conversation_access),
 ) -> Response:
+    store = _store(request)
+    exports = getattr(request.app.state, "tax_review_exports", None)
+    case_id = (await store.tax_cases.case_id_for_deletion(
+        user_id=principal.user_id, conversation_id=conversation_id,
+    )) if exports is not None else None
     try:
-        deleted = await _store(request).conversations.delete(
+        if case_id is not None:
+            # Invalidate queued generation before removing canonical work. A
+            # failed cleanup keeps the case, so the owner can retry deletion.
+            await exports.delete_case(user_id=principal.user_id, case_id=case_id)
+        deleted = await store.conversations.delete(
             user_id=principal.user_id,
             conversation_id=conversation_id,
         )
-    except ConversationHasActiveRunError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except BaseException as exc:
+        if case_id is not None:
+            await exports.allow_case(user_id=principal.user_id, case_id=case_id)
+        if isinstance(exc, ConversationHasActiveRunError):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise
     if not deleted:
+        # Another deletion may have won the canonical race; keep its export
+        # tombstone rather than reopening an already removed case.
         raise HTTPException(status_code=404, detail="Conversation not found.")
     projector = getattr(request.app.state, "archive_projector", None)
     wake = getattr(projector, "wake", None)

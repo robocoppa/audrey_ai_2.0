@@ -957,16 +957,15 @@ and 2024 figures unresolved. This improves uncertainty reporting without passing
 comparison coverage. Runtime usage and the actual stopping cause are unverified;
 the answer's budget explanation is not telemetry.
 
-The user explicitly requested a targeted retest October 24: continue the same
-saved case and read only the owned Form 8911 instructions' What's New on PDF
-page 1. Require the edition, exact placed-in-service cutoff, citation and saved
-passage. Keep other topics and any earlier conflicting evidence unresolved.
-The current December 2025 public source identifies June 30, 2026; an older owned
-edition must be disclosed rather than silently treated as current. No pull,
-rebuild or upload is needed for the tax check. A paused task retains spent usage;
-if its durable budget is truly exhausted, preserve the refusal and inspect it
-before changing limits. No result is claimed until the user supplies the reply.
-This tests one-source use/continuation, not broad comparison coverage.
+**October 24 targeted retest:** the user supplied the same-case answer with
+the December 2025 Form 8911 instructions, PDF page 1, and the correct June 30,
+2026 placed-in-service cutoff. It distinguished the former December 31, 2032
+termination date from conflicting evidence and left the other topics unresolved.
+Two observed sources and five tool calls were reported. Source lookup passes;
+broad comparison coverage remains incomplete. Passage retention is unverified:
+the writer said it could not save a file or memory, while the Toolbox showed
+Review saved. That badge can describe an existing worksheet, not proof that this
+passage was retained. No task-limit change or repeated comparison is queued.
 
 Record outcomes and available costs once, including failures. Correct a concrete
 native defect if demonstrated, or narrow the supported task; do not reopen the isolated
@@ -984,7 +983,8 @@ prompt or answer a genuinely missing question. Show one compact Toolbox progress
 item such as “Checking income records · 3 of 8 checks complete,” with expandable current
 findings, missing items and Pause/Resume/Cancel. Keep the existing Models,
 Tool calls and Sources disclosures. Completion is a cited worksheet and a
-clear question list; this phase does not file returns or author office documents.
+clear question list. This phase does not file returns; the review downloads
+below are scoped case outputs, not general office-document authoring.
 
 Federal work can start with the owned IRS library. State-specific conclusions
 wait for the requested jurisdiction's official sources. Source updates run
@@ -1039,6 +1039,74 @@ for the inventory/interview, [Publication 17 overview](https://www.irs.gov/forms
 for its role alongside form instructions, and [Taxpayer Advocate guidance on AI tax advice](https://www.taxpayeradvocate.irs.gov/news/tax-tips/is-ai-generated-tax-advice-making-the-grade/2024/06/)
 for the need to verify facts and calculations. These inform workflow design;
 tax-rule implementations still require the applicable retained official source.
+
+### 20F — saved review files
+
+**Built October 24; targeted browser acceptance pending.** The canonical case
+remains Audrey's working record. A successful new worksheet save adds a
+server-created workbook link to the saved native answer. The client reconciles
+that link after completion without resetting the next message or attachments.
+The Toolbox and Private project offer Download workbook for existing saved
+reviews, including partial work. No workbook is generated merely by opening a
+case or saving facts.
+
+The authenticated prepare route binds the displayed case revision and captures
+an immutable local JSON snapshot. The download route renders that snapshot on
+first use and reuses its XLSX afterward. A revision mismatch asks the user to
+reload rather than silently exporting a different case. Current facts can be
+exported alongside an older worksheet, which is clearly marked stale. Old links
+retain their own revision until expiry/eviction; they never switch to newer facts.
+
+The five sheets are Overview, Facts, Evidence, Calculations and Unresolved items.
+They include retained exact passages, edition/page/checksum and available original
+citations, saved fact statuses, source conflicts and named decimal arithmetic.
+Values are literal text, including exact decimal results; there are no executable
+formulas, macros or fetched spreadsheet links. Unknowns and the selected-source/
+conditional-arithmetic scope remain explicit. Exports do not determine eligibility
+or turn a partial review into a complete return.
+
+The cache lives beside the application database under tax-review-exports in the
+existing persisted application volume. Defaults bound snapshots to 512 KiB,
+workbooks to 8 MiB/4,096 rows, rendering to two concurrent jobs, each case to eight
+snapshots, and the total cache to 512 snapshots/128 MiB. Retention is at most
+30 days and capacity eviction can remove older downloads sooner. Expired chat
+links direct users to the current Toolbox workbook. Downloaded copies remain in
+the user's possession. Current exports can be rebuilt from saved case data; an
+application-database backup alone does not retain every older export snapshot.
+
+Rendering runs outside SQLite transactions and the event loop, with concurrent
+requests deduplicated. Owner/case identity is checked before and after rendering.
+Downloads stream an already-open file handle, avoiding incomplete responses if
+cache eviction unlinks its path. Conversation deletion, including archived cases,
+and account purge remove derived files; refused deletion restores availability.
+Project deletion keeps its cases/exports under the established retain-conversation
+contract. Generated outputs bypass upload extraction/indexing. Export failure
+leaves saved evidence and the answer usable; errors stay within the download UI.
+
+Tool feedback explicitly identifies successful case writes. A final-answer
+quotation alone does not persist evidence. The earlier Form 8911 passage's save
+remains unverified; this implementation does not retroactively claim it was saved.
+
+Nextcloud/Collabora and DOCX are outside this implementation. Optional later
+browser editing/collaboration needs verified per-user mapping and a deliberate
+import/review path before spreadsheet edits can alter case facts. Nextcloud's
+[authenticated WebDAV API](https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html)
+can support that separate destination when needed.
+
+Backend checks cover retained evidence/citations, exact revisions, literal cells,
+concurrent reuse, capacity, failures, authorization, deletion/purge and native
+answer delivery. UI checks cover on-demand download, stale/error handling, saved
+chat links and preserving an unsent draft/attachment during final reconciliation.
+Type checking and the production build pass; the existing unrelated UI lint
+baseline is unchanged. This is local verification, not deployed acceptance.
+
+After the user's normal commit/push/pull, rebuild audrey and audrey-ui on Tower.
+No schema/config/sidecar/model or IRS-index work is needed. In the browser, use
+one existing Private Tax review, explicitly retain a supporting passage and save
+its worksheet, then download from chat and the Project. Refresh and reopen the
+file; change one fact to check the old link stays unchanged and the current
+Toolbox export shows the update with any stale worksheet notice. No upload or
+broad tax-comparison rerun is required. This is the one pending product check.
 
 ## Deployment and testing
 

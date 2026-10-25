@@ -480,6 +480,12 @@ async def request_account_purge(
     if application_store is None:
         raise HTTPException(status_code=503, detail="application_store_unavailable")
     await application_store.purge_local_user_data(user_id=principal.user_id)
+    exports = getattr(request.app.state, "tax_review_exports", None)
+    if exports is not None:
+        # Canonical rows are gone before cleanup invalidates in-flight renders;
+        # no new request can load their old case. A retry remains owner-bound
+        # even when the first purge already removed those rows.
+        await exports.delete_owner(user_id=principal.user_id)
     purge_id = ""
     if idempotency_key:
         purge_id = str(uuid.uuid5(

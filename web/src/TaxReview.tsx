@@ -10,6 +10,7 @@ import {
   taxReviewScopeNotice,
   type TaxCase,
 } from "./taxReviewApi";
+import { TaxWorkbookDownload } from "./TaxWorkbookDownload";
 import "./TaxReview.css";
 
 export function TaxReview({
@@ -270,6 +271,8 @@ export function TaxReview({
         {settings}
       </dialog> : null}
         {children}
+        {taxCase?.review ? <TaxWorkbookDownload taxCase={taxCase} disabled={loading || loadFailed}
+          onReload={() => setReloadVersion((current) => current + 1)} /> : null}
         {taxCase?.review ? <details className="tax-review-worksheet">
           <summary>Review worksheet</summary>
           <p className="tax-review-note">{taxReviewScopeNotice(taxCase.review)}</p>

@@ -714,6 +714,10 @@ class NativeRunManager:
         )
 
         async def work(execution_app, step):
+            before_case = await self._store.tax_cases.get(
+                user_id=live.owner_user_id, conversation_id=live.started.conversation.conversation_id,
+            )
+            before_revision = before_case["revision"] if before_case is not None else 0
             # Bind the canonical typed turn before attachments, Project text or
             # retrieved evidence decorate the model's context. Handlers created
             # by task preparation read this revocable source at invocation time.
@@ -754,9 +758,27 @@ class NativeRunManager:
                 "completed" if review is not None and not review["stale"]
                 and verification.get("status") == "checked" else "paused"
             )
+            assistant_content = "".join(live.answer_parts)
+            if (review is not None and not review["stale"]
+                    and review["review_revision"] > before_revision):
+                from audrey.tax_review import prepare_tax_workbook
+
+                try:
+                    async with asyncio.timeout(5):
+                        workbook = await prepare_tax_workbook(
+                            self._app, live.principal, live.started.conversation.conversation_id,
+                            expected_revision=case["revision"],
+                        )
+                    link = f"\n\n[Download review workbook (.xlsx)]({workbook['download_url']})"
+                    if len(assistant_content) + len(link) <= 64000:
+                        assistant_content += link
+                except Exception:  # noqa: BLE001 - auxiliary export must not fail a saved answer
+                    # Export preparation is auxiliary; canonical evidence and
+                    # the native saved answer remain useful when it is offline.
+                    log.warning("private workbook link unavailable run_id=%s", live.started.run.run_id)
             usage = live.latest_usage
             delivery = {
-                "outcome": terminal.status, "assistant_content": "".join(live.answer_parts),
+                "outcome": terminal.status, "assistant_content": assistant_content,
                 "finish_reason": terminal.finish_reason, "error_code": terminal.error_code,
                 "virtual_model": terminal.virtual_model, "concrete_model": terminal.concrete_model,
                 "prompt_tokens": usage.prompt_tokens if usage is not None else 0,

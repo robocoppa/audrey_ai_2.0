@@ -396,3 +396,51 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 760 
     await expect(page.getByRole("button", { name: "Audrey model", exact: true })).toContainText("Private");
   });
 }
+
+test("a saved workbook link appears after the tax answer without replacing the next draft", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.clock.setFixedTime(new Date(DATE));
+  await mockTaxApi(page);
+  await page.goto("./");
+  await page.getByRole("button", { name: "Tools and skills: Automatic" }).click();
+  await page.getByRole("dialog", { name: "Choose how Audrey uses tools" }).getByRole("button", { name: /Tax review/u }).click();
+  const rail = toolbox(page, 1280);
+  await rail.getByLabel("Review goal", { exact: true }).fill("Review deductions");
+  await rail.getByRole("button", { name: "Use Tax review" }).click();
+  await closeToolbox(rail);
+  let release!: () => void;
+  let observed!: () => void;
+  const canonicalReady = new Promise<void>((resolve) => { observed = resolve; });
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const path = `/api/conversations/${ID}/tax-review/exports/tax_export_1/download`;
+  await page.route(`**/api/conversations/${ID}/messages?*`, async (route) => {
+    observed();
+    await gate;
+    return json(route, { items: [
+      { id: "msg_user_review", run_id: "run_tax_1", role: "user", status: "completed", content: TAX_REVIEW_PROMPT, sequence: 1, created_at: DATE, updated_at: DATE, attachments: [] },
+      { id: "msg_run_tax_1", run_id: "run_tax_1", role: "assistant", status: "completed", content: `Review findings saved 1.\n\n[Download workbook](${path})`, sequence: 2, created_at: DATE, updated_at: DATE, attachments: [] },
+    ], next_cursor: null });
+  });
+  await page.route(`**${path}`, (route) => route.fulfill({ status: 200,
+    contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    headers: { "Content-Disposition": 'attachment; filename="tax-review-2025.xlsx"' }, body: "workbook bytes" }));
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await composer.fill(TAX_REVIEW_PROMPT);
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(page.getByText("Review findings saved 1.", { exact: true })).toBeVisible();
+  await canonicalReady;
+  await page.getByRole("button", { name: "Add files", exact: true }).click();
+  const files = page.getByRole("region", { name: "Choose attachments" });
+  await files.getByRole("button", { name: /unsent-private.txt/u }).click();
+  await files.getByRole("button", { name: "Hide attachment picker" }).click();
+  await composer.fill("Keep this next question unsent.");
+  release();
+  const link = page.getByRole("link", { name: "Download workbook", exact: true });
+  await expect(link).toBeVisible();
+  await expect(composer).toHaveValue("Keep this next question unsent.");
+  await expect(page.getByRole("button", { name: "Remove attachment unsent-private.txt" })).toBeVisible();
+  const downloaded = page.waitForEvent("download");
+  await link.click();
+  expect((await downloaded).suggestedFilename()).toBe("tax-review-2025.xlsx");
+  await expect(composer).toHaveValue("Keep this next question unsent.");
+});

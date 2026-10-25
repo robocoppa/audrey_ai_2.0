@@ -1,4 +1,4 @@
-import { apiJson } from "./api";
+import { apiJson, apiResponse } from "./api";
 
 export interface TaxFactProvenance {
   file_id: string;
@@ -179,4 +179,60 @@ export function actOnTaxCase(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ expected_revision: expectedRevision, ...action }),
   });
+}
+
+export interface TaxWorkbookExport {
+  id: string;
+  case_revision: number;
+  review_revision: number;
+  filename: string;
+  download_url: string;
+}
+
+export const TAX_WORKBOOK_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+export function isTaxWorkbookUrl(path: string | undefined): path is string {
+  return Boolean(path && /^\/api\/conversations\/[^/?#]+\/tax-review\/exports\/[^/?#]+\/download$/u.test(path));
+}
+
+export async function prepareTaxWorkbook(taxCase: TaxCase, signal?: AbortSignal): Promise<TaxWorkbookExport> {
+  const result = await apiJson<{ export: TaxWorkbookExport }>(`${casePath(taxCase.conversation_id)}/exports`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_revision: taxCase.revision }),
+    signal,
+  });
+  const item = result.export;
+  if (!isTaxWorkbookUrl(item.download_url)
+    || item.download_url !== `${casePath(taxCase.conversation_id)}/exports/${encodeURIComponent(item.id)}/download`
+    || item.case_revision !== taxCase.revision) {
+    throw new Error("The workbook did not match this saved review.");
+  }
+  return item;
+}
+
+export async function downloadTaxWorkbook(path: string, filename?: string, signal?: AbortSignal): Promise<void> {
+  if (!isTaxWorkbookUrl(path)) throw new Error("The workbook link is invalid.");
+  const response = await apiResponse(path, { signal, headers: { Accept: TAX_WORKBOOK_CONTENT_TYPE } });
+  if (response.headers.get("Content-Type")?.split(";")[0].trim() !== TAX_WORKBOOK_CONTENT_TYPE) {
+    throw new Error("The server did not return a workbook.");
+  }
+  const blob = await response.blob();
+  if (signal?.aborted) return;
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const encodedName = /filename\*=UTF-8''([^;]+)/iu.exec(disposition)?.[1];
+  let headerName = /filename="([^"]+)"/iu.exec(disposition)?.[1];
+  if (encodedName) {
+    try { headerName = decodeURIComponent(encodedName); } catch { /* Use the plain filename. */ }
+  }
+  const name = (filename || headerName || "tax-review.xlsx").split(/[\\/]/u).pop()!.replace(/\p{Cc}/gu, "");
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name || "tax-review.xlsx";
+  document.body.append(anchor);
+  try { anchor.click(); } finally {
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
 }

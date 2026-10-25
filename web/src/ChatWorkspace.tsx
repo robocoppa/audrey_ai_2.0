@@ -46,6 +46,7 @@ import { ScrollToLatest } from "./ScrollToLatest";
 import { SwipeConversationRow } from "./SwipeConversationRow";
 import { UploadProgress } from "./UploadProgress";
 import { TaxReview } from "./TaxReview";
+import { TaxWorkbookLink } from "./TaxWorkbookDownload";
 import { ConversationToolbox } from "./ConversationToolbox";
 import { PrivateTaskProgress } from "./PrivateTaskProgress";
 import type { PrivateTask } from "./privateTasksApi";
@@ -1768,6 +1769,8 @@ function AudreyThread({
   }, [onDurableReviewPresenceChange]);
   const [taxReviewExpanded, setTaxReviewExpanded] = useState(false);
   const [taxReviewRefresh, setTaxReviewRefresh] = useState(0);
+  const [completedTaxRun, setCompletedTaxRun] = useState<string | null>(null);
+  const taxReconcileEpoch = useRef(0);
   const [queuedTaxReview, setQueuedTaxReview] = useState<{ text: string } | null>(null);
   const pendingTaxReviewRef = useRef<object | null>(null);
   const dispatchedTaxReviewRef = useRef<object | null>(null);
@@ -1980,6 +1983,8 @@ function AudreyThread({
   useEffect(() => {
     const subscriber: AgentSubscriber = {
       onRunInitialized: () => {
+        taxReconcileEpoch.current += 1;
+        setCompletedTaxRun(null);
         userRequestedCancelRef.current = false;
         onRunActiveChange(true);
         setRetrying(false);
@@ -2084,6 +2089,7 @@ function AudreyThread({
       },
       onRunFinishedEvent: ({ event }) => {
         onRunFinishedRef.current(event.runId);
+        if (isPrivate && effectiveSkillId === "tax-review") setCompletedTaxRun(event.runId);
         setTaxReviewRefresh((current) => current + 1);
         setActiveRunId(null);
         userRequestedCancelRef.current = false;
@@ -2138,7 +2144,7 @@ function AudreyThread({
     };
     const subscription = agent.subscribe(subscriber);
     return () => subscription.unsubscribe();
-  }, [agent, onRunActiveChange, setActivity]);
+  }, [agent, effectiveSkillId, isPrivate, onRunActiveChange, setActivity]);
   const runtime = useAgUiRuntime({
     agent,
     adapters: { history },
@@ -2207,6 +2213,38 @@ function AudreyThread({
       });
     },
   });
+
+  useEffect(() => {
+    if (!completedTaxRun) return;
+    let active = true;
+    let started = false;
+    const epoch = taxReconcileEpoch.current;
+    async function reconcileWorkbookLink() {
+      if (started || runtime.thread.getState().isRunning) return;
+      started = true;
+      try {
+        const { items } = await listMessages(conversationId);
+        if (!active || taxReconcileEpoch.current !== epoch || runtime.thread.getState().isRunning) return;
+        const saved = items.find((message) => message.role === "assistant"
+          && message.run_id === completedTaxRun && message.status === "completed");
+        if (!saved?.content.includes("/tax-review/exports/")) return;
+        const repository = runtime.thread.export();
+        const message = repository.messages.find(({ message }) => message.id === saved.id)?.message;
+        if (!message || message.role !== "assistant") return;
+        // Reconcile the server's immutable workbook link without resetting the
+        // runtime or touching the user's next draft and attachments.
+        runtime.thread.import({ ...repository, messages: repository.messages.map((item) => item.message.id === saved.id
+          ? { ...item, message: { ...item.message, content: [{ type: "text" as const, text: saved.content }] } }
+          : item) });
+      } catch {
+        // The saved link remains available from the Toolbox and on reload.
+        // An auxiliary refresh never turns a completed answer into a failure.
+      }
+    }
+    const unsubscribe = runtime.thread.subscribe(() => { void reconcileWorkbookLink(); });
+    void reconcileWorkbookLink();
+    return () => { active = false; unsubscribe(); };
+  }, [completedTaxRun, conversationId, runtime]);
 
   const restoredDraftRef = useRef(false);
   useEffect(() => {
@@ -3565,9 +3603,7 @@ function MarkdownText({ text }: TextMessagePartProps) {
         skipHtml
         components={{
           a: ({ href, title, children }) => (
-            <a href={href} title={title} target="_blank" rel="noreferrer noopener">
-              {children}
-            </a>
+            <TaxWorkbookLink href={href} title={title}>{children}</TaxWorkbookLink>
           ),
           pre: ({ children }) => <MarkdownCodeBlock>{children}</MarkdownCodeBlock>,
         }}

@@ -80,12 +80,20 @@ records the evidence and missing execution metadata. The model's budget claim
 does not identify the stopping cause. Keep broad comparison coverage as a known
 limitation, with exact-source review and conditional arithmetic supported.
 
-**User-requested targeted retest October 24:** continue the same saved case for
-only the Form 8911 instructions' page-1 cutoff and edition. The reply and retained
-passage are pending. Preserve remaining topics/source conflicts and spent task
-usage; no new upload, rebuild, model or index work is required. An exhausted-task
-refusal is diagnostic evidence, not permission to reset its budget. The original
-multi-topic comparison remains incomplete.
+**Targeted source lookup passed October 24.** The same-case answer identified
+December 2025 Form 8911 instructions, PDF page 1, and June 30, 2026 correctly.
+Passage retention is not established: the answer said it could not save, while
+the Toolbox showed a saved review. The broader comparison remains incomplete.
+
+**20F built — local review workbooks.** Saved Tax answers include a revision-bound
+XLSX link; the Toolbox and Private project also offer Download workbook. The
+server captures a bounded snapshot and renders it only when requested, reusing
+that revision without model calls. Facts, retained passages/citations, arithmetic
+and unresolved items come from the saved case. Case saves remain independent of
+export failure; deletion/purge removes derived files. Saved-write tool feedback
+now identifies case persistence explicitly. Locally verified; one browser check
+remains. After pull rebuild audrey and audrey-ui; no sidecar/config/schema/model
+or index change. DOCX and Nextcloud remain optional future work.
 
 No broader repeat test is queued. A later
 decision to improve broader autonomous review starts from this saved run's
@@ -192,6 +200,12 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **20E.2 comparison assessment:** completed once October 24; outcome is
   incomplete coverage, not a passed comparison or eligibility-accuracy result.
   Retain the limitation; no repeated broad test is queued.
+- [x] **Targeted Form 8911 lookup:** correct edition/page/cutoff reported;
+  persistence of this passage is unverified, not an accepted save.
+- [x] **20F built — review files:** on-demand local XLSX snapshots, authenticated
+  chat/Toolbox/project downloads, bounded reuse/retention and deletion cleanup.
+  Backend/UI verification passed; targeted browser acceptance remains.
+  Nextcloud and DOCX wait for a concrete editing/collaboration/reporting need.
 
 Tax year/jurisdiction and reference release remain in the case record. Project
 views read that canonical record rather than duplicate it in Project instructions. OCR/media, fine-tuning and state
@@ -224,8 +238,9 @@ remain deferred. 17C is a future diagnostic note for an actual reported failure.
   evidence; they are not fresh acceptance data after tuning.
 - Background generation, webhooks, Conversations API, historical imports,
   broader media analysis, and model/config experiments require a real need.
-- Document/spreadsheet authoring belongs to the existing Hermes Bot Tools MCP,
-  Nextcloud, and Collabora setup, not Audrey's browser experience.
+- General document/spreadsheet authoring remains in the existing Hermes Bot
+  Tools MCP, Nextcloud and Collabora setup. Tax review workbook downloads are
+  scoped projections of saved Audrey cases, with no general office editor.
 - Analyze ordinary accumulated traffic for cost/quality questions; do not
   generate workloads simply to satisfy an old checklist.
 

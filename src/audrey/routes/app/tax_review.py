@@ -1,8 +1,11 @@
 """Owner-only saved Tax review case and explicit user confirmation actions."""
+import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.background import BackgroundTask
 
 from audrey.auth import require_scope
 from audrey.identity import Principal
@@ -14,6 +17,7 @@ from audrey.tax_review import (
     ensure_tax_project,
     get_project_tax_cases,
     get_tax_case,
+    prepare_tax_workbook,
 )
 
 router = APIRouter(tags=["application-tax-review"])
@@ -55,6 +59,68 @@ async def case_action(
     principal: Principal = Depends(_access),
 ) -> dict:
     return await apply_tax_case_action(request.app, principal, conversation_id, body)
+
+
+class TaxWorkbookRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_revision: int = Field(ge=1)
+
+
+@router.post("/conversations/{conversation_id}/tax-review/exports")
+async def prepare_workbook(
+    conversation_id: str, body: TaxWorkbookRequest, request: Request,
+    principal: Principal = Depends(_access),
+) -> dict:
+    return {"export": await prepare_tax_workbook(
+        request.app, principal, conversation_id, expected_revision=body.expected_revision,
+    )}
+
+
+@router.get("/conversations/{conversation_id}/tax-review/exports/{export_id}/download")
+async def download_workbook(
+    conversation_id: str, export_id: str, request: Request,
+    principal: Principal = Depends(_access),
+) -> StreamingResponse:
+    from audrey.tax_exports import TaxExportError
+
+    case = await get_tax_case(request.app, principal, conversation_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Tax review case not found.")
+    exports = getattr(request.app.state, "tax_review_exports", None)
+    if exports is None:
+        raise HTTPException(status_code=503, detail="Workbook downloads are temporarily unavailable.")
+    try:
+        artifact = await exports.download(user_id=principal.user_id, case=case, export_id=export_id)
+    except TaxExportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    # Rendering ran outside the database transaction. Reauthorize before serving
+    # bytes in case the account, conversation or project changed in that await.
+    try:
+        current = await get_tax_case(request.app, principal, conversation_id)
+        if current is None or current["id"] != case["id"]:
+            await exports.delete_case(user_id=principal.user_id, case_id=case["id"])
+            raise HTTPException(status_code=404, detail="Tax review case not found.")
+    except BaseException:
+        artifact.close()
+        raise
+
+    async def content():
+        try:
+            while chunk := await asyncio.to_thread(artifact.file.read, 64 * 1024):
+                yield chunk
+        finally:
+            artifact.close()
+
+    # The file was opened while the cache lock was held. Its descriptor remains
+    # valid if eviction/deletion unlinks the path during an authorized download.
+    return StreamingResponse(
+        content(), background=BackgroundTask(artifact.close),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+                 "Content-Disposition": f'attachment; filename="{artifact.filename}"',
+                 "Content-Length": str(artifact.size),
+                 "X-Tax-Case-Revision": str(artifact.case_revision)},
+    )
 
 
 class PrivateTaskAction(BaseModel):
