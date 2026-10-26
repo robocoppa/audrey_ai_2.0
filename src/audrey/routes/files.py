@@ -73,6 +73,7 @@ import urllib.parse
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Literal
 
 import anyio
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
@@ -185,6 +186,7 @@ class FileRow(BaseModel):
     fetch_downloaded_bytes: int = 0
     fetch_total_bytes: int = 0
     private_required: bool = False
+    origin: Literal["upload", "generated"] = "upload"
 
 
 class UploadResponse(BaseModel):
@@ -353,6 +355,7 @@ class ModelFileRow(BaseModel):
     # model spends a call finding out, and it is the same fact the artifact
     # route reports on the way back.
     artifacts: list[str] = []
+    origin: Literal["upload", "generated"] = "upload"
 
 
 class ServiceListResponse(BaseModel):
@@ -2853,6 +2856,9 @@ async def requeue_job(
         raise HTTPException(status_code=404, detail="No such file.")
     _refuse_unavailable_private_processing(row)
 
+    if row.get("origin") == "generated":
+        raise HTTPException(status_code=409, detail="Generated working outputs cannot be queued for ingestion.")
+
     if row["status"] == "processing" and not force:
         # Refuse before touching Qdrant, so a refused call changes nothing at
         # all — including for the worker that is still running.
@@ -3073,6 +3079,7 @@ async def list_files_for_user(
             failure_reason=str(row["failure_reason"]),
             waiting_for_s=_waiting_for_s(row, now=now),
             artifacts=available.get(str(row["file_id"]), []),
+            origin=row.get("origin", "upload"),
         )
         for row in rows
     ]
@@ -3200,6 +3207,8 @@ async def read_artifact(
             f"recent, uploaded {row['uploaded_at']}. "
         )
 
+    if row.get("origin") == "generated":
+        note += "Generated working output; this is not independent source evidence. "
     user_dir = _upload_root(request) / sanitize_user(user)
     path = (
         user_dir / f"{row['file_id']}{Path(str(row['filename'])).suffix.lower()}"
@@ -3210,7 +3219,10 @@ async def read_artifact(
         if artifact == "document":
             if str(row["kind"]) != "text":
                 raise OSError("document text exists only for text files")
-            text = await asyncio.to_thread(extract_uploaded_text, path)
+            if row.get("origin") == "generated":
+                text = await asyncio.to_thread(_read_generated_text, path)
+            else:
+                text = await asyncio.to_thread(extract_uploaded_text, path)
         else:
             text = await asyncio.to_thread(path.read_text, "utf-8")
     except (EmptyExtractionError, OSError):
@@ -3294,7 +3306,7 @@ async def read_artifact(
     # Snap forward to the end of the line so a page break lands between
     # transcript lines rather than inside one. Only when there is more to come;
     # at the end of the document there is nothing to snap to.
-    if end < total:
+    if end < total and row.get("origin") != "generated":
         newline = text.find("\n", end)
         end = total if newline == -1 else newline + 1
 
@@ -3343,6 +3355,16 @@ async def delete_file(
         deleted=result.known,
         pending_cleanup=result.known and not result.completed,
     )
+
+
+def _read_generated_text(path: Path) -> str:
+    """Read deterministic renderer text without reparsing model-produced archives."""
+    sidecar = path.with_suffix(".ocr.txt")
+    if path.is_symlink() or not path.is_file() or sidecar.is_symlink() or not sidecar.is_file():
+        raise OSError("Generated output text is unavailable.")
+    if sidecar.stat().st_size > 8 * 1024 * 1024:
+        raise OSError("Generated output text exceeds the reader limit.")
+    return sidecar.read_text(encoding="utf-8")
 
 
 def _safe_unlink(p: Path) -> None:

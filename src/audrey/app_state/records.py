@@ -95,6 +95,7 @@ class ProjectFileRecord:
     project_id: str
     file_id: str
     added_at: str
+    origin: str = "upload"
 
 
 @dataclass(frozen=True, slots=True)

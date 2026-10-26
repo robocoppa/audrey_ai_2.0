@@ -1637,7 +1637,7 @@ def test_native_agent_carries_explicit_skill_and_restricted_tools(tmp_path):
             ).json()
 
         assert captured["resolved_skill"] is resolved
-        assert captured["model_tools"].names() == ["kb_search"]
+        assert captured["model_tools"].names() == ["create_file", "kb_search"]
         assert app.state.tools.names() == ["kb_search", "web_search"]
         assert captured["messages"][1] == {
             "role": "system", "content": resolved.spec.instructions,

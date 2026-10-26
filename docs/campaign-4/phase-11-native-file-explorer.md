@@ -1,6 +1,6 @@
 # Campaign 4 Phase 11 — native file explorer
 
-**Status:** Explorer accepted. Upload presentation followup built; browser acceptance pending.
+**Status:** Explorer accepted. Shared file creation built October 26; browser acceptance pending.
 
 ## Library model
 
@@ -36,26 +36,48 @@ Sources, Models, and Tool calls form one controlled popover group: opening one c
 
 Model telemetry is a separate operations phase; it is not another Phase 11 file-explorer slice.
 
-## Generated files — next slice
+## Generated files
 
-**Requested October 25; queued, not implemented.** File creation is a shared
-Audrey capability for ordinary tasks and Private work. Tax workbooks are one
-consumer, not the definition of that capability.
+Native ordinary and Private chat can call `create_file` for TXT, Markdown, CSV,
+JSON, DOCX and XLSX. Python standard-library renderers, python-docx and openpyxl
+run locally in Audrey. Models supply content and safe filenames, with bounded
+rows/sheets and input/output size; they cannot choose server paths or run renderer
+code. Spreadsheet strings remain literals. The tool supports eight outputs per
+reply. Direct model passthrough and existing Hermes adapters are unchanged.
 
-- A server-owned creation tool renders supported formats from model-supplied
-  content; no model-chosen filesystem paths or executable renderer code.
-- Generated files belong to the authenticated user, appear in My files, link to
-  the current owned Project when appropriate, and download directly from chat.
-  Reuse the existing file catalog/authorization/deletion lifecycle rather than
-  treating the Tax export cache as the permanent user library.
-- Start with text/Markdown, CSV/JSON, DOCX and XLSX. Python's existing standard
-  library, python-docx and openpyxl cover these formats locally.
-- Private creation and processing stay local. Derived outputs remain distinct
-  from uploaded/source evidence. Repeated calls/retries must not duplicate or
-  overwrite a user's file accidentally; changes need explicit revision handling.
-- Verify one ordinary creation/download and one Private Project creation via the
-  real browser, including My files visibility and owner isolation. The Tax
-  passage-save/workbook check remains the immediate pending acceptance boundary.
+Generated files use the same owner catalog, protected storage, quota, download
+and deletion lifecycle as uploads. My files and Project rows label them Created
+by Audrey. A generated file joins the current owned Project when space permits;
+if that Project changes or fills, the file stays in My files with explicit tool
+feedback. Successful outputs receive server-created chat links that survive
+reload; reconciling them preserves the next draft and attachments. Identical
+filename/content in the same conversation reuses its file. Changed content
+creates a separate immutable file; no prior output or upload is overwritten.
+A deleted output is not resurrected by a retry; choose a new filename deliberately.
 
-This adds file generation/download, not an in-browser office editor. Existing
-Hermes/Nextcloud/Collabora integrations retain their current behavior.
+File origin is immutable in the upload catalog and Project relation (application
+schema 25, existing relations default to upload). Generated outputs do not enter
+RAG or automatic Project grounding, and do not change an active Tax task's source
+pins. Explicit reads/attachments label them working outputs, not independent
+source evidence; they cannot verify extracted Tax facts. Private generation and
+reads use local code and preserve durable privacy flags. Source/sidecar files live
+in the configured upload directory, not the evictable Tax export cache. Tax case
+workbooks retain their separate revision-bound export contract.
+
+This provides file generation/download. The existing Hermes/Nextcloud/Collabora
+office editor integration keeps its current behavior.
+
+### Deployment and acceptance
+
+After the user's normal commit/push, run on Tower in
+`/mnt/user/appdata/audrey_ai_2.0`: pull, then
+`docker compose up -d --build audrey audrey-ui`. The additive schema migration runs
+at backend startup. No sidecar rebuild, configuration, model pull or reindex.
+
+At `https://ai.builtryte.xyz`, request a small ordinary DOCX/XLSX, download and open
+it, and check Created by Audrey in My files. In an existing Private Project,
+request a short Markdown/text output; check chat download, Project membership and
+My files. Reload and verify the link remains usable. No upload is needed; these
+prompts generate model/tool calls. Backend owner-isolation, quota, retry/deletion,
+Private task/source boundaries and real-format checks are hermetic; browser
+acceptance remains the final gate. No separate smoke document.

@@ -248,6 +248,7 @@ class PrivateDocumentSource:
     mime: str
     source_bytes: int
     path: Path
+    origin: str = "upload"
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +258,7 @@ class PrivateDocumentText:
     mime: str
     source_bytes: int
     text: str
+    origin: str = "upload"
 
 
 @asynccontextmanager
@@ -277,7 +279,10 @@ async def private_document_source(app: Any, principal: Any, file_id: str):
         if (
             not row or row.get("user") != user or not row.get("private_required")
             or row.get("status") != "ready" or row.get("kind") != "text"
-            or row.get("collection") != private_text_collection(user)
+            or not (
+                (row.get("origin", "upload") == "upload" and row.get("collection") == private_text_collection(user))
+                or (row.get("origin") == "generated" and row.get("collection") == "" and row.get("chunks") == 0)
+            )
             or row.get("source_freed_at")
         ):
             raise ProcessingPolicyError("private_processing_unavailable")
@@ -290,7 +295,7 @@ async def private_document_source(app: Any, principal: Any, file_id: str):
             raise ProcessingPolicyError("private_processing_unavailable") from None
         yield PrivateDocumentSource(
             file_id=file_id, filename=str(row["filename"]), mime=str(row["mime"]),
-            source_bytes=int(row["bytes"]), path=path,
+            source_bytes=int(row["bytes"]), path=path, origin=str(row.get("origin", "upload")),
         )
 
 
@@ -305,5 +310,5 @@ async def read_private_document(app: Any, principal: Any, file_id: str) -> Priva
         except Exception:  # noqa: BLE001 - never disclose paths or document text
             raise ProcessingPolicyError("private_processing_unavailable") from None
         return PrivateDocumentText(
-            source.file_id, source.filename, source.mime, source.source_bytes, text,
+            source.file_id, source.filename, source.mime, source.source_bytes, text, source.origin,
         )

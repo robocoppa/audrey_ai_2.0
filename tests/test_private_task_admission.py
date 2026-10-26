@@ -326,3 +326,35 @@ async def test_revocation_during_source_verification_prevents_late_case_write(ad
     record = json.loads(task["record_json"])
     assert record["stop_reason"] == "access_changed"
     assert record["usage"]["tool_calls"] == 1
+
+
+async def test_generated_project_output_does_not_change_running_task_inputs(admission):
+    from test_private_document_ingestion import _land
+
+    from audrey.processing_policy import processing_scope
+
+    context, state = admission, admission.state
+    task = await _create(context)
+    runner = PrivateTaskStepRunner(state.store.private_tasks, context.service.prepare)
+
+    async def write_working_output(_app, step):
+        file_id, path, reservation = await _land(state.env, content="Generated working output")
+        path.with_suffix(".ocr.txt").write_text("Generated working output", encoding="utf-8")
+        await state.env.storage.commit_upload(
+            reservation, file_id=file_id, filename="working.txt", mime="text/plain",
+            bytes_=path.stat().st_size, kind="text", collection="", chunks=0,
+            uploaded_at="2026-10-19T12:00:00+00:00", status="ready",
+            max_user_bytes=100_000, origin="generated",
+        )
+        with processing_scope(state.env.runtime.policy):
+            await state.store.projects.add_file(
+                user_id=state.owner.user_id, project_id=context.project_id,
+                file_id=file_id, file_is_private=True, file_origin="generated",
+            )
+        await step.check()
+        return StepResult({"stage": "inspect", "summary": "Working output retained."})
+
+    completed = await runner.execute(user_id=state.owner.user_id, task_id=task["id"], work=write_working_output)
+    assert completed["status"] == "queued"
+    assert completed["pins"]["input_digest"] == task["pins"]["input_digest"]
+    assert completed["checkpoint"]["summary"] == "Working output retained."

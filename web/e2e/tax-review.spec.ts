@@ -667,3 +667,28 @@ for (const originalSkill of ["tax-review", "automatic"] as const) {
     expect(JSON.stringify(observed.agentBodies[0])).toContain(TAX_REVIEW_PROMPT);
   });
 }
+
+
+test("a generated file link appears in Automatic chat without replacing the next draft", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await mockTaxApi(page);
+  await page.goto("./");
+  await expect(page.getByRole("button", { name: "Tools and skills: Automatic" })).toBeVisible();
+  const path = "/api/files/7f45cd33-d591-4f69-9ac6-42efb004eb9a/download";
+  await page.route(`**/api/conversations/${ID}/messages?*`, async (route) => json(route, { items: [
+    { id: "msg_user_output", run_id: "run_tax_1", role: "user", status: "completed", content: "Create notes.md", sequence: 1, created_at: DATE, updated_at: DATE, attachments: [] },
+    { id: "msg_run_tax_1", run_id: "run_tax_1", role: "assistant", status: "completed", content: `Review findings saved 1.\n\n[Download notes.md](${path})`, sequence: 2, created_at: DATE, updated_at: DATE, attachments: [] },
+  ], next_cursor: null }));
+  await page.route(`**${path}`, (route) => route.fulfill({ status: 200, contentType: "text/markdown",
+    headers: { "Content-Disposition": 'attachment; filename="notes.md"' }, body: "# Working notes" }));
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await composer.fill("Create notes.md");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  const link = page.getByRole("link", { name: "Download notes.md", exact: true });
+  await expect(link).toBeVisible();
+  await composer.fill("Keep this question unsent.");
+  const downloaded = page.waitForEvent("download");
+  await link.click();
+  expect((await downloaded).suggestedFilename()).toBe("notes.md");
+  await expect(composer).toHaveValue("Keep this question unsent.");
+});

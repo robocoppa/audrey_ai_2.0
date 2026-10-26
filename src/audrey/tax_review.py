@@ -775,6 +775,10 @@ def make_tax_review_handler(
                             row = await uploads.get_upload(document.file_id) if uploads is not None else None
                             if row and row.get("user") == principal.storage_namespace and row.get("private_required"):
                                 selected[document.file_id]["filename"] = str(row["filename"])
+                    from audrey.tax_documents import tax_source_file_ids
+
+                    source_ids = await tax_source_file_ids(app, principal, selected)
+                    selected = {file_id: item for file_id, item in selected.items() if file_id in source_ids}
                     case.update(selected_files=list(selected.values())[:100],
                                 selected_file_count=len(selected), files_truncated=len(selected) > 100)
                 return _tool_result(case, operation=body.operation, section=body.section, offset=body.offset, limit=body.limit)

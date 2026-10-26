@@ -523,7 +523,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                             {kindLabel(file.kind)} · {file.bytes || !["fetch_pending", "fetching"].includes(file.status)
                               ? formatBytes(file.bytes)
                               : "Size pending"}
-                            {file.status === "ready" ? ` · ${file.chunks} ${file.chunks === 1 ? "chunk" : "chunks"}` : ""}
+                            {file.origin === "generated" ? " · Created by Audrey" : file.status === "ready" ? ` · ${file.chunks} ${file.chunks === 1 ? "chunk" : "chunks"}` : ""}
                             {file.transcript_source ? ` · ${transcriptLabel(file.transcript_source)}` : ""}
                           </span>
                           <time dateTime={file.uploaded_at} title={file.uploaded_at}>

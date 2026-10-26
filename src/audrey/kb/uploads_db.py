@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS uploads (
   collection  TEXT NOT NULL,
   chunks      INTEGER NOT NULL,
   uploaded_at TEXT NOT NULL,
-  -- 'ready'         — ingested, searchable now.
+  -- 'ready'         — usable; generated working outputs are not indexed.
   -- 'fetch_pending' — a URL was accepted and no bytes exist yet (Phase 41).
   --                   Waiting for a media fetcher.
   -- 'fetching'      — leased by a media fetcher, download in progress.
@@ -141,6 +141,8 @@ CREATE TABLE IF NOT EXISTS uploads (
   -- Capacity held while a URL is waiting for or actively being downloaded.
   -- The real size replaces this ceiling atomically in `complete_fetch`.
   quota_reserved_bytes   INTEGER NOT NULL DEFAULT 0,
+  -- Generated working outputs share storage but are never source-indexed.
+  origin TEXT NOT NULL DEFAULT 'upload' CHECK (origin IN ('upload', 'generated')),
   -- Fixed when bytes are accepted, before processing. Existing ordinary rows
   -- cannot be relabelled to promise privacy after their content was processed.
   private_required INTEGER NOT NULL DEFAULT 0
@@ -273,6 +275,7 @@ _UPLOADS_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("quota_reserved_bytes", "INTEGER NOT NULL DEFAULT 0"),
     ("private_required", "INTEGER NOT NULL DEFAULT 0 CHECK "
      "(typeof(private_required) = 'integer' AND private_required IN (0, 1))"),
+    ("origin", "TEXT NOT NULL DEFAULT 'upload' CHECK (origin IN ('upload', 'generated'))"),
 )
 
 
@@ -394,6 +397,11 @@ class UploadsDB:
                     continue
                 self._conn.execute(f"ALTER TABLE uploads ADD COLUMN {name} {ddl}")
                 log.info("uploads_db: migrated uploads table — added `%s`", name)
+            self._conn.execute(
+                "CREATE TRIGGER IF NOT EXISTS trg_uploads_origin_immutable "
+                "BEFORE UPDATE OF origin ON uploads WHEN OLD.origin != NEW.origin "
+                "BEGIN SELECT RAISE(ABORT, 'file origin is immutable'); END"
+            )
             for table in _PRIVATE_TABLES:
                 privacy_columns = {
                     row["name"] for row in self._conn.execute(
@@ -492,19 +500,23 @@ class UploadsDB:
     def _record_locked(
         self, file_id: str, user: str, filename: str, mime: str,
         bytes_: int, kind: str, collection: str, chunks: int, uploaded_at: str,
-        status: str, private_required: bool = False,
+        status: str, private_required: bool = False, origin: str = "upload",
     ) -> None:
+        if origin not in {"upload", "generated"}:
+            raise ValueError("unsupported file origin")
+        if origin == "generated" and (kind != "text" or collection or chunks != 0 or status != "ready"):
+            raise ValueError("generated outputs must be ready unindexed documents")
         existing = self._conn.execute(
-            "SELECT user, private_required FROM uploads WHERE file_id = ?",
+            "SELECT user, private_required, origin FROM uploads WHERE file_id = ?",
             (file_id,),
         ).fetchone()
-        if existing is not None and existing["private_required"]:
-            raise ValueError("ordinary handover cannot overwrite a private file")
+        if existing is not None and (existing["private_required"] or existing["origin"] == "generated"):
+            raise ValueError("ordinary handover cannot overwrite a protected or generated file")
         self._conn.execute(
             "INSERT INTO uploads "
             "(file_id, user, filename, mime, bytes, kind, collection, "
-            " chunks, uploaded_at, status, private_required) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            " chunks, uploaded_at, status, private_required, origin) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(file_id) DO UPDATE SET "
             "  user = excluded.user, filename = excluded.filename, "
             "  mime = excluded.mime, bytes = excluded.bytes, "
@@ -512,7 +524,7 @@ class UploadsDB:
             "  chunks = excluded.chunks, uploaded_at = excluded.uploaded_at "
             "WHERE uploads.private_required = 0",
             (file_id, user, filename, mime, bytes_, kind, collection,
-             chunks, uploaded_at, status, _private_flag(private_required)),
+             chunks, uploaded_at, status, _private_flag(private_required), origin),
         )
 
     async def backfill_upload(self, row: dict, *, user: str, collection: str) -> bool:
@@ -537,7 +549,7 @@ class UploadsDB:
             self._conn.execute(
                 "UPDATE uploads SET kind = CASE "
                 "WHEN mime LIKE 'video/%' THEN 'video' ELSE 'audio' END "
-                "WHERE file_id = ? AND user = ? AND private_required = 0 "
+                "WHERE file_id = ? AND user = ? AND private_required = 0 AND origin = 'upload' "
                 "AND (mime LIKE 'video/%' OR mime LIKE 'audio/%')",
                 (row["file_id"], user),
             )
@@ -560,6 +572,7 @@ class UploadsDB:
         status: str,
         max_user_bytes: int,
         summary: str = "",
+        origin: str = "upload",
     ) -> QuotaDecision:
         return await asyncio.to_thread(
             self._commit_reserved_upload_sync,
@@ -577,6 +590,7 @@ class UploadsDB:
             status,
             max_user_bytes,
             summary,
+            origin,
         )
 
     def _commit_reserved_upload_sync(
@@ -595,15 +609,23 @@ class UploadsDB:
         status: str,
         max_user_bytes: int,
         summary: str,
+        origin: str,
     ) -> QuotaDecision:
         with self._lock, self._transaction_locked():
             committed = self._conn.execute(
-                "SELECT user FROM uploads WHERE file_id = ?",
+                "SELECT user, origin, filename, mime, bytes, kind, collection, chunks, status FROM uploads WHERE file_id = ?",
                 (file_id,),
             ).fetchone()
             if committed is not None:
                 if committed["user"] != user:
                     raise ValueError("file id belongs to another user")
+                if committed["origin"] != origin or (origin == "generated" and any(
+                    committed[key] != value for key, value in {
+                        "filename": filename, "mime": mime, "bytes": bytes_, "kind": kind,
+                        "collection": collection, "chunks": chunks, "status": status,
+                    }.items()
+                )):
+                    raise ValueError("file commit does not match the stored output")
                 usage = self._quota_usage_locked(user)
                 return QuotaDecision(True, usage, bytes_, max_user_bytes)
 
@@ -645,7 +667,7 @@ class UploadsDB:
                 chunks,
                 uploaded_at,
                 status,
-                private_required=bool(row["private_required"]),
+                private_required=bool(row["private_required"]), origin=origin,
             )
             if summary:
                 self._conn.execute(
@@ -1633,7 +1655,7 @@ class UploadsDB:
                 "       chunks, uploaded_at, status, failure_reason, duration_s, "
                 "       summary, source_freed_at, leased_at, source_url, "
                 "       transcript_source, fetch_downloaded_bytes, "
-                "       fetch_total_bytes, private_required "
+                "       fetch_total_bytes, private_required, origin "
                 "FROM uploads WHERE user = ? AND status != 'deleting' "
                 "ORDER BY uploaded_at DESC",
                 (user,),
@@ -1957,7 +1979,7 @@ class UploadsDB:
         with self._lock:
             cur = self._conn.execute(
                 "SELECT file_id FROM uploads "
-                "WHERE user = ? AND status = 'ready' AND chunks > 0",
+                "WHERE user = ? AND status = 'ready' AND chunks > 0 AND origin = 'upload'",
                 (user,),
             )
             return {r["file_id"] for r in cur.fetchall()}
@@ -2596,14 +2618,14 @@ class UploadsDB:
                     "       source_freed_at = '', bytes = 0, "
                     "       fetched_transcript = '', transcript_source = '', "
                     "       fetch_downloaded_bytes = 0, fetch_total_bytes = 0 "
-                    "WHERE file_id = ? AND source_url != ''",
+                    "WHERE file_id = ? AND source_url != '' AND origin = 'upload'",
                     (file_id,),
                 )
                 return cur.rowcount > 0
             cur = self._conn.execute(
                 f"UPDATE uploads SET status = 'pending', "  # noqa: S608
                 f"       {self._REQUEUE_CLEARS}, bytes = COALESCE(?, bytes) "
-                "WHERE file_id = ?",
+                "WHERE file_id = ? AND origin = 'upload'",
                 (bytes_, file_id),
             )
             return cur.rowcount > 0
@@ -2987,7 +3009,7 @@ async def reconcile_with_qdrant(db: UploadsDB, qdrant) -> dict[str, int]:
                     ):
                         indexed_ids.setdefault(user, set()).add(file_id)
                     continue
-                if stored and stored.get("private_required"):
+                if stored and (stored.get("private_required") or stored.get("origin") == "generated"):
                     continue
                 indexed_ids.setdefault(user, set()).add(file_id)
                 backfilled_rows += int(await db.backfill_upload(

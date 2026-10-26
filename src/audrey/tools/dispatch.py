@@ -31,6 +31,7 @@ import httpx
 from audrey.metrics import tool_call_seconds, tool_calls_total
 from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
 from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, ToolUserScope
+from audrey.tools.native_files import NativeFileToolUnavailableError, native_file_handler
 from audrey.tools.private_dispatch import (
     PrivateToolArgumentsError,
     PrivateToolHandler,
@@ -188,6 +189,17 @@ async def dispatch_one(
     call_id = tool_call.get("id")
     policy = current_processing_policy()
     private_handler: PrivateToolHandler | None = None
+    native_handler: PrivateToolHandler | None = None
+    if policy is None and name == "create_file":
+        # Resolve the owner/run binding before parsing or logging model content.
+        try:
+            native_handler = native_file_handler(user_id=user_id)
+        except NativeFileToolUnavailableError:
+            tool_calls_total.labels(tool=name, outcome="error").inc()
+            return ToolResult(name=name, call_id=call_id, content=json.dumps({
+                "error": "native_tool_unavailable",
+                "detail": "File creation requires an active native conversation.",
+            }), elapsed_s=0.0, is_error=True)
     if policy is not None:
         # Run before argument parsing, echoing or logging. Tool names alone
         # cannot vouch for a remote server or an unrelated endpoint path.
@@ -219,12 +231,12 @@ async def dispatch_one(
         try:
             args = json.loads(args)
         except json.JSONDecodeError:
-            if policy is None:
+            if policy is None and native_handler is None:
                 log.warning("dispatch: %s arguments not JSON: %r", name, raw_args[:200])
             tool_calls_total.labels(tool=name, outcome="error").inc()
             return ToolResult(
                 name=name, call_id=call_id,
-                content=json.dumps({"error": "arguments_not_json", **({} if policy is not None else {"raw": raw_args[:500]})}),
+                content=json.dumps({"error": "arguments_not_json", **({} if policy is not None or native_handler is not None else {"raw": raw_args[:500]})}),
                 elapsed_s=0.0, is_error=True,
             )
     if args is None:
@@ -250,7 +262,7 @@ async def dispatch_one(
         )
 
     declaration = TOOL_DECLARATIONS.get(name)
-    if policy is None and (spec.in_process_only or (declaration and declaration.in_process_only)):
+    if policy is None and native_handler is None and (spec.in_process_only or (declaration and declaration.in_process_only)):
         return ToolResult(
             name=name, call_id=call_id,
             content=json.dumps({"error": "private_tool_not_allowed"}),
@@ -302,16 +314,17 @@ async def dispatch_one(
             is_error=True,
         )
 
-    if policy is not None:
-        # This is the only protected execution path. Missing local bindings
+    if policy is not None or native_handler is not None:
+        # This is the only protected/native execution path. Missing local bindings
         # already refused before arguments were parsed; no HTTP fallback exists.
         start = time.monotonic()
         try:
-            if private_handler is None:
+            handler = private_handler if policy is not None else native_handler
+            if handler is None:
                 raise ProcessingPolicyError("private_tool_not_allowed")
             dispatch_timeout = spec.timeout_s if spec.timeout_s is not None else timeout_s
             async with asyncio.timeout(dispatch_timeout):
-                payload = await private_handler(dict(args))
+                payload = await handler(dict(args))
             content = json.dumps(payload, ensure_ascii=False)
             truncated = _truncate_payload(payload, content, max_result_chars)
         except TimeoutError:
@@ -333,7 +346,9 @@ async def dispatch_one(
             return ToolResult(
                 name=name, call_id=call_id,
                 content=json.dumps({
-                    "error": PrivateToolArgumentsError.code if invalid_arguments else "private_tool_unavailable",
+                    "error": PrivateToolArgumentsError.code if invalid_arguments else (
+                        "private_tool_unavailable" if policy is not None else "native_tool_unavailable"
+                    ),
                     "detail": PrivateToolArgumentsError.detail if invalid_arguments else "Local tool request failed.",
                 }),
                 elapsed_s=elapsed, is_error=True,

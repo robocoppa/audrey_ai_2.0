@@ -64,6 +64,7 @@ class NativeFileRecord(BaseModel):
     fetch_downloaded_bytes: int
     fetch_total_bytes: int
     private_required: bool = False
+    origin: Literal["upload", "generated"] = "upload"
 
 
 class NativeFileListResponse(BaseModel):
@@ -158,6 +159,7 @@ def _file_record(row: upload_routes.FileRow) -> NativeFileRecord:
         fetch_downloaded_bytes=row.fetch_downloaded_bytes,
         fetch_total_bytes=row.fetch_total_bytes,
         private_required=row.private_required,
+        origin=row.origin,
     )
 
 
@@ -400,6 +402,7 @@ class OwnedDocumentText:
     filename: str
     text: str
     source_bytes: int
+    origin: str = "upload"
 
 
 async def read_owned_document_text(
@@ -430,7 +433,7 @@ async def _read_document_text(
 ) -> OwnedDocumentText:
     """Read an owned document for its browser viewer or an admitted model."""
 
-    if not is_text_mime(row.mime) or row.status != "ready":
+    if (not is_text_mime(row.mime) and row.origin != "generated") or row.status != "ready":
         raise HTTPException(status_code=422, detail="Text is available for ready documents only.")
     path = _source_path(request, principal, row)
     if row.source_freed_at or not await asyncio.to_thread(path.is_file):
@@ -443,10 +446,13 @@ async def _read_document_text(
         sidecar = ocr_text_path(path)
         if max_text_chars is not None and sidecar.is_file() and sidecar.stat().st_size > max_text_chars * 4:
             raise HTTPException(status_code=413, detail="Document text exceeds the Responses character limit.")
-        content = extract_uploaded_text(path)
+        if row.origin == "generated":
+            content = upload_routes._read_generated_text(path)
+        else:
+            content = extract_uploaded_text(path)
         if max_text_chars is not None and len(content) > max_text_chars:
             raise HTTPException(status_code=413, detail="Document text exceeds the Responses character limit.")
-        return OwnedDocumentText(filename=row.filename, text=content, source_bytes=source_bytes)
+        return OwnedDocumentText(filename=row.filename, text=content, source_bytes=source_bytes, origin=row.origin)
 
     try:
         return await asyncio.to_thread(read)

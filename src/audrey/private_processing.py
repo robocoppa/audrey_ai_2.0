@@ -203,7 +203,7 @@ async def prepare_native_private_runtime(app: Any, *, tax_review: bool = False) 
     names.add(profile["model"])
     names.discard("")
     from audrey.tools.private_handlers import SUPPORTED_PRIVATE_TOOL_NAMES
-    available = frozenset(app.state.tools.names()) & SUPPORTED_PRIVATE_TOOL_NAMES
+    available = (frozenset(app.state.tools.names()) & SUPPORTED_PRIVATE_TOOL_NAMES) | {"create_file"}
     specs = app.state.tools.restrict(available).specs()
     if tax_review:
         if not specs:
@@ -212,7 +212,8 @@ async def prepare_native_private_runtime(app: Any, *, tax_review: bool = False) 
     policy = await prepare_processing_policy(
         ollama_base_url=cfg.env.ollama_host,
         model_names=sorted(names), expected_digests={profile["model"]: profile["digest"]},
-        allowed_tools=available, tool_servers=frozenset(spec.server_url for spec in specs),
+        allowed_tools=available, tool_servers=(frozenset(spec.server_url for spec in specs)
+                                              | {cfg.env.ollama_host}),
     )
     return PrivateProcessingRuntime(policy, tax_review=tax_review)
 
@@ -287,6 +288,10 @@ class PrivateProcessingRuntime:
                 ))
                 await _verify_models(ollama, self.policy)
                 tools: ToolRegistry = app.state.tools.restrict(self.policy.allowed_tools)
+                if "create_file" in self.policy.allowed_tools:
+                    from audrey.tools.native_files import with_create_file
+
+                    tools = with_create_file(tools, server_url=sorted(self.policy.tool_servers)[0])
                 if self.tax_review:
                     from audrey.tax_review import tax_review_spec
 

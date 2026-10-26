@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 25, 2026.** English user input only. Passed work stays closed.
+**Updated October 26, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -85,36 +85,23 @@ December 2025 Form 8911 instructions, PDF page 1, and June 30, 2026 correctly.
 Passage retention is not established: the answer said it could not save, while
 the Toolbox showed a saved review. The broader comparison remains incomplete.
 
-**20F built — local review workbooks.** Saved Tax answers include a revision-bound
-XLSX link; the Toolbox and Private project also offer Download workbook. The
-server captures a bounded snapshot and renders it only when requested, reusing
-that revision without model calls. Facts, retained passages/citations, arithmetic
-and unresolved items come from the saved case. Case saves remain independent of
-export failure; deletion/purge removes derived files. Saved-write tool feedback
-now identifies case persistence explicitly. Locally verified; one browser check
-remains. After pull rebuild audrey and audrey-ui; no sidecar/config/schema/model
-or index change. DOCX and Nextcloud remain optional future work.
+**20F accepted October 26 — saved review files.** The downloaded workbook
+contains the complete Form 8911 termination-date excerpt, original extraction
+spacing, both dates and citation/provenance. The older short fragment remains
+visible. Passage retention and the chat XLSX download are now passed. Canonical
+case data remains authoritative; Tax exports use a bounded revision cache, separate
+from My files. Broader comparison/eligibility limits remain as recorded above.
 
-**Tax mode restoration fixed October 25.** The user's two inline answers did not
-save a worksheet, so save/download acceptance remains open. A reproducible UI
-path restored the saved case after reload without restoring its Tax review
-selection, sending ordinary Private requests without the case tool. Saved cases
-now reopen in Tax review; unresolved loading/setup blocks accidental sends, an
-explicit Automatic choice is preserved within the opened view, and retries keep
-the attempted skill. Browser/component checks, typecheck and build pass locally.
-Rebuild only audrey-ui after pull for this fix, then check one saved-case reload
-and save/download. No model/budget/backend/index change or broader comparison run.
-
-**Tax evidence capture fix built October 25.** The fresh trace retained only a
-bill-name fragment after six exact-quotation failures and never saved a worksheet.
-Tax page reads now return a run-bound source selection; saving resolves the exact
-reader text/provenance on the server and rechecks the pinned source. The model
-need not reproduce PDF spacing or checksums. Each turn receives canonical case
-state; paused replies without a current worksheet explicitly say it was not saved.
-Focused source-capture, runtime and real-workbook checks pass locally. Rebuild only
-audrey, then test one same-case passage save and chat workbook download. The
-Evidence sheet must contain the full excerpt. Save/download acceptance remains
-open; no broader model evaluation or index work is queued.
+**Shared generated files built October 26.** Native ordinary and Private chat
+can create owned text/Markdown, CSV/JSON, DOCX and XLSX. Server-created chat links,
+My files and the current Project use the existing storage/download/delete lifecycle.
+Generated outputs are labeled and excluded from automatic evidence retrieval and
+Tax source pins. Private renders locally. Additive application schema 25 records
+Project file origin; existing rows remain uploads. Focused local verification is
+complete; one ordinary and one Private Project browser creation/download remain.
+Rebuild audrey and audrey-ui after pull. No sidecar/config/model/index change.
+The [Phase 11 contract](phase-11-native-file-explorer.md#generated-files) owns this
+slice; existing Hermes office integrations remain unchanged.
 
 No broader repeat test is queued. A later
 decision to improve broader autonomous review starts from this saved run's
@@ -163,7 +150,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
 | 10 | [Answer provenance](phase-10-ordinary-answer-provenance.md) | Complete; immediate answer summaries await acceptance |
-| 11 | [File explorer](phase-11-native-file-explorer.md) | Complete; upload presentation followup built |
+| 11 | [File explorer](phase-11-native-file-explorer.md) | Explorer complete; shared file creation built, browser acceptance pending |
 | 12 | [Navigation](phase-12-sidebar-navigation.md) | Desktop/mobile followup built; browser acceptance pending |
 | 13 | [Responses extensions](phase-13-responses-multimodal-input.md) | Complete |
 | 14 | [Bots and tokens](phase-14-bot-accounts-and-token-lifetimes.md) | Complete |
@@ -222,18 +209,13 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
   incomplete coverage, not a passed comparison or eligibility-accuracy result.
   Retain the limitation; no repeated broad test is queued.
 - [x] **Targeted Form 8911 lookup:** correct edition/page/cutoff reported;
-  persistence of this passage is unverified, not an accepted save.
-- [x] **20F built — review files:** on-demand local XLSX snapshots, authenticated
-  chat/Toolbox/project downloads, bounded reuse/retention and deletion cleanup.
-  Backend/UI verification passed; targeted browser acceptance remains.
-  Browser editing/collaboration remains optional; shared file creation is next.
-- [ ] **Next: shared file creation.** Ordinary Audrey tasks can produce owned
-  downloadable files, shown in chat/My files and linked to the current Project.
-  Private creation stays local. Initial text/Markdown, CSV/JSON, DOCX and XLSX
-  renderers reuse existing libraries and file ownership/download lifecycle.
-  Derived outputs stay distinguishable from uploaded evidence; creation is
-  retry-safe. The [Phase 11 contract](phase-11-native-file-explorer.md#generated-files-next-slice)
-  owns this slice; it is not built by the Tax-specific export cache.
+  full-passage persistence and workbook delivery subsequently passed in 20F.
+- [x] **20F accepted — review files:** retained full source passage and real chat
+  workbook download passed October 26. No repeat save/download test is queued.
+- [ ] **Shared file creation built:** owned TXT/Markdown, CSV/JSON, DOCX and XLSX,
+  chat/My files/Project delivery, Private local rendering and retry-safe immutable
+  outputs. Local verification passes; browser acceptance is next. See
+  [Phase 11](phase-11-native-file-explorer.md#generated-files).
 
 Tax year/jurisdiction and reference release remain in the case record. Project
 views read that canonical record rather than duplicate it in Project instructions. OCR/media, fine-tuning and state
@@ -267,7 +249,7 @@ remain deferred. 17C is a future diagnostic note for an actual reported failure.
 - Background generation, webhooks, Conversations API, historical imports,
   broader media analysis, and model/config experiments require a real need.
 - Audrey may generate user-owned documents/spreadsheets for general chat tasks.
-  Shared file creation is queued in Phase 11; the existing Tax exporter is one
+  Shared file creation is built in Phase 11; the existing Tax exporter is one
   scoped output path. Interactive office editing/collaboration stays in the
   existing Hermes Bot Tools MCP, Nextcloud and Collabora setup; no adapter change.
 - Analyze ordinary accumulated traffic for cost/quality questions; do not

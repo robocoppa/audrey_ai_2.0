@@ -98,6 +98,7 @@ def test_native_list_uses_server_owned_namespace_and_hides_compat_fields(monkeyp
             {
                 "id": "file_123",
                 "private_required": False,
+                "origin": "upload",
                 "filename": "field-notes.txt",
                 "mime": "text/plain",
                 "bytes": 42,

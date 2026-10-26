@@ -127,7 +127,7 @@ class ProjectsRepository:
             if project_row is None:
                 return None
             file_rows = self._conn.execute(
-                "SELECT project_id, file_id, added_at FROM app_project_files "
+                "SELECT project_id, file_id, added_at, origin FROM app_project_files "
                 "WHERE project_id = ? ORDER BY added_at DESC, file_id",
                 (str(project_row["project_id"]),),
             ).fetchall()
@@ -305,7 +305,7 @@ class ProjectsRepository:
             if self._project_row_locked(user_id, project_id) is None:
                 return None
             rows = self._conn.execute(
-                "SELECT project_id, file_id, added_at FROM app_project_files "
+                "SELECT project_id, file_id, added_at, origin FROM app_project_files "
                 "WHERE project_id = ? ORDER BY added_at DESC, file_id",
                 (project_id,),
             ).fetchall()
@@ -318,9 +318,10 @@ class ProjectsRepository:
         project_id: str,
         file_id: str,
         file_is_private: bool = False,
+        file_origin: str = "upload",
     ) -> ProjectFileRecord:
         return await asyncio.to_thread(
-            self._add_file_sync, user_id, project_id, file_id, file_is_private,
+            self._add_file_sync, user_id, project_id, file_id, file_is_private, file_origin,
         )
 
     def _add_file_sync(
@@ -329,7 +330,10 @@ class ProjectsRepository:
         project_id: str,
         file_id: str,
         file_is_private: bool,
+        file_origin: str,
     ) -> ProjectFileRecord:
+        if file_origin not in {"upload", "generated"}:
+            raise InvalidProjectStateError("invalid project file origin")
         if type(file_is_private) is not bool:
             raise InvalidProjectStateError("file restriction must be a boolean")
         user_id = _required(user_id, "user id")
@@ -362,16 +366,16 @@ class ProjectsRepository:
                         f"projects can contain at most {PROJECT_MAX_FILES} files"
                     )
                 self._conn.execute(
-                    "INSERT INTO app_project_files (project_id, file_id, added_at) "
-                    "VALUES (?, ?, ?)",
-                    (project_id, file_id, now),
+                    "INSERT INTO app_project_files (project_id, file_id, added_at, origin) "
+                    "VALUES (?, ?, ?, ?)",
+                    (project_id, file_id, now, file_origin),
                 )
                 self._conn.execute(
                     "UPDATE app_projects SET updated_at = ? WHERE user_id = ? AND project_id = ?",
                     (now, user_id, project_id),
                 )
                 row = self._conn.execute(
-                    "SELECT project_id, file_id, added_at FROM app_project_files "
+                    "SELECT project_id, file_id, added_at, origin FROM app_project_files "
                     "WHERE project_id = ? AND file_id = ?",
                     (project_id, file_id),
                 ).fetchone()
@@ -509,6 +513,7 @@ def _project_file_from_row(row: sqlite3.Row) -> ProjectFileRecord:
         project_id=str(row["project_id"]),
         file_id=str(row["file_id"]),
         added_at=str(row["added_at"]),
+        origin=str(row["origin"]),
     )
 
 

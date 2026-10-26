@@ -23,7 +23,11 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from audrey.app_state.history_import import HistoryImportRepository
-from audrey.app_state.migrations import MIGRATIONS, PRIVATE_PROCESSING_GUARDS_SQL
+from audrey.app_state.migrations import (
+    MIGRATIONS,
+    PRIVATE_PROCESSING_GUARDS_SQL,
+    PROJECT_FILE_ORIGIN_GUARD_SQL,
+)
 from audrey.app_state.private_tasks import PrivateTasksRepository
 from audrey.app_state.projects import ProjectsRepository
 from audrey.app_state.records import (
@@ -68,6 +72,7 @@ _ADDITIVE_COLUMN_MIGRATIONS = {
         "app_projects": ("private_required",),
         "app_runs": ("private_required",),
     },
+    25: {"app_project_files": ("origin",)},
 }
 
 
@@ -198,6 +203,8 @@ class ApplicationStore:
                             "(typeof(private_required) = 'integer' "
                             "AND private_required IN (0, 1))"
                         )
+                    elif column == "origin":
+                        definition = "TEXT NOT NULL DEFAULT 'upload' CHECK (origin IN ('upload', 'generated'))"
                     elif column == "skill_version":
                         definition = "INTEGER NOT NULL DEFAULT 0"
                     else:
@@ -208,6 +215,8 @@ class ApplicationStore:
             if version == 22:
                 for guard_sql in PRIVATE_PROCESSING_GUARDS_SQL:
                     self._conn.execute(guard_sql)
+            if version == 25:
+                self._conn.execute(PROJECT_FILE_ORIGIN_GUARD_SQL)
             self._conn.execute(
                 "INSERT INTO app_schema_migrations(version, applied_at) VALUES (?, ?)",
                 (version, stamp),

@@ -33,6 +33,7 @@ from audrey.private_task_runner import (
     runtime_task_pins,
 )
 from audrey.processing_policy import ProcessingPolicyError, processing_scope
+from audrey.tax_documents import tax_source_file_ids
 from audrey.tax_review import require_tax_case
 from audrey.user_data_visibility import remote_personal_reads_blocked
 
@@ -159,6 +160,11 @@ class PrivateTaskAdmission:
             instructions = snapshot[0].instructions
         elif snapshot is not None:
             raise PrivateTaskConflictError("The Private Project changed.")
+        # Outputs created during a task may join its Project. They are working
+        # artifacts, not newly admitted source documents, and must not change
+        # the pinned input set or interrupt the same task that produced them.
+        conversation_ids = await tax_source_file_ids(self.app, principal, conversation_ids)
+        project_ids = await tax_source_file_ids(self.app, principal, project_ids)
         selected_ids = conversation_ids | project_ids
         if len(selected_ids) > 100:
             raise PrivateTaskError("Choose at most one hundred Private documents for a task.")

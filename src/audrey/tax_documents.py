@@ -31,8 +31,31 @@ def _pdf_page(path, page: int) -> str:
     return text
 
 
+async def tax_source_file_ids(app: Any, principal: Any, file_ids) -> set[str]:
+    """Exclude owned generated working outputs from automatic tax source inputs.
+
+    Keep missing or unexpected records in the set so existing source admission
+    fails closed. Only an owner-matched canonical generated row is excluded.
+    """
+    selected = set(file_ids)
+    db = getattr(app.state, "uploads_db", None)
+    if db is None:
+        return selected
+    for file_id in tuple(selected):
+        row = await db.get_upload(file_id)
+        if row and row.get("user") == principal.storage_namespace and row.get("origin") == "generated":
+            selected.remove(file_id)
+    return selected
+
+
+async def _require_original_source(app: Any, principal: Any, file_id: str) -> None:
+    if file_id not in await tax_source_file_ids(app, principal, {file_id}):
+        raise TaxCaseError("Generated working outputs cannot verify extracted tax facts; use the original uploaded source.")
+
+
 async def private_source_identity(app: Any, principal: Any, file_id: str) -> dict[str, str]:
     """Expose an opaque source identity only to the bound local case worker."""
+    await _require_original_source(app, principal, file_id)
     async with private_document_source(app, principal, file_id) as source:
         checksum = await asyncio.to_thread(_checksum, source.path)
     return {"file_id": file_id, "checksum": checksum}
@@ -63,6 +86,7 @@ async def validate_fact_source(app: Any, principal: Any, conversation_id: str,
     provenance = payload["provenance"]
     if provenance["file_id"] not in selected:
         raise TaxCaseError("Choose this Private document in the conversation or Project first.")
+    await _require_original_source(app, principal, provenance["file_id"])
     async with private_document_source(app, principal, provenance["file_id"]) as source:
         checksum = await asyncio.to_thread(_checksum, source.path)
         if checksum != provenance["checksum"]:
@@ -90,7 +114,7 @@ async def validate_fact_source(app: Any, principal: Any, conversation_id: str,
 @asynccontextmanager
 async def _project_document_sources(app: Any, principal: Any, file_ids: list[str], conversation_id: str):
     """Keep source locks through project persistence and recheck deletion races."""
-    selected = sorted(set(file_ids))
+    selected = sorted(await tax_source_file_ids(app, principal, file_ids))
     async with AsyncExitStack() as stack:
         for file_id in selected:
             await stack.enter_async_context(private_document_source(app, principal, file_id))

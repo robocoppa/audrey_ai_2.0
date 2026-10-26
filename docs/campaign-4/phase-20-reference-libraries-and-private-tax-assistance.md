@@ -564,7 +564,7 @@ indicators remain. Accepted Toolbox layout/lifecycle behavior stays closed;
 only the changed facts and missing-information flow needs browser acceptance.
 
 Each conversation owns one case; Project membership is derived from its canonical
-conversation. A saved case does not activate Tax review automatically after reload.
+conversation. A saved case restores Tax review after its initial lookup; an explicit Automatic choice remains available.
 Automatic Private retains its existing tools and behavior. The additive schema 23
 record lives in the application database, participates in normal SQLite backup,
 and cascades on conversation deletion or owner purge.
@@ -1042,113 +1042,50 @@ tax-rule implementations still require the applicable retained official source.
 
 ### 20F — saved review files
 
-**Built October 24; save/download acceptance remains open October 25.** The
-user's two replies supplied inline worksheets and denied persistence, without a
-saved workbook link. They do not establish retained evidence or a saved worksheet.
-The canonical case remains Audrey's working record. A successful new worksheet save adds a
-server-created workbook link to the saved native answer. The client reconciles
-that link after completion without resetting the next message or attachments.
-The Toolbox and Private project offer Download workbook for existing saved
-reviews, including partial work. No workbook is generated merely by opening a
-case or saving facts.
+**Accepted October 26.** The user's downloaded XLSX retains the complete Form
+8911 termination-date excerpt and both dates, with original PDF spacing and source
+provenance. The earlier bill-name fragment is also retained. The canonical case
+save and real chat workbook download are passed. This establishes persistence
+and delivery, not broader tax comparison or eligibility accuracy.
 
-**October 25 UI restoration fix:** reopening a saved case now selects Tax review
-once its initial lookup succeeds. Previously the Toolbox returned while the
-composer silently remained Automatic; that request legitimately used the ordinary
-Private panel without tax_review. Normal Send/Enter waits for unresolved case
-loading or explicit Tax setup. Failures offer Reload settings or a deliberate
-Automatic choice. Later case refreshes preserve that explicit choice; retries
-restore the attempted skill, using saved run metadata after reload. Private chats
-without a case resolve to Automatic. The fix changes no backend or model settings.
-Focused browser/component checks, typecheck/build and changed-surface lint pass;
-the existing unrelated ChatWorkspace lint baseline is unchanged. Rebuild only
-audrey-ui for this followup. The deployed trace confirms the earlier omitted-skill
-path; the subsequent fresh case exposed a separate exact-quotation failure.
+Saved cases reopen with Tax review selected after their initial lookup succeeds.
+An explicit Automatic choice stays respected. The server supplies current case
+state before each Tax turn, and paused replies without a current worksheet say
+it was not saved. A completed chat message alone does not establish persistence.
 
-**October 25 source-capture repair:** six attempts to save the full PDF passage
-failed; only a bill-name fragment was retained, with no worksheet. Private Tax
-read_reference now returns an opaque source_ref for the exact visible reader
-excerpt (at most 2,000 characters, with paging). record_evidence accepts that
-reference and a claim; the server supplies the document/revision/page/offset/text
-and the current case pin, then performs the existing exact source verification.
-The model cannot override those fields or set verified applicability. References
-are bounded and valid only in that run; expired/forged selections require another
-read. The saved record contains the original passage, not the temporary reference.
-Legacy explicit quotations retain strict matching. Historical reads, ordinary
-Private and external APIs do not gain this Tax-only capture path.
+Tax page reads return a bounded, run-bound `source_ref` for their exact visible
+excerpt. `record_evidence` resolves document/revision/page/offset/text on the
+server and rechecks the pinned source; no model retyping, fuzzy matching or
+provenance override. Expired/forged selections require another read. The saved
+record contains the actual passage, not its temporary reference. Historical and
+ordinary reference/API behavior keep their existing contracts.
 
-The server supplies current canonical case state before model work. A paused
-reply without a current worksheet explicitly reports that no worksheet/new workbook
-link was saved. A completed chat message does not establish persistence. This
-change does not force a model to comply or certify the review; the task remains
-paused when work is unfinished. Source-capture, runtime and export boundaries are
-locally verified. Rebuild only audrey, then verify one real same-case save/download;
-acceptance remains open until its workbook contains the full source excerpt.
+A successful new worksheet save adds a protected revision-bound workbook link to
+the canonical answer. The Toolbox and Private Project also offer Download
+workbook. Client reconciliation preserves the next draft and attachments. Facts
+or inline prose alone do not generate a workbook. Exports contain Overview,
+Facts, Evidence, Calculations and Unresolved items, with literal values, exact
+passages/citations, unknowns and the selected-source/conditional-arithmetic scope.
+No formulas, macros or fetched spreadsheet content are executed.
 
-The authenticated prepare route binds the displayed case revision and captures
-an immutable local JSON snapshot. The download route renders that snapshot on
-first use and reuses its XLSX afterward. A revision mismatch asks the user to
-reload rather than silently exporting a different case. Current facts can be
-exported alongside an older worksheet, which is clearly marked stale. Old links
-retain their own revision until expiry/eviction; they never switch to newer facts.
+The prepare route snapshots the displayed case revision; first download renders
+that immutable snapshot locally with openpyxl. Concurrent requests reuse it. Old
+links never switch to newer facts; a stale prepare requires reload. The cache
+lives beside the application database in `tax-review-exports`: at most 30 days,
+eight snapshots/case, 512 snapshots/128 MiB total, 512 KiB/snapshot and
+8 MiB/4,096 rows/workbook, with two render jobs. Capacity can evict sooner;
+expired links direct users to the current Toolbox export. Canonical case data
+persists independently. A database backup does not retain every old snapshot.
 
-The five sheets are Overview, Facts, Evidence, Calculations and Unresolved items.
-They include retained exact passages, edition/page/checksum and available original
-citations, saved fact statuses, source conflicts and named decimal arithmetic.
-Values are literal text, including exact decimal results; there are no executable
-formulas, macros or fetched spreadsheet links. Unknowns and the selected-source/
-conditional-arithmetic scope remain explicit. Exports do not determine eligibility
-or turn a partial review into a complete return.
+Owner/case checks precede and follow rendering; downloads stream an open file
+handle. Conversation deletion and account purge remove derived exports; Project
+deletion retains its conversations. Export failures do not discard saved evidence.
+Downloaded spreadsheets do not edit case facts. No Nextcloud/Collabora dependency.
 
-The cache lives beside the application database under tax-review-exports in the
-existing persisted application volume. Defaults bound snapshots to 512 KiB,
-workbooks to 8 MiB/4,096 rows, rendering to two concurrent jobs, each case to eight
-snapshots, and the total cache to 512 snapshots/128 MiB. Retention is at most
-30 days and capacity eviction can remove older downloads sooner. Expired chat
-links direct users to the current Toolbox workbook. Downloaded copies remain in
-the user's possession. Current exports can be rebuilt from saved case data; an
-application-database backup alone does not retain every older export snapshot.
-
-Rendering runs outside SQLite transactions and the event loop, with concurrent
-requests deduplicated. Owner/case identity is checked before and after rendering.
-Downloads stream an already-open file handle, avoiding incomplete responses if
-cache eviction unlinks its path. Conversation deletion, including archived cases,
-and account purge remove derived files; refused deletion restores availability.
-Project deletion keeps its cases/exports under the established retain-conversation
-contract. Generated outputs bypass upload extraction/indexing. Export failure
-leaves saved evidence and the answer usable; errors stay within the download UI.
-
-Tool feedback explicitly identifies successful case writes. A final-answer
-quotation alone does not persist evidence. The earlier Form 8911 passage's save
-remains unverified; this implementation does not retroactively claim it was saved.
-
-Nextcloud/Collabora and DOCX are outside this implementation. Optional later
-browser editing/collaboration needs verified per-user mapping and a deliberate
-import/review path before spreadsheet edits can alter case facts. Nextcloud's
-[authenticated WebDAV API](https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html)
-can support that separate destination when needed. Shared general-purpose file
-creation is now queued in Phase 11; this Tax-only cache is not its permanent
-My files storage.
-
-Backend checks cover retained evidence/citations, exact revisions, literal cells,
-concurrent reuse, capacity, failures, authorization, deletion/purge and native
-answer delivery. UI checks cover on-demand download, stale/error handling, saved
-chat links and preserving an unsent draft/attachment during final reconciliation.
-Type checking and the production build pass; the existing unrelated UI lint
-baseline is unchanged. This is local verification, not deployed acceptance.
-
-Initial 20F deployment rebuilds audrey and audrey-ui on Tower. The October 25
-UI restoration needs audrey-ui; the later source-capture repair rebuilds only
-audrey after the normal commit/push/pull.
-No schema/config/sidecar/model or IRS-index work is needed. In the browser,
-reload the same saved Private Tax conversation and check Tools and skills says
-Tax review before sending through the normal composer. Ask to retain the Form
-8911 page-1 passage and save only that worksheet item, leaving other topics open.
-A pass requires the server-created workbook link and the exact passage/citation
-inside its Evidence sheet; inline prose is insufficient. Keep the conversation
-until this save/download check is resolved. No upload or broad comparison rerun
-is needed. Existing exact-revision/download/fact-edit checks remain part of the
-export acceptance, not extra model-quality runs.
+Shared general file creation is built in [Phase 11](phase-11-native-file-explorer.md#generated-files),
+using the permanent My files lifecycle. Tax workbook snapshots remain this scoped
+case export. The accepted save/download flow needs no repeat test or index/model
+change; broader tax coverage limits above remain recorded.
 
 ## Deployment and testing
 

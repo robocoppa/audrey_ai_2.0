@@ -29,6 +29,13 @@ PRIVATE_PROCESSING_GUARDS_SQL: tuple[str, ...] = (
     """,
 )
 
+PROJECT_FILE_ORIGIN_GUARD_SQL = """
+CREATE TRIGGER IF NOT EXISTS trg_app_project_files_origin_immutable
+  BEFORE UPDATE OF origin ON app_project_files WHEN OLD.origin != NEW.origin
+  BEGIN SELECT RAISE(ABORT, 'project file origin is immutable'); END
+"""
+
+
 MIGRATIONS: tuple[tuple[int, str], ...] = (
     (
         1,
@@ -1066,6 +1073,13 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON app_private_tasks(status, lease_expires_at, created_at, task_id);
         """,
     ),
+    (
+        25,
+        """
+        ALTER TABLE app_project_files ADD COLUMN origin TEXT NOT NULL DEFAULT 'upload'
+          CHECK (origin IN ('upload', 'generated'));
+        """ + PROJECT_FILE_ORIGIN_GUARD_SQL + ";",
+    ),
 )
 
-__all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL"]
+__all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

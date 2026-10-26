@@ -102,6 +102,7 @@ class ProjectFileResponse(BaseModel):
     status: str
     uploaded_at: str
     added_at: str
+    origin: Literal["upload", "generated"] = "upload"
 
 
 class ProjectFileListResponse(BaseModel):
@@ -157,6 +158,7 @@ def _project_file_response(
         status=row.status,
         uploaded_at=row.uploaded_at,
         added_at=relation.added_at,
+        origin=row.origin,
     )
 
 
@@ -346,6 +348,7 @@ async def add_project_file(
                 raise HTTPException(status_code=422, detail="Project files must be ready or processing.")
             relation = await _store(request).projects.add_file(
                 user_id=principal.user_id, project_id=project_id, file_id=payload.file_id,
+                file_origin=row.origin,
             )
         else:
             with processing_scope(runtime.policy):
@@ -355,7 +358,7 @@ async def add_project_file(
                     relation = await native_files.upload_routes._settle_private_persistence(
                         _store(request).projects.add_file(
                             user_id=principal.user_id, project_id=project_id,
-                            file_id=payload.file_id, file_is_private=True,
+                            file_id=payload.file_id, file_is_private=True, file_origin=row.origin,
                         )
                     )
                     # Deletion marks its tombstone before waiting on this lock.
@@ -388,7 +391,10 @@ async def _validate_private_project_file(
         raise HTTPException(status_code=404, detail="File not found.")
     if (
         not owned.get("private_required") or owned.get("kind") != "text"
-        or owned.get("collection") != private_text_collection(principal.storage_namespace)
+        or not (
+            (owned.get("origin", "upload") == "upload" and owned.get("collection") == private_text_collection(principal.storage_namespace))
+            or (owned.get("origin") == "generated" and owned.get("collection") == "" and owned.get("chunks") == 0)
+        )
         or owned.get("status") != "ready" or owned.get("source_freed_at")
     ):
         raise HTTPException(

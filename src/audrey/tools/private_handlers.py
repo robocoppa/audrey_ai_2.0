@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 SUPPORTED_PRIVATE_TOOL_NAMES = frozenset({
     "calculate", "list_my_files", "get_file_text", "analyze_table", "kb_search",
-    "reference_lookup", "read_reference", "reference_search",
+    "reference_lookup", "read_reference", "reference_search", "create_file",
 })
 
 
@@ -87,7 +87,8 @@ def make_private_tool_handlers(
         for row in rows:
             if not row.get("private_required") or row.get("status") != "ready" or row.get("kind") != "text":
                 continue
-            if (row.get("collection") != private_text_collection(user)
+            generated = row.get("origin") == "generated" and not row.get("collection")
+            if ((not generated and row.get("collection") != private_text_collection(user))
                     or row.get("source_freed_at")):
                 invalid += 1
                 continue
@@ -206,7 +207,8 @@ def make_private_tool_handlers(
         offset = min(body.offset, len(text))
         end = min(offset + 2_000, len(text))
         identity = {}
-        if tax_conversation_id is not None and artifact == "document":
+        if (tax_conversation_id is not None and artifact == "document"
+                and row.get("origin") != "generated"):
             from audrey.tax_documents import private_source_identity
 
             identity = await private_source_identity(app, principal, str(row["file_id"]))
@@ -216,6 +218,7 @@ def make_private_tool_handlers(
             "total_chars": len(text),
             "note": " ".join(part for part in (
                 "This is a page of the owned document; follow next_offset for the rest." if end < len(text) else "",
+                "Generated working output; not independent source evidence." if row.get("origin") == "generated" else "",
                 duplicate_notice(row),
             ) if part),
         }
@@ -225,7 +228,7 @@ def make_private_tool_handlers(
 
         body = _SearchRequest.model_validate(args)
         guard(body.user)
-        rows = await ready_rows()
+        rows = [row for row in await ready_rows() if row.get("origin") != "generated"]
         if body.filename:
             rows = [row for row in rows if str(row["filename"]).strip().casefold() == body.filename.strip().casefold()]
         if not rows:
@@ -289,7 +292,16 @@ def make_private_tool_handlers(
             result = await asyncio.to_thread(analyze_table, source.path, mime, spec)
         return {**result, "filename": str(row["filename"]), "artifact": "table", "file_id": str(row["file_id"]), "note": duplicate_notice(row)}
 
+    async def create_file(args: dict[str, Any]) -> dict:
+        guard()
+        from audrey.tools.native_files import native_file_handler
+
+        # In task runs this alias is wrapped by the existing step tool budget
+        # and lease guard. The native binding supplies conversation/run IDs.
+        return await native_file_handler(user_id=user)(args)
+
     handlers = {
+        "create_file": create_file,
         "calculate": calculate, "reference_lookup": lookup, "read_reference": read,
         "reference_search": search, "list_my_files": list_files,
         "get_file_text": file_text, "analyze_table": table, "kb_search": kb_search,

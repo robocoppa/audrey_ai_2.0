@@ -293,6 +293,7 @@ export interface AudreyProjectList extends ListResponse<AudreyProject> {
 }
 
 export interface AudreyProjectFile {
+  origin?: "upload" | "generated";
   id: string;
   filename: string;
   mime: string;
@@ -310,6 +311,7 @@ export interface AudreyProjectFileList {
 
 export interface AudreyFile {
   id: string;
+  origin?: "upload" | "generated";
   private_required?: boolean;
   filename: string;
   mime: string;

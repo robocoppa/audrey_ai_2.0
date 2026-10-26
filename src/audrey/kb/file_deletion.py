@@ -219,7 +219,11 @@ class FileDeletionWorker:
             )
             upload = await self._db.get_upload(file_id)
             protected = bool(upload and upload.get("user") == user and upload.get("private_required", False))
-            if protected:
+            if upload and upload.get("user") == user and upload.get("origin") == "generated":
+                # Generated outputs never enter the vector index. Their disk and
+                # quota lifecycle must remain usable during a Qdrant outage.
+                collections = ()
+            elif protected:
                 collections = (*collections, private_text_collection(user))
             outcomes = await asyncio.gather(
                 *(

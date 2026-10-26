@@ -205,7 +205,7 @@ class PrivateTasksRepository:
             [
                 item["file_id"]
                 for item in self._conn.execute(
-                    "SELECT file_id FROM app_project_files WHERE project_id=? ORDER BY file_id",
+                    "SELECT file_id FROM app_project_files WHERE project_id=? AND origin='upload' ORDER BY file_id",
                     (row["project_id"],),
                 ).fetchall()
             ]

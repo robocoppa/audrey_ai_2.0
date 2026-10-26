@@ -329,3 +329,18 @@ def test_http_boundary_parses_owned_references_and_rejects_foreign(library, stre
         assert response.headers["content-type"].startswith("text/event-stream")
     else:
         assert response.json()["output_text"] == "ORCHID-42"
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_generated_working_output_is_readable_without_becoming_source_evidence(library, stream):
+    row, path = library.add(filename="working.json", mime="application/json", text='{"draft":"ORCHID-42"}')
+    row.origin = "generated"
+    row.chunks = 0
+    path.with_suffix(".ocr.txt").write_text('{"draft":"ORCHID-42"}')
+    await routes.create_response(
+        _payload({"type": "input_file", "file_id": "file_doc"}, stream=stream),
+        library.request, library.user,
+    )
+    content = library.captured[0][0].messages[0].content[1]["text"]
+    assert content.startswith("Attached generated working output (quoted JSON), not independent source evidence.")
+    assert json.loads(content.split("\n", 1)[1])["text"] == '{"draft":"ORCHID-42"}'
