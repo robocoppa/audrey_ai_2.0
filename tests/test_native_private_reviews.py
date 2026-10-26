@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
 from test_native_private_workflow import _conversation, _settle
 from test_native_private_workflow import document_setup as document_setup
 from test_native_private_workflow import native as native
@@ -386,3 +387,32 @@ async def test_native_statement_binding_cannot_use_an_earlier_turn_as_current_au
                                            conversation_id=conversation["id"])
     assert saved["facts"] == case["facts"]
     assert saved["facts"][0]["status"] == "proposed"
+
+
+@pytest.mark.parametrize("answer_length", [38, 63990])
+async def test_prose_without_worksheet_stays_paused_and_is_explicitly_unsaved(native, answer_length):
+    state = native
+    conversation, original = await saved_case(state)
+    async def prose(execution_app, payload, messages, options, *, event_context, model_tools, **_kwargs):
+        assert "tax_review" in model_tools.by_name
+        assert any("Current saved Tax review case" in str(message.get("content")) for message in messages)
+        emitter = event_context.emitter
+        emitter.run_started()
+        emitter.message_started()
+        emitter.text_delta("x" * answer_length)
+        emitter.message_finished(status="completed")
+        emitter.run_finished(status="succeeded", finish_reason="stop")
+        yield "terminal"
+    state.manager._stream_factory = prose
+    run = await start_review(state, conversation["id"], "Retain the passage and save the worksheet.")
+    await _settle(state, run["id"])
+    messages = await state.store.conversations.list_messages(user_id=state.owner.user_id, conversation_id=conversation["id"])
+    assert "Worksheet not saved." in messages[-1].content
+    assert len(messages[-1].content) <= 64000
+    assert ("Reply shortened" in messages[-1].content) is (answer_length == 63990)
+    assert "No new workbook link was created." in messages[-1].content
+    assert "Download review workbook" not in messages[-1].content
+    case = await state.store.tax_cases.get(user_id=state.owner.user_id, conversation_id=conversation["id"])
+    assert case["revision"] == original["revision"] and case["evidence"] == []
+    task = await task_status(state, conversation["id"])
+    assert task["status"] == "paused"

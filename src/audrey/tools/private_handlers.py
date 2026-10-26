@@ -67,6 +67,11 @@ def make_private_tool_handlers(
         or not principal.storage_namespace.strip()
     ):
         raise ProcessingPolicyError("private_tool_not_allowed")
+    evidence_readings = None
+    if tax_conversation_id is not None and "tax_review" in policy.allowed_tools:
+        from audrey.tax_review import TaxEvidenceReadings
+
+        evidence_readings = TaxEvidenceReadings()
     request = Request({"type": "http", "app": app})
     user = principal.storage_namespace
 
@@ -155,7 +160,8 @@ def make_private_tool_handlers(
     async def read(args: dict[str, Any]) -> dict:
         guard()
         body, _ = reference_body(references.ReadRequest, args)
-        return await references.read(body, request, None)
+        result = await references.read(body, request, None)
+        return evidence_readings.offer(result) if evidence_readings is not None else result
 
     async def search(args: dict[str, Any]) -> dict:
         guard()
@@ -293,6 +299,7 @@ def make_private_tool_handlers(
 
         handlers["tax_review"] = make_tax_review_handler(
             app=app, principal=principal, conversation_id=tax_conversation_id,
+            evidence_readings=evidence_readings,
         )
     return MappingProxyType({name: handler for name, handler in handlers.items() if name in policy.allowed_tools})
 

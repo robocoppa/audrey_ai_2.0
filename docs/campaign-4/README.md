@@ -105,14 +105,16 @@ the attempted skill. Browser/component checks, typecheck and build pass locally.
 Rebuild only audrey-ui after pull for this fix, then check one saved-case reload
 and save/download. No model/budget/backend/index change or broader comparison run.
 
-
-**Deployed save diagnosis October 25:** the runtime source matches this checkout.
-Earlier turns omitted Tax review; the latest selected it and called the case tool,
-but all evidence writes were refused and no worksheet save was attempted. The
-case is empty; the durable task has budget remaining. Existing validation refusals
-now have content-free diagnostic codes retained in native tool errors. Acceptance
-stays open: rebuild only audrey for this diagnostic change, then repeat one scoped
-save and inspect its new error codes. No model, prompt, budget or export change.
+**Tax evidence capture fix built October 25.** The fresh trace retained only a
+bill-name fragment after six exact-quotation failures and never saved a worksheet.
+Tax page reads now return a run-bound source selection; saving resolves the exact
+reader text/provenance on the server and rechecks the pinned source. The model
+need not reproduce PDF spacing or checksums. Each turn receives canonical case
+state; paused replies without a current worksheet explicitly say it was not saved.
+Focused source-capture, runtime and real-workbook checks pass locally. Rebuild only
+audrey, then test one same-case passage save and chat workbook download. The
+Evidence sheet must contain the full excerpt. Save/download acceptance remains
+open; no broader model evaluation or index work is queued.
 
 No broader repeat test is queued. A later
 decision to improve broader autonomous review starts from this saved run's
@@ -224,7 +226,14 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **20F built — review files:** on-demand local XLSX snapshots, authenticated
   chat/Toolbox/project downloads, bounded reuse/retention and deletion cleanup.
   Backend/UI verification passed; targeted browser acceptance remains.
-  Nextcloud and DOCX wait for a concrete editing/collaboration/reporting need.
+  Browser editing/collaboration remains optional; shared file creation is next.
+- [ ] **Next: shared file creation.** Ordinary Audrey tasks can produce owned
+  downloadable files, shown in chat/My files and linked to the current Project.
+  Private creation stays local. Initial text/Markdown, CSV/JSON, DOCX and XLSX
+  renderers reuse existing libraries and file ownership/download lifecycle.
+  Derived outputs stay distinguishable from uploaded evidence; creation is
+  retry-safe. The [Phase 11 contract](phase-11-native-file-explorer.md#generated-files-next-slice)
+  owns this slice; it is not built by the Tax-specific export cache.
 
 Tax year/jurisdiction and reference release remain in the case record. Project
 views read that canonical record rather than duplicate it in Project instructions. OCR/media, fine-tuning and state
@@ -257,9 +266,10 @@ remain deferred. 17C is a future diagnostic note for an actual reported failure.
   evidence; they are not fresh acceptance data after tuning.
 - Background generation, webhooks, Conversations API, historical imports,
   broader media analysis, and model/config experiments require a real need.
-- General document/spreadsheet authoring remains in the existing Hermes Bot
-  Tools MCP, Nextcloud and Collabora setup. Tax review workbook downloads are
-  scoped projections of saved Audrey cases, with no general office editor.
+- Audrey may generate user-owned documents/spreadsheets for general chat tasks.
+  Shared file creation is queued in Phase 11; the existing Tax exporter is one
+  scoped output path. Interactive office editing/collaboration stays in the
+  existing Hermes Bot Tools MCP, Nextcloud and Collabora setup; no adapter change.
 - Analyze ordinary accumulated traffic for cost/quality questions; do not
   generate workloads simply to satisfy an old checklist.
 

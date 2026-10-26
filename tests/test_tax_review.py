@@ -25,7 +25,7 @@ from audrey.user_data_visibility import block_remote_personal_reads, unblock_rem
 
 
 @pytest.fixture
-async def state(tmp_path):
+async def state(tmp_path, request):
     store = ApplicationStore(tmp_path / "app.sqlite")
     owner = await store.resolve_external_identity(
         provider="test", subject="owner", email="alice@example.com", display_name="Alice",
@@ -35,7 +35,7 @@ async def state(tmp_path):
     root = tmp_path / "irs"
     source = _entry()
     with ArchiveStore(root) as archive:
-        _record(archive, [source], content=_pdf("Dated official supporting passage."))
+        _record(archive, [source], content=_pdf(getattr(request, "param", "Dated official supporting passage.")))
     registry = _registry(root)
     metadata = registry.lookup("irs-federal", document_id(source.source_url))
     releases = ReleaseStore(tmp_path / "reference-state")

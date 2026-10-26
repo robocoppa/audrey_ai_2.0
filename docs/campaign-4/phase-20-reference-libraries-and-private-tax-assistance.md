@@ -1062,15 +1062,28 @@ restore the attempted skill, using saved run metadata after reload. Private chat
 without a case resolve to Automatic. The fix changes no backend or model settings.
 Focused browser/component checks, typecheck/build and changed-surface lint pass;
 the existing unrelated ChatWorkspace lint baseline is unchanged. Rebuild only
-audrey-ui for this followup. The subsequent Tower trace confirms the two earlier
-requests omitted the skill. Its latest request selects Tax review correctly but
-has three evidence writes refused, leaving an empty case and no worksheet save.
-The durable task still has budget; workbook export is not reached. Imported source
-hashes match the checkout. Fixed content-free validation error codes now survive
-in native tool error_code, without recording quotations or full arguments. This
-diagnostic change preserves validation and HTTP status/detail; rebuild only
-audrey, then inspect one new scoped save attempt. Prior generic failures cannot
-be decoded retroactively. Save/download acceptance remains open.
+audrey-ui for this followup. The deployed trace confirms the earlier omitted-skill
+path; the subsequent fresh case exposed a separate exact-quotation failure.
+
+**October 25 source-capture repair:** six attempts to save the full PDF passage
+failed; only a bill-name fragment was retained, with no worksheet. Private Tax
+read_reference now returns an opaque source_ref for the exact visible reader
+excerpt (at most 2,000 characters, with paging). record_evidence accepts that
+reference and a claim; the server supplies the document/revision/page/offset/text
+and the current case pin, then performs the existing exact source verification.
+The model cannot override those fields or set verified applicability. References
+are bounded and valid only in that run; expired/forged selections require another
+read. The saved record contains the original passage, not the temporary reference.
+Legacy explicit quotations retain strict matching. Historical reads, ordinary
+Private and external APIs do not gain this Tax-only capture path.
+
+The server supplies current canonical case state before model work. A paused
+reply without a current worksheet explicitly reports that no worksheet/new workbook
+link was saved. A completed chat message does not establish persistence. This
+change does not force a model to comply or certify the review; the task remains
+paused when work is unfinished. Source-capture, runtime and export boundaries are
+locally verified. Rebuild only audrey, then verify one real same-case save/download;
+acceptance remains open until its workbook contains the full source excerpt.
 
 The authenticated prepare route binds the displayed case revision and captures
 an immutable local JSON snapshot. The download route renders that snapshot on
@@ -1113,7 +1126,9 @@ Nextcloud/Collabora and DOCX are outside this implementation. Optional later
 browser editing/collaboration needs verified per-user mapping and a deliberate
 import/review path before spreadsheet edits can alter case facts. Nextcloud's
 [authenticated WebDAV API](https://docs.nextcloud.com/server/stable/developer_manual/client_apis/WebDAV/basic.html)
-can support that separate destination when needed.
+can support that separate destination when needed. Shared general-purpose file
+creation is now queued in Phase 11; this Tax-only cache is not its permanent
+My files storage.
 
 Backend checks cover retained evidence/citations, exact revisions, literal cells,
 concurrent reuse, capacity, failures, authorization, deletion/purge and native
@@ -1123,7 +1138,8 @@ Type checking and the production build pass; the existing unrelated UI lint
 baseline is unchanged. This is local verification, not deployed acceptance.
 
 Initial 20F deployment rebuilds audrey and audrey-ui on Tower. The October 25
-restoration followup needs only audrey-ui after the normal commit/push/pull.
+UI restoration needs audrey-ui; the later source-capture repair rebuilds only
+audrey after the normal commit/push/pull.
 No schema/config/sidecar/model or IRS-index work is needed. In the browser,
 reload the same saved Private Tax conversation and check Tools and skills says
 Tax review before sending through the normal composer. Ask to retain the Form

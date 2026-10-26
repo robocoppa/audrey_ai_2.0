@@ -35,3 +35,27 @@ status check. Existing file ingestion/reuse acceptance remains closed.
 Sources, Models, and Tool calls form one controlled popover group: opening one closes the others; outside click or Escape closes the current popover. Live activity and saved answers follow the same behavior.
 
 Model telemetry is a separate operations phase; it is not another Phase 11 file-explorer slice.
+
+## Generated files — next slice
+
+**Requested October 25; queued, not implemented.** File creation is a shared
+Audrey capability for ordinary tasks and Private work. Tax workbooks are one
+consumer, not the definition of that capability.
+
+- A server-owned creation tool renders supported formats from model-supplied
+  content; no model-chosen filesystem paths or executable renderer code.
+- Generated files belong to the authenticated user, appear in My files, link to
+  the current owned Project when appropriate, and download directly from chat.
+  Reuse the existing file catalog/authorization/deletion lifecycle rather than
+  treating the Tax export cache as the permanent user library.
+- Start with text/Markdown, CSV/JSON, DOCX and XLSX. Python's existing standard
+  library, python-docx and openpyxl cover these formats locally.
+- Private creation and processing stay local. Derived outputs remain distinct
+  from uploaded/source evidence. Repeated calls/retries must not duplicate or
+  overwrite a user's file accidentally; changes need explicit revision handling.
+- Verify one ordinary creation/download and one Private Project creation via the
+  real browser, including My files visibility and owner isolation. The Tax
+  passage-save/workbook check remains the immediate pending acceptance boundary.
+
+This adds file generation/download, not an in-browser office editor. Existing
+Hermes/Nextcloud/Collabora integrations retain their current behavior.
