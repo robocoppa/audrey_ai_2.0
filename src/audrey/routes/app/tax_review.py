@@ -123,6 +123,51 @@ async def download_workbook(
     )
 
 
+@router.get("/conversations/{conversation_id}/tax-review/exports/{export_id}/preview")
+async def preview_workbook(
+    conversation_id: str, export_id: str, request: Request,
+    principal: Principal = Depends(_access),
+):
+    import io
+
+    from fastapi.responses import JSONResponse
+
+    from audrey.file_previews import MAX_SOURCE_BYTES, workbook_preview
+    from audrey.routes.files import _settle_private_persistence
+    from audrey.tax_exports import TaxExportError
+
+    case = await get_tax_case(request.app, principal, conversation_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Tax review case not found.")
+    exports = getattr(request.app.state, "tax_review_exports", None)
+    if exports is None:
+        raise HTTPException(status_code=503, detail="Workbook previews are temporarily unavailable.")
+    try:
+        artifact = await exports.download(user_id=principal.user_id, case=case, export_id=export_id)
+    except TaxExportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    try:
+        if artifact.size > MAX_SOURCE_BYTES:
+            raise ValueError("Preview limit")
+        # Finish the short descriptor read before closing it on cancellation.
+        data = await _settle_private_persistence(asyncio.to_thread(artifact.file.read, MAX_SOURCE_BYTES + 1))
+        if len(data) > MAX_SOURCE_BYTES:
+            raise ValueError("Preview limit")
+        result = await asyncio.to_thread(workbook_preview, io.BytesIO(data))
+    except Exception:  # noqa: BLE001 - never expose parser contents or host paths
+        raise HTTPException(status_code=422, detail="Preview is unavailable. You can still download the workbook.") from None
+    finally:
+        artifact.close()
+    current = await get_tax_case(request.app, principal, conversation_id)
+    if current is None or current["id"] != case["id"]:
+        raise HTTPException(status_code=404, detail="Tax review case not found.")
+    return JSONResponse(
+        {"id": export_id, "filename": artifact.filename, **result},
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+                 "X-Tax-Case-Revision": str(artifact.case_revision)},
+    )
+
+
 class PrivateTaskAction(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     expected_revision: int = Field(ge=1)

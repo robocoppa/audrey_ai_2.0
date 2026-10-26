@@ -369,6 +369,38 @@ async def download_file(
     )
 
 
+@router.get("/files/{file_id}/preview")
+async def preview_file(
+    file_id: str, request: Request, response: Response,
+    principal: Principal = Depends(_files_access),
+) -> dict:
+    """Preview an owned generated output without downloads or model calls."""
+    from audrey.file_previews import preview_generated_file
+
+    async with request.app.state.file_operation_locks.hold(file_id):
+        row = await _owned_row(request, principal, file_id)
+        if row.origin != "generated":
+            raise HTTPException(status_code=422, detail="Use the existing file viewer for uploaded documents.")
+        if row.status != "ready" or row.source_freed_at:
+            raise HTTPException(status_code=410, detail="The saved file is unavailable.")
+        path = _source_path(request, principal, row)
+        if not await asyncio.to_thread(path.is_file):
+            raise HTTPException(status_code=410, detail="The saved file is unavailable.")
+        try:
+            preview = await asyncio.to_thread(
+                preview_generated_file, path, format=path.suffix.lower().lstrip("."),
+                text_path=path.with_name(f"{file_id}.ocr.txt"),
+            )
+        except Exception:  # noqa: BLE001 - parsers must not reveal document contents or host paths
+            raise HTTPException(status_code=422, detail="Preview is unavailable. You can still download the file.") from None
+        # Recheck canonical ownership/deletion after file parsing, just as the
+        # original viewer does before exposing owner contents.
+        await _owned_row(request, principal, file_id)
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return {"id": file_id, "filename": row.filename, **preview}
+
+
 @router.get("/files/{file_id}/text", response_model=NativeFileTextResponse)
 async def get_file_text(
     file_id: str,

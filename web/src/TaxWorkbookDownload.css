@@ -10,3 +10,5 @@
 .tax-workbook-link .tax-workbook-error { display: block; margin-top: 0.3rem; }
 .tax-project-case > .tax-workbook-download { margin: 0 0 0.85rem; }
 @media (max-width: 600px) { .tax-workbook-download .tax-workbook-button { min-height: 2.5rem; } }
+
+.tax-workbook-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem; }

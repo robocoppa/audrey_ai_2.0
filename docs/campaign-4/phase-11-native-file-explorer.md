@@ -1,6 +1,6 @@
 # Campaign 4 Phase 11 — native file explorer
 
-**Status:** Explorer accepted. Shared file creation built October 26; browser acceptance pending.
+**Status:** Explorer and shared file creation accepted October 26. Browser previews built; acceptance pending.
 
 ## Library model
 
@@ -67,17 +67,43 @@ workbooks retain their separate revision-bound export contract.
 This provides file generation/download. The existing Hermes/Nextcloud/Collabora
 office editor integration keeps its current behavior.
 
+Shared creation/download and owned library/Project visibility are accepted
+October 26: all three ordinary DOCX/XLSX and Private Markdown outputs worked.
+
+## Browser previews
+
+Generated chat and Project file links have Preview beside Download. My files >
+Open uses the same content viewer for generated files. It displays readable DOCX
+paragraphs, formatted Markdown, plain text/JSON, and CSV/XLSX tables with numbered
+rows and column headings. Multiple worksheets have keyboard-accessible tabs.
+The modal fits desktop/mobile screens, closes with Escape/outside click/Close,
+restores trigger focus and preserves the unsent chat draft. Download remains
+available. Existing uploaded document/image/media viewers retain their contracts.
+
+The backend returns bounded read-only JSON, using saved generated document text
+and locally parsed spreadsheet values. It does not evaluate formulas, load remote
+workbook links or run model/index calls. Markdown suppresses raw HTML and remote
+images. Previews enforce owner/scope checks, file locks, deletion rechecks and
+private no-store headers. The same viewer supports saved Tax workbook revisions,
+using the existing owner/case authorization, revision cache and expiry behavior.
+Nothing in a preview changes case facts or the file itself.
+
+Preview limits are eight sheets, 200 rows/sheet, 32 columns, 100,000 total text
+characters and 1,000 DOCX paragraphs. Source input is at most 8 MiB, with bounded
+ZIP inflation. Any omitted content has an explicit partial-preview notice; the
+original remains downloadable. These are content previews, not office editors.
+
 ### Deployment and acceptance
 
-After the user's normal commit/push, run on Tower in
-`/mnt/user/appdata/audrey_ai_2.0`: pull, then
-`docker compose up -d --build audrey audrey-ui`. The additive schema migration runs
-at backend startup. No sidecar rebuild, configuration, model pull or reindex.
+After normal commit/push, run on Tower in `/mnt/user/appdata/audrey_ai_2.0`:
+pull, then `docker compose up -d --build audrey audrey-ui`. No schema/config,
+sidecar, model, dependency or index change.
 
-At `https://ai.builtryte.xyz`, request a small ordinary DOCX/XLSX, download and open
-it, and check Created by Audrey in My files. In an existing Private Project,
-request a short Markdown/text output; check chat download, Project membership and
-My files. Reload and verify the link remains usable. No upload is needed; these
-prompts generate model/tool calls. Backend owner-isolation, quota, retry/deletion,
-Private task/source boundaries and real-format checks are hermetic; browser
-acceptance remains the final gate. No separate smoke document.
+At `https://ai.builtryte.xyz`, use Preview beside the three existing generated
+chat links. DOCX shows paragraphs, XLSX cells, Markdown formatted text. Check
+My files > Open and the Private Project file's Preview. The saved Tax workbook's
+Preview shows worksheet tabs and retained source content. Closing returns to chat
+with its draft intact; Download remains usable. No upload or generation needed.
+Backend/component checks, desktop/mobile browser checks, typecheck, production
+build and changed-file lint pass locally; this existing-file browser check is
+pending. No separate smoke document or repeated creation test.

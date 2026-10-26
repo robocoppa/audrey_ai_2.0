@@ -1082,7 +1082,14 @@ handle. Conversation deletion and account purge remove derived exports; Project
 deletion retains its conversations. Export failures do not discard saved evidence.
 Downloaded spreadsheets do not edit case facts. No Nextcloud/Collabora dependency.
 
-Shared general file creation is built in [Phase 11](phase-11-native-file-explorer.md#generated-files),
+Saved Tax workbook links and Toolbox/Project actions also offer a local read-only
+Preview with sheet tabs. It projects the same immutable cached revision and
+retained passages, with owner/case checks and no model calls or case mutation.
+The shared [browser preview contract](phase-11-native-file-explorer.md#browser-previews)
+owns limits and the pending existing-file browser check. Tax persistence and
+download acceptance stay closed.
+
+Shared general file creation is accepted in [Phase 11](phase-11-native-file-explorer.md#generated-files),
 using the permanent My files lifecycle. Tax workbook snapshots remain this scoped
 case export. The accepted save/download flow needs no repeat test or index/model
 change; broader tax coverage limits above remain recorded.

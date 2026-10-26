@@ -1,0 +1,55 @@
+.file-output-link { display: inline-flex; align-items: center; flex-wrap: wrap; gap: .55rem; }
+.file-output-link > .file-preview-trigger { display: inline-flex; align-items: center; gap: .35rem; padding: .2rem .5rem; border: 1px solid var(--border-strong); border-radius: .4rem; background: var(--surface-raised); color: var(--accent); font: inherit; font-size: .75rem; line-height: 1.6; cursor: pointer; }
+.file-preview-trigger svg { width: 1rem; height: 1rem; stroke: currentColor; fill: none; stroke-width: 1.6; }
+.file-preview-trigger:hover { border-color: var(--accent); background: var(--surface-active); }
+.file-preview-backdrop { position: fixed; z-index: 75; inset: 0; display: grid; place-items: center; padding: 1.25rem; background: rgb(2 7 16 / 80%); backdrop-filter: blur(.45rem); }
+.file-preview-dialog { display: flex; flex-direction: column; width: min(72rem, 100%); max-height: calc(100dvh - 2.5rem); min-height: 12rem; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 1rem; background: var(--surface); box-shadow: 0 2rem 6rem rgb(0 0 0 / 55%); color: var(--text-soft); }
+.file-preview-header { display: flex; align-items: center; justify-content: space-between; flex: none; gap: 1rem; padding: 1rem 1.2rem; border-bottom: 1px solid var(--border); }
+.file-preview-eyebrow { color: var(--muted); font-size: .65rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+.file-preview-header h2 { margin: .15rem 0 0; font-size: 1.1rem; }
+.file-preview-actions { display: flex; align-items: center; gap: .6rem; }
+.file-preview-actions button, .file-preview-error button { padding: .45rem .75rem; border: 1px solid var(--border-strong); border-radius: .5rem; background: var(--surface-raised); color: var(--accent); font: inherit; font-size: .8rem; cursor: pointer; }
+.file-preview-actions .file-preview-close { display: grid; place-items: center; width: 2.2rem; height: 2.2rem; padding: 0; font-size: 1.4rem; color: var(--muted); }
+.file-preview-actions button:hover, .file-preview-error button:hover { border-color: var(--accent); background: var(--surface-active); }
+.file-preview-content { display: flex; flex-direction: column; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 1rem 1.2rem; gap: 1rem; }
+.file-preview-name { flex: none; margin: 0; font-size: .9rem; overflow-wrap: anywhere; color: var(--muted); }
+.file-preview-document { max-width: 52rem; width: 100%; box-sizing: border-box; margin: 0 auto; padding: clamp(1rem, 3vw, 2.5rem); border: 1px solid var(--border); border-radius: .65rem; background: var(--surface-raised); color: var(--text-soft); line-height: 1.75; font-size: .9rem; overflow-wrap: anywhere; }
+.file-preview-document p { margin: 0 0 1rem; white-space: pre-wrap; }
+.file-preview-document p:last-child { margin-bottom: 0; }
+.file-preview-document h1, .file-preview-document h2, .file-preview-document h3 { margin: 1.3em 0 .6em; color: var(--text); line-height: 1.3; }
+.file-preview-document > :first-child { margin-top: 0; }
+.file-preview-document pre, .file-preview-text { margin: 0; max-width: 100%; padding: 1rem; border: 1px solid var(--border); border-radius: .6rem; background: var(--input-surface); color: var(--text-soft); font-family: var(--font-mono, ui-monospace, monospace); font-size: .8rem; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.file-preview-markdown a { color: var(--accent); }
+.file-preview-markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.file-preview-markdown th, .file-preview-markdown td { padding: .4rem .65rem; border: 1px solid var(--border); text-align: left; }
+.file-preview-omitted-image, .file-preview-status, .file-preview-notice, .file-preview-grid-caption { color: var(--muted); font-size: .78rem; line-height: 1.6; }
+.file-preview-status, .file-preview-notice { margin: 0; }
+.file-preview-error { margin: 0; padding: 1rem; color: var(--danger); font-size: .8rem; }
+.file-preview-error p { margin: 0 0 .6rem; }
+.file-preview-workbook { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: .65rem; }
+.file-preview-tabs { display: flex; flex: none; gap: .4rem; overflow: auto; padding-bottom: .2rem; }
+.file-preview-tabs button { flex: none; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: .5rem .85rem; border: 1px solid var(--border); border-radius: .5rem; background: var(--input-surface); color: var(--muted); font: inherit; font-size: .8rem; cursor: pointer; }
+.file-preview-tabs button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); background: var(--surface-active); }
+.file-preview-grid { min-height: 0; max-height: 65dvh; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border); border-radius: .6rem; background: var(--input-surface); }
+.file-preview-grid table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: .8rem; line-height: 1.5; }
+.file-preview-grid th, .file-preview-grid td { padding: .5rem .75rem; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.file-preview-grid td { min-width: 7rem; max-width: 28rem; white-space: pre-wrap; overflow-wrap: anywhere; vertical-align: top; }
+.file-preview-grid th { background: var(--surface-raised); color: var(--muted); font-weight: 500; text-align: center; }
+.file-preview-grid thead th { position: sticky; z-index: 2; top: 0; font-size: .7rem; }
+.file-preview-grid tbody th, .file-preview-grid thead th:first-child { position: sticky; z-index: 1; left: 0; width: 2.2rem; min-width: 2.2rem; max-width: 2.2rem; font-variant-numeric: tabular-nums; }
+.file-preview-grid thead th:first-child { z-index: 3; }
+.file-preview-grid .file-preview-number { text-align: right; font-variant-numeric: tabular-nums; }
+.file-preview-content .file-preview-notice { flex: none; }
+.file-preview-trigger:focus-visible, .file-preview-dialog :is(button,a,[tabindex="0"]):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.file-manager .file-preview-content { padding: 0; margin-top: .9rem; }
+@media (max-width: 600px) {
+  .file-preview-backdrop { padding: .5rem; }
+  .file-preview-dialog { max-height: calc(100dvh - 1rem); border-radius: .75rem; }
+  .file-preview-header, .file-preview-content { padding: .85rem; }
+  .file-preview-grid { max-height: 65dvh; }
+  .file-preview-grid td { min-width: 6rem; max-width: 18rem; }
+  .file-preview-trigger { min-height: 2.4rem; }
+}
+
+.project-file-details .file-output-link { display: flex; max-width: 100%; white-space: normal; }
+.project-file-details .file-output-link > a { overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }

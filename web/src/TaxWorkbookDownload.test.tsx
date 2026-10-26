@@ -99,3 +99,16 @@ it("shows a failed saved chat link inline without opening a raw error page", asy
   expect(await screen.findByRole("alert")).toHaveTextContent("This saved download is no longer available.");
   expect(screen.getByRole("alert")).toHaveTextContent("Download workbook in the Toolbox");
 });
+
+it("prepares a revision-bound preview with no browser download", async () => {
+  const preview = { id: "tax_export_1", filename: "tax-review-2025.xlsx", format: "xlsx", kind: "table", truncated: false,
+    sheets: [{ name: "Evidence", rows: [["Source", "Retained passage"], ["Form 8911", "Exact saved passage."]], truncated: false }] };
+  const fetchMock = vi.fn().mockResolvedValueOnce(prepared()).mockResolvedValueOnce(json(preview));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<TaxWorkbookDownload taxCase={taxCase} onReload={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Preview workbook" }));
+  expect(await screen.findByRole("cell", { name: "Exact saved passage." })).toBeVisible();
+  expect(screen.getByRole("dialog", { name: "File preview" })).toBeVisible();
+  expect(fetchMock.mock.calls[0][0]).toBe("/api/conversations/con_tax/tax-review/exports");
+  expect(fetchMock.mock.calls[1][0]).toBe(downloadPath.replace(/\/download$/u, "/preview"));
+});

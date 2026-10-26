@@ -92,16 +92,20 @@ visible. Passage retention and the chat XLSX download are now passed. Canonical
 case data remains authoritative; Tax exports use a bounded revision cache, separate
 from My files. Broader comparison/eligibility limits remain as recorded above.
 
-**Shared generated files built October 26.** Native ordinary and Private chat
-can create owned text/Markdown, CSV/JSON, DOCX and XLSX. Server-created chat links,
-My files and the current Project use the existing storage/download/delete lifecycle.
-Generated outputs are labeled and excluded from automatic evidence retrieval and
-Tax source pins. Private renders locally. Additive application schema 25 records
-Project file origin; existing rows remain uploads. Focused local verification is
-complete; one ordinary and one Private Project browser creation/download remain.
-Rebuild audrey and audrey-ui after pull. No sidecar/config/model/index change.
-The [Phase 11 contract](phase-11-native-file-explorer.md#generated-files) owns this
-slice; existing Hermes office integrations remain unchanged.
+**Shared generated files accepted October 26.** The user reports all three
+ordinary DOCX/XLSX and Private Project Markdown outputs worked. Creation and owned
+chat/My files/Project delivery stay closed. Generated outputs remain separate
+from source evidence and Private renders locally; application schema stays 25.
+
+**Browser file previews built.** Chat and Project links offer Preview alongside
+Download; My files > Open shows generated document text or spreadsheet cells.
+Markdown is rendered locally, DOCX uses readable paragraphs, and workbooks have
+sheet tabs. The same viewer supports revision-bound Tax exports. Owner checks,
+Private handling, truncation, focus/closing, desktop/mobile layout and existing
+downloads pass locally. Browser acceptance uses the existing files, with no
+upload, regeneration, model or index run. Rebuild audrey and audrey-ui after pull;
+no sidecar/config/schema change. [Phase 11](phase-11-native-file-explorer.md#browser-previews)
+owns the contract; Hermes office integrations remain unchanged.
 
 No broader repeat test is queued. A later
 decision to improve broader autonomous review starts from this saved run's
@@ -150,7 +154,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
 | 10 | [Answer provenance](phase-10-ordinary-answer-provenance.md) | Complete; immediate answer summaries await acceptance |
-| 11 | [File explorer](phase-11-native-file-explorer.md) | Explorer complete; shared file creation built, browser acceptance pending |
+| 11 | [File explorer](phase-11-native-file-explorer.md) | Explorer/file creation accepted; browser previews built |
 | 12 | [Navigation](phase-12-sidebar-navigation.md) | Desktop/mobile followup built; browser acceptance pending |
 | 13 | [Responses extensions](phase-13-responses-multimodal-input.md) | Complete |
 | 14 | [Bots and tokens](phase-14-bot-accounts-and-token-lifetimes.md) | Complete |
@@ -212,10 +216,11 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
   full-passage persistence and workbook delivery subsequently passed in 20F.
 - [x] **20F accepted — review files:** retained full source passage and real chat
   workbook download passed October 26. No repeat save/download test is queued.
-- [ ] **Shared file creation built:** owned TXT/Markdown, CSV/JSON, DOCX and XLSX,
-  chat/My files/Project delivery, Private local rendering and retry-safe immutable
-  outputs. Local verification passes; browser acceptance is next. See
-  [Phase 11](phase-11-native-file-explorer.md#generated-files).
+- [x] **Shared file creation accepted:** all three ordinary DOCX/XLSX and Private
+  Project Markdown outputs worked; no repeat generation/download smoke.
+- [ ] **Browser previews built:** local read-only views for generated files and
+  saved Tax workbooks from chat, My files and Projects. Existing-file browser
+  acceptance is next; [Phase 11](phase-11-native-file-explorer.md#browser-previews).
 
 Tax year/jurisdiction and reference release remain in the case record. Project
 views read that canonical record rather than duplicate it in Project instructions. OCR/media, fine-tuning and state

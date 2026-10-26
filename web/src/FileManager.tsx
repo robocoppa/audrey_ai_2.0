@@ -18,6 +18,7 @@ import {
   type AudreyFileList,
 } from "./api";
 
+import { FilePreviewContent } from "./FilePreview";
 import { UploadProgress } from "./UploadProgress";
 
 type FileKindFilter = "all" | AudreyFile["kind"];
@@ -287,6 +288,15 @@ export function FileManager({ onClose }: { onClose: () => void }) {
               file={selectedFile}
               onBack={() => setSelectedFileId(null)}
             />
+          ) : selectedFile.origin === "generated" ? (
+            <div className="file-artifact-viewer">
+              <div className="file-artifact-heading">
+                <button type="button" onClick={() => setSelectedFileId(null)}>← All files</button>
+                <div><h3>{selectedFile.filename}</h3><small>Created by Audrey · {formatBytes(selectedFile.bytes)}</small></div>
+                <a className="file-artifact-download" href={getFileDownloadUrl(selectedFile.id)} download={selectedFile.filename}>Download</a>
+              </div>
+              <FilePreviewContent key={selectedFile.id} fileId={selectedFile.id} showName={false} />
+            </div>
           ) : (
             <DocumentTextViewer
               key={selectedFile.id}

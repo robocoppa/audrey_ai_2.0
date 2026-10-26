@@ -692,3 +692,46 @@ test("a generated file link appears in Automatic chat without replacing the next
   expect((await downloaded).suggestedFilename()).toBe("notes.md");
   await expect(composer).toHaveValue("Keep this question unsent.");
 });
+
+for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+  test(`generated spreadsheet preview fits ${viewport.width}px, keeps the draft and never downloads`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await mockTaxApi(page);
+    const fileId = "file_preview";
+    await page.route(`**/api/conversations/${ID}/messages?*`, (route) => json(route, { items: [
+      { id: "msg_preview_user", run_id: "run_tax_1", role: "user", status: "completed", content: "Create a budget", sequence: 1, created_at: DATE, updated_at: DATE, attachments: [] },
+      { id: "msg_preview_saved", run_id: "run_tax_1", role: "assistant", status: "completed", content: `[Download budget.xlsx](/api/files/${fileId}/download)`, sequence: 2, created_at: DATE, updated_at: DATE, attachments: [] },
+    ], next_cursor: null }));
+    await page.route(`**/api/files/${fileId}/preview`, (route) => json(route, {
+      id: fileId, filename: "budget.xlsx", format: "xlsx", kind: "table", truncated: false,
+      sheets: [
+        { name: "Budget", rows: [["Item", "Cost", "A longer note for the spreadsheet preview"],
+          ...Array.from({ length: 40 }, (_, index) => [`Item ${index + 1}`, index * 5, "A saved working value."])], truncated: false },
+        { name: "Notes", rows: [["Private working output", "Read only"]], truncated: false },
+      ],
+    }));
+    const downloads: string[] = [];
+    page.on("download", (download) => downloads.push(download.suggestedFilename()));
+    await page.goto("./");
+    const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+    await composer.fill("Keep my unsent next question.");
+    const trigger = page.getByRole("button", { name: "Preview", exact: true });
+    await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "File preview" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("cell", { name: "Item 1", exact: true })).toBeVisible();
+    const bounds = await dialog.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.y).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
+    await dialog.getByRole("tab", { name: "Notes", exact: true }).click();
+    await expect(dialog.getByRole("cell", { name: "Private working output" })).toBeVisible();
+    await page.screenshot({ path: `/tmp/audrey-file-preview-${viewport.width}.png` });
+    await dialog.getByRole("button", { name: "Close file preview" }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(trigger).toBeFocused();
+    await expect(composer).toHaveValue("Keep my unsent next question.");
+    expect(downloads).toEqual([]);
+  });
+}

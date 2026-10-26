@@ -969,6 +969,22 @@ export function getFileArtifactDownloadUrl(
   return `/api/files/${encodeURIComponent(fileId)}/artifacts/${artifact}/download`;
 }
 
+export interface AudreyFilePreview {
+  id: string;
+  filename: string;
+  format: "txt" | "md" | "csv" | "json" | "docx" | "xlsx";
+  kind: "text" | "document" | "table";
+  text?: string;
+  paragraphs?: string[];
+  sheets?: { name: string; rows: (string | number | boolean | null)[][]; truncated: boolean }[];
+  truncated: boolean;
+  notice?: string;
+}
+
+export function getFilePreview(fileId: string, signal?: AbortSignal): Promise<AudreyFilePreview> {
+  return apiJson<AudreyFilePreview>(`/api/files/${encodeURIComponent(fileId)}/preview`, { signal });
+}
+
 export function getFileText(fileId: string, offset = 0): Promise<AudreyFileText> {
   return apiJson<AudreyFileText>(
     `/api/files/${encodeURIComponent(fileId)}/text?offset=${offset}`,
