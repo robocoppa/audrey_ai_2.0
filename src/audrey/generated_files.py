@@ -21,6 +21,32 @@ from audrey.processing_policy import ProcessingPolicyError, current_processing_p
 from audrey.routes import files as uploads
 from audrey.user_data_visibility import remote_personal_reads_blocked
 
+# Change this only when DOCX/XLSX rendering changes. New renderer versions create
+# new immutable outputs; prior-version tombstones still prevent resurrection.
+_OFFICE_RENDERER_REVISION = 2
+
+
+def _output_ids(principal: Principal, conversation_id: str, private: bool,
+                body: CreateFileRequest) -> list[str]:
+    normalized = body.model_dump(mode="json", exclude_none=True)
+    # Newly introduced defaults must not change identities of non-office files,
+    # or hide pre-formatting outputs and deletion tombstones from legacy requests.
+    if normalized.get("content_format") == "plain":
+        normalized.pop("content_format", None)
+    for sheet in normalized.get("sheets", []):
+        if sheet.get("header_row") is False:
+            sheet.pop("header_row", None)
+    base = [principal.storage_namespace, conversation_id, private, normalized]
+    versions = [None]
+    if body.format in {"docx", "xlsx"}:
+        versions.extend(range(2, _OFFICE_RENDERER_REVISION + 1))
+    identities = []
+    for version in versions:
+        value = base if version is None else [*base, {"office_renderer": version}]
+        identity = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        identities.append(str(uuid.uuid5(uuid.NAMESPACE_URL, hashlib.sha256(identity.encode()).hexdigest())))
+    return identities
+
 
 class GeneratedFileError(ValueError):
     """Fixed safe feedback, without model content or host paths."""
@@ -96,17 +122,15 @@ async def create_generated_file(
     file_id = ""
     try:
         conversation = await guard()
-        normalized = body.model_dump(mode="json", exclude_none=True)
-        identity = json.dumps([principal.storage_namespace, conversation_id,
-                               bool(conversation.private_required), normalized],
-                              ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        file_id = str(uuid.uuid5(uuid.NAMESPACE_URL, hashlib.sha256(identity.encode()).hexdigest()))
+        identities = _output_ids(principal, conversation_id, bool(conversation.private_required), body)
+        file_id = identities[-1]
         async with app.state.file_operation_locks.hold(file_id):
             # Tombstones are durable: an inherited retry cannot resurrect a
             # deleted output. A deliberate new filename creates a new identity.
-            if file_id in await db.file_deletion_ids(principal.storage_namespace):
-                raise GeneratedFileError("generated_file_deleted", "This output was deleted. Choose a new filename to create it again.")
+            deleted = await db.file_deletion_ids(principal.storage_namespace)
             existing = await db.get_upload(file_id)
+            if file_id in deleted or (existing is None and any(old in deleted for old in identities[:-1])):
+                raise GeneratedFileError("generated_file_deleted", "This output was deleted. Choose a new filename to create it again.")
             created = existing is None
             if existing is not None:
                 if (existing["user"] != principal.storage_namespace or existing.get("origin") != "generated"

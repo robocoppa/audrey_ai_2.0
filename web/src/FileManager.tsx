@@ -20,6 +20,7 @@ import {
 
 import { FilePreviewContent } from "./FilePreview";
 import { PdfPreviewContent } from "./PdfPreview";
+import { MediaFilePlayer } from "./MediaFilePlayer";
 import { UploadProgress } from "./UploadProgress";
 
 type FileKindFilter = "all" | AudreyFile["kind"];
@@ -55,6 +56,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const [previewSelectedFile, setPreviewSelectedFile] = useState(false);
   const [fileSearch, setFileSearch] = useState("");
   const [kindFilter, setKindFilter] = useState<FileKindFilter>("all");
   const [statusFilter, setStatusFilter] = useState<FileStatusFilter>("all");
@@ -281,6 +283,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
             <MediaArtifactViewer
               key={selectedFile.id}
               file={selectedFile}
+              initialPreview={previewSelectedFile}
               onBack={() => setSelectedFileId(null)}
             />
           ) : selectedFile.kind === "image" ? (
@@ -302,6 +305,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
             <DocumentTextViewer
               key={selectedFile.id}
               file={selectedFile}
+              initialView={previewSelectedFile ? (selectedFile.mime === "application/pdf" && !selectedFile.source_freed_at ? "pdf" : "transcript") : "summary"}
               onBack={() => setSelectedFileId(null)}
             />
           )
@@ -527,7 +531,11 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                     <li key={file.id}>
                       <div className="file-kind" aria-hidden="true">{kindSymbol(file.kind)}</div>
                       <div className="file-details">
-                        <strong title={file.filename}>{file.filename}</strong>
+                        <button className="file-filename-preview" type="button" title={file.filename}
+                          aria-label={`Preview ${file.filename}`} disabled={file.status !== "ready"}
+                          onClick={() => { setPreviewSelectedFile(true); setSelectedFileId(file.id); }}>
+                          {file.filename}
+                        </button>
                         <div className="file-row-meta">
                           <span className="file-status">{fileStatus(file, listing.server_time)}</span>
                           <span>
@@ -560,7 +568,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                           <button
                             className="file-view"
                             type="button"
-                            onClick={() => setSelectedFileId(file.id)}
+                            onClick={() => { setPreviewSelectedFile(false); setSelectedFileId(file.id); }}
                             aria-label={`View ${file.kind === "image" ? "image" : file.kind === "video" ? "video text" : file.kind === "audio" ? "audio text" : "document text"} for ${file.filename}`}
                           >Open</button>
                         ) : null}
@@ -607,8 +615,10 @@ function artifactLabel(artifact: AudreyFileArtifactKind): string {
   return artifact[0].toUpperCase() + artifact.slice(1);
 }
 
-function DocumentTextViewer({ file, onBack }: { file: AudreyFile; onBack: () => void }) {
-  const [view, setView] = useState<"summary" | "transcript" | "pdf">("summary");
+function DocumentTextViewer({ file, onBack, initialView = "summary" }: {
+  file: AudreyFile; onBack: () => void; initialView?: "summary" | "transcript" | "pdf";
+}) {
+  const [view, setView] = useState<"summary" | "transcript" | "pdf">(initialView);
 
   return (
     <div className="file-artifact-viewer">
@@ -669,8 +679,12 @@ function ImagePreviewViewer({ file, onBack }: { file: AudreyFile; onBack: () => 
   );
 }
 
-function MediaArtifactViewer({ file, onBack }: { file: AudreyFile; onBack: () => void }) {
-  const [artifact, setArtifact] = useState<AudreyFileArtifactKind>("summary");
+function MediaArtifactViewer({ file, onBack, initialPreview = false }: {
+  file: AudreyFile; onBack: () => void; initialPreview?: boolean;
+}) {
+  const [artifact, setArtifact] = useState<AudreyFileArtifactKind | "player">(
+    initialPreview && !file.source_freed_at ? "player" : "summary",
+  );
   const availableKinds = file.kind === "audio"
     ? artifactKinds.filter((kind) => kind !== "visual")
     : artifactKinds;
@@ -682,10 +696,13 @@ function MediaArtifactViewer({ file, onBack }: { file: AudreyFile; onBack: () =>
         <button type="button" onClick={onBack}>← All files</button>
         <div>
           <h3>{file.filename}</h3>
-          <small>{mediaLabel} text · {formatBytes(file.bytes)}</small>
+          <small>{mediaLabel} · {formatBytes(file.bytes)}</small>
         </div>
       </div>
+      {file.source_freed_at ? <p className="file-original-reclaimed">The original was reclaimed. The saved summary and transcript are still available.</p> : null}
       <div className="file-artifact-tabs" role="group" aria-label={mediaLabel + " text type"}>
+        {!file.source_freed_at ? <button type="button" aria-pressed={artifact === "player"}
+          onClick={() => setArtifact("player")}>Player</button> : null}
         {availableKinds.map((kind) => (
           <button
             key={kind}
@@ -695,7 +712,8 @@ function MediaArtifactViewer({ file, onBack }: { file: AudreyFile; onBack: () =>
           >{artifactLabel(kind)}</button>
         ))}
       </div>
-      <ArtifactPage key={file.id + ":" + artifact} file={file} artifact={artifact} />
+      {artifact === "player" ? <MediaFilePlayer file={file} />
+        : <ArtifactPage key={file.id + ":" + artifact} file={file} artifact={artifact} />}
     </div>
   );
 }

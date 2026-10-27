@@ -368,3 +368,96 @@ it("shows processing after upload bytes finish while the server response is pend
   await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument());
   expect(await screen.findByRole("link", { name: "Download original notes.txt" })).toBeVisible();
 });
+
+function previewFile(overrides: Partial<api.AudreyFile>): api.AudreyFile {
+  return {
+    id: "preview_file", filename: "preview.txt", mime: "text/plain", bytes: 4096,
+    uploaded_at: "2026-10-27T00:00:00+00:00", kind: "text", chunks: 1, status: "ready",
+    failure_reason: "", duration_s: 0, summary: "Saved summary.", source_freed_at: "",
+    leased_at: "", source_url: "", transcript_source: "", fetch_downloaded_bytes: 0,
+    fetch_total_bytes: 0, ...overrides,
+  };
+}
+
+function listPreviewFiles(files: api.AudreyFile[]) {
+  vi.spyOn(api, "listFiles").mockResolvedValue({
+    items: files, total_bytes: 4096, server_time: "2026-10-27T00:00:01+00:00",
+    limits: { max_upload_bytes: 50000000, max_user_bytes: 1000000000, allowed_extensions: [".pdf", ".png", ".mp3", ".mp4"],
+      chunked_max_bytes: 2000000000, part_size: 8000000, fetch_hosts: [], max_images_per_turn: 4 },
+  });
+}
+
+it("opens the actual PDF directly from its filename while Open keeps the summary default", async () => {
+  const file = previewFile({ filename: "inspection.pdf", mime: "application/pdf" });
+  listPreviewFiles([file]);
+  vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+    id: file.id, filename: file.filename, kind: "pdf", format: "pdf", page_count: 2, truncated: false,
+  }), { headers: { "Content-Type": "application/json" } }))));
+  vi.spyOn(api, "getFileArtifact").mockResolvedValue({ id: file.id, artifact: "summary", text: file.summary, offset: 0, next_offset: null, total_chars: file.summary.length });
+  render(<FileManager onClose={() => undefined} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Preview inspection.pdf" }));
+  const image = await screen.findByAltText("inspection.pdf — page 1 of 2");
+  expect(image).toHaveAttribute("src", "/api/files/preview_file/preview/pages/1");
+  expect(screen.getByRole("button", { name: "Original PDF" })).toHaveAttribute("aria-pressed", "true");
+  expect(api.getFileArtifact).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "← All files" }));
+  fireEvent.click(await screen.findByRole("button", { name: "View document text for inspection.pdf" }));
+  expect(await screen.findByText(file.summary)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Summary" })).toHaveAttribute("aria-pressed", "true");
+});
+
+it("opens images from their filenames and disables previews until processing finishes", async () => {
+  listPreviewFiles([
+    previewFile({ filename: "photo.png", mime: "image/png", kind: "image" }),
+    previewFile({ id: "pending_file", filename: "processing.pdf", mime: "application/pdf", status: "processing" }),
+  ]);
+  render(<FileManager onClose={() => undefined} />);
+  expect(await screen.findByRole("button", { name: "Preview processing.pdf" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Preview photo.png" }));
+  expect(await screen.findByAltText("Preview of photo.png")).toHaveAttribute("src", "/api/files/preview_file/image");
+});
+
+it.each(["audio", "video"] as const)("opens %s playback from a filename and stops it when switching to Summary", async (kind) => {
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+  vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+  const file = previewFile({ filename: kind === "audio" ? "interview.mp3" : "walk.mp4", kind, mime: kind === "audio" ? "audio/mpeg" : "video/mp4" });
+  listPreviewFiles([file]);
+  vi.spyOn(api, "getFileArtifact").mockResolvedValue({ id: file.id, artifact: "summary", text: file.summary, offset: 0, next_offset: null, total_chars: file.summary.length });
+  render(<FileManager onClose={() => undefined} />);
+  fireEvent.click(await screen.findByRole("button", { name: `Preview ${file.filename}` }));
+  const media = screen.getByLabelText(`${kind === "audio" ? "Audio" : "Video"} player for ${file.filename}`);
+  expect(media).toHaveAttribute("src", "/api/files/preview_file/media");
+  expect(screen.getByRole("button", { name: "Player" })).toHaveAttribute("aria-pressed", "true");
+  expect(api.getFileArtifact).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+  expect(await screen.findByText(file.summary)).toBeVisible();
+  expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce();
+  expect(media).not.toHaveAttribute("src");
+});
+
+it("keeps reclaimed media text available without offering a player", async () => {
+  const file = previewFile({ filename: "old.mp4", kind: "video", mime: "video/mp4", source_freed_at: "2026-10-27" });
+  listPreviewFiles([file]);
+  vi.spyOn(api, "getFileArtifact").mockResolvedValue({ id: file.id, artifact: "summary", text: file.summary, offset: 0, next_offset: null, total_chars: file.summary.length });
+  render(<FileManager onClose={() => undefined} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Preview old.mp4" }));
+  expect(await screen.findByText(file.summary)).toBeVisible();
+  expect(screen.getByText(/The original was reclaimed/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Player" })).not.toBeInTheDocument();
+});
+
+
+it("opens a text document's contents from its filename while Open keeps Summary", async () => {
+  const file = previewFile({ filename: "notes.txt" });
+  listPreviewFiles([file]);
+  vi.spyOn(api, "getFileText").mockResolvedValue({ id: file.id, text: "The complete document contents.", offset: 0, next_offset: null, total_chars: 31 });
+  vi.spyOn(api, "getFileArtifact").mockResolvedValue({ id: file.id, artifact: "summary", text: file.summary, offset: 0, next_offset: null, total_chars: file.summary.length });
+  render(<FileManager onClose={() => undefined} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Preview notes.txt" }));
+  expect(await screen.findByText("The complete document contents.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Transcript" })).toHaveAttribute("aria-pressed", "true");
+  expect(api.getFileArtifact).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "← All files" }));
+  fireEvent.click(await screen.findByRole("button", { name: "View document text for notes.txt" }));
+  expect(await screen.findByText(file.summary)).toBeVisible();
+});

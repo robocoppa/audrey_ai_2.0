@@ -110,6 +110,8 @@ def create_file_spec(server_url: str = "http://native.invalid") -> ToolSpec:
         name="create_file",
         description=("Create a downloadable file owned by this user: text, Markdown, CSV, JSON, Word DOCX or Excel XLSX. "
                      "Supply filename and structured content; the server saves it in My files and the current Project. "
+                     "For styled DOCX, set content_format=markdown and use headings, lists, bold/italic and pipe tables in content. "
+                     "For XLSX, set header_row=true only when the first row contains headers; column_formats and column_widths control display. Currency means US dollars. "
                      "Do not invent a download link or filesystem path. Repeating identical content in this reply reuses the file. "
                      "Generated content is output, not independent evidence. This does not save or validate a Tax review case."),
         parameters=parameters, server_url=server_url.rstrip("/"), path="/create_file",

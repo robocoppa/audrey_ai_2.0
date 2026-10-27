@@ -118,7 +118,11 @@ def test_bounded_archive_rejects_inflation_before_openpyxl():
 def test_document_paragraph_count_is_bounded(tmp_path):
     from audrey.file_previews import MAX_PARAGRAPHS, preview_generated_file
     source = tmp_path / 'notes.docx'
-    source.write_bytes(b'generated source')
+    from docx import Document
+    document = Document()
+    for _ in range(MAX_PARAGRAPHS + 1):
+        document.add_paragraph('Paragraph')
+    document.save(source)
     text = tmp_path / 'notes.ocr.txt'
     text.write_text('\n\n'.join(['Paragraph'] * (MAX_PARAGRAPHS + 1)))
     result = preview_generated_file(source, format='docx', text_path=text)
@@ -228,3 +232,42 @@ def test_invalid_sheet_refuses_instead_of_showing_another_sheet():
     source.seek(0)
     with pytest.raises(FilePreviewError, match='Worksheet'):
         workbook_preview(source, sheet=1)
+
+
+@pytest.mark.parametrize('format', ['docx', 'xlsx'])
+async def test_private_rich_preview_uses_saved_formatting_and_owned_download(output_state, format):
+    state = output_state
+    conversation, run = await _run(state, private=True, project=True)
+    policy = ProcessingPolicy(local_models={'local:latest': 'a' * 64},
+        ollama_base_url='http://ollama:11434', allowed_tools=frozenset({'create_file'}),
+        tool_servers=frozenset({'http://ollama:11434'}))
+    fields = ({'content_format': 'markdown', 'content': '# Private notes\n\n4. First\n7. Next\n\n**Kept local**'}
+        if format == 'docx' else {'sheets': [{'name': 'Budget', 'header_row': True,
+            'column_formats': ['text', 'currency'], 'column_widths': [25, 20],
+            'rows': [['Item', 'Cost'], ['Supplies', 1250.5]]}]})
+    with processing_scope(policy):
+        item = await _create(state, conversation, run, filename=f'private-report.{format}', format=format, **fields)
+    assert 'error' not in item, item
+    row = await state.db.get_upload(item['file_id'])
+    assert row['private_required'] == 1 and row['collection'] == ''
+    path = f"/api/files/{item['file_id']}/preview"
+    response = await state.client.get(path)
+    assert response.status_code == 200, response.text
+    preview = response.json()
+    assert response.headers['cache-control'] == 'private, no-store'
+    if format == 'docx':
+        assert preview['blocks'][0]['kind'] == 'heading'
+        assert [block['list_start'] for block in preview['blocks'] if block.get('list') == 'number'] == [4, 7]
+        assert preview['blocks'][-1]['runs'] == [{'text': 'Kept local', 'bold': True}]
+        assert preview['formatting_truncated'] is False
+    else:
+        sheet = preview['sheets'][0]
+        assert sheet['rows'][1] == ['Supplies', 1250.5]
+        assert sheet['column_widths'] == [25, 20]
+        assert sheet['cell_styles'][0][0]['header'] is True
+        assert sheet['cell_styles'][1][1]['display'] == '$1,250.50'
+    original = await state.client.get(item['download_url'])
+    assert original.status_code == 200
+    state.current[0] = state.other
+    assert (await state.client.get(path)).status_code == 404
+    assert (await state.client.get(item['download_url'])).status_code == 404

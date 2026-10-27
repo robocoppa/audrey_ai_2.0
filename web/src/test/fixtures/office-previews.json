@@ -1,0 +1,223 @@
+{
+  "document": {
+    "id": "file_document",
+    "filename": "launch-plan.docx",
+    "kind": "document",
+    "text": "Launch plan\n\nNext steps\n\nPlease review the draft.\n\nReview the draft\n\nSend the update\n\nTask\tOwner\nPlanning\tAlex\nReview\tJordan",
+    "paragraphs": [
+      "Launch plan",
+      "Next steps",
+      "Please review the draft.",
+      "Review the draft",
+      "Send the update",
+      "Task\tOwner\nPlanning\tAlex\nReview\tJordan"
+    ],
+    "blocks": [
+      {
+        "kind": "heading",
+        "level": 1,
+        "runs": [
+          {
+            "text": "Launch plan",
+            "bold": true
+          }
+        ]
+      },
+      {
+        "kind": "heading",
+        "level": 2,
+        "runs": [
+          {
+            "text": "Next steps",
+            "bold": true
+          }
+        ]
+      },
+      {
+        "kind": "paragraph",
+        "runs": [
+          {
+            "text": "Please "
+          },
+          {
+            "text": "review",
+            "bold": true
+          },
+          {
+            "text": " the "
+          },
+          {
+            "text": "draft",
+            "italic": true
+          },
+          {
+            "text": "."
+          }
+        ]
+      },
+      {
+        "kind": "paragraph",
+        "runs": [
+          {
+            "text": "Review the draft"
+          }
+        ],
+        "list": "bullet"
+      },
+      {
+        "kind": "paragraph",
+        "runs": [
+          {
+            "text": "Send the update"
+          }
+        ],
+        "list": "bullet"
+      },
+      {
+        "kind": "table",
+        "rows": [
+          [
+            {
+              "runs": [
+                {
+                  "text": "Task",
+                  "bold": true
+                }
+              ]
+            },
+            {
+              "runs": [
+                {
+                  "text": "Owner",
+                  "bold": true
+                }
+              ]
+            }
+          ],
+          [
+            {
+              "runs": [
+                {
+                  "text": "Planning"
+                }
+              ]
+            },
+            {
+              "runs": [
+                {
+                  "text": "Alex"
+                }
+              ]
+            }
+          ],
+          [
+            {
+              "runs": [
+                {
+                  "text": "Review"
+                }
+              ]
+            },
+            {
+              "runs": [
+                {
+                  "text": "Jordan"
+                }
+              ]
+            }
+          ]
+        ],
+        "header": true
+      }
+    ],
+    "formatting_truncated": false,
+    "format": "docx",
+    "offset": 0,
+    "next_offset": null,
+    "total_chars": 124,
+    "truncated": false,
+    "content_truncated": false,
+    "notice": ""
+  },
+  "workbook": {
+    "id": "file_workbook",
+    "filename": "launch-budget.xlsx",
+    "format": "xlsx",
+    "kind": "table",
+    "sheets": [
+      {
+        "name": "Budget",
+        "sheet_index": 0,
+        "column_widths": [
+          24.0,
+          18.0,
+          14.0
+        ],
+        "cell_styles": [
+          [
+            {
+              "bold": true,
+              "header": true
+            },
+            {
+              "bold": true,
+              "header": true
+            },
+            {
+              "bold": true,
+              "header": true
+            }
+          ],
+          [
+            {
+              "banded": true
+            },
+            {
+              "banded": true,
+              "display": "$1,250.50"
+            },
+            {
+              "banded": true,
+              "display": "25.00%"
+            }
+          ],
+          [
+            {},
+            {
+              "display": "$500.00"
+            },
+            {
+              "display": "75.00%"
+            }
+          ]
+        ],
+        "rows": [
+          [
+            "Item",
+            "Amount",
+            "Share"
+          ],
+          [
+            "Supplies",
+            1250.5,
+            0.25
+          ],
+          [
+            "Travel",
+            500,
+            0.75
+          ]
+        ],
+        "row_offset": 0,
+        "next_row_offset": null,
+        "total_rows": 3,
+        "content_truncated": false,
+        "truncated": false
+      }
+    ],
+    "sheet_count": 1,
+    "truncated": false,
+    "content_truncated": false,
+    "notice": ""
+  }
+}

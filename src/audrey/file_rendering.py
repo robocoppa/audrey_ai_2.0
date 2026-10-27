@@ -18,8 +18,11 @@ from typing import Annotated, Any, Literal, Self
 from docx import Document
 from openpyxl import Workbook
 from openpyxl.cell import WriteOnlyCell
-from openpyxl.styles import Alignment
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from audrey.office_documents import markdown_document
 
 MAX_INPUT_BYTES = 256 * 1024
 MAX_OUTPUT_BYTES = 4 * 1024 * 1024
@@ -39,6 +42,10 @@ Scalar = str | int | float | bool | None
 Row = Annotated[list[Scalar], Field(max_length=MAX_COLUMNS)]
 Rows = Annotated[list[Row], Field(min_length=1, max_length=MAX_ROWS)]
 FileFormat = Literal["txt", "md", "csv", "json", "docx", "xlsx"]
+ColumnFormat = Literal["general", "integer", "decimal", "currency", "percent", "text"]
+ColumnWidth = Annotated[float | int, Field(ge=8, le=60)]
+_NUMBER_FORMATS = {"general": "General", "integer": "#,##0", "decimal": "#,##0.00",
+                   "currency": '$#,##0.00', "percent": "0.00%", "text": "@"}
 
 _MIMES = {
     "txt": "text/plain",
@@ -88,6 +95,23 @@ class FileSheet(BaseModel):
                               hide_input_in_errors=True)
     name: str = Field(min_length=1, max_length=31)
     rows: Rows
+    header_row: bool = Field(default=False, description="Style the first row as headings; freeze and filter it.")
+    column_formats: list[ColumnFormat] | None = Field(
+        default=None, max_length=MAX_COLUMNS,
+        description="Formats by column: general, integer, decimal, currency (US dollars), percent or text. Values stay unchanged.",
+    )
+    column_widths: list[ColumnWidth] | None = Field(
+        default=None, max_length=MAX_COLUMNS,
+        description="Optional widths by column, 8 to 60 characters. Otherwise sized automatically.",
+    )
+
+    @model_validator(mode="after")
+    def check_columns(self) -> Self:
+        width = max((len(row) for row in self.rows), default=0)
+        if any(value is not None and len(value) > width
+               for value in (self.column_formats, self.column_widths)):
+            raise ValueError("Column options must not exceed the worksheet's columns.")
+        return self
 
     @field_validator("name")
     @classmethod
@@ -113,7 +137,10 @@ class CreateFileRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=180, description="Display basename with format suffix.")
     format: FileFormat
     content: str | None = Field(default=None, max_length=200000,
-                               description="Plain text for txt, md or docx.")
+                               description="Text for txt or md; DOCX supports plain text or the explicit markdown content format.")
+    content_format: Literal["plain", "markdown"] = Field(
+        default="plain", description="DOCX only: markdown adds headings, lists, tables, bold, italic and code. Plain is literal.",
+    )
     rows: Rows | None = Field(default=None, description="CSV rows, including headers if wanted.")
     data: Any = Field(default=None, description="Any JSON value; used only with json format.")
     sheets: list[FileSheet] | None = Field(default=None, min_length=1, max_length=8,
@@ -150,6 +177,8 @@ class CreateFileRequest(BaseModel):
         supplied = self.model_fields_set & {"content", "rows", "data", "sheets"}
         if supplied != {field} or (field != "data" and getattr(self, field) is None):
             raise ValueError("Supply only the content field required by this format.")
+        if "content_format" in self.model_fields_set and self.format != "docx":
+            raise ValueError("content_format is available only for DOCX.")
         suffix = "." + self.format
         if not self.filename.casefold().endswith(suffix) or not self.filename[:-len(suffix)].strip(" ."):
             raise ValueError("The filename must have the selected format's suffix.")
@@ -200,9 +229,22 @@ def _workbook(sheets: list[FileSheet]) -> bytes:
     target = io.BytesIO()
     for spec in sheets:
         sheet = workbook.create_sheet(spec.name)
-        for row in spec.rows:
+        width = max((len(row) for row in spec.rows), default=0)
+        for column in range(width):
+            explicit = spec.column_widths or []
+            values = [str(row[column]) for row in spec.rows
+                      if column < len(row) and row[column] is not None]
+            measured = max((max(map(len, value.split("\n")), default=0) for value in values), default=0)
+            sheet.column_dimensions[get_column_letter(column + 1)].width = (
+                explicit[column] if column < len(explicit) else min(48, max(10, measured + 3))
+            )
+        if spec.header_row:
+            sheet.freeze_panes = "A2"
+            if width:
+                sheet.auto_filter.ref = f"A1:{get_column_letter(width)}{len(spec.rows)}"
+        for index, row in enumerate(spec.rows):
             cells = []
-            for value in row:
+            for column, value in enumerate(row):
                 # Excel numeric cells have only 15 significant digits. Preserve
                 # larger integer values exactly rather than silently rounding.
                 if isinstance(value, int) and not isinstance(value, bool) and abs(value) > 999999999999999:
@@ -210,7 +252,15 @@ def _workbook(sheets: list[FileSheet]) -> bytes:
                 cell = WriteOnlyCell(sheet, value=value)
                 if isinstance(value, str):
                     cell.data_type = "s"
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
+                cell.alignment = Alignment(horizontal="left", wrap_text=True, vertical="top")
+                header = spec.header_row and index == 0
+                cell.font = Font(name="Aptos", size=11, bold=header,
+                                 color="FFFFFF" if header else "25364D")
+                if header or index % 2:
+                    cell.fill = PatternFill("solid", fgColor="16324F" if header else "F2F6FA")
+                formats = spec.column_formats or []
+                if not header and column < len(formats):
+                    cell.number_format = _NUMBER_FORMATS[formats[column]]
                 cells.append(cell)
             sheet.append(cells)
     workbook.save(target)
@@ -235,9 +285,12 @@ def render_file(request: CreateFileRequest) -> RenderedFile:
             data = _csv_text(request.rows or [], protect_formulas=True).encode("utf-8-sig")
         case "docx":
             text = request.content or ""
-            document = Document()
-            for paragraph in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-                document.add_paragraph(paragraph)
+            if request.content_format == "markdown":
+                document, text = markdown_document(text)
+            else:
+                document = Document()
+                for paragraph in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+                    document.add_paragraph(paragraph)
             target = io.BytesIO()
             document.save(target)
             data = target.getvalue()

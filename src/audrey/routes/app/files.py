@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import stat
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ from fastapi import Path as PathParameter
 from fastapi.responses import FileResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel
+from starlette.types import Message, Receive, Scope, Send
 
 from audrey.app_state import AttachmentSnapshot
 from audrey.auth import AuthedUser, require_scope
@@ -371,6 +373,64 @@ async def download_file(
 
 
 _PREVIEW_HEADERS = {"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"}
+
+# Stored MIME values come from ingestion's sniff gate, not the display name.
+# Normalize legacy libmagic audio names to the standard browser media types.
+_MEDIA_TYPES = {
+    "video/mp4": "video/mp4", "audio/mpeg": "audio/mpeg",
+    "audio/x-wav": "audio/wav", "audio/x-m4a": "audio/mp4",
+    "audio/flac": "audio/flac", "audio/ogg": "audio/ogg",
+    "audio/x-hx-aac-adts": "audio/aac",
+}
+
+
+class _MediaFileResponse(FileResponse):
+    """Keep safe headers on FileResponse's generated 400/416 range errors too."""
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        async def safe_send(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                safe = {key.lower().encode(): value.encode() for key, value in _PREVIEW_HEADERS.items()}
+                message["headers"] = [(key, value) for key, value in message["headers"]
+                                      if key.lower() not in safe] + list(safe.items())
+            await send(message)
+        await super().__call__(scope, receive, safe_send)
+
+
+@router.get("/files/{file_id}/media", response_class=FileResponse)
+@router.head("/files/{file_id}/media", response_class=FileResponse, include_in_schema=False)
+async def play_file_media(
+    file_id: str, request: Request,
+    principal: Principal = Depends(_files_access),
+) -> FileResponse:
+    """Stream an owned audio/video original inline, including byte-range seeking."""
+    try:
+        async with request.app.state.file_operation_locks.hold(file_id):
+            row = await _owned_row(request, principal, file_id)
+            media_type = _MEDIA_TYPES.get(row.mime)
+            if media_type is None:
+                raise HTTPException(status_code=422, detail="Playback is available for audio and video only.")
+            if row.status != "ready" or row.source_freed_at:
+                raise HTTPException(status_code=410, detail="Stored media is unavailable.")
+            path = _source_path(request, principal, row)
+            try:
+                source_stat = await asyncio.to_thread(path.stat, follow_symlinks=False)
+            except OSError:
+                raise HTTPException(status_code=410, detail="Stored media is unavailable.") from None
+            if not stat.S_ISREG(source_stat.st_mode):
+                raise HTTPException(status_code=410, detail="Stored media is unavailable.")
+            # Deletion/purge can mark the canonical row while this request waits
+            # for filesystem work; every new seek request must authorize again.
+            current = await _owned_row(request, principal, file_id)
+            if (current.status != "ready" or current.source_freed_at
+                    or current.mime != row.mime or current.filename != row.filename):
+                raise HTTPException(status_code=410, detail="Stored media is unavailable.")
+        return _MediaFileResponse(path, filename=row.filename, media_type=media_type,
+                                  content_disposition_type="inline", stat_result=source_stat,
+                                  headers=_PREVIEW_HEADERS)
+    except HTTPException as error:
+        error.headers = {**(error.headers or {}), **_PREVIEW_HEADERS}
+        raise
 
 
 @router.get("/files/{file_id}/preview")

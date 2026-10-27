@@ -7,6 +7,7 @@ import { ApiError, apiJson, getFilePreview, filePreviewQuery, type FilePreviewPo
 import { downloadOwnedFile } from "./fileDownloads";
 import { downloadTaxWorkbook, isTaxWorkbookUrl } from "./taxReviewApi";
 import { PdfPreviewContent } from "./PdfPreview";
+import { OfficeDocumentPreview } from "./OfficeDocumentPreview";
 import "./FilePreview.css";
 
 type PreviewSource = { fileId: string; downloadPath?: never } | { fileId?: never; downloadPath: string };
@@ -140,13 +141,14 @@ function PreviewContent({ fileId, workbookPath, showName = true }: PreviewConten
             previous={positions.length > 0} next={preview.next_offset != null}
             onPrevious={() => void textPage(false)} onNext={() => void textPage(true)}
             label={`Section ${positions.length + 1} · Characters ${((preview.offset ?? 0) + 1).toLocaleString()}–${((preview.offset ?? 0) + (preview.text?.length ?? 0)).toLocaleString()}${preview.total_chars != null ? ` of ${preview.total_chars.toLocaleString()}` : ""}`} /> : null}
-          {preview.kind === "document" ? <article className="file-preview-document" tabIndex={0} aria-label="Document content">{preview.paragraphs?.map((paragraph, index) => <p key={index}>{paragraph || "\u00a0"}</p>)}</article>
+          {preview.kind === "document" ? <OfficeDocumentPreview blocks={preview.blocks} paragraphs={preview.paragraphs} />
             : preview.format === "md" ? <article className="file-preview-document file-preview-markdown" tabIndex={0} aria-label="Document content"><Markdown remarkPlugins={[remarkGfm]} skipHtml components={{
               img: ({ alt }) => <span className="file-preview-omitted-image">{alt ? `Image: ${alt}` : "Image"}</span>,
               a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer noopener">{children}</a>,
             }}>{preview.text ?? ""}</Markdown></article>
               : <pre className="file-preview-text" tabIndex={0} aria-label="File content">{preview.text || "This file is empty."}</pre>}
         </>}
+      {preview.formatting_truncated ? <p className="file-preview-notice" role="status">Some formatting is simplified in this preview. Download the file to see its saved layout.</p> : null}
       {paging.error ? <p className="file-preview-error" role="alert">{paging.error}</p> : null}
       {preview.notice && preview.content_truncated !== false && (preview.kind !== "table" || preview.content_truncated === undefined || (preview.sheet_count ?? 0) > 8) ? <p className="file-preview-notice" role="status">{preview.notice}</p> : null}
     </> : null}
@@ -209,6 +211,10 @@ function SpreadsheetPreview({ sheets: initialSheets, paging }: {
     setPositions((history) => ({ ...history, [selected]: forward ? [...(history[selected] ?? []), sheet.row_offset ?? 0] : history[selected].slice(0, -1) }));
     grid.current?.scrollTo?.({ top: 0 });
   }
+  const widthClass = (column: number) => {
+    const width = sheet?.column_widths?.[column];
+    return width == null ? undefined : `file-preview-width-${width <= 12 ? "narrow" : width <= 24 ? "medium" : width <= 40 ? "wide" : "extra-wide"}`;
+  };
   return <div className="file-preview-workbook">
     {sheets.length > 1 ? <div className="file-preview-tabs" role="tablist" aria-label="Worksheets">
       {sheets.map((item, index) => <button key={item.name} type="button" role="tab" id={`${tabId}-tab-${index}`}
@@ -227,11 +233,16 @@ function SpreadsheetPreview({ sheets: initialSheets, paging }: {
       id={`${tabId}-sheet-${selected}`} aria-labelledby={sheets.length > 1 ? `${tabId}-tab-${selected}` : undefined}
       aria-label={sheets.length === 1 ? sheet?.name ?? "Table" : undefined} tabIndex={0}>
       {rows.length ? <table aria-label={sheet?.name ?? "Table"}><thead><tr><th scope="col" aria-label="Row" />
-        {Array.from({ length: columns }, (_, index) => <th key={index} scope="col">{index < 26 ? String.fromCharCode(65 + index) : `A${String.fromCharCode(65 + index - 26)}`}</th>)}
+        {Array.from({ length: columns }, (_, index) => <th key={index} scope="col" className={widthClass(index)}>{index < 26 ? String.fromCharCode(65 + index) : `A${String.fromCharCode(65 + index - 26)}`}</th>)}
       </tr></thead><tbody>{rows.map((row, index) => <tr key={index}><th scope="row">{(sheet?.row_offset ?? 0) + index + 1}</th>
-        {Array.from({ length: columns }, (_, column) => <td key={column} className={typeof row[column] === "number" ? "file-preview-number" : undefined}>
-          {row[column] == null ? "" : typeof row[column] === "boolean" ? (row[column] ? "TRUE" : "FALSE") : String(row[column])}
-        </td>)}
+        {Array.from({ length: columns }, (_, column) => {
+          const style = sheet?.cell_styles?.[index]?.[column];
+          const classes = [widthClass(column), typeof row[column] === "number" ? "file-preview-number" : "",
+            ...(["header", "banded", "bold", "italic"] as const).filter((name) => style?.[name]).map((name) => `file-preview-cell-${name}`)].filter(Boolean).join(" ");
+          return <td key={column} className={classes || undefined}>
+            {style?.display ?? (row[column] == null ? "" : typeof row[column] === "boolean" ? (row[column] ? "TRUE" : "FALSE") : String(row[column]))}
+          </td>;
+        })}
       </tr>)}</tbody></table> : <p className="file-preview-status">This worksheet is empty.</p>}
     </div>
     {((sheet?.row_offset ?? 0) > 0 || sheet?.next_row_offset != null) ? <PreviewPager busy={paging.busy}

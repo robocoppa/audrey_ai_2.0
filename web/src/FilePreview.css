@@ -88,6 +88,16 @@
 .file-preview-grid thead th:first-child { z-index: 3; }
 .file-preview-grid tbody tr:hover td { background: #f1f8f7; }
 .file-preview-grid tbody tr:hover th { background: #daeae7; color: #18685e; }
+/* Spreadsheet metadata selects these fixed styles; source files cannot supply CSS. */
+.file-preview-grid :is(td,th).file-preview-width-narrow { width: 6rem; min-width: 6rem; max-width: 6rem; }
+.file-preview-grid :is(td,th).file-preview-width-medium { width: 12rem; min-width: 12rem; max-width: 12rem; }
+.file-preview-grid :is(td,th).file-preview-width-wide { width: 20rem; min-width: 20rem; max-width: 20rem; }
+.file-preview-grid :is(td,th).file-preview-width-extra-wide { width: 30rem; min-width: 30rem; max-width: 30rem; }
+.file-preview-grid .file-preview-cell-banded { background: #f2f6fa; }
+.file-preview-grid .file-preview-cell-header,
+.file-preview-grid tbody tr:hover .file-preview-cell-header { background: #16324f; color: #fff; font-weight: 700; }
+.file-preview-grid .file-preview-cell-bold { font-weight: 700; }
+.file-preview-grid .file-preview-cell-italic { font-style: italic; }
 /* All sheet values stay left aligned, including numeric cells, at the user's request. */
 .file-preview-grid .file-preview-number { font-variant-numeric: tabular-nums; }
 .file-preview-grid-caption { flex: none; padding: .45rem .7rem; border-top: 1px solid #c9d6df; color: #526b7b; font-size: .72rem; }
@@ -123,6 +133,8 @@
 @media (forced-colors: active) {
   .file-preview-document, .file-preview-text, .file-preview-workbook, .file-preview-grid,
   .file-preview-grid th, .file-preview-grid td, .file-preview-grid-caption, .file-preview-tabs,
+  .file-preview-grid .file-preview-cell-header, .file-preview-grid .file-preview-cell-banded,
+  .file-preview-grid tbody tr:hover .file-preview-cell-header,
   .file-preview-tabs button, .file-preview-markdown :is(code,pre,th,td,blockquote),
   .file-preview-pagination, .file-preview-pagination :is(button,select),
   .file-preview-workbook .file-preview-pagination, .file-preview-workbook .file-preview-pagination :is(button,select) {

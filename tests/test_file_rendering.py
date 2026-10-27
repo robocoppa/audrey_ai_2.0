@@ -216,3 +216,134 @@ def test_schema_is_compact_and_only_one_nonrecursive_definition_is_needed():
     assert schema["$defs"]["FileSheet"]["additionalProperties"] is False
     assert len(json.dumps(schema)) < 6000
     assert schema["properties"]["format"]["enum"] == ["txt", "md", "csv", "json", "docx", "xlsx"]
+
+
+def test_markdown_docx_saves_native_headings_runs_lists_table_and_code():
+    content = (
+        '# Review notes\n\n## Findings\nUse **verified** facts and *clear* caveats with `literal` code.\n'
+        '- First observation\n- Second observation\n1. Read the source\n2. Check the figure\n'
+        '> Keep this qualification.\n\n| Item | Amount |\n| --- | --- |\n| Wages | **50000** |\n'
+        '\n```python\n=1+1\nprint("literal")\n```'
+    )
+    artifact = render_file(CreateFileRequest(filename='review.docx', format='docx',
+                                             content_format='markdown', content=content))
+    document = Document(io.BytesIO(artifact.data))
+    assert document.paragraphs[0].style.name == 'Heading 1'
+    assert document.paragraphs[0].text == 'Review notes'
+    assert document.paragraphs[1].style.name == 'Heading 2'
+    rich = document.paragraphs[2]
+    assert any(run.text == 'verified' and run.bold for run in rich.runs)
+    assert any(run.text == 'clear' and run.italic for run in rich.runs)
+    assert any(run.text == 'literal' and run.style.name == 'InlineCode' for run in rich.runs)
+    assert [paragraph.style.name for paragraph in document.paragraphs[3:7]] == [
+        'List Bullet', 'List Bullet', 'List Number', 'List Number']
+    assert document.paragraphs[7].style.name == 'Quote'
+    assert document.paragraphs[-1].style.name == 'CodeBlock'
+    assert document.paragraphs[-1].text == '=1+1\nprint("literal")'
+    assert [[cell.text for cell in row.cells] for row in document.tables[0].rows] == [
+        ['Item', 'Amount'], ['Wages', '50000']]
+    assert all(run.bold for cell in document.tables[0].rows[0].cells for run in cell.paragraphs[0].runs)
+    assert 'Item\tAmount\nWages\t50000' in artifact.text
+    assert 'Use verified facts and clear caveats with literal code.' in artifact.text
+    assert artifact.text.startswith('Review notes\n\nFindings\n\n')
+    _assert_no_external_or_executable_zip_parts(artifact.data)
+
+
+def test_docx_markdown_is_opt_in_and_keeps_unsupported_markup_literal():
+    content = '# Heading\n![image](https://outside.invalid/a.png)\n<script>literal()</script>'
+    plain = render_file(CreateFileRequest(filename='plain.docx', format='docx', content=content))
+    assert Document(io.BytesIO(plain.data)).paragraphs[0].text == '# Heading'
+    assert plain.text == content
+    rich = render_file(CreateFileRequest(filename='rich.docx', format='docx',
+                                         content_format='markdown', content=content))
+    document = Document(io.BytesIO(rich.data))
+    assert document.paragraphs[0].text == 'Heading'
+    assert document.paragraphs[1].text == '![image](https://outside.invalid/a.png)'
+    assert document.paragraphs[2].text == '<script>literal()</script>'
+    _assert_no_external_or_executable_zip_parts(rich.data)
+    unclosed = render_file(CreateFileRequest(filename='fence.docx', format='docx',
+        content_format='markdown', content='```\nliteral text'))
+    assert unclosed.text == '```\nliteral text'
+
+
+def test_docx_markdown_table_and_block_work_are_bounded():
+    with pytest.raises(ValueError, match='column limit'):
+        render_file(CreateFileRequest(filename='wide.docx', format='docx', content_format='markdown',
+            content='|'.join(['item'] * 33) + '\n' + '|'.join(['---'] * 33)))
+    with pytest.raises(ValueError, match='block limit'):
+        render_file(CreateFileRequest(filename='many.docx', format='docx', content_format='markdown',
+                                      content='line\n' * 2001))
+
+
+def test_xlsx_styles_actual_headers_widths_formats_without_changing_cells():
+    rows = [['Item', 'Count', 'Amount', 'Fraction', 'Literal'],
+            ['Wages', 1234, 50000.125, 0.125, '=SUM(1,2)'],
+            ['Other', 10, -12.50, 1, '#REF!']]
+    artifact = render_file(CreateFileRequest(filename='styled.xlsx', format='xlsx', sheets=[{
+        'name': 'Worksheet', 'rows': rows, 'header_row': True,
+        'column_formats': ['text', 'integer', 'currency', 'percent', 'general'],
+        'column_widths': [25, 10, 20],
+    }]))
+    book = load_workbook(io.BytesIO(artifact.data), data_only=False)
+    sheet = book['Worksheet']
+    assert sheet.freeze_panes == 'A2'
+    assert sheet.auto_filter.ref == 'A1:E3'
+    assert sheet['A1'].font.bold and sheet['A1'].font.color.rgb == '00FFFFFF'
+    assert sheet['A1'].fill.fgColor.rgb == '0016324F'
+    assert sheet['A2'].fill.fgColor.rgb == '00F2F6FA'
+    assert [sheet[f'{column}2'].number_format for column in 'ABCDE'] == [
+        '@', '#,##0', '$#,##0.00', '0.00%', 'General']
+    assert [sheet[f'{column}2'].value for column in 'ABCDE'] == rows[1]
+    assert sheet['E2'].data_type == 's' and sheet['E2'].hyperlink is None
+    assert sheet.column_dimensions['A'].width == 25
+    assert sheet.column_dimensions['B'].width == 10
+    assert sheet.column_dimensions['E'].width >= 10
+    assert all(cell.alignment.horizontal == 'left' for row in sheet for cell in row)
+    book.close()
+    _assert_no_external_or_executable_zip_parts(artifact.data)
+
+
+def test_default_xlsx_style_does_not_guess_header_or_number_formats():
+    artifact = render_file(CreateFileRequest(filename='values.xlsx', format='xlsx', sheets=[{
+        'name': 'Values', 'rows': [[1, 0.125], [2, 0.25]],
+    }]))
+    book = load_workbook(io.BytesIO(artifact.data))
+    sheet = book['Values']
+    assert sheet.freeze_panes is None and sheet.auto_filter.ref is None
+    assert sheet['A1'].font.bold is False
+    assert sheet['B1'].value == 0.125 and sheet['B1'].number_format == 'General'
+    assert all(cell.alignment.horizontal == 'left' for row in sheet for cell in row)
+    book.close()
+
+
+@pytest.mark.parametrize('options', [
+    {'column_formats': ['formula']}, {'column_formats': ['currency', 'integer']},
+    {'column_widths': [7]}, {'column_widths': [61]}, {'column_widths': [True]},
+    {'column_widths': [float('nan')]}, {'column_widths': [10, 20]}, {'header_row': 'true'},
+])
+def test_worksheet_formatting_options_are_safe_bounded_and_typed(options):
+    with pytest.raises(ValidationError):
+        CreateFileRequest(filename='report.xlsx', format='xlsx',
+                          sheets=[{'name': 'Sheet', 'rows': [[1]], **options}])
+
+
+@pytest.mark.parametrize('format', ['txt', 'md', 'csv', 'json', 'xlsx'])
+def test_content_format_option_is_docx_only(format):
+    field = {'txt': {'content': 'text'}, 'md': {'content': '# text'}, 'csv': {'rows': [[1]]},
+             'json': {'data': 1}, 'xlsx': {'sheets': [{'name': 'Sheet', 'rows': [[1]]}]}}[format]
+    with pytest.raises(ValidationError, match='only for DOCX'):
+        CreateFileRequest(filename=f'report.{format}', format=format, content_format='plain', **field)
+
+
+def test_docx_markdown_preserves_heading_hashes_and_explicit_list_numbers():
+    artifact = render_file(CreateFileRequest(filename='numbered.docx', format='docx',
+        content_format='markdown', content='# C#\n4. Fourth item\n7. Seventh item\n\n1. New list'))
+    document = Document(io.BytesIO(artifact.data))
+    assert document.paragraphs[0].text == 'C#'
+    numbering = document.part.numbering_part.element
+    starts = []
+    for paragraph in document.paragraphs[1:]:
+        identity = paragraph._p.pPr.numPr.numId.val
+        instance = numbering.num_having_numId(identity)
+        starts.append(instance.lvlOverride_lst[0].startOverride.val)
+    assert starts == [4, 7, 1]

@@ -4,11 +4,17 @@ from __future__ import annotations
 import csv
 import json
 import math
-import zipfile
 from pathlib import Path
 from typing import BinaryIO
 
 from openpyxl import load_workbook
+
+from audrey.office_preview_formatting import (
+    bounded_package,
+    cell_style,
+    column_widths,
+    document_blocks,
+)
 
 MAX_SOURCE_BYTES = 8 * 1024 * 1024
 MAX_EXPANDED_BYTES = 32 * 1024 * 1024
@@ -31,9 +37,10 @@ def _options(sheet: int | None, row_offset: int, text_offset: int = 0) -> None:
         raise FilePreviewError("Invalid preview position.")
 
 
-def _table(rows, *, budget: list[int], row_offset: int = 0) -> dict:
+def _table(rows, *, budget: list[int], row_offset: int = 0, styled: bool = False) -> dict:
     visible, content_truncated, more = [], False, False
     total_rows, observed_rows = None, 0
+    styles = []
     for index, row in enumerate(rows):
         observed_rows = index + 1
         if index < row_offset:
@@ -41,8 +48,9 @@ def _table(rows, *, budget: list[int], row_offset: int = 0) -> dict:
         if len(visible) >= MAX_ROWS or budget[0] <= 0:
             more = True
             break
-        cells = []
-        for value in row[:MAX_COLUMNS]:
+        cells, cell_styles = [], []
+        for source in row[:MAX_COLUMNS]:
+            value = source.value if styled else source
             if value is None or isinstance(value, (bool, int)):
                 cell = value
             elif isinstance(value, float) and math.isfinite(value):
@@ -53,8 +61,13 @@ def _table(rows, *, budget: list[int], row_offset: int = 0) -> dict:
                 content_truncated |= len(cell) < len(raw)
                 budget[0] -= len(cell)
             cells.append(cell)
-        content_truncated |= len(row) > MAX_COLUMNS and any(value is not None for value in row[MAX_COLUMNS:])
+            if styled:
+                cell_styles.append(cell_style(source, cell))
+        content_truncated |= len(row) > MAX_COLUMNS and any(
+            (value.value if styled else value) is not None for value in row[MAX_COLUMNS:])
         visible.append(cells)
+        if styled:
+            styles.append(cell_styles)
     else:
         # Only report an exact count after observing EOF, rather than trusting
         # workbook dimensions or forcing a second full scan for each page.
@@ -62,7 +75,8 @@ def _table(rows, *, budget: list[int], row_offset: int = 0) -> dict:
     next_row = row_offset + len(visible) if more else None
     if next_row is not None and next_row > MAX_ROW_OFFSET:
         next_row, content_truncated = None, True
-    return {"rows": visible, "row_offset": row_offset, "next_row_offset": next_row,
+    return {**({"cell_styles": styles} if styled else {}),
+            "rows": visible, "row_offset": row_offset, "next_row_offset": next_row,
             "total_rows": total_rows, "content_truncated": content_truncated,
             "truncated": row_offset > 0 or more or content_truncated}
 
@@ -74,12 +88,7 @@ def _notice(truncated: bool) -> str:
 def workbook_preview(source: BinaryIO, *, sheet: int | None = None, row_offset: int = 0) -> dict:
     """Read values and inert formula text; never evaluate formulas or fetch links."""
     _options(sheet, row_offset)
-    with zipfile.ZipFile(source) as package:
-        entries = package.infolist()
-        if (len(entries) > 1024 or sum(entry.file_size for entry in entries) > MAX_EXPANDED_BYTES
-                or any(entry.file_size > MAX_EXPANDED_BYTES // 2 for entry in entries)):
-            raise FilePreviewError("Workbook is too large to preview.")
-    source.seek(0)
+    bounded_package(source)
     # data_only=False displays formulas as inert text if a retained export ever
     # includes one. It never evaluates them or follows workbook external links.
     book = load_workbook(source, read_only=True, data_only=False, keep_links=False)
@@ -95,13 +104,16 @@ def workbook_preview(source: BinaryIO, *, sheet: int | None = None, row_offset: 
             # Do not trust dimensions inside a ZIP: generated write-only files
             # may omit them, and corrupted dimensions must not allocate a grid.
             worksheet.reset_dimensions()
-            page = _table(worksheet.iter_rows(max_col=MAX_COLUMNS + 1, values_only=True),
-                          budget=budget, row_offset=row_offset)
+            page = _table(worksheet.iter_rows(max_col=MAX_COLUMNS + 1),
+                          budget=budget, row_offset=row_offset, styled=True)
             # Trimming trailing blank cells preserves interior column positions.
-            for row in page['rows']:
+            for row, styles in zip(page['rows'], page['cell_styles'], strict=True):
                 while row and row[-1] is None:
                     row.pop()
-            sheets.append({"name": worksheet.title, "sheet_index": index, **page})
+                    styles.pop()
+            widths = column_widths(source, worksheet)
+            sheets.append({"name": worksheet.title, "sheet_index": index,
+                           "column_widths": widths, **page})
             truncated |= page['truncated']
             content_truncated |= page['content_truncated']
         return {"format": "xlsx", "kind": "table", "sheets": sheets,
@@ -154,7 +166,9 @@ def preview_generated_file(path: Path, *, format: str, text_path: Path,
         paragraphs = value.split("\n\n")
         if len(paragraphs) > MAX_PARAGRAPHS and paragraphs[-1] == "":
             paragraphs.pop()
-        result = {"kind": "document", "text": value, "paragraphs": paragraphs}
+        blocks, formatting_truncated = document_blocks(path, raw, text_offset, end)
+        result = {"kind": "document", "text": value, "paragraphs": paragraphs,
+                  "blocks": blocks, "formatting_truncated": formatting_truncated}
     elif format == "json":
         # Validate the bounded original once even for a middle page; fragments
         # need not be valid standalone JSON and must not be silently reformatted.

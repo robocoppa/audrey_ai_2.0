@@ -1,6 +1,6 @@
 # Campaign 4 — main plan
 
-**Updated October 26, 2026.** English user input only. Passed work stays closed.
+**Updated October 27, 2026.** English user input only. Passed work stays closed.
 This is the only campaign roadmap; each phase has one document containing its
 behavior, decisions, and remaining work. Read this plan and the current phase.
 Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
@@ -102,16 +102,29 @@ The user accepted section/row navigation, document paper, spreadsheet grids,
 rendered Markdown and text/code presentation. Numeric spreadsheet values remain
 left aligned. No repeat test is queued for that slice.
 
-**11B built — uploaded PDF previews.** Owned ordinary and Private PDFs can show
-original pages locally in My files, Projects and saved chat attachments. My files
-keeps Summary and Transcript alongside Original PDF; navigation and zoom use
-bounded PNG pages rather than an external viewer. Download still serves the
-unchanged original. Backend/component and desktop/mobile browser checks,
-typecheck, build and scoped lint pass; existing large-component lint diagnostics
-are unchanged. User acceptance is pending. Rebuild audrey and audrey-ui after pull. No
-schema/config/dependency/CSP/model/index change. [Phase 11](phase-11-native-file-explorer.md#uploaded-pdf-previews--11b)
-owns the contract and the one existing-PDF browser check. The next unbuilt slice
-is richer actual DOCX/XLSX formatting and supported preview fidelity (11C).
+**11B accepted October 27 — uploaded PDF previews.** The user passed the
+owned original-page view, navigation and zoom. Existing PDF acceptance stays closed.
+
+**11C built — actual DOCX/XLSX formatting and preview fidelity.** DOCX supports
+explicit Markdown headings, lists, tables, emphasis and code; plain content remains
+literal. XLSX has optional styled headings, widths and fixed numeric/USD/percentage
+formats. Previews read supported formatting from saved bytes; cells remain left
+aligned. Old outputs stay immutable, including across renderer revisions. Tax
+workbook regeneration is not part of this slice.
+
+**11D built — filename previews and media players.** Clicking a ready filename
+in My files opens its preview, including the PDF original and audio/video player.
+The existing Open action retains its Summary-first behavior. Native media controls
+use protected inline originals with byte-range seeking; missing/reclaimed sources
+have honest feedback and retained text artifacts remain accessible. Browser codec
+support varies; original download is available. No transcoding or new upload
+formats are introduced.
+
+Local backend/component and desktop/mobile browser checks, typecheck, build
+and changed-file lint pass. Browser acceptance for 11C/11D is pending. Rebuild
+`audrey` and `audrey-ui` after pull; no sidecar, schema, config, dependency, CSP,
+model or index change. [Phase 11](phase-11-native-file-explorer.md#deployment-and-acceptance--11c11d)
+owns the targeted checks. No further approved implementation slice is unbuilt.
 
 No broader repeat test is queued. A later
 decision to improve broader autonomous review starts from this saved run's
@@ -160,7 +173,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
 | 10 | [Answer provenance](phase-10-ordinary-answer-provenance.md) | Complete; immediate answer summaries await acceptance |
-| 11 | [File explorer](phase-11-native-file-explorer.md) | Creation/paged previews accepted; uploaded PDF preview built; richer formatting next |
+| 11 | [File explorer](phase-11-native-file-explorer.md) | Creation/paged/PDF previews accepted; richer Office formatting and filename/media previews built, acceptance pending |
 | 12 | [Navigation](phase-12-sidebar-navigation.md) | Desktop/mobile followup built; browser acceptance pending |
 | 13 | [Responses extensions](phase-13-responses-multimodal-input.md) | Complete |
 | 14 | [Bots and tokens](phase-14-bot-accounts-and-token-lifetimes.md) | Complete |
@@ -229,16 +242,18 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 - [x] **11A accepted — larger previews and native-style appearance.** Bounded
   previous/next browsing for text/document sections and worksheet rows, with
   paper/grid/Markdown/text surfaces. User accepted October 26; no repeat check.
-- [x] **11B built — uploaded PDF preview.** Original-page navigation and zoom
-  for owned ordinary/Private PDFs in My files, Projects and saved chat attachments.
-  Local verification passes; user acceptance pending. Phase 11 owns the check.
-- [ ] **11C — generated-file formatting and preview fidelity.** Improve actual
-  DOCX/XLSX headings, lists, tables and worksheet formatting, then reflect
-  supported formatting in previews. Preserve literal cells and safe local
-  generation; no office editor or Hermes adapter changes.
+- [x] **11B accepted — uploaded PDF previews.** Original-page navigation and zoom
+  passed October 27; no repeat PDF preview check is queued.
+- [x] **11C built — generated-file formatting and preview fidelity.** Native DOCX
+  headings/lists/tables and explicit XLSX formatting, with supported saved-byte
+  previews and immutable old outputs. Locally verified; browser acceptance pending.
+- [x] **11D built — filename previews and media players.** Ready My files names
+  open previews; owned audio/video plays inline with seeking and retained text views.
+  Locally verified; browser acceptance pending.
 
-The approved file-preview followups run in that order. Passed creation and Tax
-save/download work stays closed; deferred work remains deferred.
+The approved implementation queue is built. Complete the targeted 11C/11D check;
+passed creation, PDF preview and Tax save/download work stays closed. Deferred
+work remains deferred; choose new product work only when requested.
 
 Tax year/jurisdiction and reference release remain in the case record. Project
 views read that canonical record rather than duplicate it in Project instructions. OCR/media, fine-tuning and state

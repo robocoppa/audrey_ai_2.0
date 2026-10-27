@@ -1,6 +1,9 @@
 # Campaign 4 Phase 11 — native file explorer
 
-**Status:** Explorer/shared file creation and 11A paged/native-style previews accepted October 26. Uploaded PDF previews (11B) are built; final UI/browser gates and user acceptance are pending. Richer generated-file formatting (11C) is next.
+**Status:** Explorer/shared creation and 11A paged previews are accepted October 26;
+11B uploaded PDF previews are accepted October 27. Actual Office formatting (11C)
+and filename/media previews (11D) are built; final local gates and browser acceptance
+are pending. No further approved implementation slice is unbuilt.
 
 ## Library model
 
@@ -24,13 +27,6 @@ chosen. Captions sit outside both fields. Both actions share height and a baseli
 progress/results sit below both forms so they cannot misalign the buttons.
 Long links stay inside their field. Narrow screens stack link then upload.
 File types and size limits are available in a separate compact disclosure.
-
-Deploy after the normal commit/push/pull on Tower in
-`/mnt/user/appdata/audrey_ai_2.0`: `docker compose up -d --build audrey-ui`.
-No backend rebuild or data/index change. In the browser, open My Files > Add files,
-paste a long video link and check the layout; upload a PDF and check that transfer
-completion changes to Processing before Ready. The upload is required for that
-status check. Existing file ingestion/reuse acceptance remains closed.
 
 Sources, Models, and Tool calls form one controlled popover group: opening one closes the others; outside click or Escape closes the current popover. Live activity and saved answers follow the same behavior.
 
@@ -79,11 +75,11 @@ rows and column headings. Text and numeric cells align left; numbers retain
 equal-width digits. Multiple worksheets have keyboard-accessible tabs.
 The modal fits desktop/mobile screens, closes with Escape/outside click/Close,
 restores trigger focus and preserves the unsent chat draft. Download remains
-available. Uploaded PDFs have the additional original-page view below; other
-uploaded document/image/media viewers retain their contracts.
+available. Uploaded PDFs have the original-page view below; My files names also
+open the appropriate document, image or media view described in 11D.
 
 The backend returns bounded read-only JSON, using saved generated document text
-and locally parsed spreadsheet values. It does not evaluate formulas, load remote
+and supported formatting parsed locally from actual DOCX/XLSX bytes. It does not evaluate formulas, load remote
 workbook links or run model/index calls. Markdown suppresses raw HTML and remote
 images. Previews enforce owner/scope checks, file locks, deletion rechecks and
 private no-store headers. The same viewer supports saved Tax workbook revisions,
@@ -95,8 +91,8 @@ Nothing in a preview changes case facts or the file itself.
 Documents use a continuous paper reading surface, spreadsheets use a light grid
 with row/column headings and worksheet tabs, Markdown is rendered, and plain
 text/JSON uses a code-style surface. Numeric spreadsheet values stay left aligned.
-This approximates familiar file types; exact Word/Excel layout, embedded images,
-advanced formatting and interactive editing are not claimed.
+This is a continuous reading view. Exact Word pagination, embedded images,
+arbitrary Office formatting and interactive editing are not claimed.
 
 Text and DOCX previews have Previous/Next sections with exact character positions.
 Each request is bounded to 100,000 characters and, for DOCX, 1,000 paragraphs;
@@ -135,32 +131,89 @@ selectable page text or edit the document; Transcript remains available separate
 
 This adds no model/embedding/index work or dependency, schema, config or CSP
 change. Existing ingestion, summaries, text extraction and Private processing
-remain accepted. The 11A presentation/paging slice is also accepted October 26.
+remain accepted. The user accepted this PDF slice October 27; no repeat check is queued.
 
-### Next approved slice — 11C
+### Actual Office formatting and preview fidelity — 11C
 
-Richer DOCX/XLSX generation will improve headings, lists, tables and worksheet
-formatting in the actual saved files, then reflect supported formatting in
-previews. Existing outputs stay immutable. These remain read-only previews and
-generated outputs; office editing stays outside Audrey and Hermes adapters stay
-unchanged. The main campaign queue owns the order.
+DOCX `content_format` defaults to `plain`, preserving existing literal paragraphs.
+Explicit `markdown` supports headings 1–3, bullet/numbered lists, pipe tables,
+bold/italic text, inline code, fenced code and quotations. These become native
+Word structures, with restrained typography and table headings. Unsupported syntax,
+HTML, image and link syntax stays text; no external resource is fetched or embedded.
+The saved text projection follows the actual document body for reliable reading.
 
-### Deployment and acceptance — 11B
+XLSX worksheets may request a styled first header row, which also freezes that
+row and adds filtering. Widths are sized automatically or supplied per column
+within 8–60 characters. Fixed formats cover general, integer, decimal, US-dollar
+currency, percentage and text. Formatting changes display, not stored values;
+formula-looking strings remain literal. Text and numbers align left in both the
+actual workbook and preview. Existing sheet/row/column/input/output bounds remain.
 
-After normal commit/push, run on **Tower** in
-`/mnt/user/appdata/audrey_ai_2.0`: pull, then
-`docker compose up -d --build audrey audrey-ui`. No sidecar/model/index work or
-schema/config/dependency change is needed.
+Previews project supported structure, emphasis, table styling, column widths and
+fixed numeric display from the saved file bytes. Column widths use responsive
+size bands rather than exact Excel geometry; document paper is continuous,
+without claiming exact Word pagination. A safe plain-content fallback
+and notice cover formatting the preview cannot represent. Existing paging and
+owner/deletion checks remain. Original files can still be downloaded for full
+Office fidelity; previews do not edit or regenerate them.
 
-Backend/component regressions, desktop/mobile browser checks under production
-CSP, typecheck, build and scoped lint pass; existing large-component diagnostics
-are unchanged. Browser acceptance is pending. At
-`https://ai.builtryte.xyz`, open an existing multipage PDF in My files, choose
-Original PDF, use Next/Previous and change zoom. Summary and Transcript should
-remain accessible. Check Preview from a Project PDF or saved chat attachment
-where available, then close it: the unsent chat draft remains. Pages display
-inside Audrey without a download; Download still retrieves the original when
-clicked. An ordinary or Private PDF is suitable. **No upload is required if one
-already exists; otherwise upload one multipage PDF and wait for Ready.** This is
-the targeted new check; do not repeat accepted file creation, 11A browsing or Tax
-save/download tests. No separate smoke document is needed.
+Renderer-version identities preserve immutable earlier outputs and retries.
+An existing identical output is reused; new content/formatting creates a separate
+file. A deleted prior output is not resurrected. Existing Tax case workbooks keep
+their own revision-bound generation/cache contract; no Tax regeneration is needed.
+
+### Filename previews and media players — 11D
+
+A ready filename in My files opens the file's appropriate view: the actual PDF
+page view, image preview, generated-file preview, ordinary document extracted contents,
+or audio/video Player. The existing Open action retains its Summary-first view,
+and Summary/Transcript/Visual notes remain available where they already exist.
+
+Audio/video Player uses native browser controls for play, pause, volume and seeking.
+Changing its text tab, returning to the list or closing My files stops playback.
+The source is the protected owner-bound `GET`/`HEAD /api/files/{id}/media` endpoint:
+inline original bytes, byte-range seeking, authoritative allowlisted media MIME,
+no-store/nosniff headers and canonical ownership/source/deletion rechecks. Private
+owner playback stays local to the server/browser path and does not invoke a model.
+
+A missing or reclaimed original produces clear feedback while retained summaries
+and transcripts stay usable. Codec/container support depends on the browser; an
+unsupported player offers the original download. No transcoding, buffering of whole
+media files, new upload formats, external player or third-party service is added.
+
+### Deployment and acceptance — 11C/11D
+
+After normal commit/push, run on **Tower**:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+git pull
+docker compose up -d --build audrey audrey-ui
+```
+
+No sidecar/media-worker rebuild, schema/config/dependency/CSP change, model pull
+or reindex is needed. Backend/component regressions, desktop/mobile browser
+checks under production CSP, real audio/video playback/seek/cleanup, typecheck,
+build and changed-file Ruff/ESLint pass locally. Browser acceptance is pending.
+
+At `https://ai.builtryte.xyz`, use one ordinary new chat request:
+
+> Create preview-check.docx with a heading, two bullet points and a two-column
+> table. Also create preview-check.xlsx with a Budget worksheet: headings Item,
+> Amount and Share; rows Food, 40, 0.25 and Travel, 120, 0.75. Style the first row as
+> headings, Amount as US dollars and Share as percentages. Use real document and
+> worksheet formatting.
+
+Preview both outputs, then open their downloads in your usual Office application.
+Headings, bullets/table, header styling and `$40.00`/`25.00%` displays should agree;
+spreadsheet values remain left aligned. This generates the two requested files;
+**no upload is required**. Existing Tax workbooks need no regeneration or retest.
+
+In My files, click existing PDF/image/audio/video filenames. The appropriate view
+should open directly. For playable audio/video, test play/pause and seeking, then
+switch to Summary/Transcript or close: playback stops and those text views remain
+accessible. The existing Open action should still show Summary first. A reclaimed
+source should explain its absence. **Upload only if no suitable existing audio or
+video is available; wait for Ready before playback.** Browser playback checks make
+no model call; a fresh upload uses the existing processing flow. This is the new
+filename/player interaction check, not a repeat of accepted PDF rendering.

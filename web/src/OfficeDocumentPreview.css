@@ -1,0 +1,26 @@
+.office-document-preview :is(strong,b) { font-weight: 700; }
+.office-document-preview :is(em,i) { font-style: italic; }
+.office-document-preview :is(ul,ol) { margin: .6rem 0 1rem; padding-inline-start: 1.55rem; }
+.office-document-preview li { padding-inline-start: .15rem; white-space: pre-wrap; }
+.office-document-preview li + li { margin-top: .35rem; }
+.office-document-preview blockquote { margin: 1rem 0; padding: .15rem 1rem; border-inline-start: .2rem solid #96b1c5; color: #4b5d6e; white-space: pre-wrap; }
+.office-document-preview code { padding: .1rem .25rem; border-radius: .15rem; background: #edf2f6; color: #24384c; font-family: var(--font-mono, ui-monospace, monospace); font-size: .9em; }
+.office-document-preview .office-preview-code { margin: 1rem 0; padding: .85rem 1rem; border-color: #d8e1e9; border-radius: .15rem; background: #f1f5f8; color: #24384c; font-size: .84em; }
+.office-document-preview .office-preview-code code { padding: 0; background: transparent; font-size: inherit; }
+.office-preview-table-wrap { max-width: 100%; margin: 1rem 0 1.3rem; overflow-x: auto; overscroll-behavior-inline: contain; }
+.office-preview-table-wrap table { width: 100%; border-collapse: collapse; font-size: .9em; line-height: 1.5; }
+.office-preview-table-wrap :is(th,td) { min-width: 6rem; padding: .5rem .7rem; border: 1px solid #d5dfe7; text-align: left; vertical-align: top; white-space: pre-wrap; }
+.office-preview-table-wrap th { background: #eaf0f5; color: #16324f; font-weight: 700; }
+.office-preview-table-wrap tbody tr:nth-child(even) td { background: #f7f9fb; }
+@media (max-width: 600px) {
+  .office-document-preview .office-preview-code { padding: .7rem; }
+  .office-preview-table-wrap :is(th,td) { min-width: 5rem; padding: .4rem .5rem; }
+}
+@media (forced-colors: active) {
+  .office-document-preview :is(code,pre,blockquote), .office-preview-table-wrap :is(th,td),
+  .office-preview-table-wrap tbody tr:nth-child(even) td {
+    background: Canvas;
+    color: CanvasText;
+    border-color: ButtonBorder;
+  }
+}

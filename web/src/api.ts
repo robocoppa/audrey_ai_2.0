@@ -969,6 +969,14 @@ export function getFileArtifactDownloadUrl(
   return `/api/files/${encodeURIComponent(fileId)}/artifacts/${artifact}/download`;
 }
 
+export interface FilePreviewCellStyle {
+  bold?: boolean;
+  italic?: boolean;
+  header?: boolean;
+  banded?: boolean;
+  display?: string;
+}
+
 export interface AudreyFilePreview {
   id: string;
   filename: string;
@@ -977,9 +985,13 @@ export interface AudreyFilePreview {
   page_count?: number;
   text?: string;
   paragraphs?: string[];
+  blocks?: import("./OfficeDocumentPreview").OfficeDocumentBlock[];
+  formatting_truncated?: boolean;
   sheets?: {
     name: string;
     rows: (string | number | boolean | null)[][];
+    cell_styles?: FilePreviewCellStyle[][];
+    column_widths?: number[];
     truncated: boolean;
     sheet_index?: number;
     row_offset?: number;

@@ -209,3 +209,38 @@ async def test_failed_or_cancelled_write_cannot_unlink_concurrent_identical_retr
     assert (await s.client.get(f"/api/files/{result['file_id']}/text")).json()['text'] == args['content']
     assert len(await s.db.list_user(s.owner.storage_namespace)) == 1
     assert (await s.db.quota_usage(s.owner.storage_namespace)).single_shot_bytes == 0
+
+
+@pytest.mark.parametrize('format', ['docx', 'xlsx'])
+async def test_office_renderer_revision_keeps_old_bytes_and_reuses_new_outputs(output_state, monkeypatch, format):
+    from audrey import generated_files
+    s = output_state
+    conversation, run = await _run(s)
+    args = {'filename': f'versioned.{format}', 'format': format}
+    args.update({'content': 'A retained output'} if format == 'docx' else {'sheets': [{'name': 'Values', 'rows': [['Amount'], [12.5]]}]})
+    monkeypatch.setattr(generated_files, '_OFFICE_RENDERER_REVISION', 1)
+    old = await _create(s, conversation, run, **args)
+    original = (await s.client.get(old['download_url'])).content
+    monkeypatch.setattr(generated_files, '_OFFICE_RENDERER_REVISION', 2)
+    current = await _create(s, conversation, run, **args)
+    assert current['created'] and current['file_id'] != old['file_id']
+    repeated = await _create(s, conversation, run, **args)
+    assert not repeated['created'] and repeated['file_id'] == current['file_id']
+    assert (await s.client.get(old['download_url'])).content == original
+    # Removing an old copy does not invalidate an independently retained new one.
+    assert (await s.client.delete(f"/api/files/{old['file_id']}")).status_code == 200
+    assert (await _create(s, conversation, run, **args))['file_id'] == current['file_id']
+
+
+async def test_office_revision_does_not_resurrect_previously_deleted_output(output_state, monkeypatch):
+    from audrey import generated_files
+    s = output_state
+    conversation, run = await _run(s)
+    args = {'filename': 'deleted.docx', 'format': 'docx', 'content': 'A retained output'}
+    monkeypatch.setattr(generated_files, '_OFFICE_RENDERER_REVISION', 1)
+    old = await _create(s, conversation, run, **args)
+    assert (await s.client.delete(f"/api/files/{old['file_id']}")).status_code == 200
+    monkeypatch.setattr(generated_files, '_OFFICE_RENDERER_REVISION', 2)
+    assert (await _create(s, conversation, run, **args))['error'] == 'generated_file_deleted'
+    replacement = await _create(s, conversation, run, **{**args, 'filename': 'replacement.docx'})
+    assert replacement['created']
