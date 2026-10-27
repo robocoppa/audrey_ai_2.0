@@ -1,6 +1,6 @@
 # Campaign 4 Phase 11 — native file explorer
 
-**Status:** Explorer and shared file creation accepted October 26. Browser previews built; acceptance pending.
+**Status:** Explorer/shared file creation accepted. Larger-file browsing and native-style previews built and locally verified October 26; uploaded PDF previews and richer generated-file formatting are approved followups.
 
 ## Library model
 
@@ -75,7 +75,8 @@ October 26: all three ordinary DOCX/XLSX and Private Markdown outputs worked.
 Generated chat and Project file links have Preview beside Download. My files >
 Open uses the same content viewer for generated files. It displays readable DOCX
 paragraphs, formatted Markdown, plain text/JSON, and CSV/XLSX tables with numbered
-rows and column headings. Multiple worksheets have keyboard-accessible tabs.
+rows and column headings. Text and numeric cells align left; numbers retain
+equal-width digits. Multiple worksheets have keyboard-accessible tabs.
 The modal fits desktop/mobile screens, closes with Escape/outside click/Close,
 restores trigger focus and preserves the unsent chat draft. Download remains
 available. Existing uploaded document/image/media viewers retain their contracts.
@@ -88,10 +89,36 @@ private no-store headers. The same viewer supports saved Tax workbook revisions,
 using the existing owner/case authorization, revision cache and expiry behavior.
 Nothing in a preview changes case facts or the file itself.
 
-Preview limits are eight sheets, 200 rows/sheet, 32 columns, 100,000 total text
-characters and 1,000 DOCX paragraphs. Source input is at most 8 MiB, with bounded
-ZIP inflation. Any omitted content has an explicit partial-preview notice; the
-original remains downloadable. These are content previews, not office editors.
+### Larger previews and native-style appearance — current slice
+
+Documents use a continuous paper reading surface, spreadsheets use a light grid
+with row/column headings and worksheet tabs, Markdown is rendered, and plain
+text/JSON uses a code-style surface. Numeric spreadsheet values stay left aligned.
+This approximates familiar file types; exact Word/Excel layout, embedded images,
+advanced formatting and interactive editing are not claimed.
+
+Text and DOCX previews have Previous/Next sections with exact character positions.
+Each request is bounded to 100,000 characters and, for DOCX, 1,000 paragraphs;
+continuation preserves text at character and paragraph boundaries. Spreadsheet
+requests show 200 rows, with Previous/Next controls and independent worksheet
+positions. Sheet indices and row numbers remain stable. Total rows appear only
+when the reader has observed the end, not from untrusted workbook dimensions.
+
+Limits remain eight sheets and 32 columns. Source input is at most 8 MiB, with
+bounded ZIP inflation. Cells/columns that cannot be represented have a separate
+omission notice; content on later browsable sections is not described as lost.
+Source files remain downloadable and unchanged. Paging makes no model/index calls
+and repeats owner/scope/deletion checks for every request, including saved Tax
+workbook revisions.
+
+### Approved followups
+
+The main campaign queue owns their order. Uploaded PDF browser preview will add
+page navigation for existing owned PDFs without changing ingestion or Private
+processing. Richer DOCX/XLSX generation will improve formatting in the actual files
+and show supported formatting in previews. Native-style surfaces above do not
+mean those formatting changes have already shipped. These remain read-only
+previews and generated outputs; office editing stays outside Audrey.
 
 ### Deployment and acceptance
 
@@ -99,11 +126,13 @@ After normal commit/push, run on Tower in `/mnt/user/appdata/audrey_ai_2.0`:
 pull, then `docker compose up -d --build audrey audrey-ui`. No schema/config,
 sidecar, model, dependency or index change.
 
-At `https://ai.builtryte.xyz`, use Preview beside the three existing generated
-chat links. DOCX shows paragraphs, XLSX cells, Markdown formatted text. Check
-My files > Open and the Private Project file's Preview. The saved Tax workbook's
-Preview shows worksheet tabs and retained source content. Closing returns to chat
-with its draft intact; Download remains usable. No upload or generation needed.
-Backend/component checks, desktop/mobile browser checks, typecheck, production
-build and changed-file lint pass locally; this existing-file browser check is
-pending. No separate smoke document or repeated creation test.
+Backend/component regressions, desktop/mobile browser checks, typecheck, build
+and changed-file lint pass locally. Browser acceptance is pending. At
+`https://ai.builtryte.xyz`, preview an existing long document or worksheet and
+use Next then Previous: text/rows retain their order, worksheet tabs retain their
+place, and the new presentation stays usable on desktop/mobile. A short existing
+file is enough to inspect appearance; paging needs a file beyond a section limit.
+Use a current long file where possible; no upload, regeneration, or broad model
+suite is required for already accepted creation or Tax save/download behavior.
+Download remains available and closing returns to the unsent chat draft. No
+separate smoke document is needed.

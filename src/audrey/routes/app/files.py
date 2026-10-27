@@ -372,6 +372,9 @@ async def download_file(
 @router.get("/files/{file_id}/preview")
 async def preview_file(
     file_id: str, request: Request, response: Response,
+    sheet: int | None = Query(default=None, ge=0, le=7),
+    row_offset: int = Query(default=0, ge=0, le=10_000),
+    text_offset: int = Query(default=0, ge=0, le=8 * 1024 * 1024),
     principal: Principal = Depends(_files_access),
 ) -> dict:
     """Preview an owned generated output without downloads or model calls."""
@@ -390,6 +393,7 @@ async def preview_file(
             preview = await asyncio.to_thread(
                 preview_generated_file, path, format=path.suffix.lower().lstrip("."),
                 text_path=path.with_name(f"{file_id}.ocr.txt"),
+                sheet=sheet, row_offset=row_offset, text_offset=text_offset,
             )
         except Exception:  # noqa: BLE001 - parsers must not reveal document contents or host paths
             raise HTTPException(status_code=422, detail="Preview is unavailable. You can still download the file.") from None

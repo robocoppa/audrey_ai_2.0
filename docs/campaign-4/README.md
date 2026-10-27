@@ -97,15 +97,17 @@ ordinary DOCX/XLSX and Private Project Markdown outputs worked. Creation and own
 chat/My files/Project delivery stay closed. Generated outputs remain separate
 from source evidence and Private renders locally; application schema stays 25.
 
-**Browser file previews built.** Chat and Project links offer Preview alongside
-Download; My files > Open shows generated document text or spreadsheet cells.
-Markdown is rendered locally, DOCX uses readable paragraphs, and workbooks have
-sheet tabs. The same viewer supports revision-bound Tax exports. Owner checks,
-Private handling, truncation, focus/closing, desktop/mobile layout and existing
-downloads pass locally. Browser acceptance uses the existing files, with no
-upload, regeneration, model or index run. Rebuild audrey and audrey-ui after pull;
-no sidecar/config/schema change. [Phase 11](phase-11-native-file-explorer.md#browser-previews)
-owns the contract; Hermes office integrations remain unchanged.
+**File-preview followups approved October 26.** The user wants all three
+followups in the queue. The current slice adds larger-file browsing and a
+presentation closer to the native file types: continuous document paper, a
+spreadsheet grid and worksheet tabs, rendered Markdown and a plain-text/code
+surface. Left-aligned spreadsheet values stay in place. This is a read-only
+projection, not exact Word/Excel layout or an office editor. Backend, component,
+desktop/mobile browser, typecheck, build and changed-file lint gates pass locally;
+browser acceptance remains pending. Rebuild audrey and audrey-ui after pull; no schema/config/model/index
+change. [Phase 11](phase-11-native-file-explorer.md#browser-previews) owns the
+contract. Uploaded PDF preview and richer generated-file formatting follow in
+that order; the main queue below is authoritative.
 
 No broader repeat test is queued. A later
 decision to improve broader autonomous review starts from this saved run's
@@ -154,7 +156,7 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
 | 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
 | 10 | [Answer provenance](phase-10-ordinary-answer-provenance.md) | Complete; immediate answer summaries await acceptance |
-| 11 | [File explorer](phase-11-native-file-explorer.md) | Explorer/file creation accepted; browser previews built |
+| 11 | [File explorer](phase-11-native-file-explorer.md) | File creation accepted; paged/native-style previews built; PDF and richer formatting queued |
 | 12 | [Navigation](phase-12-sidebar-navigation.md) | Desktop/mobile followup built; browser acceptance pending |
 | 13 | [Responses extensions](phase-13-responses-multimodal-input.md) | Complete |
 | 14 | [Bots and tokens](phase-14-bot-accounts-and-token-lifetimes.md) | Complete |
@@ -218,9 +220,21 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
   workbook download passed October 26. No repeat save/download test is queued.
 - [x] **Shared file creation accepted:** all three ordinary DOCX/XLSX and Private
   Project Markdown outputs worked; no repeat generation/download smoke.
-- [ ] **Browser previews built:** local read-only views for generated files and
-  saved Tax workbooks from chat, My files and Projects. Existing-file browser
-  acceptance is next; [Phase 11](phase-11-native-file-explorer.md#browser-previews).
+- [x] **Browser previews foundation:** local read-only generated-file and saved
+  Tax workbook views; spreadsheet numeric values align left.
+- [x] **11A built — larger previews and native-style appearance.** Bounded
+  previous/next browsing for text/document sections and worksheet rows, with
+  paper/grid/Markdown/text surfaces. Local verification passes; browser acceptance
+  remains pending. See Phase 11 for the targeted existing-file check.
+- [ ] **11B — uploaded PDF preview.** Let users read their owned uploaded PDFs
+  in the browser with page navigation, preserving Private and owner controls.
+- [ ] **11C — generated-file formatting and preview fidelity.** Improve actual
+  DOCX/XLSX headings, lists, tables and worksheet formatting, then reflect
+  supported formatting in previews. Preserve literal cells and safe local
+  generation; no office editor or Hermes adapter changes.
+
+The approved file-preview followups run in that order. Passed creation and Tax
+save/download work stays closed; deferred work remains deferred.
 
 Tax year/jurisdiction and reference release remain in the case record. Project
 views read that canonical record rather than duplicate it in Project instructions. OCR/media, fine-tuning and state

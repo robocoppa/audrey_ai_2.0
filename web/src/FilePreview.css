@@ -13,32 +13,94 @@
 .file-preview-actions button:hover, .file-preview-error button:hover { border-color: var(--accent); background: var(--surface-active); }
 .file-preview-content { display: flex; flex-direction: column; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 1rem 1.2rem; gap: 1rem; }
 .file-preview-name { flex: none; margin: 0; font-size: .9rem; overflow-wrap: anywhere; color: var(--muted); }
-.file-preview-document { max-width: 52rem; width: 100%; box-sizing: border-box; margin: 0 auto; padding: clamp(1rem, 3vw, 2.5rem); border: 1px solid var(--border); border-radius: .65rem; background: var(--surface-raised); color: var(--text-soft); line-height: 1.75; font-size: .9rem; overflow-wrap: anywhere; }
-.file-preview-document p { margin: 0 0 1rem; white-space: pre-wrap; }
+/* The document remains a continuous reading surface, rather than imitating Word pagination. */
+.file-preview-document {
+  color-scheme: light;
+  flex: none;
+  width: 100%;
+  max-width: 51rem;
+  min-height: 26rem;
+  box-sizing: border-box;
+  margin: .2rem auto .7rem;
+  padding: clamp(1.5rem, 5vw, 4rem) clamp(1.25rem, 6vw, 4.5rem);
+  border: 1px solid #d5dbe2;
+  border-radius: .12rem;
+  background: #fff;
+  box-shadow: 0 .3rem .6rem rgb(0 0 0 / 18%), 0 1rem 2.5rem rgb(0 0 0 / 18%);
+  color: #202a35;
+  font-family: Aptos, Calibri, Carlito, "Segoe UI", sans-serif;
+  font-size: .96rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.file-preview-document p { margin: 0 0 .85rem; white-space: pre-wrap; }
 .file-preview-document p:last-child { margin-bottom: 0; }
-.file-preview-document h1, .file-preview-document h2, .file-preview-document h3 { margin: 1.3em 0 .6em; color: var(--text); line-height: 1.3; }
+.file-preview-document :is(h1,h2,h3,h4,h5,h6) { margin: 1.4em 0 .6em; color: #162b40; line-height: 1.3; }
+.file-preview-document h1 { font-size: 1.8em; }
+.file-preview-document h2 { font-size: 1.4em; }
+.file-preview-document h3 { font-size: 1.15em; }
 .file-preview-document > :first-child { margin-top: 0; }
-.file-preview-document pre, .file-preview-text { margin: 0; max-width: 100%; padding: 1rem; border: 1px solid var(--border); border-radius: .6rem; background: var(--input-surface); color: var(--text-soft); font-family: var(--font-mono, ui-monospace, monospace); font-size: .8rem; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
-.file-preview-markdown a { color: var(--accent); }
-.file-preview-markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
-.file-preview-markdown th, .file-preview-markdown td { padding: .4rem .65rem; border: 1px solid var(--border); text-align: left; }
+.file-preview-document pre, .file-preview-text { margin: 0; max-width: 100%; padding: 1rem; border: 1px solid var(--border); border-radius: .5rem; font-family: var(--font-mono, ui-monospace, monospace); font-size: .8rem; line-height: 1.65; tab-size: 2; white-space: pre-wrap; overflow-wrap: anywhere; }
+.file-preview-text { flex: none; background: #0a1423; color: #d7e5f6; box-shadow: inset .2rem 0 0 #35557b; }
+.file-preview-markdown { font-family: inherit; font-size: .9rem; }
+.file-preview-markdown a { color: #126497; text-decoration: underline; text-underline-offset: .15em; }
+.file-preview-markdown a:hover { color: #08466e; }
+.file-preview-markdown :is(ul,ol) { margin: .6rem 0 1rem; padding-inline-start: 1.5rem; }
+.file-preview-markdown li + li { margin-top: .3rem; }
+.file-preview-markdown blockquote { margin: 1rem 0; padding: .15rem 1rem; border-inline-start: .2rem solid #96b1c5; color: #4b5d6e; }
+.file-preview-markdown blockquote p:last-child { margin-bottom: 0; }
+.file-preview-markdown hr { margin: 1.5rem 0; border: 0; border-top: 1px solid #d8e0e7; }
+.file-preview-markdown code { padding: .1rem .3rem; border-radius: .2rem; background: #edf2f6; color: #24384c; font-family: var(--font-mono, ui-monospace, monospace); font-size: .9em; }
+.file-preview-markdown pre { margin: 1rem 0; border-color: #d8e1e9; background: #f1f5f8; color: #24384c; }
+.file-preview-markdown pre code { padding: 0; background: transparent; font-size: inherit; }
+.file-preview-markdown table { display: block; max-width: 100%; margin: 1rem 0; overflow-x: auto; border-collapse: collapse; }
+.file-preview-markdown th, .file-preview-markdown td { padding: .4rem .65rem; border: 1px solid #d5dfe7; text-align: left; }
+.file-preview-markdown th { background: #eef3f7; font-weight: 600; }
+.file-preview-markdown tbody tr:nth-child(even) { background: #f8fafc; }
+.file-preview-markdown .file-preview-omitted-image { display: inline-block; padding: .15rem .45rem; border: 1px dashed #a4b5c3; border-radius: .2rem; color: #51677a; }
 .file-preview-omitted-image, .file-preview-status, .file-preview-notice, .file-preview-grid-caption { color: var(--muted); font-size: .78rem; line-height: 1.6; }
 .file-preview-status, .file-preview-notice { margin: 0; }
 .file-preview-error { margin: 0; padding: 1rem; color: var(--danger); font-size: .8rem; }
 .file-preview-error p { margin: 0 0 .6rem; }
-.file-preview-workbook { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: .65rem; }
-.file-preview-tabs { display: flex; flex: none; gap: .4rem; overflow: auto; padding-bottom: .2rem; }
-.file-preview-tabs button { flex: none; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: .5rem .85rem; border: 1px solid var(--border); border-radius: .5rem; background: var(--input-surface); color: var(--muted); font: inherit; font-size: .8rem; cursor: pointer; }
-.file-preview-tabs button[aria-selected="true"] { border-color: var(--accent); color: var(--accent); background: var(--surface-active); }
-.file-preview-grid { min-height: 0; max-height: 65dvh; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border); border-radius: .6rem; background: var(--input-surface); }
-.file-preview-grid table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: .8rem; line-height: 1.5; }
-.file-preview-grid th, .file-preview-grid td { padding: .5rem .75rem; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.file-preview-grid td { min-width: 7rem; max-width: 28rem; white-space: pre-wrap; overflow-wrap: anywhere; vertical-align: top; }
-.file-preview-grid th { background: var(--surface-raised); color: var(--muted); font-weight: 500; text-align: center; }
-.file-preview-grid thead th { position: sticky; z-index: 2; top: 0; font-size: .7rem; }
-.file-preview-grid tbody th, .file-preview-grid thead th:first-child { position: sticky; z-index: 1; left: 0; width: 2.2rem; min-width: 2.2rem; max-width: 2.2rem; font-variant-numeric: tabular-nums; }
+.file-preview-workbook {
+  color-scheme: light;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #bdcdd8;
+  border-radius: .5rem;
+  background: #edf3f6;
+  color: #263845;
+}
+.file-preview-tabs { display: flex; flex: none; gap: .15rem; overflow: auto; padding: .35rem .5rem 0; background: #e6edf2; border-bottom: 1px solid #bfccd5; }
+.file-preview-tabs button { flex: none; max-width: 18rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: .5rem .85rem; border: 1px solid transparent; border-bottom: .2rem solid transparent; border-radius: .25rem .25rem 0 0; background: transparent; color: #4b6172; font: inherit; font-size: .78rem; cursor: pointer; }
+.file-preview-tabs button:hover { background: #f6fafb; color: #1d665f; }
+.file-preview-tabs button[aria-selected="true"] { border-color: #c1d4d9; border-bottom-color: #238478; color: #14665d; background: #fff; font-weight: 600; }
+.file-preview-grid { flex: 1; min-height: 0; max-height: 65dvh; overflow: auto; overscroll-behavior: contain; background: #fff; }
+.file-preview-grid table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-family: Aptos, Calibri, Carlito, "Segoe UI", sans-serif; font-size: .84rem; line-height: 1.45; }
+.file-preview-grid th, .file-preview-grid td { padding: .35rem .65rem; border-right: 1px solid #dce4e9; border-bottom: 1px solid #dce4e9; }
+.file-preview-grid td { min-width: 7rem; max-width: 28rem; white-space: pre-wrap; overflow-wrap: anywhere; vertical-align: top; text-align: left; color: #263845; }
+.file-preview-grid th { background: #edf2f5; color: #536776; font-weight: 500; text-align: center; }
+.file-preview-grid thead th { position: sticky; z-index: 2; top: 0; font-size: .7rem; border-bottom-color: #bcccd6; }
+.file-preview-grid tbody th, .file-preview-grid thead th:first-child { position: sticky; z-index: 1; left: 0; width: 2.2rem; min-width: 2.2rem; max-width: 2.2rem; font-variant-numeric: tabular-nums; border-right-color: #bcccd6; }
 .file-preview-grid thead th:first-child { z-index: 3; }
-.file-preview-grid .file-preview-number { text-align: right; font-variant-numeric: tabular-nums; }
+.file-preview-grid tbody tr:hover td { background: #f1f8f7; }
+.file-preview-grid tbody tr:hover th { background: #daeae7; color: #18685e; }
+/* All sheet values stay left aligned, including numeric cells, at the user's request. */
+.file-preview-grid .file-preview-number { font-variant-numeric: tabular-nums; }
+.file-preview-grid-caption { flex: none; padding: .45rem .7rem; border-top: 1px solid #c9d6df; color: #526b7b; font-size: .72rem; }
+.file-preview-grid .file-preview-status { padding: 1rem; color: #526b7b; }
+.file-preview-pagination { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; flex: none; align-items: center; gap: .6rem; padding: .6rem .1rem 0; border-top: 1px solid var(--border); color: var(--muted); font-size: .78rem; }
+.file-preview-pagination button, .file-preview-pagination select { flex: none; min-height: 2.2rem; padding: .4rem .7rem; border: 1px solid var(--border); border-radius: .4rem; background: var(--surface-raised); color: var(--text-soft); font: inherit; cursor: pointer; }
+.file-preview-pagination button:hover:not(:disabled), .file-preview-pagination select:hover { border-color: var(--accent); background: var(--surface-active); }
+.file-preview-pagination button:disabled { opacity: .45; cursor: default; }
+.file-preview-page-label { min-width: 0; overflow-wrap: anywhere; text-align: center; font-variant-numeric: tabular-nums; }
+.file-preview-content > .file-preview-pagination { position: sticky; z-index: 4; top: 0; margin-top: -.15rem; padding-bottom: .6rem; background: var(--surface); box-shadow: 0 .3rem .6rem rgb(0 0 0 / 12%); }
+.file-preview-workbook .file-preview-pagination { padding: .5rem .65rem; border-color: #c9d6df; background: #edf3f6; color: #526b7b; }
+.file-preview-workbook .file-preview-pagination :is(button,select) { border-color: #c0cfd9; background: #fff; color: #314d5f; }
+.file-preview-workbook .file-preview-pagination button:hover:not(:disabled), .file-preview-workbook .file-preview-pagination select:hover { border-color: #4c958d; background: #e9f5f2; }
 .file-preview-content .file-preview-notice { flex: none; }
 .file-preview-trigger:focus-visible, .file-preview-dialog :is(button,a,[tabindex="0"]):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .file-manager .file-preview-content { padding: 0; margin-top: .9rem; }
@@ -46,10 +108,29 @@
   .file-preview-backdrop { padding: .5rem; }
   .file-preview-dialog { max-height: calc(100dvh - 1rem); border-radius: .75rem; }
   .file-preview-header, .file-preview-content { padding: .85rem; }
-  .file-preview-grid { max-height: 65dvh; }
+  .file-preview-document { min-height: 18rem; padding: 1.5rem 1.15rem; font-size: .9rem; }
+  .file-preview-markdown { font-size: .85rem; }
+  .file-preview-grid { max-height: 60dvh; }
+  .file-preview-pagination :is(button,select) { min-height: 2.5rem; }
+  .file-preview-pagination { gap: .45rem; font-size: .73rem; }
   .file-preview-grid td { min-width: 6rem; max-width: 18rem; }
   .file-preview-trigger { min-height: 2.4rem; }
 }
 
 .project-file-details .file-output-link { display: flex; max-width: 100%; white-space: normal; }
 .project-file-details .file-output-link > a { overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (forced-colors: active) {
+  .file-preview-document, .file-preview-text, .file-preview-workbook, .file-preview-grid,
+  .file-preview-grid th, .file-preview-grid td, .file-preview-grid-caption, .file-preview-tabs,
+  .file-preview-tabs button, .file-preview-markdown :is(code,pre,th,td,blockquote),
+  .file-preview-pagination, .file-preview-pagination :is(button,select),
+  .file-preview-workbook .file-preview-pagination, .file-preview-workbook .file-preview-pagination :is(button,select) {
+    background: Canvas;
+    color: CanvasText;
+    border-color: ButtonBorder;
+    box-shadow: none;
+  }
+  .file-preview-tabs button[aria-selected="true"] { border-bottom-color: Highlight; color: Highlight; }
+  .file-preview-markdown a { color: LinkText; }
+}

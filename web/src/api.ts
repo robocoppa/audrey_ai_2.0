@@ -976,13 +976,37 @@ export interface AudreyFilePreview {
   kind: "text" | "document" | "table";
   text?: string;
   paragraphs?: string[];
-  sheets?: { name: string; rows: (string | number | boolean | null)[][]; truncated: boolean }[];
+  sheets?: {
+    name: string;
+    rows: (string | number | boolean | null)[][];
+    truncated: boolean;
+    sheet_index?: number;
+    row_offset?: number;
+    next_row_offset?: number | null;
+    total_rows?: number | null;
+    content_truncated?: boolean;
+  }[];
+  sheet_count?: number;
+  offset?: number;
+  next_offset?: number | null;
+  total_chars?: number;
+  content_truncated?: boolean;
   truncated: boolean;
   notice?: string;
 }
 
-export function getFilePreview(fileId: string, signal?: AbortSignal): Promise<AudreyFilePreview> {
-  return apiJson<AudreyFilePreview>(`/api/files/${encodeURIComponent(fileId)}/preview`, { signal });
+export interface FilePreviewPosition { sheet?: number; row_offset?: number; text_offset?: number }
+
+export function filePreviewQuery(position: FilePreviewPosition = {}): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(position)) {
+    if (value !== undefined) query.set(key, String(value));
+  }
+  return query.size ? `?${query}` : "";
+}
+
+export function getFilePreview(fileId: string, signal?: AbortSignal, position?: FilePreviewPosition): Promise<AudreyFilePreview> {
+  return apiJson<AudreyFilePreview>(`/api/files/${encodeURIComponent(fileId)}/preview${filePreviewQuery(position)}`, { signal });
 }
 
 export function getFileText(fileId: string, offset = 0): Promise<AudreyFileText> {

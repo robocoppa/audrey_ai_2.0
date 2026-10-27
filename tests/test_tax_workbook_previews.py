@@ -45,3 +45,24 @@ async def test_old_preview_stays_at_saved_revision(state, tmp_path):
     overview = dict(preview['sheets'][0]['rows'])
     assert overview['Tax year'] == '2025'
     assert overview['Case revision'] == str(saved['revision'])
+
+
+async def test_workbook_preview_can_select_sheet_and_page_with_revision_auth(state, tmp_path):
+    saved = await _saved(state, tmp_path)
+    prepared = await state.client.post(state.path + '/exports', json={'expected_revision': saved['revision']})
+    path = prepared.json()['export']['download_url'].removesuffix('/download') + '/preview'
+    response = await state.client.get(path, params={'sheet': 2, 'row_offset': 1})
+    assert response.status_code == 200, response.text
+    preview = response.json()
+    assert preview['sheet_count'] == 5
+    assert len(preview['sheets']) == 1
+    evidence = preview['sheets'][0]
+    assert evidence['name'] == 'Evidence' and evidence['sheet_index'] == 2
+    assert evidence['row_offset'] == 1 and evidence['next_row_offset'] is None
+    assert any('Dated official supporting passage.' in str(row) for row in evidence['rows'])
+    assert response.headers['x-tax-case-revision'] == str(saved['revision'])
+    for params in ({'sheet': -1}, {'sheet': 8}, {'row_offset': 10001}):
+        assert (await state.client.get(path, params=params)).status_code == 422
+    state.current[0] = await state.store.resolve_external_identity(provider='test', subject='page-other',
+        email='other@example.com', display_name='Other', role='user', auth_method='test')
+    assert (await state.client.get(path, params={'sheet': 2, 'row_offset': 1})).status_code == 404

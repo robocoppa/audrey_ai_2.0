@@ -124,3 +124,107 @@ def test_document_paragraph_count_is_bounded(tmp_path):
     result = preview_generated_file(source, format='docx', text_path=text)
     assert len(result['paragraphs']) == MAX_PARAGRAPHS
     assert result['truncated']
+
+
+@pytest.mark.parametrize('format', ['csv', 'xlsx'])
+async def test_table_pages_have_no_missing_rows_and_repeat_ownership_checks(output_state, format):
+    state = output_state
+    conversation, run = await _run(state)
+    rows = [[index, f'row-{index}'] for index in range(405)]
+    fields = {'rows': rows} if format == 'csv' else {'sheets': [
+        {'name': 'First', 'rows': rows}, {'name': 'Second', 'rows': [['second sheet']]},
+    ]}
+    item = await _create(state, conversation, run, filename=f'paged.{format}', format=format, **fields)
+    path = f"/api/files/{item['file_id']}/preview"
+    seen = []
+    for offset, expected_next in [(0, 200), (200, 400), (400, None)]:
+        response = await state.client.get(path, params={'sheet': 0, 'row_offset': offset})
+        assert response.status_code == 200, response.text
+        page = response.json()
+        table = page['sheets'][0]
+        assert table['sheet_index'] == 0 and table['row_offset'] == offset
+        assert table['next_row_offset'] == expected_next
+        assert table['total_rows'] == (405 if offset == 400 else None)
+        assert page['content_truncated'] is False and table['content_truncated'] is False
+        assert response.headers['cache-control'] == 'private, no-store'
+        seen.extend(table['rows'])
+    expected = [[str(cell) for cell in row] for row in rows] if format == 'csv' else rows
+    assert seen == expected
+    if format == 'xlsx':
+        result = (await state.client.get(path, params={'sheet': 1})).json()
+        assert result['sheet_count'] == 2 and len(result['sheets']) == 1
+        assert result['sheets'][0]['sheet_index'] == 1
+        assert result['sheets'][0]['rows'] == [['second sheet']]
+    state.current[0] = state.other
+    assert (await state.client.get(path, params={'sheet': 0, 'row_offset': 200})).status_code == 404
+    state.current[0] = state.owner
+    assert (await state.client.delete(f"/api/files/{item['file_id']}")).status_code == 200
+    assert (await state.client.get(path, params={'sheet': 0, 'row_offset': 200})).status_code == 404
+
+
+@pytest.mark.parametrize('format', ['txt', 'md', 'docx', 'json'])
+async def test_text_pages_join_exactly_including_unicode_and_paragraph_boundary(output_state, format):
+    state = output_state
+    conversation, run = await _run(state)
+    content = ('Paragraph \u2022 with text\n\n' * 6000)[:150_000]
+    fields = {'data': {'note': content}} if format == 'json' else {'content': content}
+    item = await _create(state, conversation, run, filename=f'long.{format}', format=format, **fields)
+    assert 'error' not in item, item
+    path = f"/api/files/{item['file_id']}/preview"
+    chunks, offset = [], 0
+    while True:
+        response = await state.client.get(path, params={'text_offset': offset})
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert result['offset'] == offset
+        assert len(result['text']) <= 100_000
+        assert result['content_truncated'] is False
+        if format == 'docx':
+            assert len(result['paragraphs']) <= 1000
+        chunks.append(result['text'])
+        next_offset = result['next_offset']
+        if next_offset is None:
+            break
+        assert next_offset == offset + len(result['text'])
+        assert next_offset > offset
+        offset = next_offset
+    if format == 'json':
+        import json
+        assert json.loads(''.join(chunks)) == fields['data']
+    else:
+        assert ''.join(chunks) == content
+    assert sum(map(len, chunks)) == result['total_chars']
+
+
+@pytest.mark.parametrize('params', [
+    {'sheet': -1}, {'sheet': 8}, {'sheet': 'oops'},
+    {'row_offset': -1}, {'row_offset': 10001},
+    {'text_offset': -1}, {'text_offset': 8388609},
+])
+async def test_preview_positions_are_bounded_by_route(output_state, params):
+    response = await output_state.client.get('/api/files/not-a-file/preview', params=params)
+    assert response.status_code == 422
+
+
+def test_table_continuation_does_not_hide_irrecoverable_cell_or_column_omissions():
+    source = io.BytesIO()
+    book = Workbook()
+    book.active.append(['text' * 3000] + [None] * 32 + ['hidden final column'])
+    for index in range(205):
+        book.active.append([index])
+    book.save(source)
+    source.seek(0)
+    first = workbook_preview(source)
+    sheet = first['sheets'][0]
+    assert sheet['next_row_offset'] == MAX_ROWS
+    assert sheet['content_truncated'] and first['content_truncated']
+    assert len(sheet['rows'][0][0]) == 8000
+
+
+def test_invalid_sheet_refuses_instead_of_showing_another_sheet():
+    source = io.BytesIO()
+    book = Workbook()
+    book.save(source)
+    source.seek(0)
+    with pytest.raises(FilePreviewError, match='Worksheet'):
+        workbook_preview(source, sheet=1)

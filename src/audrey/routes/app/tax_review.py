@@ -2,7 +2,7 @@
 import asyncio
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.background import BackgroundTask
@@ -126,6 +126,8 @@ async def download_workbook(
 @router.get("/conversations/{conversation_id}/tax-review/exports/{export_id}/preview")
 async def preview_workbook(
     conversation_id: str, export_id: str, request: Request,
+    sheet: int | None = Query(default=None, ge=0, le=7),
+    row_offset: int = Query(default=0, ge=0, le=10_000),
     principal: Principal = Depends(_access),
 ):
     import io
@@ -153,7 +155,7 @@ async def preview_workbook(
         data = await _settle_private_persistence(asyncio.to_thread(artifact.file.read, MAX_SOURCE_BYTES + 1))
         if len(data) > MAX_SOURCE_BYTES:
             raise ValueError("Preview limit")
-        result = await asyncio.to_thread(workbook_preview, io.BytesIO(data))
+        result = await asyncio.to_thread(workbook_preview, io.BytesIO(data), sheet=sheet, row_offset=row_offset)
     except Exception:  # noqa: BLE001 - never expose parser contents or host paths
         raise HTTPException(status_code=422, detail="Preview is unavailable. You can still download the workbook.") from None
     finally:

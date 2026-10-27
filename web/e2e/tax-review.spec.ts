@@ -702,14 +702,21 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       { id: "msg_preview_user", run_id: "run_tax_1", role: "user", status: "completed", content: "Create a budget", sequence: 1, created_at: DATE, updated_at: DATE, attachments: [] },
       { id: "msg_preview_saved", run_id: "run_tax_1", role: "assistant", status: "completed", content: `[Download budget.xlsx](/api/files/${fileId}/download)`, sequence: 2, created_at: DATE, updated_at: DATE, attachments: [] },
     ], next_cursor: null }));
-    await page.route(`**/api/files/${fileId}/preview`, (route) => json(route, {
-      id: fileId, filename: "budget.xlsx", format: "xlsx", kind: "table", truncated: false,
-      sheets: [
-        { name: "Budget", rows: [["Item", "Cost", "A longer note for the spreadsheet preview"],
-          ...Array.from({ length: 40 }, (_, index) => [`Item ${index + 1}`, index * 5, "A saved working value."])], truncated: false },
-        { name: "Notes", rows: [["Private working output", "Read only"]], truncated: false },
-      ],
-    }));
+    await page.route(`**/api/files/${fileId}/preview*`, (route) => {
+      const offset = Number(new URL(route.request().url()).searchParams.get("row_offset") ?? 0);
+      return json(route, {
+        id: fileId, filename: "budget.xlsx", format: "xlsx", kind: "table", truncated: true, content_truncated: false,
+        sheets: offset ? [{ name: "Budget", sheet_index: 0, row_offset: 200, next_row_offset: null, total_rows: 205,
+          rows: Array.from({ length: 5 }, (_, index) => [`Item ${index + 200}`, (index + 199) * 5, "A later saved value."]), truncated: true }]
+          : [
+            { name: "Budget", sheet_index: 0, row_offset: 0, next_row_offset: 200, total_rows: null,
+              rows: [["Item", "Cost", "A longer note for the spreadsheet preview"],
+                ...Array.from({ length: 199 }, (_, index) => [`Item ${index + 1}`, index * 5, "A saved working value."])], truncated: true },
+            { name: "Notes", sheet_index: 1, row_offset: 0, next_row_offset: null, total_rows: 1,
+              rows: [["Private working output", "Read only"]], truncated: false },
+          ],
+      });
+    });
     const downloads: string[] = [];
     page.on("download", (download) => downloads.push(download.suggestedFilename()));
     await page.goto("./");
@@ -720,11 +727,27 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     const dialog = page.getByRole("dialog", { name: "File preview" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("cell", { name: "Item 1", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("cell", { name: "5", exact: true })).toHaveCSS("text-align", "left");
+    await expect(dialog.getByRole("cell", { name: "Item 2", exact: true })).toHaveCSS("text-align", "left");
     const bounds = await dialog.boundingBox();
     expect(bounds!.x).toBeGreaterThanOrEqual(0);
     expect(bounds!.y).toBeGreaterThanOrEqual(0);
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
     expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
+    const pager = dialog.getByRole("navigation", { name: "Preview pages" });
+    await expect(pager).toBeVisible();
+    const pagerBounds = await pager.boundingBox();
+    expect(pagerBounds!.y + pagerBounds!.height).toBeLessThanOrEqual(viewport.height);
+    await pager.getByRole("button", { name: "Next", exact: true }).click();
+    await expect(dialog.getByRole("cell", { name: "Item 200", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("rowheader", { name: "201", exact: true })).toBeVisible();
+    await expect(pager.getByRole("button", { name: "Next", exact: true })).toBeDisabled();
+    await dialog.getByRole("tab", { name: "Notes", exact: true }).click();
+    await expect(dialog.getByRole("cell", { name: "Private working output" })).toBeVisible();
+    await dialog.getByRole("tab", { name: "Budget", exact: true }).click();
+    await expect(dialog.getByRole("cell", { name: "Item 200", exact: true })).toBeVisible();
+    await pager.getByRole("button", { name: "Previous", exact: true }).click();
+    await expect(dialog.getByRole("cell", { name: "Item 1", exact: true })).toBeVisible();
     await dialog.getByRole("tab", { name: "Notes", exact: true }).click();
     await expect(dialog.getByRole("cell", { name: "Private working output" })).toBeVisible();
     await page.screenshot({ path: `/tmp/audrey-file-preview-${viewport.width}.png` });
@@ -733,5 +756,39 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await expect(trigger).toBeFocused();
     await expect(composer).toHaveValue("Keep my unsent next question.");
     expect(downloads).toEqual([]);
+  });
+}
+
+for (const width of [1280, 390]) {
+  test(`document preview looks like paper at ${width}px and keeps paging controls accessible`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await mockTaxApi(page);
+    const fileId = "file_document";
+    await page.route(`**/api/conversations/${ID}/messages?*`, (route) => json(route, { items: [
+      { id: "msg_document_user", run_id: "run_tax_1", role: "user", status: "completed", content: "Create meeting notes", sequence: 1, created_at: DATE, updated_at: DATE, attachments: [] },
+      { id: "msg_document_saved", run_id: "run_tax_1", role: "assistant", status: "completed", content: `[Download notes.docx](/api/files/${fileId}/download)`, sequence: 2, created_at: DATE, updated_at: DATE, attachments: [] },
+    ], next_cursor: null }));
+    await page.route(`**/api/files/${fileId}/preview*`, (route) => {
+      const offset = Number(new URL(route.request().url()).searchParams.get("text_offset") ?? 0);
+      const paragraphs = offset ? ["Final section of meeting notes."] : ["Meeting notes", ...Array.from({ length: 40 }, (_, index) => `Discussion ${index + 1}: Review the project schedule and share the next steps with the team.`)];
+      return json(route, { id: fileId, filename: "notes.docx", format: "docx", kind: "document", paragraphs,
+        text: paragraphs.join("\n\n"), offset, next_offset: offset ? null : 4000, total_chars: 4031,
+        truncated: true, content_truncated: false });
+    });
+    await page.goto("./");
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "File preview" });
+    const paper = dialog.getByRole("article", { name: "Document content" });
+    await expect(paper).toHaveCSS("background-color", "rgb(255, 255, 255)");
+    await page.screenshot({ path: `/tmp/audrey-document-preview-${width}.png` });
+    await dialog.getByText("Discussion 40:", { exact: false }).scrollIntoViewIfNeeded();
+    const next = dialog.getByRole("button", { name: "Next", exact: true });
+    const bounds = await next.boundingBox();
+    expect(bounds!.y).toBeGreaterThanOrEqual(0);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
+    await next.click();
+    await expect(paper).toContainText("Final section of meeting notes.");
+    await dialog.getByRole("button", { name: "Previous", exact: true }).click();
+    await expect(paper).toContainText("Discussion 1:");
   });
 }
