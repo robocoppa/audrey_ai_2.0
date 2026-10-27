@@ -47,6 +47,7 @@ import { SwipeConversationRow } from "./SwipeConversationRow";
 import { UploadProgress } from "./UploadProgress";
 import { TaxReview, type TaxReviewLoadState } from "./TaxReview";
 import { FileDownloadLink } from "./FileDownloadLink";
+import { FilePreviewButton } from "./FilePreview";
 import { ConversationToolbox } from "./ConversationToolbox";
 import { PrivateTaskProgress } from "./PrivateTaskProgress";
 import type { PrivateTask } from "./privateTasksApi";
@@ -3229,8 +3230,9 @@ function ChatAttachment({ attachment }: { attachment: CompleteAttachment }) {
       <span className="chat-file-icon" aria-hidden="true">{video ? "▶" : "▤"}</span>
       <span>
         <strong>{attachment.name}</strong>
-        <small>{video ? "Video" : "File"}</small>
+        <small>{video ? "Video" : attachment.contentType === "application/pdf" ? "PDF" : "File"}</small>
       </span>
+      {attachment.contentType === "application/pdf" ? <FilePreviewButton fileId={attachment.id} label={`Preview ${attachment.name}`} /> : null}
     </div>
   );
 }

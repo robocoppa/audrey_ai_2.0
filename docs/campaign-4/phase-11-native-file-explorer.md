@@ -1,6 +1,6 @@
 # Campaign 4 Phase 11 — native file explorer
 
-**Status:** Explorer/shared file creation accepted. Larger-file browsing and native-style previews built and locally verified October 26; uploaded PDF previews and richer generated-file formatting are approved followups.
+**Status:** Explorer/shared file creation and 11A paged/native-style previews accepted October 26. Uploaded PDF previews (11B) are built; final UI/browser gates and user acceptance are pending. Richer generated-file formatting (11C) is next.
 
 ## Library model
 
@@ -79,7 +79,8 @@ rows and column headings. Text and numeric cells align left; numbers retain
 equal-width digits. Multiple worksheets have keyboard-accessible tabs.
 The modal fits desktop/mobile screens, closes with Escape/outside click/Close,
 restores trigger focus and preserves the unsent chat draft. Download remains
-available. Existing uploaded document/image/media viewers retain their contracts.
+available. Uploaded PDFs have the additional original-page view below; other
+uploaded document/image/media viewers retain their contracts.
 
 The backend returns bounded read-only JSON, using saved generated document text
 and locally parsed spreadsheet values. It does not evaluate formulas, load remote
@@ -89,7 +90,7 @@ private no-store headers. The same viewer supports saved Tax workbook revisions,
 using the existing owner/case authorization, revision cache and expiry behavior.
 Nothing in a preview changes case facts or the file itself.
 
-### Larger previews and native-style appearance — current slice
+### Larger previews and native-style appearance — 11A accepted
 
 Documents use a continuous paper reading surface, spreadsheets use a light grid
 with row/column headings and worksheet tabs, Markdown is rendered, and plain
@@ -111,28 +112,55 @@ Source files remain downloadable and unchanged. Paging makes no model/index call
 and repeats owner/scope/deletion checks for every request, including saved Tax
 workbook revisions.
 
-### Approved followups
+### Uploaded PDF previews — 11B
 
-The main campaign queue owns their order. Uploaded PDF browser preview will add
-page navigation for existing owned PDFs without changing ingestion or Private
-processing. Richer DOCX/XLSX generation will improve formatting in the actual files
-and show supported formatting in previews. Native-style surfaces above do not
-mean those formatting changes have already shipped. These remain read-only
-previews and generated outputs; office editing stays outside Audrey.
+Owned uploaded PDFs have a local original-page view. My files > Open starts on
+Summary and keeps Transcript; Original PDF displays the document's actual pages.
+Project PDF rows and saved chat PDF attachments offer Preview in the shared
+modal. Page controls move one page at a time, and zoom enlarges the current
+page. The modal fits desktop/mobile screens, restores trigger focus on close
+and preserves the unsent chat draft. Download uses the existing protected route
+and serves the unchanged original only when requested.
 
-### Deployment and acceptance
+Metadata and every page request recheck ownership, stored-source availability
+and deletion under the file-operation lock. Ordinary and Private PDFs use the
+same local Poppler renderer. Only inert PNG pages reach the browser; PDF active
+content is not embedded or executed. Responses are private/no-store and nosniff.
+The renderer accepts sources up to 128 MiB and 2,000 pages, with one page at a
+time bounded to a 1,600-pixel longest edge. Two operations may run concurrently;
+the operation timeout is 45 seconds, with subprocess cancellation/timeout cleanup.
+Malformed, encrypted, oversized or unavailable sources show a safe error while
+keeping the original download path. Preview does not unlock passwords, provide
+selectable page text or edit the document; Transcript remains available separately.
 
-After normal commit/push, run on Tower in `/mnt/user/appdata/audrey_ai_2.0`:
-pull, then `docker compose up -d --build audrey audrey-ui`. No schema/config,
-sidecar, model, dependency or index change.
+This adds no model/embedding/index work or dependency, schema, config or CSP
+change. Existing ingestion, summaries, text extraction and Private processing
+remain accepted. The 11A presentation/paging slice is also accepted October 26.
 
-Backend/component regressions, desktop/mobile browser checks, typecheck, build
-and changed-file lint pass locally. Browser acceptance is pending. At
-`https://ai.builtryte.xyz`, preview an existing long document or worksheet and
-use Next then Previous: text/rows retain their order, worksheet tabs retain their
-place, and the new presentation stays usable on desktop/mobile. A short existing
-file is enough to inspect appearance; paging needs a file beyond a section limit.
-Use a current long file where possible; no upload, regeneration, or broad model
-suite is required for already accepted creation or Tax save/download behavior.
-Download remains available and closing returns to the unsent chat draft. No
-separate smoke document is needed.
+### Next approved slice — 11C
+
+Richer DOCX/XLSX generation will improve headings, lists, tables and worksheet
+formatting in the actual saved files, then reflect supported formatting in
+previews. Existing outputs stay immutable. These remain read-only previews and
+generated outputs; office editing stays outside Audrey and Hermes adapters stay
+unchanged. The main campaign queue owns the order.
+
+### Deployment and acceptance — 11B
+
+After normal commit/push, run on **Tower** in
+`/mnt/user/appdata/audrey_ai_2.0`: pull, then
+`docker compose up -d --build audrey audrey-ui`. No sidecar/model/index work or
+schema/config/dependency change is needed.
+
+Backend/component regressions, desktop/mobile browser checks under production
+CSP, typecheck, build and scoped lint pass; existing large-component diagnostics
+are unchanged. Browser acceptance is pending. At
+`https://ai.builtryte.xyz`, open an existing multipage PDF in My files, choose
+Original PDF, use Next/Previous and change zoom. Summary and Transcript should
+remain accessible. Check Preview from a Project PDF or saved chat attachment
+where available, then close it: the unsent chat draft remains. Pages display
+inside Audrey without a download; Download still retrieves the original when
+clicked. An ordinary or Private PDF is suitable. **No upload is required if one
+already exists; otherwise upload one multipage PDF and wait for Ready.** This is
+the targeted new check; do not repeat accepted file creation, 11A browsing or Tax
+save/download tests. No separate smoke document is needed.

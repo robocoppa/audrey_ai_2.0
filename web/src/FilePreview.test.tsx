@@ -171,3 +171,15 @@ it("cancels an in-flight page when the file changes and discards the old result"
   completePage(json({ ...workbook, sheets: [{ name: "Old file", rows: [["Stale data"]], truncated: false }] }));
   await waitFor(() => expect(screen.queryByText("Stale data")).not.toBeInTheDocument());
 });
+
+
+it("dispatches uploaded PDF metadata to the page reader without a second metadata request", async () => {
+  const fetch = vi.fn().mockResolvedValue(json({ id: "file_123", filename: "inspection.pdf", format: "pdf", kind: "pdf", page_count: 2, truncated: false }));
+  vi.stubGlobal("fetch", fetch);
+  render(<FilePreviewContent fileId="file_123" />);
+  const image = await screen.findByAltText("inspection.pdf — page 1 of 2");
+  expect(image).toHaveAttribute("src", "/api/files/file_123/preview/pages/1");
+  fireEvent.load(image);
+  expect(image).toBeVisible();
+  expect(fetch).toHaveBeenCalledOnce();
+});

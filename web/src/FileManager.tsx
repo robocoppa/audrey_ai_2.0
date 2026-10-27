@@ -19,6 +19,7 @@ import {
 } from "./api";
 
 import { FilePreviewContent } from "./FilePreview";
+import { PdfPreviewContent } from "./PdfPreview";
 import { UploadProgress } from "./UploadProgress";
 
 type FileKindFilter = "all" | AudreyFile["kind"];
@@ -607,7 +608,7 @@ function artifactLabel(artifact: AudreyFileArtifactKind): string {
 }
 
 function DocumentTextViewer({ file, onBack }: { file: AudreyFile; onBack: () => void }) {
-  const [view, setView] = useState<"summary" | "transcript">("summary");
+  const [view, setView] = useState<"summary" | "transcript" | "pdf">("summary");
 
   return (
     <div className="file-artifact-viewer">
@@ -619,6 +620,8 @@ function DocumentTextViewer({ file, onBack }: { file: AudreyFile; onBack: () => 
         </div>
       </div>
       <div className="file-artifact-tabs" role="group" aria-label="Document text type">
+        {file.mime === "application/pdf" && !file.source_freed_at ? <button type="button"
+          aria-pressed={view === "pdf"} onClick={() => setView("pdf")}>Original PDF</button> : null}
         <button
           type="button"
           aria-pressed={view === "summary"}
@@ -630,11 +633,11 @@ function DocumentTextViewer({ file, onBack }: { file: AudreyFile; onBack: () => 
           onClick={() => setView("transcript")}
         >Transcript</button>
       </div>
-      <ArtifactPage
+      {view === "pdf" ? <PdfPreviewContent fileId={file.id} filename={file.filename} /> : <ArtifactPage
         key={file.id + ":" + view}
         file={file}
         artifact={view === "summary" ? "summary" : undefined}
-      />
+      />}
     </div>
   );
 }

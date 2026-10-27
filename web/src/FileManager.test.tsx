@@ -271,6 +271,9 @@ it("shows a PDF summary first and its extracted text under Transcript", async ()
         headers: { "Content-Type": "application/json" },
       }));
     }
+    if (path.endsWith("/preview")) return Promise.resolve(new Response(JSON.stringify({
+      id: file.id, filename: file.filename, kind: "pdf", format: "pdf", page_count: 2, truncated: false,
+    }), { headers: { "Content-Type": "application/json" } }));
     const summary = path.includes("/artifacts/summary?");
     const body = summary
       ? {
@@ -308,6 +311,13 @@ it("shows a PDF summary first and its extracted text under Transcript", async ()
     credentials: "same-origin",
     headers: { Accept: "application/json" },
   }));
+  fireEvent.click(screen.getByRole("button", { name: "Original PDF" }));
+  const page = await screen.findByAltText("inspection.pdf — page 1 of 2");
+  expect(page).toHaveAttribute("src", "/api/files/pdf_ready/preview/pages/1");
+  fireEvent.load(page);
+  expect(page).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+  expect(await screen.findByText(file.summary)).toBeVisible();
 });
 
 

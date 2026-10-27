@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi import Path as PathParameter
 from fastapi.responses import FileResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel
@@ -369,6 +370,9 @@ async def download_file(
     )
 
 
+_PREVIEW_HEADERS = {"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"}
+
+
 @router.get("/files/{file_id}/preview")
 async def preview_file(
     file_id: str, request: Request, response: Response,
@@ -377,32 +381,77 @@ async def preview_file(
     text_offset: int = Query(default=0, ge=0, le=8 * 1024 * 1024),
     principal: Principal = Depends(_files_access),
 ) -> dict:
-    """Preview an owned generated output without downloads or model calls."""
+    """Preview an owned generated output or uploaded PDF without model calls."""
     from audrey.file_previews import preview_generated_file
+    from audrey.pdf_previews import PDFPreviewUnavailableError, pdf_preview
 
     async with request.app.state.file_operation_locks.hold(file_id):
         row = await _owned_row(request, principal, file_id)
-        if row.origin != "generated":
-            raise HTTPException(status_code=422, detail="Use the existing file viewer for uploaded documents.")
+        is_pdf = row.origin == "upload" and row.mime == "application/pdf"
+        if row.origin != "generated" and not is_pdf:
+            raise HTTPException(status_code=422, detail="Use the existing file viewer for this file type.")
         if row.status != "ready" or row.source_freed_at:
             raise HTTPException(status_code=410, detail="The saved file is unavailable.")
         path = _source_path(request, principal, row)
         if not await asyncio.to_thread(path.is_file):
             raise HTTPException(status_code=410, detail="The saved file is unavailable.")
         try:
-            preview = await asyncio.to_thread(
-                preview_generated_file, path, format=path.suffix.lower().lstrip("."),
-                text_path=path.with_name(f"{file_id}.ocr.txt"),
-                sheet=sheet, row_offset=row_offset, text_offset=text_offset,
-            )
+            if is_pdf:
+                preview = await pdf_preview(path)
+            else:
+                preview = await asyncio.to_thread(
+                    preview_generated_file, path, format=path.suffix.lower().lstrip("."),
+                    text_path=path.with_name(f"{file_id}.ocr.txt"),
+                    sheet=sheet, row_offset=row_offset, text_offset=text_offset,
+                )
+        except PDFPreviewUnavailableError:
+            raise HTTPException(status_code=503, detail="PDF preview is temporarily unavailable.",
+                                headers=_PREVIEW_HEADERS) from None
         except Exception:  # noqa: BLE001 - parsers must not reveal document contents or host paths
-            raise HTTPException(status_code=422, detail="Preview is unavailable. You can still download the file.") from None
+            raise HTTPException(status_code=422, detail="Preview is unavailable. You can still download the file.",
+                                headers=_PREVIEW_HEADERS) from None
         # Recheck canonical ownership/deletion after file parsing, just as the
         # original viewer does before exposing owner contents.
         await _owned_row(request, principal, file_id)
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return {"id": file_id, "filename": row.filename, **preview}
+
+
+@router.get("/files/{file_id}/preview/pages/{page}")
+async def preview_pdf_page(
+    file_id: str, request: Request,
+    page: int = PathParameter(ge=1, le=2000),
+    principal: Principal = Depends(_files_access),
+) -> Response:
+    """Rasterize one owned uploaded PDF page locally; active PDF content stays on disk."""
+    from audrey.pdf_previews import PDFPreviewUnavailableError, pdf_preview
+
+    try:
+        async with request.app.state.file_operation_locks.hold(file_id):
+            row = await _owned_row(request, principal, file_id)
+            if row.origin != "upload" or row.mime != "application/pdf":
+                raise HTTPException(status_code=422, detail="This preview is available for uploaded PDFs only.")
+            if row.status != "ready" or row.source_freed_at:
+                raise HTTPException(status_code=410, detail="The saved file is unavailable.")
+            path = _source_path(request, principal, row)
+            if not await asyncio.to_thread(path.is_file):
+                raise HTTPException(status_code=410, detail="The saved file is unavailable.")
+            try:
+                image = await pdf_preview(path, page=page)
+            except PDFPreviewUnavailableError:
+                raise HTTPException(status_code=503, detail="PDF preview is temporarily unavailable.") from None
+            except Exception:  # noqa: BLE001 - never expose PDF content or parser/host details
+                raise HTTPException(status_code=422, detail="Preview is unavailable. You can still download the file.") from None
+            # Deletion tombstones can be committed while waiting for this lock;
+            # reauthorize before any bytes leave the owner boundary.
+            current = await _owned_row(request, principal, file_id)
+            if current.status != "ready" or current.source_freed_at:
+                raise HTTPException(status_code=410, detail="The saved file is unavailable.")
+        return Response(content=image, media_type="image/png", headers=_PREVIEW_HEADERS)
+    except HTTPException as error:
+        error.headers = {**(error.headers or {}), **_PREVIEW_HEADERS}
+        raise
 
 
 @router.get("/files/{file_id}/text", response_model=NativeFileTextResponse)

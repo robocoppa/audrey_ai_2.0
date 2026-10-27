@@ -6,9 +6,19 @@ import remarkGfm from "remark-gfm";
 import { ApiError, apiJson, getFilePreview, filePreviewQuery, type FilePreviewPosition, type AudreyFilePreview } from "./api";
 import { downloadOwnedFile } from "./fileDownloads";
 import { downloadTaxWorkbook, isTaxWorkbookUrl } from "./taxReviewApi";
+import { PdfPreviewContent } from "./PdfPreview";
 import "./FilePreview.css";
 
 type PreviewSource = { fileId: string; downloadPath?: never } | { fileId?: never; downloadPath: string };
+
+export function FilePreviewButton({ fileId, label = "Preview" }: { fileId: string; label?: string }) {
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  return <span className="file-output-link"><button type="button" className="file-preview-trigger" aria-label={label}
+    aria-haspopup="dialog" onClick={() => setOpen(true)}>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></svg>Preview
+  </button>{open ? <FilePreviewDialog fileId={fileId} onClose={close} /> : null}</span>;
+}
 
 export function FilePreviewDialog({ fileId, downloadPath, onClose }: PreviewSource & { onClose: () => void }) {
   const titleId = useId();
@@ -27,7 +37,7 @@ export function FilePreviewDialog({ fileId, downloadPath, onClose }: PreviewSour
         onClose();
       } else if (event.key === "Tab") {
         const buttons = Array.from(dialog.current?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), a[href], [tabindex="0"]',
+          'button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), a[href], [tabindex="0"]',
         ) ?? []);
         const first = buttons[0], last = buttons.at(-1);
         if (event.shiftKey && (document.activeElement === first || !dialog.current?.contains(document.activeElement))) {
@@ -122,7 +132,9 @@ function PreviewContent({ fileId, workbookPath, showName = true }: PreviewConten
     {error ? <div className="file-preview-error" role="alert"><p>{error}</p><button type="button" onClick={retry}>Try again</button></div> : null}
     {preview && !error ? <>
       {showName ? <h3 className="file-preview-name">{preview.filename}</h3> : null}
-      {preview.kind === "table" ? <SpreadsheetPreview sheets={preview.sheets ?? []} paging={paging} />
+      {preview.kind === "pdf" && fileId ? <PdfPreviewContent fileId={fileId} filename={preview.filename}
+        metadata={{ id: preview.id, filename: preview.filename, format: "pdf", kind: "pdf", page_count: preview.page_count ?? 0, truncated: false }} />
+        : preview.kind === "table" ? <SpreadsheetPreview sheets={preview.sheets ?? []} paging={paging} />
         : <>
           {((preview.offset ?? 0) > 0 || preview.next_offset != null) ? <PreviewPager busy={paging.busy}
             previous={positions.length > 0} next={preview.next_offset != null}

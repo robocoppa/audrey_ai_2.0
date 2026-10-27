@@ -657,8 +657,13 @@ a:focus-visible {
   font-size: 0.85rem;
 }
 
-.chat-file-attachment > span:last-child {
+.chat-file-attachment > span:nth-child(2) {
   min-width: 0;
+  flex: 1;
+}
+
+.chat-file-attachment > .file-output-link {
+  flex: 0 0 auto;
 }
 
 .chat-file-attachment strong,

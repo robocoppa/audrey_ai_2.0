@@ -1,4 +1,5 @@
 import { FileDownloadLink } from "./FileDownloadLink";
+import { FilePreviewButton } from "./FilePreview";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import {
@@ -511,6 +512,7 @@ export function ProjectHome({
                   <span className="project-file-symbol" aria-hidden="true">{kindSymbol(file.kind)}</span>
                   <span className="project-file-details" title={file.filename}>
                     <span>{file.origin === "generated" ? <FileDownloadLink href={`/api/files/${encodeURIComponent(file.id)}/download`}>{file.filename}</FileDownloadLink> : file.filename}</span>
+                    {file.origin !== "generated" && file.mime === "application/pdf" && file.status === "ready" ? <FilePreviewButton fileId={file.id} label={`Preview ${file.filename}`} /> : null}
                     {file.origin === "generated" ? <small>Created by Audrey</small> : null}
                     {file.status === "ready" ? null : <small>{projectFileStatus(file.status)}</small>}
                   </span>

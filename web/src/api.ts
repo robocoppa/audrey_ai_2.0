@@ -972,8 +972,9 @@ export function getFileArtifactDownloadUrl(
 export interface AudreyFilePreview {
   id: string;
   filename: string;
-  format: "txt" | "md" | "csv" | "json" | "docx" | "xlsx";
-  kind: "text" | "document" | "table";
+  format: "txt" | "md" | "csv" | "json" | "docx" | "xlsx" | "pdf";
+  kind: "text" | "document" | "table" | "pdf";
+  page_count?: number;
   text?: string;
   paragraphs?: string[];
   sheets?: {
