@@ -683,7 +683,7 @@ function MediaArtifactViewer({ file, onBack, initialPreview = false }: {
   file: AudreyFile; onBack: () => void; initialPreview?: boolean;
 }) {
   const [artifact, setArtifact] = useState<AudreyFileArtifactKind | "player">(
-    initialPreview && !file.source_freed_at ? "player" : "summary",
+    initialPreview ? "player" : "summary",
   );
   const availableKinds = file.kind === "audio"
     ? artifactKinds.filter((kind) => kind !== "visual")
@@ -699,10 +699,10 @@ function MediaArtifactViewer({ file, onBack, initialPreview = false }: {
           <small>{mediaLabel} · {formatBytes(file.bytes)}</small>
         </div>
       </div>
-      {file.source_freed_at ? <p className="file-original-reclaimed">The original was reclaimed. The saved summary and transcript are still available.</p> : null}
+      {file.source_freed_at && artifact !== "player" ? <p className="file-original-reclaimed">The original file was removed to free storage. The saved summary and transcript are still available.</p> : null}
       <div className="file-artifact-tabs" role="group" aria-label={mediaLabel + " text type"}>
-        {!file.source_freed_at ? <button type="button" aria-pressed={artifact === "player"}
-          onClick={() => setArtifact("player")}>Player</button> : null}
+        <button type="button" aria-pressed={artifact === "player"}
+          onClick={() => setArtifact("player")}>Player</button>
         {availableKinds.map((kind) => (
           <button
             key={kind}

@@ -1202,12 +1202,9 @@ kb:
     # Reclaiming user data to fit a self-imposed limit is solving the wrong
     # problem, and it is the only irreversible operation in the pipeline.
     #
-    # The tempting argument for deleting is that nothing can read the bytes
-    # back — there is no download route, so a processed video's source is
-    # write-only storage. That is true today and it is weak: it describes a
-    # feature that does not exist yet rather than a decision that the file is
-    # disposable. Add a download button later and every already-reclaimed
-    # video is permanently broken, with no way to tell which ones.
+    # My files playback and original downloads read these bytes after processing,
+    # so removing them makes those actions unavailable. Summaries and transcripts
+    # remain readable but cannot replace the original for playback or reprocessing.
     #
     # Turn this on only for genuine disk pressure on the box — a case where
     # the alternative is the array filling up, not a case where an accounting
@@ -1216,31 +1213,17 @@ kb:
     # summary stages applies only to videos uploaded afterwards.
     keep_source: true
 
-    # The same decision for URL-sourced videos (Phase 41), and it comes out the
-    # other way — false, meaning their bytes ARE reclaimed.
-    #
-    # Everything above argues from one fact: nothing can read the bytes back,
-    # so deleting them is final. A fetched video breaks that premise. The row
-    # keeps the URL it came from, and requeueing one whose source was reclaimed
-    # now sends it to `fetch_pending` rather than refusing — the fetcher
-    # downloads it again and the video re-processes. **That path is the whole
-    # justification for this line.** If it is ever removed, this goes back to
-    # true with it.
-    #
-    # What it costs is worth stating plainly: the video must still be at that
-    # URL. Removals, takedowns and privacy flips are outside this box's
-    # control, so a reclaimed fetch is recoverable in the ordinary case and not
-    # in the case where the source disappeared — which is also the case where
-    # the local copy would have been worth most. Set this true if that matters
-    # more than the quota; nothing else changes.
-    #
-    # It does NOT touch the transcript, descriptions or summary. Those are the
-    # ingest's output, they live in Qdrant, and the video stays fully
-    # searchable after reclamation either way.
-    keep_fetched_source: false
+    # Keep URL-downloaded originals too: My files playback and original downloads
+    # need those bytes even after processing finishes. They continue to count
+    # against file quota and are removed through the normal file-deletion flow.
+    # This does not restore originals removed under the previous retention policy;
+    # upload a saved copy to play those here. Source links remain available.
+    # Setting this false explicitly enables reclamation after the window below.
+    # Summaries, transcripts and search content survive either policy.
+    keep_fetched_source: true
 
-    # How long a processed video's bytes are kept before reclamation, timed
-    # from when its ingest finished rather than from when it was uploaded. A
+    # If either keep setting is false, how long its processed bytes are kept
+    # before reclamation, timed from ingest completion rather than upload. A
     # video that sat in a stalled queue for two days would otherwise become
     # eligible the instant it completed — a window of zero, for exactly the
     # file whose processing most deserved a second look.

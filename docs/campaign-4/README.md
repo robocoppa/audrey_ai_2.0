@@ -120,10 +120,17 @@ have honest feedback and retained text artifacts remain accessible. Browser code
 support varies; original download is available. No transcoding or new upload
 formats are introduced.
 
+**11D retention followup built October 27.** The reported older downloaded MP4
+had already lost its original under the former retention policy. Filename clicks
+now open Player with a clear unavailable-original explanation and source link
+where present; saved text stays readable. The user chose to retain downloaded
+originals for playback, so `kb.video.keep_fetched_source` is now true. Retained
+bytes count against file quota; removed originals are not restored automatically.
+
 Local backend/component and desktop/mobile browser checks, typecheck, build
-and changed-file lint pass. Browser acceptance for 11C/11D is pending. Rebuild
-`audrey` and `audrey-ui` after pull; no sidecar, schema, config, dependency, CSP,
-model or index change. [Phase 11](phase-11-native-file-explorer.md#deployment-and-acceptance--11c11d)
+and changed-file lint pass. Browser acceptance for 11C/11D is pending. Recreate
+`audrey` for the retention config and rebuild `audrey-ui` after pull; no sidecar,
+schema, dependency, CSP, model or index change. [Phase 11](phase-11-native-file-explorer.md#deployment-and-acceptance--11c11d)
 owns the targeted checks. No further approved implementation slice is unbuilt.
 
 No broader repeat test is queued. A later
@@ -249,7 +256,8 @@ history; Qwen3.5 4B remains the router. Measurements stay in the model ledger.
   previews and immutable old outputs. Locally verified; browser acceptance pending.
 - [x] **11D built — filename previews and media players.** Ready My files names
   open previews; owned audio/video plays inline with seeking and retained text views.
-  Locally verified; browser acceptance pending.
+  Downloaded originals are retained; reclaimed filenames open an explicit
+  unavailable Player with source access. Locally verified; browser acceptance pending.
 
 The approved implementation queue is built. Complete the targeted 11C/11D check;
 passed creation, PDF preview and Tax save/download work stays closed. Deferred

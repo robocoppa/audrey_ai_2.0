@@ -506,7 +506,7 @@ class TestFetchedSourcesAreADifferentDecision:
         ) == []
 
     async def test_the_sweep_reads_both_settings(self, db: UploadsDB, tmp_path: Path):
-        """The shipped combination: keep uploads, reclaim fetches."""
+        """An explicit override can keep uploads while reclaiming fetches."""
         await _processed_video(db, "uploaded", completed_hours_ago=48)
         await _fetched_video(db, "fetched", completed_hours_ago=48)
         root = tmp_path / "uploads"

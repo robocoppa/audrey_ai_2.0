@@ -2,8 +2,9 @@
 
 **Status:** Explorer/shared creation and 11A paged previews are accepted October 26;
 11B uploaded PDF previews are accepted October 27. Actual Office formatting (11C)
-and filename/media previews (11D) are built; final local gates and browser acceptance
-are pending. No further approved implementation slice is unbuilt.
+and filename/media previews (11D) are built and locally verified; browser acceptance
+is pending. The October 27 followup retains downloaded originals and explains unavailable playback for previously
+removed sources. No further approved implementation slice is unbuilt.
 
 ## Library model
 
@@ -176,8 +177,21 @@ inline original bytes, byte-range seeking, authoritative allowlisted media MIME,
 no-store/nosniff headers and canonical ownership/source/deletion rechecks. Private
 owner playback stays local to the server/browser path and does not invoke a model.
 
-A missing or reclaimed original produces clear feedback while retained summaries
-and transcripts stay usable. Codec/container support depends on the browser; an
+A reclaimed filename still opens Player, which explains that the original was
+removed to free storage without requesting absent media or offering an original
+download. Summary/Transcript remain selectable; Open still starts on Summary.
+When a source URL exists, Open source website opens it separately. Uploading a
+saved original is the recovery path for playback here; no automatic refetch,
+catalog deletion or search-content replacement occurs.
+
+The user chose to keep downloaded originals October 27. Repository config now
+sets both `kb.video.keep_source` and `keep_fetched_source` true: retained originals
+count against quota and follow normal file deletion. The retention window applies
+only if reclamation is explicitly enabled. This cannot restore already-removed
+bytes or clear their reclamation markers.
+
+A missing original produces clear feedback while retained summaries and
+transcripts stay usable. Codec/container support depends on the browser; an
 unsupported player offers the original download. No transcoding, buffering of whole
 media files, new upload formats, external player or third-party service is added.
 
@@ -188,10 +202,11 @@ After normal commit/push, run on **Tower**:
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
 git pull
-docker compose up -d --build audrey audrey-ui
+docker compose up -d --build --force-recreate audrey audrey-ui
 ```
 
-No sidecar/media-worker rebuild, schema/config/dependency/CSP change, model pull
+Recreate Audrey to apply the retention config and rebuild the UI for the player
+followup. No sidecar/media-worker rebuild, schema/dependency/CSP change, model pull
 or reindex is needed. Backend/component regressions, desktop/mobile browser
 checks under production CSP, real audio/video playback/seek/cleanup, typecheck,
 build and changed-file Ruff/ESLint pass locally. Browser acceptance is pending.
@@ -213,7 +228,8 @@ In My files, click existing PDF/image/audio/video filenames. The appropriate vie
 should open directly. For playable audio/video, test play/pause and seeking, then
 switch to Summary/Transcript or close: playback stops and those text views remain
 accessible. The existing Open action should still show Summary first. A reclaimed
-source should explain its absence. **Upload only if no suitable existing audio or
-video is available; wait for Ready before playback.** Browser playback checks make
+filename should open Player with an unavailable-original explanation and source
+link when present; Summary/Transcript remain readable. **Upload only if no suitable
+existing audio or video is available; wait for Ready before playback.** Browser playback checks make
 no model call; a fresh upload uses the existing processing flow. This is the new
 filename/player interaction check, not a repeat of accepted PDF rendering.

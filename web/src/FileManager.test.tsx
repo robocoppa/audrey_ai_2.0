@@ -435,15 +435,27 @@ it.each(["audio", "video"] as const)("opens %s playback from a filename and stop
   expect(media).not.toHaveAttribute("src");
 });
 
-it("keeps reclaimed media text available without offering a player", async () => {
-  const file = previewFile({ filename: "old.mp4", kind: "video", mime: "video/mp4", source_freed_at: "2026-10-27" });
+it("opens unavailable playback for reclaimed filenames and keeps their source and text accessible", async () => {
+  const file = previewFile({ filename: "old.mp4", kind: "video", mime: "video/mp4", source_freed_at: "2026-10-27",
+    source_url: "https://www.youtube.com/watch?v=old-video" });
   listPreviewFiles([file]);
   vi.spyOn(api, "getFileArtifact").mockResolvedValue({ id: file.id, artifact: "summary", text: file.summary, offset: 0, next_offset: null, total_chars: file.summary.length });
   render(<FileManager onClose={() => undefined} />);
   fireEvent.click(await screen.findByRole("button", { name: "Preview old.mp4" }));
+  expect(screen.getByRole("button", { name: "Player" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("status")).toHaveTextContent("Playback unavailable");
+  expect(screen.getByRole("link", { name: "Open source website" })).toHaveAttribute("href", file.source_url);
+  expect(screen.queryByLabelText("Video player for old.mp4")).not.toBeInTheDocument();
+  expect(api.getFileArtifact).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Summary" }));
   expect(await screen.findByText(file.summary)).toBeVisible();
-  expect(screen.getByText(/The original was reclaimed/)).toBeVisible();
-  expect(screen.queryByRole("button", { name: "Player" })).not.toBeInTheDocument();
+  expect(screen.getByText(/The original file was removed to free storage/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Player" }));
+  expect(screen.getByRole("status")).toHaveTextContent("Playback unavailable");
+  fireEvent.click(screen.getByRole("button", { name: "← All files" }));
+  fireEvent.click(await screen.findByRole("button", { name: "View video text for old.mp4" }));
+  expect(await screen.findByText(file.summary)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Summary" })).toHaveAttribute("aria-pressed", "true");
 });
 
 

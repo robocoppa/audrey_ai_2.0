@@ -2342,8 +2342,7 @@ async def _reclaim_sources(request: Request, db) -> int:
     # a user's file — this is the only irreversible operation in the pipeline,
     # and a deployment whose `config.yaml` predates the setting is exactly the
     # deployment least expecting it. That applies to `keep_fetched_source` too
-    # even though the shipped config sets it false: the guarantee is about what
-    # silence means, not about what this box happens to be configured for.
+    # regardless of deployment policy: the guarantee is about what silence means.
     keep_uploaded = bool(video_cfg.get("keep_source", True))
     keep_fetched = bool(video_cfg.get("keep_fetched_source", True))
     if keep_uploaded and keep_fetched:

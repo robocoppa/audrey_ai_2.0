@@ -83,10 +83,26 @@ for (const width of [1280, 390]) {
       { id: "file_video", filename: "sample.mp4", kind: "video", mime: "video/mp4" },
     ].map((file) => ({ ...file, bytes: 2048, origin: "upload", status: "ready", uploaded_at: DATE, chunks: 1,
       source_freed_at: "", summary: "A synthetic sample.", failure_reason: "", duration_s: 3, source_url: "", leased_at: "", transcript_source: "", fetch_downloaded_bytes: 0, fetch_total_bytes: 0 }));
+    const reclaimedVideo = { ...files[2], id: "file_reclaimed_video", filename: "archived.mp4",
+      source_freed_at: "2026-09-18T20:48:29+00:00", source_url: "https://www.youtube.com/watch?v=reclaimed_fixture",
+      summary: "Saved notes from the removed video." };
+    files.push(reclaimedVideo);
+    const sourceRequests: string[] = [];
+    await page.route("https://www.youtube.com/**", (route) => {
+      sourceRequests.push(route.request().url());
+      return route.abort("blockedbyclient");
+    });
     await page.route("**/api/files", (route) => json(route, { items: files, total_bytes: 6144, server_time: DATE, limits: { max_upload_bytes: 50000000, max_user_bytes: 1000000000, allowed_extensions: [".wav", ".mp4", ".png"], chunked_max_bytes: 2000000000, part_size: 8000000, fetch_hosts: [], max_images_per_turn: 4 } }));
     await page.route("**/api/files/file_image/image", (route) => route.fulfill({ status: 200, contentType: "image/png", body: imageBytes }));
-    await page.route("**/api/files/*/artifacts/*?*", (route) => json(route, { id: "file_audio", artifact: "summary", text: "A synthetic sample.", offset: 0, next_offset: null, total_chars: 19 }));
+    await page.route("**/api/files/*/artifacts/*?*", (route) => {
+      const [, , , id, , artifact] = new URL(route.request().url()).pathname.split("/");
+      const text = files.find((file) => file.id === id)!.summary;
+      return json(route, { id, artifact, text, offset: 0, next_offset: null, total_chars: text.length });
+    });
+    const mediaRequests: string[] = [];
     await page.route("**/api/files/*/media", async (route) => {
+      mediaRequests.push(new URL(route.request().url()).pathname);
+      if (route.request().url().includes(reclaimedVideo.id)) return route.abort("failed");
       const audio = route.request().url().includes("file_audio");
       const data = audio ? audioBytes : videoBytes;
       const range = /^bytes=(\d+)-(\d*)$/u.exec(route.request().headers().range ?? "");
@@ -106,6 +122,28 @@ for (const width of [1280, 390]) {
     const picture = dialog.getByRole("img", { name: "Preview of picture.png" });
     await expect(picture).toBeVisible();
     await expect.poll(() => picture.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(800);
+    await dialog.getByRole("button", { name: "← All files" }).click();
+    await dialog.getByRole("button", { name: "Preview archived.mp4", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Player", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByRole("status")).toContainText("Playback unavailable. The original file was removed to free storage.");
+    const source = dialog.getByRole("link", { name: "Open source website", exact: true });
+    await expect(source).toHaveAttribute("href", reclaimedVideo.source_url);
+    await expect(source).toHaveAttribute("target", "_blank");
+    await expect(source).toHaveAttribute("rel", "noopener noreferrer");
+    await expect(dialog.locator("audio,video")).toHaveCount(0);
+    await expect(dialog.getByRole("link", { name: "Download original archived.mp4", exact: true })).toHaveCount(0);
+    await page.screenshot({ path: `/tmp/audrey-reclaimed-player-${width}.png` });
+    await dialog.getByRole("button", { name: "Summary", exact: true }).click();
+    await expect(dialog.getByText(reclaimedVideo.summary, { exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "Player", exact: true }).click();
+    await expect(dialog.getByRole("status")).toContainText("Playback unavailable.");
+    await expect(dialog.locator("audio,video")).toHaveCount(0);
+    await dialog.getByRole("button", { name: "← All files" }).click();
+    await dialog.getByRole("button", { name: "View video text for archived.mp4", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Summary", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByText(reclaimedVideo.summary, { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Player", exact: true })).toHaveAttribute("aria-pressed", "false");
+    expect(mediaRequests).not.toContain(`/api/files/${reclaimedVideo.id}/media`);
     await dialog.getByRole("button", { name: "← All files" }).click();
     await dialog.getByRole("button", { name: "Preview sample.wav", exact: true }).click();
     const audio = dialog.getByLabel("Audio player for sample.wav", { exact: true });
@@ -135,6 +173,8 @@ for (const width of [1280, 390]) {
     const oldVideo = await video.elementHandle();
     await dialog.getByRole("button", { name: "Close files" }).click();
     expect(await oldVideo!.evaluate((media) => (media as HTMLMediaElement).paused && !media.getAttribute("src"))).toBe(true);
+    expect(mediaRequests).not.toContain(`/api/files/${reclaimedVideo.id}/media`);
+    expect(sourceRequests).toEqual([]);
     expect(downloads).toEqual([]);
   });
 }

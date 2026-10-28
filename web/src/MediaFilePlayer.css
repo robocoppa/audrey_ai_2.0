@@ -26,6 +26,7 @@
 .file-media-player :is(.file-media-status,.file-media-error) { margin: 0; font-size: .8rem; line-height: 1.55; color: var(--muted); }
 .file-media-player .file-media-error { color: var(--danger); }
 .file-media-unavailable { color: var(--muted); font-size: .8rem; line-height: 1.55; }
+.file-media-unavailable p { margin: 0; }
 .file-original-reclaimed { margin: 1rem 0 0; color: var(--muted); font-size: .78rem; line-height: 1.5; }
 @media (max-width: 600px) {
   .file-media-player { padding: .6rem; }

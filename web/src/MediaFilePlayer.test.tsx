@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { MediaFilePlayer } from "./MediaFilePlayer";
 
-const file = { id: "media / file", filename: "interview.mp3", kind: "audio" as const, source_freed_at: "" };
+const file = { id: "media / file", filename: "interview.mp3", kind: "audio" as const, source_freed_at: "", source_url: "" };
 
 beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
@@ -53,6 +53,19 @@ it("explains unsupported formats and retains the original download", () => {
 it("does not request reclaimed media and points to the remaining derived text", () => {
   const { container } = render(<MediaFilePlayer file={{ ...file, source_freed_at: "2026-10-27" }} />);
   expect(container.querySelector("audio,video")).toBeNull();
-  expect(screen.getByRole("status")).toHaveTextContent("The original was reclaimed");
+  expect(screen.getByRole("status")).toHaveTextContent("Playback unavailable");
+  expect(screen.getByRole("status")).toHaveTextContent("Upload the original again");
   expect(screen.queryByRole("link")).not.toBeInTheDocument();
+});
+
+it("offers the source website for reclaimed downloads without requesting media or downloading an absent original", () => {
+  const { container } = render(<MediaFilePlayer file={{ ...file, kind: "video", filename: "old.mp4",
+    source_freed_at: "2026-10-27", source_url: "https://www.youtube.com/watch?v=old-video" }} />);
+  expect(container.querySelector("audio,video")).toBeNull();
+  expect(screen.getByRole("status")).toHaveTextContent("The original file was removed to free storage");
+  const link = screen.getByRole("link", { name: "Open source website" });
+  expect(link).toHaveAttribute("href", "https://www.youtube.com/watch?v=old-video");
+  expect(link).toHaveAttribute("target", "_blank");
+  expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  expect(screen.queryByRole("link", { name: /Download original/u })).not.toBeInTheDocument();
 });

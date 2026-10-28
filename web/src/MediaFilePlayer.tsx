@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { getFileDownloadUrl, type AudreyFile } from "./api";
 import "./MediaFilePlayer.css";
 
-type MediaFile = Pick<AudreyFile, "id" | "filename" | "kind" | "source_freed_at">;
+type MediaFile = Pick<AudreyFile, "id" | "filename" | "kind" | "source_freed_at" | "source_url">;
 
 export function MediaFilePlayer({ file }: { file: MediaFile }) {
   return <Player key={file.id} file={file} />;
@@ -25,7 +25,11 @@ function Player({ file }: { file: MediaFile }) {
   }, []);
 
   if (file.source_freed_at) return <div className="file-media-player file-media-unavailable" role="status">
-    The original was reclaimed. The saved summary and transcript are still available.
+    <p>Playback unavailable. The original file was removed to free storage. The saved summary and transcript are still available.</p>
+    {file.source_url ? <>
+      <p>You can open the source website, or upload a saved copy to play it here.</p>
+      <a className="file-artifact-download" href={file.source_url} target="_blank" rel="noopener noreferrer">Open source website</a>
+    </> : <p>Upload the original again to play it here.</p>}
   </div>;
 
   const props = {
