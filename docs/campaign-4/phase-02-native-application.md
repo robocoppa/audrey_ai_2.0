@@ -1,8 +1,8 @@
 # Campaign 4 Phase 2 — native Audrey application
 
-**Status:** Complete. The native application, identity, administration, recovery,
-and standalone browser cutover are accepted. No Phase 2 acceptance gate remains.
-User input is English-only for the current campaign.
+**Status:** Closed by owner October 27, 2026. Native application, identity,
+administration, recovery and browser cutover are implemented and accepted.
+User input is English-only.
 
 ## Goal and decisions
 

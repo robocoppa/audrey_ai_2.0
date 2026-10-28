@@ -1,6 +1,7 @@
 # Campaign 4 Phase 13 — Responses inputs, output, tools, and storage
 
-**Status:** 13A–13F complete and accepted. Inline-image API proof passed October 7, 2026.
+**Status:** Closed by owner October 27, 2026. Responses extensions 13A–13F are
+implemented and accepted.
 
 This extends [the Responses foundation](phase-05-responses-api.md) through existing authenticated generation paths. Admission and owner/policy failures finish before provider dispatch or SSE. Claimed `user` values never select the file/storage owner.
 

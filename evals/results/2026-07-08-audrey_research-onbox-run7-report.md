@@ -1,8 +1,8 @@
 # Run-7 assessment — 2026-07-08 (post `compress_keep_last:5` deploy + S4 fix)
 
-Answers: [`2026-07-08-audrey_research-onbox-answers.md`](2026-07-08-audrey_research-onbox-answers.md)
+Answers: `2026-07-08-audrey_research-onbox-answers.md` (historical artifact; not present in this checkout).
 Baseline: run 6 ([`2026-07-07-audrey_research-onbox-run2-report.md`](2026-07-07-audrey_research-onbox-run2-report.md) captured run 5; run 6 assessment lives in PROJECT_STATE +65)
-Plan: [`docs/plans/research-run5-followups-plan.md`](../../docs/plans/research-run5-followups-plan.md)
+Campaign record: [closed research contract](../../docs/campaign-3/phase-26-research-claim-ledger.md). The completed run-5 followup draft was removed at campaign closure.
 
 **Verdict: 10/10 PASS. This is the gate run for Stages 0+1+2, and all three
 land. S2 — the one that shipped-but-ineffective in run 6 — is now decisively

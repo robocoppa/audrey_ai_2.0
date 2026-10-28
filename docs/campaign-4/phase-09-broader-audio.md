@@ -1,6 +1,6 @@
 # Campaign 4 Phase 09 — broader spoken audio
 
-**Status:** Complete and accepted.
+**Status:** Closed by owner October 27, 2026. Implemented and accepted.
 
 ## Additional supported inputs
 

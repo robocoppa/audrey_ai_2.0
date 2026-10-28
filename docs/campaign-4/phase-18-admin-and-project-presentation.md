@@ -2,7 +2,7 @@
 
 ## 18A — complete
 
-**Status:** User accepted October 7, 2026.
+**Status:** Closed by owner October 27, 2026. Implemented and accepted.
 
 Account role/status/delete controls use fixed columns, including an empty delete
 slot on the current administrator's row. Model rows place a drag handle on the

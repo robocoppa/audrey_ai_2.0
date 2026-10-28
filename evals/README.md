@@ -6,7 +6,8 @@ other end and let you read the actual answers. One harness
 (`evals/eval_research.py`) drives all of them — the cases differ, the script
 doesn't.
 
-See `../docs/plans/PLAN-mode-test-suite.md` for the design rationale and case taxonomy.
+The protocol table and cases below are the maintained suite reference; the
+completed design draft was removed at campaign closure.
 
 ## The protocols
 
@@ -327,8 +328,6 @@ evals/
     <date>-<protocol>-report.md  # hand-written: the quality read for that run
     <date>-<desc>-results.json   # machine-written: per-case checks/latency (--save-json)
     <date>-<desc>-compare.md     # eval_compare.py: case × model matrix for a sweep
-docs/plans/
-  PLAN-mode-test-suite.md       # design rationale + case taxonomy
 ```
 
 The hermetic unit suite is separate — `tests/` + `.venv/bin/pytest tests/ -q`.

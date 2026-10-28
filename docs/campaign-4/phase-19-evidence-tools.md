@@ -1,11 +1,12 @@
 # Phase 19 — calculations and deeper evidence tools
 
-Approved October 13, 2026. English requests only. These tools extend ordinary
-Audrey chat and use the existing Tools and Sources summaries.
+**Status:** Closed by owner October 27, 2026. All five tools are implemented
+and were accepted in the browser October 13. English requests only. They use
+the existing Tools and Sources summaries.
 
-## Build order
+## Delivered capabilities
 
-| Slice | Capability | Acceptance |
+| Slice | Capability | Behavior |
 |---|---|---|
 | 19A | Calculator and unit conversion | Exact decimal totals, conversions, bounded linear/quadratic equations; invalid expressions fail clearly |
 | 19B | Read-only CSV and Excel analysis | Inspect sheets/columns, filter rows, aggregate/group values, find duplicates; no partial totals |
@@ -32,7 +33,8 @@ Audrey chat and use the existing Tools and Sources summaries.
   answering model, with page/timestamp attribution. A still frame does not
   establish motion or speech.
 - Missing/reclaimed originals produce a clear unavailable result. No automatic
-  video re-download, source deletion, or changed retention policy.
+  video re-download occurs. Current retention/playback behavior belongs to
+  [Phase 11](phase-11-native-file-explorer.md#filename-previews-and-media-players--11d).
 - Previous conversations come from canonical saved user/assistant messages.
   Foreign/deleted conversations remain unavailable; paging names unread content.
 - Tool calls use existing run events. Sources identify the file and inspected
@@ -42,19 +44,3 @@ Audrey chat and use the existing Tools and Sources summaries.
   with a bounded timeout ladder covering rendering and vision generation.
 - Existing Hermes adapters, passthrough model settings and authentication stay
   outside this feature. Users ask normal questions; no new picker is needed.
-
-## Verification and deployment
-
-Hermetic laptop checks cover numerical correctness, table rows/aggregates,
-owner isolation, pagination, renderer failures and timeout/cancellation cleanup,
-and tool discovery/dispatch/provenance. Fake vision responses prove plumbing;
-the browser check proves deployed perception and answer quality.
-
-After pull on Tower, rebuild `audrey` and `custom-tools`. The UI and media
-workers need no rebuild for these tool additions. Manual acceptance uses a real
-CSV/XLSX, a PDF with a diagram, an existing saved chat, and a retained video.
-A calculator request needs no upload. The user confirms visible tool calls and
-answers before live acceptance is marked passed.
-
-Status: complete. The user deployed the tools and accepted all five in the
-browser October 13, following focused laptop verification.

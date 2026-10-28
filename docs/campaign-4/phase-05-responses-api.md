@@ -1,6 +1,7 @@
 # Campaign 4 Phase 05 — Responses API foundation
 
-**Status:** Complete and accepted. Expanded contracts are in [Phase 13](phase-13-responses-multimodal-input.md).
+**Status:** Closed by owner October 27, 2026. Implemented and accepted. Expanded
+contracts are in [Phase 13](phase-13-responses-multimodal-input.md).
 
 ## Shared generation
 

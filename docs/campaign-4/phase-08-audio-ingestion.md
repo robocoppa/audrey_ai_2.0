@@ -1,6 +1,6 @@
 # Campaign 4 Phase 08 — spoken audio ingestion
 
-**Status:** Complete and accepted.
+**Status:** Closed by owner October 27, 2026. Implemented and accepted.
 
 ## Supported inputs
 

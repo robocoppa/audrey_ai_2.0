@@ -1,7 +1,7 @@
 # Phase 01 — platform hardening
 
-**Status:** Core complete and deployed. October 24 runtime followups are
-implemented and locally verified; the user accepted the runtime browser handoff October 24.
+**Status:** Closed by owner October 27, 2026. Platform hardening and runtime
+followups are implemented; the runtime browser handoff was accepted October 24.
 
 ## Delivered
 
@@ -45,10 +45,6 @@ eventual, not instantaneous; request-time capability checks still return a
 component-specific 503 while unavailable. Model visibility continues to require
 both a model-facing route and its matching security declaration.
 
-The October 24 maintenance followup is locally verified; rebuild audrey and
-custom-tools after pull. No browser build, schema migration, model pull or index
-run is required for this followup.
-
 ## Pipeline scheduling and stream delivery
 
 Skipped or failed classification does not supply a confidence signal. A brief
@@ -71,17 +67,9 @@ the producer's terminal result. A banner notification cannot hide a real
 producer timeout. Progress, normal Stop and disconnect cleanup retain their
 existing behavior without a recurring 50 ms wakeup.
 
-The remaining October 24 audit followup is locally verified; rebuild audrey and
-custom-tools after pull. These changes require no UI build, config migration,
-model pull or index run. The local course AUDIT records the completed drain;
-course tooling changes take effect directly in the laptop checkout.
-
 ## Constraints
 
 Authenticated user values override model-supplied identity. Preserve routing
 order and tolerant structured-output parsing. Local/remote component readiness
 does not prove answer quality. Media-worker remains network-isolated from
 Ollama; media-fetcher retains its necessary download egress.
-
-No remaining phase work. Later product capabilities are tracked in their own
-phase documents; accepted hardening does not require another live test sweep.

@@ -1,9 +1,9 @@
 # Campaign 4 Phase 3 — reusable skills
 
-**Status:** Explicit `video-analysis` and `grounded-document-analysis` are
-complete. Native automatic English selection (3D.6) is enabled by default at
-the user's request, matching the deployed Tower setting. Remaining browser
-acceptance is pending. English input only.
+**Status:** Closed by owner October 27, 2026. Explicit document/video skills and
+native deterministic automatic selection are implemented. Automatic selection
+is enabled by default at the user's request. No acceptance work remains; closure
+does not assert an unreported browser pass. English input only.
 
 ## Goal and decisions
 
@@ -92,22 +92,10 @@ skill bundles are introduced.
   streaming, and persisted id/version/digest. `skill_reason` is `automatic`;
   existing run records, bounded metrics, and `skill.selected` logs expose it.
 
-### Acceptance and activation
-
-Use real Ready document and video files in native chat with **Tools and skills →
-Automatic**. Confirm each answer uses its file evidence and a followup remains
-grounded. Compare a document question with an explicit document-skill choice,
-and confirm ordinary chat still answers normally. Server provenance must show
-the expected skill with `reason=automatic`; explicit selection keeps
-`reason=request`. This is a targeted workflow check, not a claim about population
-precision or answer quality from synthetic labels. No broad live evaluation is
-required for the rule-only opt-in slice.
-
-The previous standalone selector study remains historical/regression evidence.
-Its model-based measurement machinery does not activate production selection.
-A classifier fallback remains parked until a real rules miss warrants it. The
-failed Japanese branch is out of scope, not passed; do not tune/rerun it or add
-runtime language rejection.
+The standalone selector study remains historical/regression evidence; its
+model-based machinery does not activate production selection. A classifier
+fallback remains outside implemented scope. Non-English work was not passed
+and does not add runtime language rejection.
 
 ## Source map
 

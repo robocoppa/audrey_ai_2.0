@@ -1,7 +1,7 @@
 # Campaign 4 Phase 10 — ordinary-answer provenance
 
-**Status:** Foundation accepted. Immediate per-answer summaries are built;
-browser acceptance is pending.
+**Status:** Closed by owner October 27, 2026. Provenance and immediate per-answer
+summaries are implemented. Closure does not assert an unreported browser pass.
 
 ## Evidence contract
 

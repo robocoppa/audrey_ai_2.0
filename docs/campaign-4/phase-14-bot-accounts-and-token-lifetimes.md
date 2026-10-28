@@ -1,6 +1,7 @@
 # Campaign 4 Phase 14 — Bot accounts, tokens, and admin refresh
 
-**Status:** Complete and accepted, including immediate token revocation.
+**Status:** Closed by owner October 27, 2026. Bot accounts, token lifetime and
+immediate revocation are implemented and accepted.
 
 ## Bot access
 
@@ -18,8 +19,8 @@ This uses the existing global compatibility allowlist: it is available to
 all eligible compatibility callers, including bots. Native role publication
 remains separate. Image inputs reach MedGemma unchanged via
 `vision.also_capable`; ordinary routing and panel pools do not select it.
-Hermetic configuration and forwarding checks pass; deployed generation is
-pending. This is endpoint availability, not a model quality assessment.
+The configured endpoint is not a model quality assessment; deployed generation
+was not established by the recorded checks.
 
 ## Token lifetime
 

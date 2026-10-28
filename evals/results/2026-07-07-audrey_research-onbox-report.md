@@ -2,7 +2,7 @@
 
 Answers: [`2026-07-07-audrey_research-onbox-answers.md`](2026-07-07-audrey_research-onbox-answers.md)
 Baseline: run 3 ([`2026-07-06-audrey_research-onbox-run3-report.md`](2026-07-06-audrey_research-onbox-run3-report.md))
-Plan under test: [`docs/plans/research-run3-followups-plan.md`](../../docs/plans/research-run3-followups-plan.md)
+Campaign record: [closed research contract](../../docs/campaign-3/phase-26-research-claim-ledger.md). The completed run-3 followup draft was removed at campaign closure.
 
 **Verdict: gate passed.** 10/10 cases green on all applicable checks, every gate
 expectation met or explained. The search cap is verified at scale, the S2

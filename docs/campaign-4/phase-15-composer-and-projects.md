@@ -1,7 +1,8 @@
 # Campaign 4 Phase 15 — composer and Projects
 
-**Status:** Composer and Projects accepted, including direct project upload.
-Shared overlay menus are built; browser acceptance is pending.
+**Status:** Closed by owner October 27, 2026. Composer, Projects and shared
+overlay menus are implemented. Closure does not assert an unreported menu
+browser pass; accepted upload and Project behavior remains accepted.
 
 ## Composer
 
@@ -9,9 +10,7 @@ The centered dock has a 56 rem desktop maximum: message field plus Send/Stop abo
 
 Send and Stop share a circular footprint on desktop and mobile. While a
 response is running, Stop uses a white filled square on a red gradient, retaining
-its accessible Stop name and Stop response tooltip. This October 24 presentation
-change preserves cancellation and refresh recovery; existing browser checks pass.
-Only audrey-ui rebuilds after pull.
+its accessible Stop name and Stop response tooltip. This presentation preserves cancellation and refresh recovery.
 
 The message box glows while its text field is focused for typing.
 Hovering, pressing, or keyboard focusing a dropdown highlights that control.

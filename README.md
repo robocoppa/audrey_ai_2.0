@@ -174,15 +174,15 @@ can search prior conversations via `chat_history_search`.
   ingest/lifecycle, fair scheduling, the OpenAI-compatible routes, the
   custom-tools sidecar). `docs/lesson-python/` is a separate beginner course
   that teaches Python by reading the same real codebase.
-- **`docs/campaign-1/phase-N-deploy.md`** — original 31-phase build history.
+- **`docs/campaign-1/README.md`** — closed orchestrator foundation contracts.
 - **`docs/campaign-2/`** — post-1.0 feature work, phases 1–15
   (chat archive, prompt centralization, KB audit fixes, complexity-gate
   fixes, Thinking/Planning banners, Grafana dashboards, passthrough).
 - **`docs/campaign-3/`** — phases 16–43 (optimization pass, research mode,
   web_fetch, video ingest, hybrid retrieval).
-- **`docs/campaign-4/`** — the current campaign (native application, skills,
-  Responses API). Start at `docs/campaign-4/README.md`.
-- **`docs/unraid-ollama.md`** — clean Ollama container recreation on Unraid.
+- **`docs/campaign-4/`** — closed native application, skills, file/media and
+  Responses API contracts. Start at `docs/campaign-4/README.md`.
+- **`docs/guides/unraid-ollama.md`** — clean Ollama container recreation on Unraid.
 - **`monitoring/README.md`** — Prometheus + Grafana stack, including how to
   add a new dashboard via repo-managed provisioning.
 
@@ -225,7 +225,7 @@ AGENTS.md           # canonical agent guide
 
 ## Status
 
-Active development. Campaign 1 (phases 1-31) shipped the core orchestrator;
-Campaigns 2 and 3 were post-1.0 feature work; Campaign 4 is current. See `docs/PROJECT_STATE.md`
-(gitignored, laptop-local) for the current priority, verified stack state,
-and per-phase behavioral facts.
+Campaigns 1–4 are closed by the owner as of October 27, 2026. Their contracts
+are indexed in [docs/README.md](docs/README.md); no campaign implementation or
+acceptance queue remains. New work starts from a new user request. Local working
+context lives in the gitignored `docs/PROJECT_STATE.md`.

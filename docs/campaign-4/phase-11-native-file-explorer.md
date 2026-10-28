@@ -1,10 +1,10 @@
 # Campaign 4 Phase 11 — native file explorer
 
-**Status:** Explorer/shared creation and 11A paged previews are accepted October 26;
-11B uploaded PDF previews are accepted October 27. Actual Office formatting (11C)
-and filename/media previews (11D) are built and locally verified; browser acceptance
-is pending. The October 27 followup retains downloaded originals and explains unavailable playback for previously
-removed sources. No further approved implementation slice is unbuilt.
+**Status:** Closed by owner October 27, 2026. File creation, paged/PDF previews,
+Office formatting, filename previews and media players are implemented. The
+owner closed remaining acceptance followups; unreported browser checks are not
+recorded as passes. Downloaded originals are retained; previously reclaimed
+bytes remain unavailable.
 
 ## Library model
 
@@ -30,8 +30,6 @@ Long links stay inside their field. Narrow screens stack link then upload.
 File types and size limits are available in a separate compact disclosure.
 
 Sources, Models, and Tool calls form one controlled popover group: opening one closes the others; outside click or Escape closes the current popover. Live activity and saved answers follow the same behavior.
-
-Model telemetry is a separate operations phase; it is not another Phase 11 file-explorer slice.
 
 ## Generated files
 
@@ -64,9 +62,6 @@ workbooks retain their separate revision-bound export contract.
 This provides file generation/download. The existing Hermes/Nextcloud/Collabora
 office editor integration keeps its current behavior.
 
-Shared creation/download and owned library/Project visibility are accepted
-October 26: all three ordinary DOCX/XLSX and Private Markdown outputs worked.
-
 ## Browser previews
 
 Generated chat and Project file links have Preview beside Download. My files >
@@ -87,7 +82,7 @@ private no-store headers. The same viewer supports saved Tax workbook revisions,
 using the existing owner/case authorization, revision cache and expiry behavior.
 Nothing in a preview changes case facts or the file itself.
 
-### Larger previews and native-style appearance — 11A accepted
+### Larger previews and native-style appearance — 11A
 
 Documents use a continuous paper reading surface, spreadsheets use a light grid
 with row/column headings and worksheet tabs, Markdown is rendered, and plain
@@ -129,10 +124,6 @@ the operation timeout is 45 seconds, with subprocess cancellation/timeout cleanu
 Malformed, encrypted, oversized or unavailable sources show a safe error while
 keeping the original download path. Preview does not unlock passwords, provide
 selectable page text or edit the document; Transcript remains available separately.
-
-This adds no model/embedding/index work or dependency, schema, config or CSP
-change. Existing ingestion, summaries, text extraction and Private processing
-remain accepted. The user accepted this PDF slice October 27; no repeat check is queued.
 
 ### Actual Office formatting and preview fidelity — 11C
 
@@ -194,42 +185,3 @@ A missing original produces clear feedback while retained summaries and
 transcripts stay usable. Codec/container support depends on the browser; an
 unsupported player offers the original download. No transcoding, buffering of whole
 media files, new upload formats, external player or third-party service is added.
-
-### Deployment and acceptance — 11C/11D
-
-After normal commit/push, run on **Tower**:
-
-```bash
-cd /mnt/user/appdata/audrey_ai_2.0
-git pull
-docker compose up -d --build --force-recreate audrey audrey-ui
-```
-
-Recreate Audrey to apply the retention config and rebuild the UI for the player
-followup. No sidecar/media-worker rebuild, schema/dependency/CSP change, model pull
-or reindex is needed. Backend/component regressions, desktop/mobile browser
-checks under production CSP, real audio/video playback/seek/cleanup, typecheck,
-build and changed-file Ruff/ESLint pass locally. Browser acceptance is pending.
-
-At `https://ai.builtryte.xyz`, use one ordinary new chat request:
-
-> Create preview-check.docx with a heading, two bullet points and a two-column
-> table. Also create preview-check.xlsx with a Budget worksheet: headings Item,
-> Amount and Share; rows Food, 40, 0.25 and Travel, 120, 0.75. Style the first row as
-> headings, Amount as US dollars and Share as percentages. Use real document and
-> worksheet formatting.
-
-Preview both outputs, then open their downloads in your usual Office application.
-Headings, bullets/table, header styling and `$40.00`/`25.00%` displays should agree;
-spreadsheet values remain left aligned. This generates the two requested files;
-**no upload is required**. Existing Tax workbooks need no regeneration or retest.
-
-In My files, click existing PDF/image/audio/video filenames. The appropriate view
-should open directly. For playable audio/video, test play/pause and seeking, then
-switch to Summary/Transcript or close: playback stops and those text views remain
-accessible. The existing Open action should still show Summary first. A reclaimed
-filename should open Player with an unavailable-original explanation and source
-link when present; Summary/Transcript remain readable. **Upload only if no suitable
-existing audio or video is available; wait for Ready before playback.** Browser playback checks make
-no model call; a fresh upload uses the existing processing flow. This is the new
-filename/player interaction check, not a repeat of accepted PDF rendering.

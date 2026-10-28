@@ -1,8 +1,8 @@
 # Live testing — runner and deployment reference
 
-The [Campaign 4 main plan](../campaign-4/README.md) owns priorities and rebuild
-instructions. This reference contains runner/auth rules, not past test logs.
-English user input only; accepted checks do not need another run.
+This reference owns runner, authentication and rebuild instructions. Campaigns
+are closed; no smoke or acceptance work is implied by these reusable commands.
+English user input only; closed checks do not need another run.
 
 ## Where to run
 
@@ -62,3 +62,24 @@ it. See [evals](../../evals/README.md) only for an actual evaluation task.
 
 Delete temporary handoffs after acceptance. Keep a brief phase status and
 regression code; retain model evaluation artifacts needed for decisions.
+
+## Service rebuilds
+
+The user runs these actions on Tower from /mnt/user/appdata/audrey_ai_2.0 after
+the normal pull. They describe how to deploy a change, not an outstanding queue.
+
+| Changed files | Tower action |
+|---|---|
+| Documentation only | None |
+| Backend Python or dependencies | `docker compose up -d --build audrey` |
+| Browser source or assets | `docker compose up -d --build audrey-ui` |
+| Shared KB code used by backend and tools | Rebuild `audrey` and `custom-tools` |
+| Tools sidecar source | Rebuild `custom-tools`; also rebuild `audrey` when its code/declarations change |
+| Media worker or fetcher source | Rebuild the corresponding `media-worker` or `media-fetcher` service |
+| config.yaml or service environment | `docker compose up -d --force-recreate audrey`, using the affected service and adding `--build` when code also changes |
+| Evaluation image contents/dependencies | `docker compose --profile eval build audrey-eval` |
+| Monitoring source/provisioning | Follow [monitoring operations](../../monitoring/README.md) for the changed artifact |
+
+Tool discovery refreshes automatically. A service restart alone does not reload
+an updated bind-mounted configuration. Secrets and host-specific settings remain
+in .env; do not edit the repository configuration directly on Tower.
