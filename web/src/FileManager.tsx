@@ -550,7 +550,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                           </time>
                         </div>
                         {file.failure_reason ? <small className="file-failure">{file.failure_reason}</small> : null}
-                        {file.source_freed_at ? <small>Original reclaimed · derived text retained</small> : null}
+                        {file.source_freed_at ? <small>Original deleted · saved text retained</small> : null}
                       </div>
                       <div className="file-actions">
                         {file.source_url ? (

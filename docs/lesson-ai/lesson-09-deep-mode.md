@@ -112,7 +112,7 @@ The planner asks whether a request is one question or several bundled
 together. If several, each worker can take one and focus on it.
 
 The graph node skips research, disabled planning and short requests, at
-[`graph.py:422`](../../src/audrey/pipeline/graph.py#L422):
+[`graph.py:436`](../../src/audrey/pipeline/graph.py#L436):
 
 ```python
 async def node_planner(state: PipelineState) -> dict[str, Any]:
@@ -129,7 +129,9 @@ spends its turn trying to work out what the question was about.
 
 When the planner does run, it makes one call to the router's small model at
 temperature 0. It's reading the request's structure, not writing anything
-creative. Its instructions,
+creative. Like any local model call, it waits its turn at the GPU gate, and the
+wait counts against the planner's deadline: On a busy GPU, planning gives up
+rather than push another person's model off the GPU. Its instructions,
 [`PLANNER_SYSTEM`](../../src/audrey/pipeline/prompts.py#L67), ask for JSON
 (abridged here):
 
@@ -149,14 +151,14 @@ sub-question: It *replaces* the person's question (§2.2). A sub-question that
 says "the leading ones" means nothing to a worker that never saw the original.
 
 The reply goes through a deliberately forgiving parser,
-[`_parse_planner_output`](../../src/audrey/pipeline/planner.py#L89), which
+[`_parse_planner_output`](../../src/audrey/pipeline/planner.py#L103), which
 looks for the outermost `{...}` and returns `[]` for anything it can't read,
-and [`plan`](../../src/audrey/pipeline/planner.py#L33) treats a single
+and [`plan`](../../src/audrey/pipeline/planner.py#L36) treats a single
 sub-question as none. So every way the planner can fail ends in the same
-place. A network error, a reply that isn't valid JSON, one sub-question: Each
-becomes `[]`, and `[]` means "every worker answers the whole request". The
-planner sharpens the panel when it works, and the panel doesn't notice when it
-doesn't.
+place. A network error, a missed deadline, a reply that isn't valid JSON, one
+sub-question: Each becomes `[]`, and `[]` means "every worker answers the whole
+request". The planner sharpens the panel when it works, and the panel doesn't
+notice when it doesn't.
 
 ### 2.2 The panel: giving each worker its question
 
@@ -334,7 +336,7 @@ waste a whole panel. The cues are English, like Audrey. A request for
 structured output skips the check entirely.
 
 `reflect` only judges. The decision to retry belongs to the graph's router,
-[`route_after_reflect`](../../src/audrey/pipeline/graph.py#L579):
+[`route_after_reflect`](../../src/audrey/pipeline/graph.py#L596):
 
 ```python
 def route_after_reflect(state: PipelineState) -> str:
@@ -365,9 +367,9 @@ leaves `reflect_passed=False` in the state for whoever reads the logs.
 #### How a request gets here
 
 After context preparation, the graph's
-[`route_deep_kind`](../../src/audrey/pipeline/graph.py#L597) sends
+[`route_deep_kind`](../../src/audrey/pipeline/graph.py#L614) sends
 `audrey_research` one way and every other deep choice the other.
-[`node_research`](../../src/audrey/pipeline/graph.py#L497) runs the whole
+[`node_research`](../../src/audrey/pipeline/graph.py#L513) runs the whole
 staged pipeline and writes the answer itself, skipping `synthesize`. The
 streaming driver runs the same pipeline under the banners Planning,
 Researching, Verifying, Fact-checking and Writing. Both drivers share one
@@ -688,16 +690,17 @@ SUB-QUESTIONS, because the list shows what was planned, not what ran. Its
 instructions tell it to acknowledge a planned sub-question no draft covers, so
 the gap shows up in the answer instead of disappearing.
 
-**3. `audrey_local` runs two workers and `audrey_deep` runs three, yet
-`audrey_local` is often the slower of the two on the same prompt. Why?**
+**3. Private's deep panel has fewer workers than Deep's, yet Private is
+often the slower of the two on the same prompt. Why?**
 
-Two of the mixed panel's three workers are cloud models. All three run at
-once, so the wait is roughly that of the slowest worker, usually the local
-one. Both of the local panel's workers need the one GPU, and the gate makes
-them take turns, so the wait is roughly the sum of the two, plus the time to
-load the second model once the first is unloaded. Tools don't change that: A
-local worker takes the gate for each model call, and other local work runs in
-the gaps.
+Private keeps everything on local models, so its panel is the local-only
+pool, while most of the mixed panel's workers are cloud models. The mixed
+panel's workers all run at once, so the wait is roughly that of the slowest
+worker, usually the local one. The local panel's workers all need the one
+GPU, and the gate makes them take turns, so the wait is roughly their sum,
+plus the time to load each model once the one before it is unloaded. Tools
+don't change that: A local worker takes the gate for each model call, and
+other local work runs in the gaps.
 
 **4. In research mode, the fact-checker's model also works as a researcher.
 During research it fails one call, and the health tracker starts a cooldown.

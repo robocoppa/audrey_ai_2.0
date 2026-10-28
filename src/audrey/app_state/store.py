@@ -44,6 +44,7 @@ from audrey.app_state.repositories import (
 )
 from audrey.app_state.responses import ResponsesRepository
 from audrey.app_state.tax_cases import TaxCasesRepository
+from audrey.app_state.transactions import write_transaction
 from audrey.identity import (
     TOKEN_SCOPES,
     IssuedPersonalToken,
@@ -515,16 +516,14 @@ class ApplicationStore:
                 "display name must be at most 100 characters"
             )
 
-        with self._lock:
+        with self._lock, write_transaction(self._conn):
             cursor = self._conn.execute(
                 "UPDATE app_users SET display_name = ?, updated_at = ? "
                 "WHERE user_id = ? AND status = 'active'",
                 (display_name, _utc_now(), user_id),
             )
             if cursor.rowcount != 1:
-                self._conn.rollback()
                 raise InvalidIdentityError("profile owner does not exist")
-            self._conn.commit()
         return display_name
 
     async def create_personal_token(
@@ -645,7 +644,7 @@ class ApplicationStore:
     ) -> bool:
         user_id = _required(user_id, "user id")
         token_id = _required(token_id, "token id")
-        with self._lock:
+        with self._lock, write_transaction(self._conn):
             row = self._token_row_for_owner_locked(user_id, token_id)
             if row is None:
                 return False
@@ -655,7 +654,6 @@ class ApplicationStore:
                     "WHERE user_id = ? AND token_id = ?",
                     (_utc_now(), user_id, token_id),
                 )
-                self._conn.commit()
         return True
 
     async def authenticate_personal_token(self, token: str) -> Principal:
@@ -704,11 +702,11 @@ class ApplicationStore:
             if str(row["status"]) != "active":
                 raise PersonalTokenAuthenticationError("invalid personal token")
             if last_used is None or now_dt - last_used >= _LAST_USED_WRITE_INTERVAL:
-                self._conn.execute(
-                    "UPDATE personal_access_tokens SET last_used_at = ? WHERE token_id = ?",
-                    (now_dt.isoformat(timespec="microseconds"), token_id),
-                )
-                self._conn.commit()
+                with write_transaction(self._conn):
+                    self._conn.execute(
+                        "UPDATE personal_access_tokens SET last_used_at = ? WHERE token_id = ?",
+                        (now_dt.isoformat(timespec="microseconds"), token_id),
+                    )
 
         return Principal(
             user_id=str(row["user_id"]),
@@ -744,12 +742,11 @@ class ApplicationStore:
 
     def _delete_personal_tokens_sync(self, user_id: str) -> int:
         user_id = _required(user_id, "user id")
-        with self._lock:
+        with self._lock, write_transaction(self._conn):
             cursor = self._conn.execute(
                 "DELETE FROM personal_access_tokens WHERE user_id = ?",
                 (user_id,),
             )
-            self._conn.commit()
             return max(0, int(cursor.rowcount))
 
     async def purge_local_user_data(self, *, user_id: str) -> LocalUserDataPurge:

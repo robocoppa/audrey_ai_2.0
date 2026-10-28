@@ -97,7 +97,7 @@ These are the files this lesson reads:
 ### 2.1 The declaration catalogue
 
 Before Audrey offers a model any tool, the tool must be declared in
-[`TOOL_DECLARATIONS`](../../src/audrey/tools/discovery.py#L100). A declaration
+[`TOOL_DECLARATIONS`](../../src/audrey/tools/discovery.py#L101). A declaration
 answers the questions that matter for safety, which are none of the model's
 business:
 
@@ -115,7 +115,7 @@ business:
   default, for the two tools that inspect a document page or a video frame.
 
 A few entries, from
-[`discovery.py:100`](../../src/audrey/tools/discovery.py#L100):
+[`discovery.py:101-173`](../../src/audrey/tools/discovery.py#L101-L173):
 
 ```python
 TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
@@ -154,13 +154,13 @@ TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
 ### 2.2 Discovery
 
 Discovery runs during startup, and again every minute while Audrey runs.
-[`discover_all`](../../src/audrey/tools/discovery.py#L491) asks every
+[`discover_all`](../../src/audrey/tools/discovery.py#L493) asks every
 configured tool server for its `/openapi.json` at the same time, each request
 with its own timeout, so one slow or broken server can't hold up or spoil the
 others. For each server,
-[`discover_one`](../../src/audrey/tools/discovery.py#L409) keeps only POST
+[`discover_one`](../../src/audrey/tools/discovery.py#L411) keeps only POST
 routes tagged `tools` and checks each against its declaration, at
-[`discovery.py:456`](../../src/audrey/tools/discovery.py#L456):
+[`discovery.py:458-471`](../../src/audrey/tools/discovery.py#L458-L471):
 
 ```python
 if "tools" not in tags:
@@ -185,10 +185,10 @@ Each route that passes is converted for the model in two steps:
 
 - **References are inlined.** A route's request schema can point at shared
   definitions (`$ref`). Ollama doesn't follow those, so
-  [`_resolve_refs`](../../src/audrey/tools/discovery.py#L254) copies each one
+  [`_resolve_refs`](../../src/audrey/tools/discovery.py#L256) copies each one
   into place.
 - **Unfamiliar keywords are scrubbed.**
-  [`_strip_unsupported_keywords`](../../src/audrey/tools/discovery.py#L277)
+  [`_strip_unsupported_keywords`](../../src/audrey/tools/discovery.py#L279)
   keeps a short list of JSON Schema keywords (`type`, `properties`,
   `required`, `enum`, `description` and a few more) and drops the rest,
   because small models can fail silently on keywords like `format`. One
@@ -196,7 +196,7 @@ Each route that passes is converted for the model in two steps:
   to their schemas. The scrubber walks into it without filtering the names;
   filtering them against the keyword list would delete every field.
 
-The result is a [`ToolSpec`](../../src/audrey/tools/discovery.py#L179): the
+The result is a [`ToolSpec`](../../src/audrey/tools/discovery.py#L181): the
 name, description and parameters the model will see, plus what only Audrey
 sees, which is the server URL and path to POST to and the policy copied from
 the declaration. The tool server also reports which of its components are
@@ -213,7 +213,7 @@ answer rather than wiping the live tools. Lesson 5 walked the loop.
 ### 2.3 What the model is offered
 
 The registry hands the loop only what a model may use right now, at
-[`discovery.py:216`](../../src/audrey/tools/discovery.py#L216):
+[`discovery.py:218`](../../src/audrey/tools/discovery.py#L218):
 
 ```python
 def specs(self) -> list[ToolSpec]:
@@ -236,7 +236,7 @@ sees a URL or a policy, only this:
 
 A skill can narrow the list further. When a run uses a skill, the route hands
 the loop a registry restricted to the tools that skill allows, through
-[`restrict`](../../src/audrey/tools/discovery.py#L240).
+[`restrict`](../../src/audrey/tools/discovery.py#L242).
 
 ### 2.4 The loop, top-down
 
@@ -244,19 +244,20 @@ the loop a registry restricted to the tools that skill allows, through
 and a short body. Its shape:
 
 ```text
-offer the registry's tools (or none)
-copy the messages into a local `convo`
-for each round, up to max_rounds:
-    after the first few rounds, compact older tool results
-    chat(convo, tools)              the GPU gate is held for this call only
-    no tool_calls? return the answer
-    append the assistant's tool-call turn
-    answer over-budget web searches with a note
-    dispatch the rest in parallel, append each result
-round limit reached: force a final answer without tools
+run_react
+  -> offer the registry's tools (or none)
+  -> copy the messages into a local convo
+  -> for each round, up to max_rounds:
+       -> after the first few rounds, compact older tool results
+       -> chat(convo, tools), holding the GPU gate for this call only
+       -> no tool_calls? return the answer
+       -> append the assistant's tool-call turn
+       -> answer over-budget web searches with a note
+       -> dispatch the rest in parallel, append each result
+  -> round limit reached: force a final answer without tools
 ```
 
-The most important line in that flow: **if the model makes no tool calls, the
+The most important step in that flow: **If the model makes no tool calls, the
 loop returns at once.** A simple question takes one round; a question that
 needs one search takes two.
 
@@ -285,23 +286,24 @@ files"). The loop runs them in parallel (§2.9).
 
 ### 2.6 The dispatcher: one call in, one result out
 
-[`dispatch_one`](../../src/audrey/tools/dispatch.py#L170) turns one entry of
+[`dispatch_one`](../../src/audrey/tools/dispatch.py#L171) turns one entry of
 `tool_calls` into a `ToolResult`. In order, it:
 
-1. **Parses the arguments.** Some models send them as a JSON string instead of
+
+- **Parses the arguments.** Some models send them as a JSON string instead of
    an object; both work. Arguments that won't parse come back as an error
    result.
-2. **Looks the tool up.** An unknown or unavailable tool comes back as an
+- **Looks the tool up.** An unknown or unavailable tool comes back as an
    error result that lists the tools that are available.
-3. **Applies the identity rule** (§2.7): a tool that touches personal data
+- **Applies the identity rule** (§2.7): a tool that touches personal data
    gets the caller's identity, never the model's.
-4. **Checks the purge block** (§2.7).
-5. **POSTs the arguments** to the tool's server, with the tool's own timeout
+- **Checks the purge block** (§2.7).
+- **POSTs the arguments** to the tool's server, with the tool's own timeout
    when its declaration sets one. Timeouts, network errors and HTTP errors all
    come back as error results.
-6. **Shapes the result** to fit the size cap (§2.8).
+- **Shapes the result** to fit the size cap (§2.8).
 
-> **The dispatcher never raises — failures come back as data.**
+**The dispatcher never raises — failures come back as data.**
 
 Every failure returns a `ToolResult` with `is_error=True` and a JSON body
 saying what went wrong. The loop passes it to the model as an ordinary tool
@@ -312,7 +314,7 @@ request.
 ### 2.7 Spotlight — the caller's identity, not the model's
 
 This is the security center of the tool path, at
-[`dispatch.py:263`](../../src/audrey/tools/dispatch.py#L263):
+[`dispatch.py:275-295`](../../src/audrey/tools/dispatch.py#L275-L295):
 
 ```python
 if (spec.user_scoped or spec.purge_gated) and (
@@ -339,7 +341,7 @@ A model can be steered into this by a hostile prompt, by instructions hidden in
 a web page a tool returned, or by plain confusion. The dispatcher doesn't argue
 with it. For a tool declared `ARGUMENT`, it overwrites `user` with the caller's
 identity; for `TAGS`,
-[`_force_user_tag`](../../src/audrey/tools/dispatch.py#L163) removes any
+[`_force_user_tag`](../../src/audrey/tools/dispatch.py#L164) removes any
 `user:` tag and appends the real one. The identity comes from authentication
 (Lesson 4): the caller's private storage id, which a later lesson on identity
 explains in full.
@@ -365,10 +367,10 @@ tool message spends the model's context, and long results repeated across
 rounds crowd out everything else.
 
 How the cut is made matters as much as where.
-[`_truncate_payload`](../../src/audrey/tools/dispatch.py#L118) first drops
+[`_truncate_payload`](../../src/audrey/tools/dispatch.py#L119) first drops
 whole items from the result's largest list, so the model still receives valid
 JSON, plus a note, at
-[`dispatch.py:148`](../../src/audrey/tools/dispatch.py#L148):
+[`dispatch.py:149`](../../src/audrey/tools/dispatch.py#L149):
 
 ```python
 for keep in range(len(items) - 1, 0, -1):
@@ -493,7 +495,7 @@ the user to wrap up is a clear signal.
 
 Each model call in the loop records the model's health and holds the GPU gate
 for that call only, at
-[`react.py:649`](../../src/audrey/pipeline/react.py#L649):
+[`react.py:649-658`](../../src/audrey/pipeline/react.py#L649-L658):
 
 ```python
 try:
@@ -521,22 +523,24 @@ at different problems: a slow tool, or a broken one.
 
 ### 2.13 One request, end to end
 
-1. You ask: *"What is the latest stable BTRFS release?"*
-2. Classification says `general`, and the fast path picks the best healthy
-   `general` model. It is on the tool-capable list, so the fast path calls
-   `run_react`.
-3. The registry offers its available tools, `web_search` among them.
-4. Round 0: the model replies with one `tool_calls` entry, `web_search` with
-   `{"query": "btrfs latest stable release"}`.
-5. The loop appends that assistant turn, counts the search against the budget,
-   and dispatches it.
-6. `dispatch_one` finds `web_search` in the registry. Its declaration has no
-   user scope, so no identity is bound and no purge block applies. It POSTs
-   the arguments to the tool server's `/web_search` route.
-7. The tool server returns a JSON body of results, a few kilobytes and well
-   under the cap, so it goes into the conversation whole, as a tool message.
-8. Round 1: the model has the results in front of it and replies in prose,
-   with no tool calls. The loop returns the answer.
+```
+--> You ask: *"What is the latest stable BTRFS release?"*
+--> Classification says `general`, and the fast path picks the best healthy
+    `general` model. It is on the tool-capable list, so the fast path calls
+    `run_react`.
+--> The registry offers its available tools, `web_search` among them.
+--> Round 0: the model replies with one `tool_calls` entry, `web_search` with
+    `{"query": "btrfs latest stable release"}`.
+--> The loop appends that assistant turn, counts the search against the budget,
+    and dispatches it.
+--> `dispatch_one` finds `web_search` in the registry. Its declaration has no
+    user scope, so no identity is bound and no purge block applies. It POSTs
+    the arguments to the tool server's `/web_search` route.
+--> The tool server returns a JSON body of results, a few kilobytes and well
+    under the cap, so it goes into the conversation whole, as a tool message.
+--> Round 1: the model has the results in front of it and replies in prose,
+    with no tool calls. The loop returns the answer.
+```
 
 Two model calls, one tool call, nothing cut.
 
@@ -544,21 +548,21 @@ Two model calls, one tool call, nothing cut.
 
 ```text
 tools/discovery.py
-  TOOL_DECLARATIONS / ToolDeclaration           what each tool may touch
-  discover_all / discover_one                   startup; fail closed per server
-  _resolve_refs / _strip_unsupported_keywords   schema clean-up
-  ToolSpec / ToolRegistry                       routing, policy, availability
+  TOOL_DECLARATIONS / ToolDeclaration           ## what each tool may touch
+  discover_all / discover_one                   ## startup; fail closed per server
+  _resolve_refs / _strip_unsupported_keywords   ## schema clean-up
+  ToolSpec / ToolRegistry                       ## routing, policy, availability
 
 tools/dispatch.py
-  dispatch_one                                  the workhorse
-  _force_user_tag                               identity inside tags
-  _truncate_payload / _truncate                 cuts that say what was cut
-  to_tool_message                               back into the conversation
+  dispatch_one                                  ## the workhorse
+  _force_user_tag                               ## identity inside tags
+  _truncate_payload / _truncate                 ## cuts that say what was cut
+  to_tool_message                               ## back into the conversation
 
 pipeline/react.py
-  run_react                                     the loop
-  _compress_history / _tool_message_priority    what keeps its full text
-  _gate_ctx                                     the GPU gate per model call
+  run_react                                     ## the loop
+  _compress_history / _tool_message_priority    ## what keeps its full text
+  _gate_ctx                                     ## the GPU gate per model call
 ```
 
 The imports run one way: `react` uses `dispatch`, which uses `discovery`.

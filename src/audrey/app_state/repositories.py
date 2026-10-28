@@ -29,6 +29,7 @@ from audrey.app_state.records import (
     UserPreferences,
 )
 from audrey.app_state.titles import fallback_conversation_title
+from audrey.app_state.transactions import write_transaction
 from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
 
 _ALLOWED_MODES = frozenset(
@@ -1396,14 +1397,13 @@ class ChatProjectionsRepository:
     def _mark_enqueued_sync(self, projection_id: str) -> bool:
         projection_id = _required(projection_id, "projection id")
         now = _utc_now()
-        with self._lock:
+        with self._lock, write_transaction(self._conn):
             cursor = self._conn.execute(
                 "UPDATE app_chat_projections SET enqueued_at = ?, attempts = attempts + 1, "
                 "last_attempt_at = ?, last_error = '' "
                 "WHERE projection_id = ? AND enqueued_at IS NULL",
                 (now, now, projection_id),
             )
-            self._conn.commit()
         return cursor.rowcount == 1
 
     async def mark_failed(
@@ -1435,7 +1435,7 @@ class ChatProjectionsRepository:
         retry_at = (now + dt.timedelta(seconds=retry_interval_s)).isoformat(
             timespec="microseconds"
         )
-        with self._lock:
+        with self._lock, write_transaction(self._conn):
             cursor = self._conn.execute(
                 "UPDATE app_chat_projections SET attempts = attempts + 1, "
                 "last_attempt_at = ?, last_error = ?, next_attempt_at = ? "
@@ -1447,7 +1447,6 @@ class ChatProjectionsRepository:
                     projection_id,
                 ),
             )
-            self._conn.commit()
         return cursor.rowcount == 1
 
     async def retry_now(self, *, limit: int = 200) -> int:
@@ -1459,7 +1458,7 @@ class ChatProjectionsRepository:
                 "chat projection retry limit must be between 1 and 10000"
             )
         now = _utc_now()
-        with self._lock:
+        with self._lock, write_transaction(self._conn):
             rows = self._conn.execute(
                 "SELECT projection_id FROM app_chat_projections "
                 "WHERE enqueued_at IS NULL "
@@ -1472,7 +1471,6 @@ class ChatProjectionsRepository:
                     "WHERE projection_id = ? AND enqueued_at IS NULL",
                     [(now, str(row[0])) for row in rows],
                 )
-                self._conn.commit()
         return len(rows)
 
     async def reset_all(self) -> int:
@@ -1480,13 +1478,12 @@ class ChatProjectionsRepository:
 
     def _reset_all_sync(self) -> int:
         now = _utc_now()
-        with self._lock:
+        with self._lock, write_transaction(self._conn):
             cursor = self._conn.execute(
                 "UPDATE app_chat_projections SET enqueued_at = NULL, attempts = 0, "
                 "last_attempt_at = NULL, last_error = '', next_attempt_at = ?",
                 (now,),
             )
-            self._conn.commit()
         return max(0, int(cursor.rowcount))
 
     async def due_deletions(
@@ -1529,7 +1526,7 @@ class ChatProjectionsRepository:
     def _mark_deletion_completed_sync(self, deletion_id: str) -> bool:
         deletion_id = _required(deletion_id, "chat projection deletion id")
         now = _utc_now()
-        with self._lock:
+        with self._lock, write_transaction(self._conn):
             cursor = self._conn.execute(
                 "UPDATE app_chat_projection_deletions "
                 "SET completed_at = ?, attempts = attempts + 1, "
@@ -1537,7 +1534,6 @@ class ChatProjectionsRepository:
                 "WHERE deletion_id = ? AND completed_at IS NULL",
                 (now, now, deletion_id),
             )
-            self._conn.commit()
         return cursor.rowcount == 1
 
     async def mark_deletion_failed(
@@ -1569,7 +1565,7 @@ class ChatProjectionsRepository:
         retry_at = (now + dt.timedelta(seconds=retry_interval_s)).isoformat(
             timespec="microseconds"
         )
-        with self._lock:
+        with self._lock, write_transaction(self._conn):
             cursor = self._conn.execute(
                 "UPDATE app_chat_projection_deletions "
                 "SET attempts = attempts + 1, last_attempt_at = ?, "
@@ -1582,7 +1578,6 @@ class ChatProjectionsRepository:
                     deletion_id,
                 ),
             )
-            self._conn.commit()
         return cursor.rowcount == 1
 
     async def retry_deletions_now(self, *, limit: int = 200) -> int:
@@ -1594,7 +1589,7 @@ class ChatProjectionsRepository:
                 "chat projection deletion retry limit must be between 1 and 10000"
             )
         now = _utc_now()
-        with self._lock:
+        with self._lock, write_transaction(self._conn):
             rows = self._conn.execute(
                 "SELECT deletion_id FROM app_chat_projection_deletions "
                 "WHERE completed_at IS NULL "
@@ -1607,7 +1602,6 @@ class ChatProjectionsRepository:
                     "WHERE deletion_id = ? AND completed_at IS NULL",
                     [(now, str(row[0])) for row in rows],
                 )
-                self._conn.commit()
         return len(rows)
 
     async def deletion_stats(

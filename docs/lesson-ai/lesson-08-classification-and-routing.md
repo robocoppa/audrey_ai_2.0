@@ -41,7 +41,7 @@ The person's choice can override the mode:
 | Choice | Mode |
 | --- | --- |
 | Fast (`audrey_fast`) | Always fast, and never escalated to deep. |
-| Deep, cloud-only or local-only (`audrey_deep`, `audrey_cloud`, `audrey_local`) | Always deep, with that pool. |
+| Deep, Cloud or Private (`audrey_deep`, `audrey_cloud`, `audrey_local`) | Always deep, with a mixed, cloud-only or local-only pool. |
 | Research (`audrey_research`) | Always deep, through the research branch. |
 | Auto (`audrey_auto`) | Audrey decides, from an attached image, the prompt's length and explicit requests for depth. |
 
@@ -99,7 +99,7 @@ system messages that came before it.
 ### 2.2 `node_classify` and the shared helper
 
 The graph node, at
-[`graph.py:298`](../../src/audrey/pipeline/graph.py#L298), does almost
+[`graph.py:312`](../../src/audrey/pipeline/graph.py#L312), does almost
 nothing itself:
 
 ```python
@@ -124,12 +124,12 @@ The three keys matter later. `task_type` goes to the model layer.
 escalation rule in §2.7.
 
 The work happens in
-[`classify_with_registry`](../../src/audrey/pipeline/classify.py#L333), which
+[`classify_with_registry`](../../src/audrey/pipeline/classify.py#L335), which
 both drivers call, so the graph and the streaming driver classify the same
 way. It reads the `router` settings, passes along the names of the tools this
 turn may use (§2.3 shows why), and calls `classify`. Then it applies one last
 rule, at
-[`classify.py:395`](../../src/audrey/pipeline/classify.py#L395):
+[`classify.py:397`](../../src/audrey/pipeline/classify.py#L397):
 
 ```python
 if task == "vl" and not conversation_has_image(messages):
@@ -145,7 +145,7 @@ follow-up about an image attached earlier stays `vl`.
 ### 2.3 The cheap first pass: keyword signals
 
 Asking a model costs time, and many prompts announce their kind plainly. So
-[`keyword_classify`](../../src/audrey/pipeline/classify.py#L107) checks a few
+[`keyword_classify`](../../src/audrey/pipeline/classify.py#L109) checks a few
 regular expressions first, in a deliberate order:
 
 ```python
@@ -176,21 +176,21 @@ slowing down for.
 the word "photo", which would otherwise look like vision work. But the person
 asked for a tool, the general path always has a model that can call one, and
 the vision models can't call tools at all. So
-[`_tool_mention_signal`](../../src/audrey/pipeline/classify.py#L89) returns
+[`_tool_mention_signal`](../../src/audrey/pipeline/classify.py#L91) returns
 `general` when the prompt names a tool this turn may use. That's why the
 helper passes the tool names in.
 
 **Reviewing code is reasoning.** "Review this code for bugs" contains code,
 but the job is analysis and judgment, not writing code, so
-[`_REVIEW_OVERRIDE`](../../src/audrey/pipeline/classify.py#L75) sends it to
+[`_REVIEW_OVERRIDE`](../../src/audrey/pipeline/classify.py#L77) sends it to
 `reasoning` before the code checks can claim it.
 
 ### 2.4 Short prompts skip the router
 
 Before asking the router model,
-[`classify`](../../src/audrey/pipeline/classify.py#L263) takes one more
+[`classify`](../../src/audrey/pipeline/classify.py#L265) takes one more
 shortcut, at
-[`classify.py:300`](../../src/audrey/pipeline/classify.py#L300):
+[`classify.py:302`](../../src/audrey/pipeline/classify.py#L302):
 
 ```python
 signal = keyword_classify(user_text, tool_names=tool_names)
@@ -213,7 +213,7 @@ of the wait before the answer starts.
 
 Plain prose like *"Could you help me think through whether this backup plan
 is sensible?"* matches no keyword, so
-[`router_classify`](../../src/audrey/pipeline/classify.py#L157) asks a small
+[`router_classify`](../../src/audrey/pipeline/classify.py#L159) asks a small
 model. Its instructions,
 [`CLASSIFIER_SYSTEM`](../../src/audrey/pipeline/prompts.py#L50), ask for one
 JSON object:
@@ -225,14 +225,14 @@ JSON object:
 The call is built to be cheap and predictable:
 
 - **Only the start of the prompt.** The router sees at most the first 2,000
-  characters ([`classify.py:202`](../../src/audrey/pipeline/classify.py#L202)).
+  characters ([`classify.py:204`](../../src/audrey/pipeline/classify.py#L204 '{"role": "user", "content": user_text[:2000]}')).
   Deciding "this is code" doesn't need the whole pasted file.
 - **Temperature 0, the answer pinned to a schema, thinking off.** The label is
   the whole product, so the output is constrained to the JSON shape above,
   and a model that would reason first is told not to, because reasoning was
   measured to cost seconds per turn for a four-way choice.
 - **A forgiving parser.**
-  [`_parse_router_output`](../../src/audrey/pipeline/classify.py#L224) takes
+  [`_parse_router_output`](../../src/audrey/pipeline/classify.py#L226) takes
   the first `{...}` it finds and clamps the confidence between 0 and 1.
 
 The [`router`](../../config.yaml#L12) settings name the model, its timeout and
@@ -262,7 +262,7 @@ tokens in the conversation, using
 [`_iter_text_parts`](../../src/audrey/pipeline/complexity.py#L43) so an
 attached image counts as nothing rather than as megabytes of data, and
 [`is_complex`](../../src/audrey/pipeline/complexity.py#L99) compares the count
-with a threshold from [`complexity`](../../config.yaml#L1347) in config.
+with a threshold from [`complexity`](../../config.yaml#L1330) in config.
 A long paste is the clearest sign that one quick answer is the wrong shape.
 
 Length misses one case: a short prompt that asks for a lot ("compare the top
@@ -274,9 +274,9 @@ make every later follow-up deep.
 
 ### 2.7 The mode decision
 
-[`node_complexity`](../../src/audrey/pipeline/graph.py#L316) gathers its
+[`node_complexity`](../../src/audrey/pipeline/graph.py#L330) gathers its
 inputs first, at
-[`graph.py:323`](../../src/audrey/pipeline/graph.py#L323):
+[`graph.py:337`](../../src/audrey/pipeline/graph.py#L337):
 
 ```python
 gate_messages = without_skill_instruction(
@@ -292,7 +292,7 @@ image_turn = has_image_part(routing_messages)
 `without_skill_instruction` is the principle from §1.2 in code: The length
 gate measures the person's words with the skill's instructions taken out.
 Then the decision, at
-[`graph.py:333`](../../src/audrey/pipeline/graph.py#L333):
+[`graph.py:347-373`](../../src/audrey/pipeline/graph.py#L347-L373):
 
 ```python
 if image_turn and not describe_first:
@@ -329,7 +329,7 @@ Read it top to bottom; the first rule that applies wins.
 
 The `reason` lands in the log line, so `complexity: 640 tokens -> deep
 (tokens>=500)` tells you exactly which rule fired. LangGraph then follows the
-mode: [`route_after_complexity`](../../src/audrey/pipeline/graph.py#L568)
+mode: [`route_after_complexity`](../../src/audrey/pipeline/graph.py#L584)
 returns `"fast"` or `"deep"`, and the graph's wiring maps those to the fast
 path or the planner.
 
@@ -337,9 +337,9 @@ path or the planner.
 
 After the fast path answers, Audrey can still decide the answer came out too
 thin and re-run the request through the deep path.
-[`escalation_decision`](../../src/audrey/pipeline/graph.py#L101) makes that
+[`escalation_decision`](../../src/audrey/pipeline/graph.py#L102) makes that
 call, and most of it is reasons *not* to, at
-[`graph.py:118`](../../src/audrey/pipeline/graph.py#L118):
+[`graph.py:120-140`](../../src/audrey/pipeline/graph.py#L120-L140):
 
 ```python
 if not enabled or state.get("response_format") is not None:
@@ -363,10 +363,19 @@ computer").
 
 Only then come the two triggers: an answer shorter than
 [`min_chars`](../../config.yaml#L871), or a classification confidence under
-the ceiling. A classification that failed outright doesn't count as low
-confidence, because a router that never answered says nothing about the
-question. An escalated request goes through a small bridge node that marks
-it, and then into the planner like any deep request.
+the ceiling. Two kinds of confidence don't count, because they're
+placeholders rather than measurements: the one `general` gets when the router
+never answered and no keyword matched, and the ones a prompt gets when it was
+short enough to skip the router (§2.4). Neither says anything about how hard
+the question is. A weak keyword the router fell back to still counts; it's a
+real signal, if a weak one.
+
+Length is judged more gently for the shortest requests. When the whole
+request, earlier turns included, fits under the router-skip threshold, a short
+answer is the expected one: "hi" doesn't need a panel. So it doesn't count as
+too short, unless it's empty, came with an error, or was cut off at the length
+limit. An escalated request goes through a small bridge node that marks it,
+and then into the planner like any deep request.
 
 Escalation happens inside the graph. A fast turn the streaming driver streams
 word by word can't escalate, because the words are already on screen; a fast
@@ -375,7 +384,7 @@ can.
 
 ### 2.9 The streaming driver makes the same decisions
 
-[`_stream_via_pipeline`](../../src/audrey/routes/openai/pipeline.py#L274)
+[`_stream_via_pipeline`](../../src/audrey/routes/openai/pipeline.py#L276)
 can't run `node_complexity`, because it wants a banner on screen before
 classification finishes. So it makes the mode decision itself, from the
 choice, an attached image, the prompt's length and depth cues, in the same
@@ -447,12 +456,13 @@ the fast path can call a tool to read the file's text and answer from it.
 get, and can that make a fast answer escalate?**
 
 `classify` counts each timeout as a strike and tries again up to the
-configured limit. Then it falls back to a weak keyword's task if there was
-one, or to `general` with the low fallback confidence, and the request goes
-on. That confidence doesn't count toward escalation: `escalation_decision`
-ignores the confidence of a classification that failed, since a router that
-never answered says nothing about the question. A thin answer can still
-escalate on length alone.
+configured limit, then falls back, and the request goes on. If a weak keyword
+matched, the request gets that keyword's task and confidence, which sits under
+the escalation ceiling, so a fast answer escalates unless a guard stops it
+first: The keyword is a real signal, if a weak one. If nothing matched, it
+gets `general` with a placeholder confidence that `escalation_decision`
+ignores, since a router that never answered says nothing about the question.
+A thin answer can still escalate on length alone.
 
 **5. Someone picks Auto and asks a short question that recalls one of their
 saved memories. The fast answer is a single sentence. Does it escalate?**
