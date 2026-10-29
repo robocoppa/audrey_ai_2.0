@@ -1,7 +1,8 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, October 29, 2026. The first public-research Agents slice
-is implemented locally; Tower/browser acceptance is pending. Campaigns 1–4 remain closed.
+**Status:** In progress, October 29, 2026. Public-research Agents and the first
+unified lexical Search slice are implemented locally; Tower acceptance of Search
+is pending. Campaigns 1–4 remain closed.
 
 The owner selected unified search, saved background tasks, project working
 memory and scheduled monitoring. Background tasks mean a visible agentic
@@ -11,7 +12,7 @@ part of the requested background execution capability.
 
 ## Current implementation slice
 
-The native app now has centered Chat/Agents navigation in the top bar and a saved public-source
+The native app now has centered Chat/Agents/Search navigation in the top bar and a saved public-source
 research workflow: Plan, Research and Review. Users can create tasks, inspect
 saved step results/reports, pause/resume/cancel, rerun the same agent and delete
 terminal history. Run again preserves completed checkpoints on unfinished tasks;
@@ -40,9 +41,37 @@ output-limit failure; live acceptance of the larger allowance remains pending.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
 User-input requests, adaptive multi-step plans, Project/file/Private agent inputs,
-foreground-priority enhancements, separate notifications, unified search, Project
+foreground-priority enhancements, separate notifications, semantic search, Project
 knowledge and watches remain implementation work. Existing Private Tax tasks keep
 their current behavior. The remaining sections specify the intended full feature.
+
+The first unified Search slice searches native completed/incomplete user and
+assistant message bodies, saved agent reports and locally readable file text.
+Supported file sources include documents, generated output text, cached image OCR,
+media transcripts, generated visual notes and summaries. Existing retained text
+works when original bytes are missing; Search labels that state explicitly.
+Private files use their saved local text without model or remote processing.
+
+Search has source, Project, chat archive and inclusive UTC update-date filters.
+Results contain canonical IDs/revisions, plain-text snippets and Unicode character
+highlights. Opening a match reads a fresh bounded text window from the canonical
+message, report or file artifact; it does not infer PDF pages or media timestamps.
+The viewer pages through that source and rejects deleted or changed revisions.
+
+A dedicated local SQLite FTS5 projection uses bounded owner-scoped backfill and
+periodic reconciliation. Unchanged sources avoid index rewrites; ownership,
+deletion, Project membership and source/stat pins are checked after awaited reads
+and immediately before returning text. Account purge clears projected text, and
+pagination is bound to owner, query, filters and index generation. Search uses no
+models, embeddings, sidecar history/memory or cloud calls. Unsupported/oversized
+sources and incomplete backfill produce an explicit partial-results state.
+Current bounds include 256 query characters/12 literal terms, 500,000 characters
+per source, 5,000 sources/10 million source characters per owner, and the first
+200 matching source candidates per query. File input/expanded parsing is bounded
+to 8 MiB; existing cached text can cover larger originals. Semantic candidates,
+approved Project knowledge and navigation into the full chat/file workspace remain
+later work. Local tests and mocked responsive browser checks verify mechanics;
+real deployed file/content acceptance remains manual.
 
 ## Product outcome
 
@@ -65,7 +94,7 @@ decision; then schedule a weekly check of a selected public release page.
 | --- | --- | --- |
 | Native runs | Browser-independent execution, saved messages, model/tool activity and reconnect events | Durable objectives, plans, checkpoints, user-input waits and restart dispatch |
 | Private tasks | Leases, revisions, source/model pins, budgets and committed-result delivery for Private tax reviews | General agent contracts and adapters; existing Private recovery currently pauses work |
-| Search | Per-user file retrieval, history search, file text and native conversation reads | One native content-search API/UI with canonical targets and usable snippets |
+| Search | Native local lexical API/UI, canonical source text viewer, bounded projection, snippets and filters | Semantic candidates, approved knowledge and full chat/file workspace navigation |
 | Projects | Instructions, conversation grouping, selected files and per-run context snapshots | Attributable working knowledge reused across conversations and agent tasks |
 | Scheduling | Lifecycle workers and polling patterns for existing maintenance | User-owned schedules, occurrences, baselines, comparisons and notifications |
 
@@ -445,8 +474,11 @@ Implement and verify on the laptop checkout. The owner pulls and deploys on Towe
 from `/mnt/user/appdata/audrey_ai_2.0`; backend/UI slices require the appropriate
 `audrey`/`audrey-ui` rebuilds, and changed bind-mounted configuration requires service
 recreation. Provide exact per-slice commands and required real inputs with each
-handoff. The implemented first slice requires backend/UI rebuilds and backend
-recreation; its public research workflow requires no upload.
+handoff. The implemented Agents/Search slices require backend/UI rebuilds and backend
+recreation; public research needs no upload. Existing saved content can verify Search;
+upload a real document only if no suitable readable file already exists. Check a
+word present in a message/file/report body but absent from its title, open its
+highlighted source, then delete the source and confirm it cannot be opened again.
 
 ## Initial implementation boundaries
 

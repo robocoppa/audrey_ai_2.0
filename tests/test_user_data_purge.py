@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 from audrey.app_state import ApplicationStore
 from audrey.kb.uploads_db import UploadsDB
@@ -71,6 +72,7 @@ def _coordinator(
     transport: _Transport,
     files: _FileWorker | None = None,
     application_store: ApplicationStore | None = None,
+    local_search_cleanup=None,
 ) -> UserDataPurgeCoordinator:
     return UserDataPurgeCoordinator(
         db=db,
@@ -80,6 +82,7 @@ def _coordinator(
         registry=object(),  # type: ignore[arg-type]
         upload_root=root,
         application_store=application_store,
+        local_search_cleanup=local_search_cleanup,
         retry_interval_s=60,
     )
 
@@ -99,6 +102,7 @@ async def _record(db: UploadsDB, *, file_id: str, user: str, uploaded_at: str) -
 
 
 async def test_admin_deletion_waits_for_purge_then_removes_identity_after_restart(tmp_path):
+    search_cleanup = AsyncMock()
     db_path = tmp_path / "uploads.sqlite"
     app_path = tmp_path / "app.sqlite"
     store = ApplicationStore(app_path)
@@ -123,9 +127,11 @@ async def test_admin_deletion_waits_for_purge_then_removes_identity_after_restar
     coordinator = _coordinator(
         db, tmp_path / "uploads", queue=_ArchiveQueue(),
         transport=_Transport([{"status": "pending"}]), application_store=store,
+        local_search_cleanup=search_cleanup,
     )
     try:
         assert await coordinator.drain_account_deletions_once() == 1
+        search_cleanup.assert_awaited_once_with(target.user_id)
         assert (await store.get_admin_user(user_id=target.user_id)).deletion_pending
         assert (await coordinator.status(user=namespace, purge_id=purge_id))["status"] == "pending"
     finally:

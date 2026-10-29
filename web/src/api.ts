@@ -387,6 +387,73 @@ export class ApiError extends Error {
   }
 }
 
+export type SearchKind = "all" | "message" | "file" | "agent";
+export type SearchArchiveFilter = "all" | "active" | "archived";
+
+export type SearchTarget =
+  | { kind: "message"; conversation_id: string; message_id: string; sequence: number }
+  | { kind: "file"; file_id: string; artifact: "text" | "transcript" | "visual" | "summary" }
+  | { kind: "agent"; task_id: string; step_id?: "plan" | "research" | "review" };
+
+export interface SearchResult {
+  id: string;
+  source_id: string;
+  kind: Exclude<SearchKind, "all">;
+  revision: string;
+  title: string;
+  excerpt: string;
+  highlights: Array<{ start: number; end: number }>;
+  offset: number;
+  updated_at: string;
+  project_id: string | null;
+  private_required: boolean;
+  availability: "available" | "text_only";
+  target: SearchTarget;
+}
+
+export interface SearchResponse extends ListResponse<SearchResult> {
+  partial: boolean;
+  indexing: boolean;
+  warnings: string[];
+}
+
+export interface SearchOptions {
+  kind?: SearchKind;
+  project_id?: string;
+  archived?: SearchArchiveFilter;
+  since?: string;
+  until?: string;
+  cursor?: string;
+}
+
+export interface SearchSource {
+  source_id: string;
+  revision: string;
+  kind: Exclude<SearchKind, "all">;
+  title: string;
+  text: string;
+  offset: number;
+  next_offset: number | null;
+  total_chars: number;
+  target: SearchTarget;
+  availability: "available" | "text_only";
+  private_required: boolean;
+}
+
+export function searchContent(query: string, options: SearchOptions = {}, signal?: AbortSignal): Promise<SearchResponse> {
+  const params = new URLSearchParams({ q: query, kind: options.kind ?? "all", archived: options.archived ?? "all" });
+  if (options.project_id) params.set("project_id", options.project_id);
+  if (options.since) params.set("since", options.since);
+  if (options.until) params.set("until", options.until);
+  if (options.cursor) params.set("cursor", options.cursor);
+  return apiJson<SearchResponse>(`/api/search?${params}`, { signal, cache: "no-store" });
+}
+
+export function getSearchSource(result: SearchResult, offset = result.offset, signal?: AbortSignal): Promise<SearchSource> {
+  const params = new URLSearchParams({ source_id: result.source_id, revision: result.revision, offset: String(offset) });
+  return apiJson<SearchSource>(`/api/search/source?${params}`, { signal, cache: "no-store" });
+}
+
 export type AgentTaskStatus = "queued" | "running" | "paused" | "completed" | "cancelled" | "failed";
 
 export interface AgentTask {

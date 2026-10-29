@@ -114,6 +114,49 @@ describe("App", () => {
     expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("Keep this research draft");
   });
 
+  it("opens local Search in the top bar and reads the matching canonical source", async () => {
+    workspaceMock.enabled = true;
+    const baseFetch = mockCapabilitySession("degraded");
+    const result = {
+      id: "message:one", source_id: "message:one", kind: "message", revision: "saved-revision",
+      title: "Saved decision", excerpt: "Choose heliotrope for the border.",
+      highlights: [{ start: 7, end: 17 }], offset: 200,
+      updated_at: "2026-10-29T12:00:00Z", project_id: null,
+      private_required: false, availability: "available",
+      target: { kind: "message", conversation_id: "conversation", message_id: "one", sequence: 9 },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => {
+      if (path.startsWith("/api/search/source?")) return new Response(JSON.stringify({
+        source_id: result.source_id, revision: result.revision, kind: result.kind, title: result.title,
+        text: "Choose heliotrope for the border. Here is the saved source context.",
+        offset: 200, next_offset: null, total_chars: 265,
+        target: result.target, availability: "available", private_required: false,
+      }), { headers: { "Content-Type": "application/json" } });
+      if (path.startsWith("/api/search?")) return new Response(JSON.stringify({
+        items: [result], next_cursor: null, partial: false, indexing: false, warnings: [],
+      }), { headers: { "Content-Type": "application/json" } });
+      return baseFetch(path);
+    }));
+    render(<App />);
+    const chat = await screen.findByText("Workspace ready", {}, { timeout: 5000 });
+    const navigation = within(screen.getByRole("navigation", { name: "Workspaces" }));
+    fireEvent.click(navigation.getByRole("button", { name: "Search" }));
+    expect(chat).not.toBeVisible();
+    expect(navigation.getByRole("button", { name: "Search" })).toHaveAttribute("aria-current", "page");
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search your content" }), { target: { value: "heliotrope" } });
+    fireEvent.submit(screen.getByRole("search"));
+    fireEvent.click(await screen.findByRole("button", { name: "Open chat: Saved decision" }));
+    const dialog = await screen.findByRole("dialog", { name: "Saved decision" });
+    await waitFor(() => expect(within(dialog).getByLabelText("Saved source text")).toHaveTextContent("Here is the saved source context."));
+    expect(dialog.querySelector("mark")).toHaveTextContent("heliotrope");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Saved decision" })).not.toBeInTheDocument();
+    fireEvent.click(navigation.getByRole("button", { name: "Chat" }));
+    expect(chat).toBeVisible();
+    fireEvent.click(navigation.getByRole("button", { name: "Search" }));
+    expect(screen.getByRole("searchbox", { name: "Search your content" })).toHaveValue("heliotrope");
+  });
+
   it("closes portalled Chat pickers and releases Escape when Agents opens", async () => {
     const conversation = {
       id: "con_visibility", title: "Visibility boundary", default_mode: "auto", default_model_id: "auto",

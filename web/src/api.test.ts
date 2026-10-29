@@ -13,17 +13,57 @@ import {
   getFileArtifactDownloadUrl,
   getFileDownloadUrl,
   getAgentTask,
+  getSearchSource,
   listAgentTasks,
   listProjects,
   removeProjectFile,
   resetAdminModelPolicy,
+  searchContent,
   updateAdminModel,
   updateConversation,
   updateConversationModel,
   uploadFile,
   uploadPrivateProjectFile,
   type AudreyFileLimits,
+  type SearchResult,
 } from "./api";
+
+describe("native content search requests", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("encodes the query and filters while preserving cancellation and local authentication", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ items: [], next_cursor: null, partial: false, indexing: false, warnings: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const signal = new AbortController().signal;
+    await searchContent("plans & <notes> / 🗂", { kind: "file", project_id: "prj / private", archived: "archived", since: "2026-10-01", until: "2026-10-29", cursor: "cursor+/?=" }, signal);
+
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(path.startsWith("/api/search?")).toBe(true);
+    const params = new URL(path, "https://audrey.test").searchParams;
+    expect(Object.fromEntries(params)).toEqual({ q: "plans & <notes> / 🗂", kind: "file", project_id: "prj / private", archived: "archived", since: "2026-10-01", until: "2026-10-29", cursor: "cursor+/?=" });
+    expect(init).toEqual(expect.objectContaining({ credentials: "same-origin", cache: "no-store", signal }));
+    expect(init.headers).not.toHaveProperty("Authorization");
+  });
+
+  it("searches all source kinds and archive states by default", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ items: [], next_cursor: null, partial: false, indexing: false, warnings: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await searchContent("a saved decision");
+    expect(fetchMock).toHaveBeenCalledWith("/api/search?q=a+saved+decision&kind=all&archived=all", expect.objectContaining({ cache: "no-store" }));
+  });
+
+  it("pins canonical source reads to the returned source ID, revision, and real text offset", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({ text: "Saved source" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const signal = new AbortController().signal;
+    const item = { source_id: "file / transcript", revision: "sha/+=", offset: 150 } as SearchResult;
+    await getSearchSource(item, undefined, signal);
+    await getSearchSource(item, 4150, signal);
+    const params = new URL(fetchMock.mock.calls[0][0] as string, "https://audrey.test").searchParams;
+    expect(Object.fromEntries(params)).toEqual({ source_id: "file / transcript", revision: "sha/+=", offset: "150" });
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/search/source?source_id=file+%2F+transcript&revision=sha%2F%2B%3D&offset=4150", expect.objectContaining({ credentials: "same-origin", cache: "no-store", signal }));
+  });
+});
 
 describe("saved agent task requests", () => {
   afterEach(() => { vi.unstubAllGlobals(); });

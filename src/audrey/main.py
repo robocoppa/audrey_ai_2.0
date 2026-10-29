@@ -25,6 +25,9 @@ from audrey.app_state import ApplicationStore
 from audrey.auth import AuthedUser, require_admin, require_principal
 from audrey.chat_projection import ChatProjectionPromoter
 from audrey.config import get_config
+from audrey.content_search import ContentSearchError, ContentSearchIndex
+from audrey.content_search_service import ContentSearchService
+from audrey.content_sources import ContentSourceReader
 from audrey.conversation_titles import ConversationTitleGenerator
 from audrey.embedding_profile import profile_from_mapping
 from audrey.identity import Principal, build_cloudflare_access_verifier
@@ -340,6 +343,12 @@ async def lifespan(app: FastAPI):
     app.state.archive_projector = archive_projector
 
     purge_cfg = ((cfg.raw.get("user_data", {}) or {}).get("purge", {}) or {})
+
+    async def purge_content_search(owner_id: str) -> None:
+        service = getattr(app.state, "content_search", None)
+        if service is not None:
+            await service.purge_owner(owner_id)
+
     user_data_purges = UserDataPurgeCoordinator(
         db=uploads_db,
         file_deletions=file_deletions,
@@ -349,6 +358,7 @@ async def lifespan(app: FastAPI):
         upload_root=upload_root,
         application_store=application_store,
         tax_review_exports=tax_review_exports,
+        local_search_cleanup=purge_content_search,
         retry_interval_s=float(purge_cfg.get("retry_interval_s", 30.0)),
         batch_size=int(purge_cfg.get("batch_size", 50)),
     )
@@ -389,6 +399,20 @@ async def lifespan(app: FastAPI):
     )
     app.state.agent_runtime = agent_runtime
 
+    search_cfg = cfg.raw.get("content_search", {}) or {}
+    content_search = None
+    if search_cfg.get("enabled", True):
+        try:
+            search_index = ContentSearchIndex(search_cfg.get("sqlite_path", "/data/content-search/index.sqlite"))
+            content_search = ContentSearchService(
+                application_store,
+                ContentSourceReader(application_store, uploads_db, upload_root),
+                search_index,
+            )
+        except (ContentSearchError, OSError):
+            log.warning("Local content search unavailable; canonical sources remain available")
+    app.state.content_search = content_search
+
     readiness_cfg = cfg.raw.get("readiness", {}) or {}
     required_components = set(
         readiness_cfg.get("required_components", ["ollama"]) or []
@@ -427,10 +451,23 @@ async def lifespan(app: FastAPI):
             name="audrey.tools.discovery",
         )
     try:
+        if content_search is not None:
+            try:
+                await content_search.start()
+            except ContentSearchError:
+                await content_search.stop()
+                content_search.index.close()
+                content_search = None
+                app.state.content_search = None
+                log.warning("Local content search recovery failed; search is unavailable")
         if saved_agent_settings.enabled:
             await agent_runtime.start()
         yield
     finally:
+        await user_data_purges.stop()
+        if content_search is not None:
+            await content_search.stop()
+            content_search.index.close()
         await agent_runtime.stop()
         await native_runs.stop()
         if tools_discovery_task is not None and not tools_discovery_task.done():
@@ -443,7 +480,6 @@ async def lifespan(app: FastAPI):
             await reconciler.stop()
         if watcher is not None:
             await watcher.stop()
-        await user_data_purges.stop()
         await archive_projector.stop()
         await archive_queue.stop()
         await file_deletions.stop()

@@ -75,6 +75,12 @@ router:
 application:
   sqlite_path: "/data/audrey_app.sqlite"
 
+# Rebuildable lexical content search; no model, embeddings or external service.
+# Canonical ownership and source revisions are checked before every result/open.
+content_search:
+  enabled: true
+  sqlite_path: "/data/content-search/index.sqlite"
+
 # Saved public-source research agents use verified local Qwen only, without fallback.
 # They share Audrey's model/tool admission.
 # Limits persist with each task; retries and resume retain consumed allowance.

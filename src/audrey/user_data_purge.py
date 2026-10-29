@@ -15,6 +15,7 @@ import datetime as dt
 import logging
 import shutil
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -60,6 +61,7 @@ class UserDataPurgeCoordinator:
         upload_root: Path,
         application_store: ApplicationStore | None = None,
         tax_review_exports: TaxReviewExports | None = None,
+        local_search_cleanup: Callable[[str], Awaitable[None]] | None = None,
         retry_interval_s: float = 30.0,
         batch_size: int = 50,
     ) -> None:
@@ -75,6 +77,7 @@ class UserDataPurgeCoordinator:
         self._upload_root = upload_root
         self._application_store = application_store
         self._tax_review_exports = tax_review_exports
+        self._local_search_cleanup = local_search_cleanup
         self._retry_interval_s = retry_interval_s
         self._batch_size = batch_size
         self._wake = asyncio.Event()
@@ -313,6 +316,8 @@ class UserDataPurgeCoordinator:
         for user_id, purge_id, namespace in pending:
             try:
                 await store.purge_local_user_data(user_id=user_id)
+                if self._local_search_cleanup is not None:
+                    await self._local_search_cleanup(user_id)
                 if self._tax_review_exports is not None:
                     # Disk cleanup shares the durable account-deletion retry:
                     # identity removal waits until private snapshots are gone.

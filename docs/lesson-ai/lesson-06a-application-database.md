@@ -28,18 +28,21 @@ database server is best at, many machines writing at once, isn't needed. SQLite
 has what Audrey does need: transactions that survive a power cut, constraints
 checked on every write, and a way to back up a database while it's in use.
 
-What lives in it, grouped by role:
+What lives in it:
 
-| Role | Tables (a sample) | Where it's taught |
-|---|---|---|
-| Who people are | `app_users`, `external_identities`, `personal_access_tokens`, groups and roles | A later lesson |
-| What they said | `app_conversations`, `app_runs`, `app_messages`, and each message's attachments, sources, tool calls and models | This lesson |
-| How they like answers | `user_preferences` | This lesson, as the simplest example |
-| Hand-offs still in flight | `app_chat_projections` (archive receipts) and matching deletion receipts | This lesson briefly; a later lesson follows the delivery |
-| Everything else | Projects, tax review cases, Private tasks, stored API responses, model settings | Later lessons |
+| What it holds | Tables |
+|---|---|
+| Accounts and access | `app_users`, `external_identities`, `personal_access_tokens` |
+| Conversations | `app_conversations`, `app_runs`, `app_messages` |
+| Preferences | `user_preferences` |
+| Archive hand-offs | `app_chat_projections` |
+| Projects and other features | `app_projects`, `app_tax_cases`, `app_private_tasks` and more |
 
-Every one of those tables follows the rules this lesson teaches, which it reads
-through conversations, messages and runs, the tables every chat request touches.
+This lesson reads the database through conversations, messages and runs, the
+tables every chat request touches, with preferences as its simplest example.
+What it teaches about transactions, schema rules, migrations and backups applies
+to every table above. Accounts and access, the delivery of archive hand-offs, and
+Projects and the other features each get their own explanation in later lessons.
 
 Three things are *not* in it. The records of uploaded files live in a second
 SQLite database, the uploads database; saved memories live in Qdrant; and the
@@ -140,7 +143,7 @@ the log that the connections share.) Three rules follow:
 - Readers don't block the writer, and the writer doesn't block readers.
 
 The store's constructor switches WAL on, along with two other settings, at
-[`store.py:102-111`](../../src/audrey/app_state/store.py#L102-L111):
+[`store.py:103-112`](../../src/audrey/app_state/store.py#L103-L112):
 
 ```python
 self._lock = threading.RLock()
@@ -247,16 +250,16 @@ return _preferences_from_row(row)
 The shape every write in the store shares:
 
 ```text
-replace(...)                            async; what routes call
- -> asyncio.to_thread(_replace_sync)    the event loop keeps running
-     -> validate and normalize          no lock needed yet
-     -> with self._lock                 one thread at a time on the connection
-         -> BEGIN IMMEDIATE             the write lock, up front
+replace(...)                              # async; what routes call
+ -> asyncio.to_thread(_replace_sync)      # the event loop keeps running
+     -> validate and normalize            # no lock needed yet
+     -> with self._lock                   # one thread at a time on the connection
+         -> BEGIN IMMEDIATE               # the write lock, up front
          -> UPDATE ... WHERE user_id = ?
          -> no row changed: rollback, return None
          -> read the row back, commit
          -> any exception: rollback, re-raise
- -> UserPreferences                     a typed record, not a database row
+ -> UserPreferences                       # a typed record, not a database row
 ```
 
 Three details carry weight. **Validation runs before the lock**, because
@@ -480,17 +483,17 @@ database sees it:
 
 ```text
 Send
- -> begin_run                one write transaction
+ -> begin_run                  # one write transaction
       check: the conversation is yours and not archived, your account is
              active, no other run is in progress
       first message and no title: the fallback title from your message
-      INSERT the run           status 'running'
-      INSERT your message      the next sequence number
+      INSERT the run           # status 'running'
+      INSERT your message      # the next sequence number
       INSERT its attachments, and the assistant message: empty, 'in_progress'
       UPDATE the conversation's timestamps
     COMMIT -> StartedRun
- -> the answer streams       in memory only; the database still says 'running'
- -> finish_run               one write transaction
+ -> the answer streams         # in memory only; the database still says 'running'
+ -> finish_run                 # one write transaction
       UPDATE the run: outcome, models, token counts, only if still 'running'
       UPDATE the assistant message: its text, 'completed' or 'incomplete'
       INSERT the models used, the sources, the tool calls, an archive receipt
@@ -553,7 +556,7 @@ whole history: an ordered tuple of `(version, sql)` pairs, from the first
 `CREATE TABLE` onward. Each database records the versions it has applied in a
 table of its own, `app_schema_migrations`, and the runner applies whatever is
 missing, at
-[`store.py:130-147`](../../src/audrey/app_state/store.py#L130-L147):
+[`store.py:132-149`](../../src/audrey/app_state/store.py#L132-L149):
 
 ```python
 for version, sql in MIGRATIONS:
@@ -582,8 +585,8 @@ version runs in its own transaction together with the row that records it, so a
 migration is either applied and recorded, or neither. (The f-string breaks
 §2.1's rule safely: The version and the timestamp come from Audrey's own code,
 never from a request.) The **schema version** is the highest version recorded
-([`schema_version`](../../src/audrey/app_state/store.py#L231)), and startup logs
-it ([`main.py:109`](../../src/audrey/main.py#L109 'log.info(')). If a migration
+([`schema_version`](../../src/audrey/app_state/store.py#L233)), and startup logs
+it ([`main.py:115`](../../src/audrey/main.py#L115 '"application_store: ready sqlite=%s schema=%d",')). If a migration
 fails, its transaction rolls back, nothing is recorded, and the exception stops
 startup: Audrey won't serve requests until every migration has applied.
 
@@ -596,7 +599,7 @@ Migrations come in three kinds:
    existing rows get a value and code written before the column keeps working.
    SQLite has no "add this column unless it's there", so the store adds these
    columns one at a time and skips any that already exist
-   ([`_apply_additive_column_migration_locked`](../../src/audrey/app_state/store.py#L182)).
+   ([`_apply_additive_column_migration_locked`](../../src/audrey/app_state/store.py#L184)).
 3. **Table rebuilds**, for changes SQLite can't make in place, such as
    changing a `CHECK`. Allowing a new run mode, and adding a
    `requested_model_id` column filled in from existing rows, took one, at
@@ -622,7 +625,7 @@ with `ON DELETE CASCADE`. With foreign keys on, SQLite rewrites that reference
 when a table is renamed, so the messages would follow the old table to its new
 name, and dropping it would delete every message attached to a run. So rebuilds
 take their own path, at
-[`store.py:161-180`](../../src/audrey/app_state/store.py#L161-L180):
+[`store.py:163-182`](../../src/audrey/app_state/store.py#L163-L182):
 
 ```python
 self._conn.execute("PRAGMA foreign_keys = OFF")
@@ -657,9 +660,9 @@ The rules for the next migration follow:
 - **Give new columns defaults**, for the existing rows and for code that
   predates the column.
 - **Register the special kinds.** A rebuild joins
-  [`_FOREIGN_KEYS_OFF_MIGRATIONS`](../../src/audrey/app_state/store.py#L60),
+  [`_FOREIGN_KEYS_OFF_MIGRATIONS`](../../src/audrey/app_state/store.py#L61),
   copies every column and recreates indexes and triggers. A column addition
-  joins [`_ADDITIVE_COLUMN_MIGRATIONS`](../../src/audrey/app_state/store.py#L61),
+  joins [`_ADDITIVE_COLUMN_MIGRATIONS`](../../src/audrey/app_state/store.py#L62),
   and the method that applies it needs the column's definition too.
 - **Expect no undo.** Nothing in Audrey reverses a migration, which is one more
   reason to prefer changes that only add, and the reason to take a backup

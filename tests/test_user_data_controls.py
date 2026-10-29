@@ -889,6 +889,7 @@ def _purge_status(*, purge_id: str = "purge-a") -> dict:
 
 async def test_account_purge_uses_verified_owner_and_scoped_idempotency_key(tmp_path):
     coordinator = SimpleNamespace(request=AsyncMock(return_value=_purge_status()))
+    search = SimpleNamespace(purge_owner=AsyncMock())
     store = ApplicationStore(tmp_path / "app.sqlite")
     principal = await store.resolve_external_identity(
         provider="owui",
@@ -910,6 +911,7 @@ async def test_account_purge_uses_verified_owner_and_scoped_idempotency_key(tmp_
             state=SimpleNamespace(
                 application_store=store,
                 user_data_purges=coordinator,
+                content_search=search,
             )
         ),
     )
@@ -942,6 +944,7 @@ async def test_account_purge_uses_verified_owner_and_scoped_idempotency_key(tmp_
         user="alice@example.com",
         purge_id=expected_id,
     )
+    search.purge_owner.assert_awaited_once_with(principal.user_id)
 
 
 def test_account_purge_rejects_personal_token(tmp_path):

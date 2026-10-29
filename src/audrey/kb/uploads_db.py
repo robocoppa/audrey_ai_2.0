@@ -1662,6 +1662,37 @@ class UploadsDB:
             )
             return [dict(r) for r in cur.fetchall()]
 
+    async def list_search_page(
+        self, *, user: str, after_file_id: str = "", limit: int = 50,
+    ) -> list[dict]:
+        """Enumerate a bounded canonical page, with durable deletion fences."""
+        if not isinstance(user, str) or not user or type(limit) is not int or not 1 <= limit <= 200:
+            raise ValueError("Invalid file search page.")
+        if not isinstance(after_file_id, str) or len(after_file_id) > 256:
+            raise ValueError("Invalid file search cursor.")
+        return await asyncio.to_thread(self._search_rows_sync, user, after_file_id, limit, None)
+
+    async def get_owned_search_row(self, *, user: str, file_id: str) -> dict | None:
+        """Resolve an owner-bound file without exposing worker-only lookup."""
+        if not isinstance(user, str) or not user or not isinstance(file_id, str) or not file_id:
+            raise ValueError("Invalid file search source.")
+        rows = await asyncio.to_thread(self._search_rows_sync, user, "", 1, file_id)
+        return rows[0] if rows else None
+
+    def _search_rows_sync(self, user: str, after: str, limit: int, file_id: str | None) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT u.file_id,u.user,u.filename,u.mime,u.bytes,u.kind,u.status,"
+                "u.uploaded_at,u.completed_at,u.source_freed_at,u.private_required,u.origin "
+                "FROM uploads u WHERE u.user=? AND u.status!='deleting' "
+                "AND NOT EXISTS (SELECT 1 FROM file_deletions d "
+                "WHERE d.file_id=u.file_id AND d.user=u.user) "
+                "AND u.file_id>? AND (? IS NULL OR u.file_id=?) "
+                "ORDER BY u.file_id LIMIT ?",
+                (user, after, file_id, file_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     async def private_file_ids(self, user: str) -> set[str]:
         """Catalog-owned exclusions, including files awaiting deletion."""
         return await asyncio.to_thread(self._private_file_ids_sync, user)

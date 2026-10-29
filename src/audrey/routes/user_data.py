@@ -497,6 +497,11 @@ async def request_account_purge(
             user=me.email,
             purge_id=purge_id,
         )
+        search = getattr(request.app.state, "content_search", None)
+        if search is not None:
+            # The coordinator has installed file tombstones before we erase
+            # the projection, so the indexer cannot re-add purged file text.
+            await search.purge_owner(principal.user_id)
         return AccountPurgeStatus.model_validate(value)
     except ValueError as e:
         raise HTTPException(status_code=409, detail="purge_id_conflict") from e

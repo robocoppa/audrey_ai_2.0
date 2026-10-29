@@ -7,6 +7,8 @@ import builtryteWordmark from "./assets/brand/builtryte-wordmark.png";
 import { AccountSettings } from "./AccountSettings";
 import { FileManager } from "./FileManager";
 import { AgentsWorkspace } from "./AgentsWorkspace";
+import { SearchWorkspace } from "./SearchWorkspace";
+import { SearchSourceViewer } from "./SearchSourceViewer";
 import {
   ApiError,
   getCapabilities,
@@ -19,6 +21,7 @@ import {
   type CurrentUser,
   type SkillSummary,
   type UserPreferences,
+  type SearchResult,
 } from "./api";
 
 const ChatWorkspace = lazy(() =>
@@ -84,7 +87,8 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
-  const [activeWorkspace, setActiveWorkspace] = useState<"chat" | "agents">("chat");
+  const [activeWorkspace, setActiveWorkspace] = useState<"chat" | "agents" | "search">("chat");
+  const [searchSource, setSearchSource] = useState<SearchResult | null>(null);
   const [activeAgentCount, setActiveAgentCount] = useState(0);
   const [mobileMenuHost, setMobileMenuHost] = useState<HTMLDivElement | null>(null);
   const [mobileNewChatHost, setMobileNewChatHost] = useState<HTMLDivElement | null>(null);
@@ -242,7 +246,7 @@ export function App() {
       </svg>
       <header className="topbar" inert={navigationOpen ? true : undefined}>
         <div className="topbar-mobile-menu" ref={setMobileMenuHost}>
-          {activeWorkspace === "agents" ? <button className="workspace-header-button" type="button" onClick={() => setActiveWorkspace("chat")} aria-label="Back to Chat">←</button> : null}
+          {activeWorkspace !== "chat" ? <button className="workspace-header-button" type="button" onClick={() => setActiveWorkspace("chat")} aria-label="Back to Chat">←</button> : null}
         </div>
         <a className="brand" href="/" aria-label="Audrey home">
           <span className="brand-wordmark" aria-hidden="true">
@@ -257,6 +261,7 @@ export function App() {
           <button type="button" aria-current={activeWorkspace === "agents" ? "page" : undefined} onClick={() => { setNavigationOpen(false); setActiveWorkspace("agents"); }}>
             Agents{activeAgentCount > 0 ? <span className="agents-active-count" aria-label={`${activeAgentCount} active agent tasks`}>{activeAgentCount}</span> : null}
           </button>
+          <button type="button" aria-current={activeWorkspace === "search" ? "page" : undefined} onClick={() => { setNavigationOpen(false); setActiveWorkspace("search"); }}>Search</button>
         </nav>
         <div className="topbar-mobile-new-chat" ref={setMobileNewChatHost} />
         <SessionActions {...sessionActions} variant="header" />
@@ -286,7 +291,11 @@ export function App() {
         <div className="app-workspace-view" hidden={activeWorkspace !== "agents"} inert={activeWorkspace !== "agents" ? true : undefined}>
           <AgentsWorkspace key={`${session.user.id}:${workspaceRevision}`} visible={activeWorkspace === "agents"} timezone={session.preferences.timezone} onActiveCountChange={setActiveAgentCount} />
         </div>
+        <div className="app-workspace-view" hidden={activeWorkspace !== "search"} inert={activeWorkspace !== "search" ? true : undefined}>
+          <SearchWorkspace key={`${session.user.id}:${workspaceRevision}`} visible={activeWorkspace === "search"} onOpenResult={setSearchSource} />
+        </div>
       </main>
+      {searchSource ? <SearchSourceViewer result={searchSource} onClose={() => setSearchSource(null)} /> : null}
       {filesOpen ? (
         <FileManager onClose={() => {
           setFilesOpen(false);
@@ -308,6 +317,7 @@ export function App() {
             );
           }}
           onDataPurgeAttempted={() => {
+            setSearchSource(null);
             setWorkspaceRevision((current) => current + 1);
             void Promise.all([
               getCurrentUser(),
