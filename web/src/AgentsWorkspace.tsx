@@ -76,7 +76,6 @@ export function AgentsWorkspace({
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState<"all" | "active" | "finished">("all");
-  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const deletedIds = useRef(new Set<string>());
   const knownIds = useRef<Set<string> | null>(null);
   const mutationGeneration = useRef(0);
@@ -175,7 +174,6 @@ export function AgentsWorkspace({
 
   function selectTask(id: string) {
     setSelectedId(id);
-    setConfirmingDeleteId(null);
     setNotice("");
     scrollToDetail();
   }
@@ -228,7 +226,6 @@ export function AgentsWorkspace({
         if (action === "rerun") {
           setSelectedId(updated.id);
           setFilter("all");
-          setConfirmingDeleteId(null);
           scrollToDetail();
         }
       }
@@ -265,11 +262,9 @@ export function AgentsWorkspace({
       knownIds.current?.delete(task.id);
       setTasks((current) => current.filter((item) => item.id !== task.id));
       setSelectedId((current) => current === task.id ? null : current);
-      setConfirmingDeleteId(null);
     } catch (reason) {
       if (!mounted.current) return;
       if (reason instanceof ApiError && reason.status === 409) {
-        setConfirmingDeleteId(null);
         try {
           const latest = await getAgentTask(task.id);
           if (mounted.current) {
@@ -355,21 +350,18 @@ export function AgentsWorkspace({
           {selected ? (
             <>
               <header className="agents-detail-header">
-                <span className={`agents-status agents-status-${selected.status}`}>{STATUS_LABELS[selected.status]}</span>
+                <div className="agents-detail-toolbar">
+                  <span className={`agents-status agents-status-${selected.status}`}>{STATUS_LABELS[selected.status]}</span>
+                  <AgentTaskControls
+                    key={`${selected.id}:${isFinished(selected) ? selected.revision : "active"}:${visible}`}
+                    task={selected}
+                    busy={busy}
+                    onAction={(action) => void act(selected, action)}
+                    onDelete={() => void removeTask(selected)}
+                  />
+                </div>
                 <h2>{selected.objective}</h2>
                 <p>Last activity <time dateTime={selected.updated_at}>{timestamp(selected.updated_at)}</time></p>
-                <div className="agents-task-actions" role="group" aria-label="Agent controls">
-                  {isMoving(selected) ? <button type="button" className="agents-secondary" disabled={busy} onClick={() => void act(selected, "pause")}>Pause</button> : null}
-                  {selected.status === "paused" ? <button type="button" className="agents-primary" disabled={busy} onClick={() => void act(selected, "resume")}>Resume</button> : null}
-                  {!isFinished(selected) ? <button type="button" className="agents-secondary" disabled={busy} onClick={() => void act(selected, "cancel")}>Cancel</button> : null}
-                  {isFinished(selected) ? <button type="button" className="agents-primary" disabled={busy} onClick={() => void act(selected, "rerun")}>Run again</button> : null}
-                  {isFinished(selected) && confirmingDeleteId !== selected.id ? <button type="button" className="agents-secondary" disabled={busy} onClick={() => setConfirmingDeleteId(selected.id)}>Delete task</button> : null}
-                </div>
-                {confirmingDeleteId === selected.id ? <div className="agents-delete-confirm" role="group" aria-label="Confirm task deletion">
-                  <p>Delete this saved task and its report? This cannot be undone.</p>
-                  <button type="button" className="agents-secondary agents-danger" disabled={busy} onClick={() => void removeTask(selected)}>Confirm delete task</button>
-                  <button type="button" className="agents-secondary" disabled={busy} onClick={() => setConfirmingDeleteId(null)}>Keep task</button>
-                </div> : null}
               </header>
               {selected.status === "paused" ? <p className="agents-notice">Completed steps are saved. Resume to continue from the next unfinished step.</p> : null}
               {selected.error ? <p className="agents-error" role="alert">{selected.error}</p> : null}
@@ -404,6 +396,57 @@ export function AgentsWorkspace({
         </section>
       </div>
     </section>
+  );
+}
+
+function AgentTaskControls({ task, busy, onAction, onDelete }: {
+  task: AgentTask;
+  busy: boolean;
+  onAction: (action: "pause" | "resume" | "cancel" | "rerun") => void;
+  onDelete: () => void;
+}) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  useEffect(() => {
+    const resetConfirmation = () => setConfirmingDelete(false);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") resetConfirmation();
+    };
+    window.addEventListener("blur", resetConfirmation);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("blur", resetConfirmation);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
+  return (
+    <div className="agents-task-actions" role="group" aria-label="Agent controls">
+      {isMoving(task) ? <button type="button" className="agents-secondary" disabled={busy} onClick={() => onAction("pause")}>Pause</button> : null}
+      {task.status === "paused" ? <button type="button" className="agents-primary" disabled={busy} onClick={() => onAction("resume")}>Resume</button> : null}
+      {!isFinished(task) ? <button type="button" className="agents-secondary" disabled={busy} onClick={() => onAction("cancel")}>Cancel</button> : null}
+      {isFinished(task) ? <>
+        <button type="button" className="agents-primary" disabled={busy} onClick={() => { setConfirmingDelete(false); onAction("rerun"); }}>Run again</button>
+        <button
+          type="button"
+          className={`agents-secondary danger-button${confirmingDelete ? " confirming-delete" : ""}`}
+          aria-label={confirmingDelete ? "Confirm delete task" : "Delete task"}
+          aria-pressed={confirmingDelete}
+          title={confirmingDelete ? "Click again to delete this saved task and its report." : "Delete saved task and report"}
+          disabled={busy}
+          onClick={() => {
+            if (confirmingDelete) {
+              setConfirmingDelete(false);
+              onDelete();
+            } else setConfirmingDelete(true);
+          }}
+          onBlur={() => setConfirmingDelete(false)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setConfirmingDelete(false);
+          }}
+        >{confirmingDelete ? "✓" : "Delete task"}</button>
+      </> : null}
+    </div>
   );
 }
 

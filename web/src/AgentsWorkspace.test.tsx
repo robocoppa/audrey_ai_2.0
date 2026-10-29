@@ -164,18 +164,86 @@ describe("AgentsWorkspace", () => {
     vi.mocked(api.getAgentTask).mockResolvedValue(saved);
     const remove = vi.spyOn(api, "deleteAgentTask").mockResolvedValue();
     render(<AgentsWorkspace />);
-    fireEvent.click(await screen.findByRole("button", { name: "Delete task" }));
+    const deleteButton = await screen.findByRole("button", { name: "Delete task" });
+    expect(deleteButton).toHaveClass("danger-button");
+    expect(deleteButton).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(deleteButton);
     expect(remove).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Keep task" }));
-    expect(screen.queryByRole("button", { name: "Confirm delete task" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm delete task" }));
+    const confirmButton = screen.getByRole("button", { name: "Confirm delete task" });
+    expect(confirmButton).toBe(deleteButton);
+    expect(confirmButton).toHaveTextContent("✓");
+    expect(confirmButton).toHaveClass("danger-button", "confirming-delete");
+    expect(confirmButton).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("group", { name: "Confirm task deletion" })).not.toBeInTheDocument();
+    fireEvent.click(confirmButton);
     expect(await screen.findByText("No agents yet. Start with a research objective above.")).toBeVisible();
     expect(remove).toHaveBeenCalledWith(saved.id, 8);
     expect(screen.queryByRole("heading", { name: saved.objective })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Refresh agent tasks" })).toBeEnabled());
     expect(screen.queryByRole("button", { name: `Open agent: ${saved.objective}` })).not.toBeInTheDocument();
+  });
+
+  it.each(["blur", "Escape"])("cancels the delete checkmark on %s", async (event) => {
+    const saved = task({ status: "completed" });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
+    vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const remove = vi.spyOn(api, "deleteAgentTask").mockResolvedValue();
+    render(<AgentsWorkspace />);
+    const deleteButton = await screen.findByRole("button", { name: "Delete task" });
+    fireEvent.click(deleteButton);
+    expect(deleteButton).toHaveTextContent("✓");
+    if (event === "blur") fireEvent.blur(deleteButton);
+    else fireEvent.keyDown(deleteButton, { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Delete task" })).toBe(deleteButton);
+    expect(deleteButton).toHaveAttribute("aria-pressed", "false");
+    expect(remove).not.toHaveBeenCalled();
+    fireEvent.click(deleteButton);
+    expect(remove).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Confirm delete task" })).toHaveTextContent("✓");
+  });
+
+  it("requires a fresh delete confirmation when switching saved agents", async () => {
+    const first = task({ status: "completed" });
+    const second = task({ id: "agt_second", objective: "Another saved task", status: "completed" });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [first, second] });
+    vi.mocked(api.getAgentTask).mockImplementation(async (id) => id === first.id ? first : second);
+    const remove = vi.spyOn(api, "deleteAgentTask").mockResolvedValue();
+    render(<AgentsWorkspace />);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete task" }));
+    expect(screen.getByRole("button", { name: "Confirm delete task" })).toHaveTextContent("✓");
+    fireEvent.click(screen.getByRole("button", { name: `Open agent: ${second.objective}` }));
+    expect(screen.getByRole("button", { name: "Delete task" })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: `Open agent: ${first.objective}` }));
+    expect(screen.getByRole("button", { name: "Delete task" })).toHaveAttribute("aria-pressed", "false");
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("clears a pending delete confirmation when leaving the Agents workspace", async () => {
+    const saved = task({ status: "completed" });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
+    vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const { rerender } = render(<AgentsWorkspace />);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete task" }));
+    expect(screen.getByRole("button", { name: "Confirm delete task" })).toHaveTextContent("✓");
+    rerender(<AgentsWorkspace visible={false} />);
+    rerender(<AgentsWorkspace visible />);
+    expect(screen.getByRole("button", { name: "Delete task" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("requires a fresh confirmation if a refreshed task revision changes", async () => {
+    let saved = task({ status: "completed" });
+    vi.mocked(api.listAgentTasks).mockImplementation(async () => ({ items: [saved] }));
+    vi.mocked(api.getAgentTask).mockImplementation(async () => saved);
+    const remove = vi.spyOn(api, "deleteAgentTask").mockResolvedValue();
+    render(<AgentsWorkspace />);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete task" }));
+    saved = { ...saved, revision: saved.revision + 1 };
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh agent tasks" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
+    await screen.findByRole("button", { name: "Delete task" });
+    expect(screen.queryByRole("button", { name: "Confirm delete task" })).not.toBeInTheDocument();
+    expect(remove).not.toHaveBeenCalled();
   });
 
   it("reloads a deletion conflict and requires a fresh confirmation", async () => {

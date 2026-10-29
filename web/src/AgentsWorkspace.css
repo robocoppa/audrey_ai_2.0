@@ -125,12 +125,13 @@
 .agents-status-failed { border-color: rgb(245 128 136 / 40%); color: #f5a3aa; }
 .agents-status-paused { border-color: rgb(237 194 122 / 35%); color: #edce95; }
 .agents-detail { min-width: 0; min-height: 31rem; padding: clamp(1rem, 2.5vw, 2rem); border: 1px solid var(--border); border-radius: 1rem; background: rgb(13 29 49 / 60%); }
+.agents-detail-header { margin-bottom: 1.5rem; }
+.agents-detail-toolbar { display: flex; flex-wrap: wrap-reverse; align-items: flex-start; justify-content: space-between; gap: 0.7rem; }
 .agents-detail-header h2 { margin: 0.85rem 0 0.5rem; font-size: clamp(1.2rem, 2vw, 1.6rem); line-height: 1.4; overflow-wrap: anywhere; white-space: pre-wrap; }
 .agents-detail-header p { margin: 0; color: var(--muted); font-size: 0.75rem; }
-.agents-delete-confirm { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0 0 1.2rem; padding: 0.8rem; border: 1px solid rgb(245 128 136 / 35%); border-radius: 0.65rem; }
-.agents-delete-confirm p { flex-basis: 100%; margin-bottom: 0.3rem; }
-.agents-danger { border-color: rgb(245 128 136 / 40%); color: #f5a3aa; }
-.agents-task-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0 1.5rem; }
+.agents-task-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; max-width: 100%; margin-left: auto; }
+.agents-task-actions .danger-button { min-width: 6.2rem; border-color: rgb(255 145 164 / 30%); background: rgb(255 145 164 / 6%); }
+.agents-task-actions .danger-button:hover:not(:disabled), .agents-task-actions .confirming-delete { border-color: rgb(255 145 164 / 56%); background: rgb(255 145 164 / 12%); }
 .agents-plan h3, .agents-result h3 { margin: 0 0 1rem; font-size: 0.95rem; }
 .agents-plan ol { display: grid; gap: 1rem; margin: 0; padding: 0; list-style: none; }
 .agents-step { display: flex; align-items: flex-start; gap: 0.7rem; }
