@@ -11,7 +11,7 @@ part of the requested background execution capability.
 
 ## Current implementation slice
 
-The native app now has primary Chat/Agents navigation and a saved public-source
+The native app now has centered Chat/Agents navigation in the top bar and a saved public-source
 research workflow: Plan, Research and Review. Users can create tasks, inspect
 saved step results/reports, pause/resume/cancel, start a new run and delete terminal
 history. Lists return compact summaries and load the selected report separately.
@@ -27,6 +27,10 @@ installed local weights before generation and pins their digest within each step
 missing or changed metadata stops execution. Public web tools still fetch source
 material. Model calls share existing admission and generation limits. Account
 purge removes the new task data and receipts.
+
+Model failures identify the actual stage and distinguish output limits from empty
+report text. Per-call logs retain only stop/usage counts and text lengths;
+report and reasoning bodies are excluded. Truncated tool calls stop before dispatch.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
 User-input requests, adaptive multi-step plans, Project/file/Private agent inputs,

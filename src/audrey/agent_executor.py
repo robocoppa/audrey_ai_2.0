@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
@@ -20,6 +21,22 @@ from audrey.processing_policy import (
 from audrey.tools.discovery import ToolRegistry
 
 PUBLIC_RESEARCH_TOOLS = frozenset({"web_search", "web_fetch"})
+logger = logging.getLogger(__name__)
+
+
+def _require_complete_text(
+    step_id: str, result: Any, reason: str, *, thinking: bool = False
+) -> None:
+    label = step_id.capitalize()
+    if reason == "length":
+        raise AgentDispatchStoppedError(
+            f"{label} reached the local model's output limit before finishing."
+        )
+    if not isinstance(result, str):
+        raise AgentDispatchStoppedError(f"{label} returned invalid report text.")
+    if not result.strip():
+        detail = " after reasoning" if thinking else ""
+        raise AgentDispatchStoppedError(f"{label} returned no report text{detail}.")
 
 
 class AgentSettings(BaseModel):
@@ -92,13 +109,59 @@ async def _verify_local(client, model, endpoint, policy=None):
 
 
 class _LocalOnlyClient:
-    def __init__(self, client, model):
+    def __init__(self, client, model, *, task_id, step_id):
         self.client, self.model = client, model
+        self.task_id, self.step_id = task_id, step_id
+        self.calls = 0
 
     async def chat(self, *, model, **kwargs):
         if model != self.model:
             raise AgentDispatchStoppedError("Agents may only use local qwen3.8.")
-        return await self.client.chat(model=model, **kwargs)
+        self.calls += 1
+        try:
+            response = await self.client.chat(model=model, **kwargs)
+        except OllamaError as error:
+            logger.warning(
+                "Agent model request failed task=%s step=%s call=%d error_type=%s",
+                self.task_id,
+                self.step_id,
+                self.calls,
+                type(error).__name__,
+            )
+            raise
+        message = response.get("message")
+        message = message if isinstance(message, dict) else {}
+        content, thinking = message.get("content", ""), message.get("thinking", "")
+        calls = message.get("tool_calls")
+        reason = response.get("done_reason", "")
+        # Provider strings and report/reasoning bodies must never enter logs.
+        stop = (
+            reason
+            if isinstance(reason, str) and reason in {"stop", "length", "load", "unload"}
+            else "unknown"
+        )
+        usage = {
+            key: value if type(value := response.get(key)) is int and value >= 0 else None
+            for key in ("prompt_eval_count", "eval_count")
+        }
+        logger.info(
+            "Agent model response task=%s step=%s call=%d stop=%s done=%s "
+            "input_tokens=%s output_tokens=%s content_chars=%s thinking_chars=%s tool_calls=%d",
+            self.task_id,
+            self.step_id,
+            self.calls,
+            stop,
+            response.get("done") is True,
+            usage["prompt_eval_count"],
+            usage["eval_count"],
+            len(content) if isinstance(content, str) else None,
+            len(thinking) if isinstance(thinking, str) else None,
+            len(calls) if isinstance(calls, list) else 0,
+        )
+        # Incomplete tool arguments must not reach HTTP dispatch either.
+        if reason == "length" or not calls:
+            _require_complete_text(self.step_id, content, reason, thinking=bool(thinking))
+        return response
 
 
 class ResearchAgentExecutor:
@@ -144,7 +207,7 @@ class ResearchAgentExecutor:
         client = self.client_factory(endpoint, trust_env=False)
         try:
             policy = await _verify_local(client, settings.model, endpoint)
-            local = _LocalOnlyClient(client, settings.model)
+            local = _LocalOnlyClient(client, settings.model, task_id=task["id"], step_id=step_id)
 
             async def authorize():
                 await repository.validate_lease(**lease)
@@ -214,10 +277,7 @@ class ResearchAgentExecutor:
                         result = (response.get("message") or {}).get("content") or ""
                         reason = response.get("done_reason", "")
             await authorize()
-            if reason == "length" or not isinstance(result, str) or not result.strip():
-                raise AgentDispatchStoppedError(
-                    "The local research step did not finish successfully."
-                )
+            _require_complete_text(step_id, result, reason)
             if len(result.encode("utf-8")) > 60000:
                 raise AgentDispatchStoppedError("The report exceeded its saved-output limit.")
             if step_id == "research":

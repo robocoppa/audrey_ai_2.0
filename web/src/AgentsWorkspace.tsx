@@ -312,7 +312,7 @@ export function AgentsWorkspace({
               required
               disabled={busy}
             />
-            <p id="agent-objective-help">All agent steps use local Qwen 3.8 with no cloud fallback. Research uses public web sources. You can leave this page and return to the saved progress and report.</p>
+            <p id="agent-objective-help">All agent steps use local models with no cloud fallback. Research uses public web sources. You can leave this page and return to the saved progress and report.</p>
             <button className="agents-primary" type="submit" disabled={busy || !objective.trim()}>{busy ? "Saving…" : "Start agent"}</button>
           </form>
 

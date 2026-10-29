@@ -100,7 +100,9 @@ describe("App", () => {
     mockCapabilitySession("degraded");
     render(<App />);
     const chat = await screen.findByText("Workspace ready", {}, { timeout: 5000 });
-    const navigation = within(screen.getByRole("navigation", { name: "Workspaces" }));
+    const workspaceNavigation = screen.getByRole("navigation", { name: "Workspaces" });
+    expect(document.querySelector(".topbar")).toContainElement(workspaceNavigation);
+    const navigation = within(workspaceNavigation);
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
     expect(screen.getByRole("heading", { name: "Agents", level: 1 })).toBeVisible();
     expect(chat).not.toBeVisible();

@@ -357,12 +357,75 @@ async def test_missing_provider_usage_stops_the_step(state):
     assert len(_content_requests(state)) == 1
 
 
-@pytest.mark.parametrize("content,reason", [("partial", "length"), ("", "stop"), ("   ", "stop")])
-async def test_truncated_or_empty_outputs_cannot_be_saved_as_success(state, content, reason):
-    task = await _step(state)
+@pytest.mark.parametrize("step_id", ["plan", "research", "review"])
+@pytest.mark.parametrize(
+    "content,reason,detail",
+    [
+        ("partial", "length", "reached the local model's output limit"),
+        ("", "stop", "returned no report text"),
+        ("   ", "stop", "returned no report text"),
+        (42, "stop", "returned invalid report text"),
+    ],
+)
+async def test_truncated_or_empty_outputs_identify_the_actual_stage(
+    state, step_id, content, reason, detail
+):
+    task = await _step(state, step_id)
     state.responses.append(_answer(content, done_reason=reason))
-    with pytest.raises(AgentDispatchStoppedError, match="did not finish successfully"):
-        await state.executor(task, "plan")
+    with pytest.raises(AgentDispatchStoppedError, match=f"{step_id.capitalize()} {detail}"):
+        await state.executor(task, step_id)
+    assert not state.tool_requests
+
+
+@pytest.mark.parametrize("step_id", ["plan", "research", "review"])
+async def test_reasoning_only_output_has_a_specific_error_and_safe_diagnostics(
+    state, step_id, caplog
+):
+    task = await _step(state, step_id)
+    state.responses.append(_answer("", message={"content": "", "thinking": "Secret reasoning"}))
+    with caplog.at_level("INFO", logger="audrey.agent_executor"):
+        with pytest.raises(
+            AgentDispatchStoppedError, match="returned no report text after reasoning"
+        ):
+            await state.executor(task, step_id)
+    assert f"task={task['id']} step={step_id} call=1 stop=stop" in caplog.text
+    assert "output_tokens=7 content_chars=0 thinking_chars=16 tool_calls=0" in caplog.text
+    assert "Secret reasoning" not in caplog.text and task["objective"] not in caplog.text
+
+
+async def test_truncated_tool_call_does_not_dispatch_partial_arguments(state):
+    task = await _step(state, "research")
+    state.responses.append({**_search(), "done_reason": "length"})
+    with pytest.raises(
+        AgentDispatchStoppedError, match="Research reached the local model's output limit"
+    ):
+        await state.executor(task, "research")
+    assert not state.tool_requests
+
+
+async def test_diagnostics_do_not_log_report_or_untrusted_stop_reason(state, caplog):
+    task = await _step(state)
+    state.responses.append(_answer("Private report body", done_reason="\nUntrusted stop data"))
+    with caplog.at_level("INFO", logger="audrey.agent_executor"):
+        assert await state.executor(task, "plan") == "Private report body"
+    assert "stop=unknown" in caplog.text
+    assert "content_chars=19" in caplog.text
+    assert "Private report body" not in caplog.text and "Untrusted stop data" not in caplog.text
+
+
+async def test_output_limit_failure_keeps_completed_plan_and_names_research(state):
+    task = await state.store.agents.create(
+        user_id=state.owner.user_id, objective="Research a timeline.", request_id="truncated"
+    )
+    state.responses.extend(
+        [_answer("Saved work plan"), _answer("Partial report", done_reason="length")]
+    )
+    assert await AgentRuntime(state.store.agents, state.executor).run_once()
+    saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert saved["status"] == "failed" and saved["attempts"] == 1
+    assert saved["steps"][0]["result"] == "Saved work plan"
+    assert saved["steps"][1]["result"] == "" and saved["result"] == ""
+    assert saved["error"].startswith("Research reached the local model's output limit")
 
 
 async def test_utf8_output_limit_is_checked_in_bytes(state):

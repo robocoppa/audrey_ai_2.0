@@ -246,16 +246,15 @@ export function App() {
             <span><span className="brand-initial">A</span>udrey</span>
           </span>
         </a>
+        <nav className="app-workspace-navigation" aria-label="Workspaces">
+          <button type="button" aria-current={activeWorkspace === "chat" ? "page" : undefined} onClick={() => { setNavigationOpen(false); setActiveWorkspace("chat"); }}>Chat</button>
+          <button type="button" aria-current={activeWorkspace === "agents" ? "page" : undefined} onClick={() => { setNavigationOpen(false); setActiveWorkspace("agents"); }}>
+            Agents{activeAgentCount > 0 ? <span className="agents-active-count" aria-label={`${activeAgentCount} active agent tasks`}>{activeAgentCount}</span> : null}
+          </button>
+        </nav>
         <div className="topbar-mobile-new-chat" ref={setMobileNewChatHost} />
         <SessionActions {...sessionActions} variant="header" />
       </header>
-
-      <nav className="app-workspace-navigation" aria-label="Workspaces" inert={navigationOpen ? true : undefined}>
-        <button type="button" aria-current={activeWorkspace === "chat" ? "page" : undefined} onClick={() => { setNavigationOpen(false); setActiveWorkspace("chat"); }}>Chat</button>
-        <button type="button" aria-current={activeWorkspace === "agents" ? "page" : undefined} onClick={() => { setNavigationOpen(false); setActiveWorkspace("agents"); }}>
-          Agents{activeAgentCount > 0 ? <span className="agents-active-count" aria-label={`${activeAgentCount} active agent tasks`}>{activeAgentCount}</span> : null}
-        </button>
-      </nav>
 
       {activeWorkspace === "chat" && !navigationOpen && !filesOpen && !settingsOpen && !adminOpen ? <PullToRefresh /> : null}
 
