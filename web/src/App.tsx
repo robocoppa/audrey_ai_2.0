@@ -50,6 +50,12 @@ const ACCESS_BOOTSTRAP_DELAYS_MS = [
   7_500,
   10_000,
   10_000,
+  10_000,
+  10_000,
+  10_000,
+  10_000,
+  10_000,
+  5_000,
 ];
 const ACCESS_BOOTSTRAP_WAIT_SECONDS = ACCESS_BOOTSTRAP_DELAYS_MS.reduce(
   (total, delay) => total + delay,

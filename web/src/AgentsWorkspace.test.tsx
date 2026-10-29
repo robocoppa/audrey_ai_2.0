@@ -101,22 +101,61 @@ describe("AgentsWorkspace", () => {
     expect(action).toHaveBeenCalledOnce();
   });
 
-  it("creates a new historical task when Run again is selected", async () => {
-    const original = task({ status: "completed", result: "Original report." });
-    const next = task({ id: "agt_new", status: "queued", revision: 1, created_at: "2026-10-28T17:00:00Z" });
-    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [original] });
-    vi.mocked(api.getAgentTask).mockImplementation(async (id) => id === original.id ? original : next);
-    const create = vi.spyOn(api, "createAgentTask").mockImplementation(async () => {
-      vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [next, original] });
-      return next;
+  it.each(["failed", "completed", "cancelled"] as const)("runs the same %s agent again with its saved plan", async (status) => {
+    const steps = task().steps.map((step) => status === "completed"
+      ? { ...step, status: "completed" as const, result: step.result || `Saved ${step.id}.` }
+      : step.id === "plan" ? step : { ...step, status: "pending" as const });
+    const original = task({
+      status, revision: 7, result: status === "completed" ? "Original report." : "",
+      error: status === "failed" ? "Research stopped." : "", steps,
+    });
+    let current = original;
+    vi.mocked(api.listAgentTasks).mockImplementation(async () => ({ items: [current] }));
+    vi.mocked(api.getAgentTask).mockImplementation(async () => current);
+    const create = vi.spyOn(api, "createAgentTask");
+    const action = vi.spyOn(api, "actOnAgentTask").mockImplementation(async () => {
+      current = {
+        ...original, status: "queued", revision: 8, result: "", error: "",
+        steps: original.steps.map((step) => step.id === "plan" ? step : { ...step, status: "pending", result: "" }),
+      };
+      return current;
+    });
+    render(<AgentsWorkspace />);
+    const runAgain = await screen.findByRole("button", { name: "Run again" });
+    fireEvent.click(screen.getByRole("button", { name: "Finished" }));
+    fireEvent.click(runAgain);
+    expect(await screen.findByRole("button", { name: "Pause" })).toBeEnabled();
+    expect(action).toHaveBeenCalledExactlyOnceWith(original.id, "rerun", 7);
+    expect(create).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /^All$/u })).toHaveAttribute("aria-pressed", "true");
+    const cards = screen.getAllByRole("button", { name: `Open agent: ${original.objective}` });
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toHaveAttribute("aria-pressed", "true");
+    expect(cards[0]).toHaveTextContent("Queued");
+    expect(screen.getByRole("heading", { name: original.objective })).toBeVisible();
+    fireEvent.click(screen.getByText("View saved plan"));
+    expect(screen.getByText(original.steps[0].result)).toBeVisible();
+    expect(screen.queryByText("Original report.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("reloads a rerun conflict on the same agent without creating or retrying a task", async () => {
+    let current = task({ status: "failed", revision: 7, error: "Research stopped." });
+    vi.mocked(api.listAgentTasks).mockImplementation(async () => ({ items: [current] }));
+    vi.mocked(api.getAgentTask).mockImplementation(async () => current);
+    const create = vi.spyOn(api, "createAgentTask");
+    const action = vi.spyOn(api, "actOnAgentTask").mockImplementation(async () => {
+      current = { ...current, status: "running", revision: 8, error: "" };
+      throw new api.ApiError(409, "Revision changed");
     });
     render(<AgentsWorkspace />);
     fireEvent.click(await screen.findByRole("button", { name: "Run again" }));
-    await waitFor(() => expect(screen.getAllByRole("button", { name: `Open agent: ${original.objective}` })).toHaveLength(2));
-    expect(create).toHaveBeenCalledWith(original.objective, expect.any(String));
-    const cards = screen.getAllByRole("button", { name: `Open agent: ${original.objective}` });
-    expect(cards[0]).toHaveAttribute("aria-pressed", "true");
-    expect(cards[1]).toHaveTextContent("Completed");
+    expect(await screen.findByText(/This agent changed while you were acting/u)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Pause" })).toBeEnabled();
+    expect(action).toHaveBeenCalledExactlyOnceWith(current.id, "rerun", 7);
+    expect(create).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("button", { name: `Open agent: ${current.objective}` })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: `Open agent: ${current.objective}` })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("confirms terminal task deletion and prevents stale listings from restoring it", async () => {

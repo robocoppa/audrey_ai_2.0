@@ -51,8 +51,14 @@ class AgentSettings(BaseModel):
     max_active_seconds: int = Field(default=1800, ge=30, le=7200)
     max_queued_per_user: int = Field(default=5, ge=1, le=20)
     max_queued_global: int = Field(default=50, ge=1, le=1000)
-    max_tokens_per_call: int = Field(default=2048, ge=128, le=8192)
+    max_tokens_per_call: int = Field(default=8192, ge=128, le=8192)
+    plan_max_tokens_per_call: int = Field(default=2048, ge=128, le=8192)
     max_tool_rounds: int = Field(default=6, ge=1, le=12)
+
+    def tokens_for_step(self, step_id: str) -> int:
+        if step_id == "plan":
+            return min(self.plan_max_tokens_per_call, self.max_tokens_per_call)
+        return self.max_tokens_per_call
 
     def task_limits(self) -> dict[str, int]:
         return {
@@ -187,6 +193,7 @@ class ResearchAgentExecutor:
         }
         if step_id not in prompts:
             raise AgentDispatchStoppedError("Unsupported agent step.")
+        max_tokens = settings.tokens_for_step(step_id)
         tools = self.app.state.tools.restrict(
             PUBLIC_RESEARCH_TOOLS if step_id == "research" else frozenset()
         )
@@ -217,7 +224,7 @@ class ResearchAgentExecutor:
                 await _verify_local(client, settings.model, endpoint, policy)
                 await authorize()
                 await repository.reserve_operation(**lease, step_id=step_id)
-                return settings.max_tokens_per_call
+                return max_tokens
 
             async def record_generation(_count):
                 await authorize()
@@ -233,7 +240,7 @@ class ResearchAgentExecutor:
                     raise AgentDispatchStoppedError("This tool is unavailable to the agent.")
                 await repository.reserve_operation(**lease, step_id=step_id)
 
-            options = {"num_predict": settings.max_tokens_per_call}
+            options = {"num_predict": max_tokens}
             retrieved = []
             with (
                 agent_dispatch_scope(check_tool),

@@ -13,8 +13,10 @@ part of the requested background execution capability.
 
 The native app now has centered Chat/Agents navigation in the top bar and a saved public-source
 research workflow: Plan, Research and Review. Users can create tasks, inspect
-saved step results/reports, pause/resume/cancel, start a new run and delete terminal
-history. Lists return compact summaries and load the selected report separately.
+saved step results/reports, pause/resume/cancel, rerun the same agent and delete
+terminal history. Run again preserves completed checkpoints on unfinished tasks;
+completed tasks repeat Research/Review using the saved Plan. The agent ID and
+selection stay the same. Lists return compact summaries and load the selected report separately.
 
 Application schema 26 stores owner-bound tasks and operation reservations with
 leases, fenced writes and cumulative limits. The lifecycle worker reuses committed
@@ -31,6 +33,10 @@ purge removes the new task data and receipts.
 Model failures identify the actual stage and distinguish output limits from empty
 report text. Per-call logs retain only stop/usage counts and text lengths;
 report and reasoning bodies are excluded. Truncated tool calls stop before dispatch.
+Research and Review allow up to 8,192 generated tokens per call, including model
+reasoning. Plan has a separate 2,048-token cap, bounded by the overall call limit.
+This raises the original 2,048-token report allowance after a reported Research
+output-limit failure; live acceptance of the larger allowance remains pending.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
 User-input requests, adaptive multi-step plans, Project/file/Private agent inputs,
@@ -98,7 +104,8 @@ Each task opens a full workspace containing:
 - A visible plan with pending/running/completed steps and bounded replanning.
 - Observed activity, findings, source links and produced files.
 - Questions that need the user's input, with answers saved against the task.
-- Pause, Resume, Cancel and Run again. Run again creates a new historical run.
+- Pause, Resume, Cancel and Run again. Run again keeps the same agent and its
+  completed Plan, continuing unfinished work or refreshing a completed report.
 - Results and proposed Project knowledge updates with links to their provenance.
 
 The visible plan explains intended work; progress reflects observed actions.
@@ -198,7 +205,9 @@ material changes require revalidation/replanning, while a Project rename does no
 Bound queued/active work per user and globally, plan steps/replans, model/tool
 calls, retries, active execution time, output bytes and event retention in
 `config.yaml`. Start conservatively with one active agent task per user. Account
-for all attempts and child calls; resume does not reset usage. Reserve resources
+for all attempts and child calls; resume and Run again do not reset usage.
+Reruns check current queue capacity and remaining saved allowances before changing
+the task. Reserve resources
 before dispatch and conservatively retain charges for unknown outcomes after a
 crash until reconciled. User waiting time does not consume active execution allowance.
 

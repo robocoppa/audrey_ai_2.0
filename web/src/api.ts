@@ -426,7 +426,7 @@ export function createAgentTask(objective: string, requestId: string): Promise<A
 
 export function actOnAgentTask(
   taskId: string,
-  action: "pause" | "resume" | "cancel",
+  action: "pause" | "resume" | "cancel" | "rerun",
   expectedRevision: number,
 ): Promise<AgentTask> {
   return apiJson<AgentTask>(`/api/agents/${encodeURIComponent(taskId)}/actions`, {

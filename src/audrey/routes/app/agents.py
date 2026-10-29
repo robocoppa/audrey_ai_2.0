@@ -53,7 +53,7 @@ class AgentCreateRequest(BaseModel):
 
 class AgentActionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    action: Literal["pause", "resume", "cancel"]
+    action: Literal["pause", "resume", "cancel", "rerun"]
     expected_revision: int = Field(ge=1, strict=True)
 
 
@@ -129,17 +129,34 @@ async def get_agent(task_id: str, request: Request, response: Response,
 
 
 @router.post("/agents/{task_id}/actions", response_model=AgentTaskResponse)
-async def agent_action(task_id: str, body: AgentActionRequest, request: Request, response: Response,
-                       principal: Principal = Depends(_agents_access)):
+async def agent_action(
+    task_id: str,
+    body: AgentActionRequest,
+    request: Request,
+    response: Response,
+    principal: Principal = Depends(_agents_access),
+):
     response.headers["Cache-Control"] = "private, no-store"
     repository = _repository(request)
     try:
-        # Resolve ownership before checking execution grants for a resume.
+        # Resolve ownership before checking execution grants for queued work.
         await repository.get(user_id=principal.user_id, task_id=task_id)
-        if body.action == "resume":
+        if body.action in {"resume", "rerun"}:
             await research_authority(request.app, principal.user_id)
-        task = await repository.control(user_id=principal.user_id, task_id=task_id,
-                                        expected_revision=body.expected_revision, action=body.action)
+        options = {}
+        if body.action == "rerun":
+            settings = agent_settings(request.app)
+            options = {
+                "max_attempts": settings.max_attempts,
+                "admission_limits": settings.task_limits(),
+            }
+        task = await repository.control(
+            user_id=principal.user_id,
+            task_id=task_id,
+            expected_revision=body.expected_revision,
+            action=body.action,
+            **options,
+        )
     except AgentDispatchStoppedError as error:
         raise HTTPException(status_code=503, detail=str(error)) from None
     except AgentTaskError as error:

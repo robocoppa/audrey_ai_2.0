@@ -96,6 +96,79 @@ async def test_commits_the_plan_research_and_review_as_one_saved_result(state):
     assert await runtime.run_once() is False
 
 
+@pytest.mark.parametrize("failure_step", ["research", "review"])
+async def test_explicit_rerun_reuses_saved_plan_and_completed_stages_without_resetting_usage(state, failure_step):
+    task = await _create(state)
+    seen = []
+    fail = True
+
+    async def execute(current, step_id):
+        seen.append((current["id"], step_id))
+        state.clock.advance(1)
+        if fail and step_id == failure_step:
+            raise AgentDispatchStoppedError(f"{step_id.capitalize()} returned no report text.")
+        return f"Saved {step_id}"
+
+    runtime = _runtime(state, execute)
+    assert await runtime.run_once()
+    failed = await _get(state, task)
+    assert failed["status"] == "failed"
+    usage = dict(state.store._conn.execute(
+        "SELECT attempts,operations,active_seconds FROM app_agent_tasks WHERE task_id=?", (task["id"],),
+    ).fetchone())
+    assert usage["active_seconds"] > 0 and usage["operations"] > 0
+
+    queued = await _control(state, failed, "rerun")
+    assert queued["id"] == task["id"] and queued["steps"] == failed["steps"]
+    assert dict(state.store._conn.execute(
+        "SELECT attempts,operations,active_seconds FROM app_agent_tasks WHERE task_id=?", (task["id"],),
+    ).fetchone()) == usage
+    fail = False
+    assert await runtime.run_once()
+    saved = await _get(state, task)
+    assert saved["id"] == task["id"] and saved["status"] == "completed"
+    assert saved["steps"][0]["result"] == "Saved plan"
+    assert saved["attempts"] == 2
+    expected = ["plan", "research", "research", "review"] if failure_step == "research" else [
+        "plan", "research", "review", "review",
+    ]
+    assert seen == [(task["id"], step_id) for step_id in expected]
+    receipts = state.store._conn.execute(
+        "SELECT COUNT(*) FROM app_agent_operations WHERE task_id=?", (task["id"],),
+    ).fetchone()[0]
+    assert receipts == len(expected)
+
+
+async def test_completed_rerun_executes_new_research_and_review_but_keeps_the_same_plan(state):
+    task = await _create(state)
+    seen = []
+
+    async def execute(current, step_id):
+        seen.append((current["id"], step_id))
+        state.clock.advance(1)
+        return f"Saved {step_id} on attempt {current['attempts']}"
+
+    runtime = _runtime(state, execute)
+    assert await runtime.run_once()
+    completed = await _get(state, task)
+    assert completed["result"] == "Saved review on attempt 1"
+    queued = await _control(state, completed, "rerun")
+    assert queued["steps"][0] == completed["steps"][0]
+    assert queued["result"] == ""
+    assert await runtime.run_once()
+    saved = await _get(state, task)
+    assert saved["id"] == task["id"] and saved["status"] == "completed"
+    assert saved["steps"][0] == completed["steps"][0]
+    assert saved["steps"][1]["result"] == "Saved research on attempt 2"
+    assert saved["result"] == "Saved review on attempt 2"
+    assert seen == [(task["id"], step_id) for step_id in ["plan", "research", "review", "research", "review"]]
+    usage = state.store._conn.execute(
+        "SELECT attempts,operations,active_seconds FROM app_agent_tasks WHERE task_id=?", (task["id"],),
+    ).fetchone()
+    assert tuple(usage) == (2, 5, 5)
+    assert len(await state.store.agents.list(user_id=state.owner.user_id)) == 1
+
+
 async def test_restart_after_an_expired_lease_reuses_committed_steps(state):
     task = await _create(state)
     claimed = await state.store.agents.claim(lease_seconds=2)

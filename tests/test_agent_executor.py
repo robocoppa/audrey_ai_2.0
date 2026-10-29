@@ -218,6 +218,68 @@ async def test_every_step_uses_only_local_qwen_and_only_research_has_public_tool
     assert len(state.tool_requests) == (1 if step_id == "research" else 0)
 
 
+@pytest.mark.parametrize("step_id", ["plan", "research", "review"])
+@pytest.mark.parametrize(
+    "configuration,expected",
+    [
+        ({}, {"plan": 2048, "research": 8192, "review": 8192}),
+        (
+            {"max_tokens_per_call": 4096, "plan_max_tokens_per_call": 1024},
+            {"plan": 1024, "research": 4096, "review": 4096},
+        ),
+        (
+            {"max_tokens_per_call": 128, "plan_max_tokens_per_call": 4096},
+            {"plan": 128, "research": 128, "review": 128},
+        ),
+    ],
+)
+async def test_step_output_limits_are_serialized_on_every_local_model_call(
+    state, step_id, configuration, expected
+):
+    state.app.state.cfg.raw["agent_tasks"] = configuration
+    task = await _step(state, step_id)
+    if step_id == "research":
+        state.responses.extend([_search(), _answer()])
+
+    await state.executor(task, step_id)
+
+    requests = _content_requests(state)
+    assert len(requests) == (2 if step_id == "research" else 1)
+    assert all(request["options"]["num_predict"] == expected[step_id] for request in requests)
+    assert all(request["model"] == _MODEL for request in requests)
+
+
+@pytest.mark.parametrize("step_id,expected", [("plan", 1024), ("research", 4096), ("review", 4096)])
+async def test_generation_budget_bounds_an_oversized_request_to_the_stage_limit(
+    state, monkeypatch, step_id, expected
+):
+    state.app.state.cfg.raw["agent_tasks"] = {
+        "max_tokens_per_call": 4096,
+        "plan_max_tokens_per_call": 1024,
+    }
+    task = await _step(state, step_id)
+    if step_id == "research":
+        state.responses.extend([_search(), _answer()])
+    original_chat = OllamaClient.chat
+
+    async def oversized_request(client, **kwargs):
+        # Exercise the real transport guard even if a caller overrequests tokens.
+        kwargs["options"] = {"num_predict": 8192}
+        return await original_chat(client, **kwargs)
+
+    monkeypatch.setattr(OllamaClient, "chat", oversized_request)
+    await state.executor(task, step_id)
+    assert all(
+        request["options"]["num_predict"] == expected for request in _content_requests(state)
+    )
+
+
+@pytest.mark.parametrize("invalid", [127, 8193, 2048.0, "2048", True, None])
+def test_plan_output_limit_requires_an_integer_in_the_supported_range(invalid):
+    with pytest.raises(ValidationError):
+        AgentSettings(plan_max_tokens_per_call=invalid)
+
+
 @pytest.mark.parametrize("model", ["kimi-k3:cloud", "qwen3.8:cloud", "ornith-1.5:35b"])
 def test_configuration_cannot_select_a_cloud_or_other_local_model(model):
     with pytest.raises(ValidationError):
@@ -413,19 +475,88 @@ async def test_diagnostics_do_not_log_report_or_untrusted_stop_reason(state, cap
     assert "Private report body" not in caplog.text and "Untrusted stop data" not in caplog.text
 
 
-async def test_output_limit_failure_keeps_completed_plan_and_names_research(state):
+async def test_larger_research_limit_reruns_the_same_agent_with_its_saved_plan_and_usage(state):
+    state.app.state.cfg.raw["agent_tasks"] = {"max_tokens_per_call": 2048}
     task = await state.store.agents.create(
         user_id=state.owner.user_id, objective="Research a timeline.", request_id="truncated"
     )
     state.responses.extend(
         [_answer("Saved work plan"), _answer("Partial report", done_reason="length")]
     )
-    assert await AgentRuntime(state.store.agents, state.executor).run_once()
+    runtime = AgentRuntime(state.store.agents, state.executor)
+    assert await runtime.run_once()
+    failed = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert failed["status"] == "failed" and failed["attempts"] == 1
+    assert failed["steps"][0]["result"] == "Saved work plan"
+    assert failed["steps"][1]["result"] == "" and failed["result"] == ""
+    assert failed["error"].startswith("Research reached the local model's output limit")
+    failed_usage = dict(
+        state.store._conn.execute(
+            "SELECT attempts,operations,active_seconds FROM app_agent_tasks WHERE task_id=?",
+            (task["id"],),
+        ).fetchone()
+    )
+    assert failed_usage["operations"] == 4
+    receipt_ids = {
+        row[0]
+        for row in state.store._conn.execute(
+            "SELECT operation_id FROM app_agent_operations WHERE task_id=?", (task["id"],)
+        ).fetchall()
+    }
+
+    state.app.state.cfg.raw["agent_tasks"]["max_tokens_per_call"] = 8192
+    queued = await state.store.agents.control(
+        user_id=state.owner.user_id,
+        task_id=task["id"],
+        expected_revision=failed["revision"],
+        action="rerun",
+    )
+    assert queued["id"] == task["id"] and queued["steps"] == failed["steps"]
+    assert (
+        dict(
+            state.store._conn.execute(
+                "SELECT attempts,operations,active_seconds FROM app_agent_tasks WHERE task_id=?",
+                (task["id"],),
+            ).fetchone()
+        )
+        == failed_usage
+    )
+    state.responses.extend([_search(), _answer("Complete research"), _answer("Final report")])
+
+    assert await runtime.run_once()
     saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
-    assert saved["status"] == "failed" and saved["attempts"] == 1
-    assert saved["steps"][0]["result"] == "Saved work plan"
-    assert saved["steps"][1]["result"] == "" and saved["result"] == ""
-    assert saved["error"].startswith("Research reached the local model's output limit")
+    assert saved["id"] == task["id"] and saved["status"] == "completed"
+    assert saved["steps"][0] == failed["steps"][0]
+    assert saved["result"] == "Final report" and saved["error"] == ""
+    assert len(await state.store.agents.list(user_id=state.owner.user_id)) == 1
+    requests = _content_requests(state)
+    assert [request["options"]["num_predict"] for request in requests] == [
+        2048,
+        2048,
+        8192,
+        8192,
+        8192,
+    ]
+    assert all(request["model"] == _MODEL for request in requests)
+    rerun_input = json.loads(
+        next(row["content"] for row in requests[2]["messages"] if row["role"] == "user")
+    )
+    assert rerun_input["saved_work"] == {"plan": "Saved work plan"}
+    final_usage = state.store._conn.execute(
+        "SELECT attempts,operations,active_seconds FROM app_agent_tasks WHERE task_id=?",
+        (task["id"],),
+    ).fetchone()
+    assert final_usage["attempts"] == 2 and final_usage["operations"] == 10
+    assert final_usage["active_seconds"] >= failed_usage["active_seconds"]
+    final_receipt_ids = {
+        row[0]
+        for row in state.store._conn.execute(
+            "SELECT operation_id FROM app_agent_operations WHERE task_id=?", (task["id"],)
+        ).fetchall()
+    }
+    assert receipt_ids < final_receipt_ids and len(final_receipt_ids) == 10
+    assert len(state.tool_requests) == 1 and not state.responses
+    assert not await runtime.run_once()
 
 
 async def test_utf8_output_limit_is_checked_in_bytes(state):

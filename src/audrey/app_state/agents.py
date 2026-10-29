@@ -188,6 +188,18 @@ class AgentsRepository:
         if record["active_seconds"] >= record["limits"]["max_active_seconds"]:
             raise AgentTaskError("Agent active execution allowance exhausted.")
 
+    def _queue_capacity(self, user_id: str, limits: dict) -> None:
+        queued = self._conn.execute(
+            "SELECT COUNT(*) AS total,COALESCE(SUM(user_id=?),0) AS owned "
+            "FROM app_agent_tasks WHERE status IN ('queued','running','paused')",
+            (user_id,),
+        ).fetchone()
+        if (
+            queued["owned"] >= limits["max_queued_per_user"]
+            or queued["total"] >= limits["max_queued_global"]
+        ):
+            raise AgentTaskError("Agent task capacity reached.")
+
     async def create(
         self, *, user_id: str, objective: str, request_id: str, limits: dict | None = None,
     ) -> dict:
@@ -206,19 +218,12 @@ class AgentsRepository:
                 if record["objective"] != objective:
                     raise AgentTaskConflictError("Request identity already used for another objective.")
                 return self._public(record)
-            queued = self._conn.execute(
-                "SELECT COUNT(*) AS total,COALESCE(SUM(user_id=?),0) AS owned "
-                "FROM app_agent_tasks WHERE status IN ('queued','running','paused')", (user_id,),
-            ).fetchone()
+            self._queue_capacity(user_id, limits)
             saved = self._conn.execute(
                 "SELECT COUNT(*) AS total,COALESCE(SUM(user_id=?),0) AS owned "
                 "FROM app_agent_tasks", (user_id,),
             ).fetchone()
-            if (
-                queued["owned"] >= limits["max_queued_per_user"]
-                or queued["total"] >= limits["max_queued_global"]
-                or saved["owned"] >= 200 or saved["total"] >= 5000
-            ):
+            if saved["owned"] >= 200 or saved["total"] >= 5000:
                 raise AgentTaskError("Agent task capacity reached.")
             task_id, now = str(uuid.uuid4()), _stamp(self._clock())
             steps = [{"id": key, "label": label, "status": "pending", "result": ""}
@@ -449,10 +454,19 @@ class AgentsRepository:
         return await asyncio.to_thread(self._transaction, work)
 
     async def control(
-        self, *, user_id: str, task_id: str, expected_revision: int, action: str,
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        expected_revision: int,
+        action: str,
+        max_attempts: int = 6,
+        admission_limits: dict | None = None,
     ) -> dict:
         _integer(expected_revision, 1, 2**63 - 1)
-        if action not in {"pause", "resume", "cancel"}:
+        _integer(max_attempts, 1, 100)
+        queue_limits = _limits(admission_limits) if admission_limits is not None else None
+        if action not in {"pause", "resume", "cancel", "rerun"}:
             raise AgentTaskError("Invalid agent action.")
 
         def work() -> dict:
@@ -460,13 +474,34 @@ class AgentsRepository:
             if record["revision"] != expected_revision:
                 raise AgentTaskConflictError("Agent task changed. Refresh before trying again.")
             allowed = {
-                "pause": {"queued", "running"}, "resume": {"paused"},
+                "pause": {"queued", "running"},
+                "resume": {"paused"},
                 "cancel": {"queued", "running", "paused"},
+                "rerun": {"completed", "cancelled", "failed"},
             }
             if record["status"] not in allowed[action]:
                 raise AgentTaskConflictError("Agent task cannot perform that action.")
             self._account(record)
-            record["status"] = {"pause": "paused", "resume": "queued", "cancel": "cancelled"}[action]
+            if action == "rerun":
+                self._queue_capacity(user_id, queue_limits or record["limits"])
+                self._budget(record)
+                if record["attempts"] >= max_attempts:
+                    raise AgentTaskError("Agent attempt allowance exhausted.")
+                if record["operations"] >= record["limits"]["max_operations"]:
+                    raise AgentTaskError("Agent operation allowance exhausted.")
+                # Continue unfinished work; a fully finished report gets fresh
+                # Research/Review while its committed Plan remains reusable.
+                if all(step["status"] == "completed" for step in record["steps"]):
+                    for step in record["steps"]:
+                        if step["id"] != "plan":
+                            step.update(status="pending", result="")
+                record.update(result="", error="")
+            record["status"] = {
+                "pause": "paused",
+                "resume": "queued",
+                "cancel": "cancelled",
+                "rerun": "queued",
+            }[action]
             record["fence"] += 1
             self._clear_lease(record)
             self._save(record)

@@ -36,11 +36,13 @@ describe("saved agent task requests", () => {
     await createAgentTask("Compare official sources", "request-unique");
     await getAgentTask("agent / owned", signal);
     await actOnAgentTask("agent / owned", "pause", 7);
+    await actOnAgentTask("agent / owned", "rerun", 8);
     await deleteAgentTask("agent / owned", 8);
     expect(fetchMock).toHaveBeenCalledWith("/api/agents", expect.objectContaining({ credentials: "same-origin", signal, cache: "no-store" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/agents", expect.objectContaining({ method: "POST", credentials: "same-origin", body: JSON.stringify({ objective: "Compare official sources", request_id: "request-unique" }) }));
     expect(fetchMock).toHaveBeenCalledWith("/api/agents/agent%20%2F%20owned", expect.objectContaining({ credentials: "same-origin", signal }));
     expect(fetchMock).toHaveBeenCalledWith("/api/agents/agent%20%2F%20owned/actions", expect.objectContaining({ method: "POST", credentials: "same-origin", body: JSON.stringify({ action: "pause", expected_revision: 7 }) }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/agents/agent%20%2F%20owned/actions", expect.objectContaining({ method: "POST", credentials: "same-origin", body: JSON.stringify({ action: "rerun", expected_revision: 8 }) }));
     expect(fetchMock).toHaveBeenCalledWith("/api/agents/agent%20%2F%20owned?expected_revision=8", expect.objectContaining({ method: "DELETE", credentials: "same-origin" }));
     for (const [, init] of fetchMock.mock.calls as unknown as Array<[string, RequestInit]>) {
       expect(init.headers).not.toHaveProperty("Authorization");

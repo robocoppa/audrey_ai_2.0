@@ -8,6 +8,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
+from audrey.agent_dispatch import AgentDispatchStoppedError
 from audrey.agent_runtime import AgentRuntime
 from audrey.app_state import ApplicationStore
 from audrey.auth import require_principal
@@ -45,6 +46,22 @@ async def _create(state, **changes):
     })
 
 
+async def _rerun(state, task, **changes):
+    return await state.client.post(f"/api/agents/{task['id']}/actions", json={
+        "action": "rerun", "expected_revision": task["revision"], **changes,
+    })
+
+
+async def _complete_task(state):
+    task = (await _create(state)).json()
+
+    async def execute(_task, step_id):
+        return f"Saved {step_id}"
+
+    assert await AgentRuntime(state.store.agents, execute).run_once()
+    return (await state.client.get(f"/api/agents/{task['id']}")).json()
+
+
 async def test_native_agents_create_idempotently_and_hide_worker_authority(agents):
     first = await _create(agents)
     assert first.status_code == 201, first.text
@@ -67,10 +84,11 @@ async def test_foreign_agent_and_missing_agent_are_indistinguishable(agents):
     assert (await agents.client.get("/api/agents")).json() == {"items": []}
     for target in (task["id"], "missing"):
         assert (await agents.client.get(f"/api/agents/{target}")).status_code == 404
-        action = await agents.client.post(f"/api/agents/{target}/actions", json={
-            "action": "cancel", "expected_revision": task["revision"],
-        })
-        assert action.status_code == 404
+        for action_name in ("cancel", "rerun"):
+            action = await agents.client.post(f"/api/agents/{target}/actions", json={
+                "action": action_name, "expected_revision": task["revision"],
+            })
+            assert action.status_code == 404
         assert (await agents.client.delete(
             f"/api/agents/{target}", params={"expected_revision": task["revision"]},
         )).status_code == 404
@@ -132,6 +150,103 @@ async def test_http_creation_connects_to_durable_runtime_and_saved_result(agents
     assert summary["summary"] is True and summary["result"] == ""
     assert all(step["result"] == "" for step in summary["steps"])
     assert not await runtime.run_once()
+
+
+@pytest.mark.parametrize("failure_step", ["research", "review"])
+async def test_http_rerun_continues_the_same_failed_agent_from_saved_steps(agents, failure_step):
+    task = (await _create(agents)).json()
+    seen = []
+    fail = True
+
+    async def execute(current, step_id):
+        seen.append((current["id"], step_id))
+        if fail and step_id == failure_step:
+            raise AgentDispatchStoppedError(f"{step_id.capitalize()} returned no report text.")
+        return f"Saved {step_id}"
+
+    runtime = AgentRuntime(agents.store.agents, execute)
+    assert await runtime.run_once()
+    failed = (await agents.client.get(f"/api/agents/{task['id']}")).json()
+    assert failed["status"] == "failed"
+    assert failed["steps"][0]["result"] == "Saved plan"
+
+    response = await _rerun(agents, failed)
+    assert response.status_code == 200, response.text
+    queued = response.json()
+    assert queued["id"] == task["id"] and queued["status"] == "queued"
+    assert queued["created_at"] == task["created_at"]
+    assert queued["steps"] == failed["steps"]
+    assert queued["error"] == "" and queued["attempts"] == failed["attempts"] == 1
+    assert response.headers["cache-control"] == "private, no-store"
+
+    fail = False
+    assert await runtime.run_once()
+    saved = (await agents.client.get(f"/api/agents/{task['id']}")).json()
+    assert saved["id"] == task["id"] and saved["status"] == "completed"
+    assert saved["result"] == "Saved review" and saved["attempts"] == 2
+    expected = ["plan", "research", "research", "review"] if failure_step == "research" else [
+        "plan", "research", "review", "review",
+    ]
+    assert seen == [(task["id"], step_id) for step_id in expected]
+    listing = (await agents.client.get("/api/agents")).json()["items"]
+    assert [item["id"] for item in listing] == [task["id"]]
+
+
+async def test_http_completed_rerun_keeps_plan_and_rejects_duplicate_revision(agents):
+    completed = await _complete_task(agents)
+    wakes = len(agents.wakes)
+    response = await _rerun(agents, completed)
+    assert response.status_code == 200, response.text
+    queued = response.json()
+    assert queued["id"] == completed["id"] and queued["status"] == "queued"
+    assert queued["steps"][0] == completed["steps"][0]
+    assert all(step["status"] == "pending" and step["result"] == "" for step in queued["steps"][1:])
+    assert queued["result"] == "" and queued["attempts"] == completed["attempts"]
+    assert len(agents.wakes) == wakes + 1
+    stale = await _rerun(agents, completed)
+    assert stale.status_code == 409
+    assert (await agents.client.get(f"/api/agents/{completed['id']}")).json() == queued
+    assert len(agents.wakes) == wakes + 1
+
+
+@pytest.mark.parametrize("revocation", ["tool", "model", "disabled"])
+async def test_http_rerun_rechecks_authority_and_keeps_the_saved_report(agents, revocation):
+    completed = await _complete_task(agents)
+    if revocation == "tool":
+        agents.app.state.tools.by_name.pop("web_fetch")
+    elif revocation == "model":
+        administrator = await agents.store.resolve_external_identity(
+            provider="test", subject="operator", email="operator@example.com", display_name="Operator",
+            role="admin", auth_method="test",
+        )
+        await agents.store.set_model_access_policy(
+            actor_user_id=administrator.user_id, model_id="local", enabled=False, audience="users",
+        )
+    else:
+        agents.app.state.cfg.raw["agent_tasks"] = {"enabled": False}
+    wakes = len(agents.wakes)
+    response = await _rerun(agents, completed)
+    assert response.status_code == 503, response.text
+    assert (await agents.client.get(f"/api/agents/{completed['id']}")).json() == completed
+    assert len(agents.wakes) == wakes
+
+
+@pytest.mark.parametrize("cap", ["max_queued_per_user", "max_queued_global", "max_attempts"])
+async def test_http_rerun_uses_current_server_admission_and_attempt_limits(agents, cap):
+    completed = await _complete_task(agents)
+    if cap != "max_attempts":
+        if cap == "max_queued_global":
+            agents.current[0] = agents.owners[1]
+        assert (await _create(agents, request_id="waiting")).status_code == 201
+        agents.current[0] = agents.owners[0]
+    agents.app.state.cfg.raw["agent_tasks"] = {cap: 1}
+    wakes = len(agents.wakes)
+    response = await _rerun(agents, completed)
+    assert response.status_code == 422, response.text
+    expected_error = "allowance exhausted" if cap == "max_attempts" else "capacity reached"
+    assert expected_error in response.text
+    assert (await agents.client.get(f"/api/agents/{completed['id']}")).json() == completed
+    assert len(agents.wakes) == wakes
 
 
 async def test_native_agents_require_authentication():

@@ -593,7 +593,29 @@ describe("App", () => {
     expect(window.location.search).toBe("");
   });
 
-  it("offers retry and logout after Access authentication remains unavailable", async () => {
+  it("accepts Access authentication after the original sign-in window", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(
+      JSON.stringify({ detail: "Not authenticated." }),
+      { status: 401, headers: { "Content-Type": "application/json" } },
+    ))));
+
+    render(<App />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(110_000);
+    });
+    expect(screen.getByRole("status", { name: "Processing Cloudflare Authentication" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Retry session" })).not.toBeInTheDocument();
+
+    mockCapabilitySession("degraded");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(screen.getByLabelText("Signed in user")).toHaveTextContent("Alice");
+    expect(screen.queryByRole("heading", { name: "Sign-in is taking longer than expected" })).not.toBeInTheDocument();
+  });
+
+  it("offers retry and logout after two minutes without Access authentication", async () => {
     vi.useFakeTimers();
     let sessionReady = false;
     const fetchMock = vi.fn().mockImplementation((path: string) => {
@@ -628,16 +650,16 @@ describe("App", () => {
     render(<App />);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(55_000);
+      await vi.advanceTimersByTimeAsync(119_999);
     });
     expect(screen.getByRole("status", { name: "Processing Cloudflare Authentication" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Retry session" })).not.toBeInTheDocument();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(1);
     });
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "did not establish this browser session within 65 seconds",
+      "did not establish this browser session within 120 seconds",
     );
     expect(screen.getByRole("heading", {
       name: "Sign-in is taking longer than expected",

@@ -214,7 +214,7 @@ export function AgentsWorkspace({
     void startTask(objective, `new:${objective.trim()}`);
   }
 
-  async function act(task: AgentTask, action: "pause" | "resume" | "cancel") {
+  async function act(task: AgentTask, action: "pause" | "resume" | "cancel" | "rerun") {
     if (busyRef.current) return;
     busyRef.current = true;
     mutationGeneration.current += 1;
@@ -223,7 +223,15 @@ export function AgentsWorkspace({
     setNotice("");
     try {
       const updated = await actOnAgentTask(task.id, action, task.revision);
-      if (mounted.current) setTasks((current) => mergeTasks(current, [updated], deletedIds.current));
+      if (mounted.current) {
+        setTasks((current) => mergeTasks(current, [updated], deletedIds.current));
+        if (action === "rerun") {
+          setSelectedId(updated.id);
+          setFilter("all");
+          setConfirmingDeleteId(null);
+          scrollToDetail();
+        }
+      }
     } catch (reason) {
       if (!mounted.current) return;
       if (reason instanceof ApiError && reason.status === 409) {
@@ -354,7 +362,7 @@ export function AgentsWorkspace({
                   {isMoving(selected) ? <button type="button" className="agents-secondary" disabled={busy} onClick={() => void act(selected, "pause")}>Pause</button> : null}
                   {selected.status === "paused" ? <button type="button" className="agents-primary" disabled={busy} onClick={() => void act(selected, "resume")}>Resume</button> : null}
                   {!isFinished(selected) ? <button type="button" className="agents-secondary" disabled={busy} onClick={() => void act(selected, "cancel")}>Cancel</button> : null}
-                  {isFinished(selected) ? <button type="button" className="agents-primary" disabled={busy} onClick={() => void startTask(selected.objective, `rerun:${selected.id}`)}>Run again</button> : null}
+                  {isFinished(selected) ? <button type="button" className="agents-primary" disabled={busy} onClick={() => void act(selected, "rerun")}>Run again</button> : null}
                   {isFinished(selected) && confirmingDeleteId !== selected.id ? <button type="button" className="agents-secondary" disabled={busy} onClick={() => setConfirmingDeleteId(selected.id)}>Delete task</button> : null}
                 </div>
                 {confirmingDeleteId === selected.id ? <div className="agents-delete-confirm" role="group" aria-label="Confirm task deletion">

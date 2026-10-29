@@ -472,9 +472,168 @@ async def test_saved_history_bound_and_deletion_free_capacity(state):
             first = task
     with pytest.raises(AgentTaskError, match="capacity"):
         await _create(state, request_id="over-capacity")
+    rerun = await _control(state, first, "rerun")
+    assert rerun["id"] == first["id"]
+    first = await _control(state, rerun, "cancel")
     await state.store.agents.delete(
         user_id=state.owner.user_id, task_id=first["id"], expected_revision=first["revision"],
     )
     replacement = await _create(state, request_id="over-capacity")
     assert replacement["status"] == "queued"
     assert len(await state.store.agents.list(user_id=state.owner.user_id, limit=200)) == 200
+
+
+async def _terminal_task(state, completed_steps=1, status="failed", **changes):
+    await _create(state, **changes)
+    task = await state.store.agents.claim()
+    for step_id in ("plan", "research", "review")[:completed_steps]:
+        task = await _step(state, task, step_id, result=f"Saved {step_id}")
+    if task["current_step"]:
+        await state.store.agents.reserve_operation(**_lease(task), step_id=task["current_step"])
+    state.clock.advance(2)
+    if status == "cancelled":
+        terminal = await _control(
+            state,
+            await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"]),
+            "cancel",
+        )
+    elif status == "completed":
+        terminal = await state.store.agents.complete(**_lease(task), result="Previous report")
+    else:
+        terminal = await state.store.agents.fail(**_lease(task), error="Research stopped.")
+    return task, terminal
+
+
+@pytest.mark.parametrize("status", ["failed", "cancelled"])
+@pytest.mark.parametrize("completed_steps", [0, 1, 2])
+async def test_rerun_keeps_the_same_task_and_all_completed_checkpoints(
+    state, status, completed_steps
+):
+    _, terminal = await _terminal_task(state, completed_steps, status)
+    receipts = [
+        tuple(row)
+        for row in state.store._conn.execute("SELECT * FROM app_agent_operations ORDER BY rowid")
+    ]
+    rerun = await _control(state, terminal, "rerun")
+    assert rerun["id"] == terminal["id"] and rerun["created_at"] == terminal["created_at"]
+    assert rerun["status"] == "queued" and rerun["error"] == ""
+    assert rerun["steps"] == terminal["steps"]
+    assert rerun["attempts"] == terminal["attempts"]
+    assert len(await state.store.agents.list(user_id=state.owner.user_id)) == 1
+    assert [
+        tuple(row)
+        for row in state.store._conn.execute("SELECT * FROM app_agent_operations ORDER BY rowid")
+    ] == receipts
+    claimed = await state.store.agents.claim()
+    assert claimed["current_step"] == ("plan", "research", "review")[completed_steps]
+    assert claimed["operations"] == completed_steps + 1
+    assert claimed["active_seconds"] == 2
+    assert claimed["attempts"] == 2
+
+
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
+async def test_rerun_of_fully_saved_work_reuses_plan_and_refreshes_report(state, status):
+    _, terminal = await _terminal_task(state, 3, status)
+    rerun = await _control(state, terminal, "rerun")
+    assert rerun["id"] == terminal["id"] and rerun["steps"][0] == terminal["steps"][0]
+    assert rerun["result"] == "" and rerun["error"] == ""
+    assert all(step["status"] == "pending" and step["result"] == "" for step in rerun["steps"][1:])
+    claimed = await state.store.agents.claim()
+    assert claimed["current_step"] == "research" and claimed["operations"] == 3
+    assert claimed["active_seconds"] == 2 and claimed["attempts"] == 2
+    assert state.store._conn.execute("SELECT COUNT(*) FROM app_agent_operations").fetchone()[0] == 3
+
+
+async def test_rerun_rejects_foreign_missing_stale_and_duplicate_actions(state):
+    _, terminal = await _terminal_task(state)
+    for task_id in (terminal["id"], "missing"):
+        with pytest.raises(AgentTaskAccessError):
+            await _control(state, terminal, "rerun", task_id=task_id, user_id=state.other.user_id)
+    results = await asyncio.gather(
+        _control(state, terminal, "rerun"),
+        _control(state, terminal, "rerun"),
+        return_exceptions=True,
+    )
+    assert sum(isinstance(result, AgentTaskConflictError) for result in results) == 1
+    assert len(await state.store.agents.list(user_id=state.owner.user_id)) == 1
+
+
+@pytest.mark.parametrize("status", ["queued", "running", "paused"])
+async def test_rerun_does_not_restart_active_or_paused_work(state, status):
+    task = await _create(state)
+    if status != "queued":
+        task = await state.store.agents.claim()
+    if status == "paused":
+        task = await _control(state, task, "pause")
+    with pytest.raises(AgentTaskConflictError):
+        await _control(state, task, "rerun")
+    assert (await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"]))[
+        "status"
+    ] == status
+
+
+async def test_rerun_fences_every_delayed_old_worker_write(state):
+    old, terminal = await _terminal_task(state)
+    await _control(state, terminal, "rerun")
+    new = await state.store.agents.claim()
+    assert new["fence"] > old["fence"] and new["lease_token"] != old["lease_token"]
+    for action in (
+        state.store.agents.heartbeat(**_lease(old)),
+        state.store.agents.reserve_operation(**_lease(old), step_id="research"),
+        state.store.agents.checkpoint(**_lease(old), step_id="research", result="Late report"),
+        state.store.agents.complete(**_lease(old), result="Late report"),
+        state.store.agents.fail(**_lease(old), error="Late failure"),
+    ):
+        with pytest.raises(AgentTaskConflictError):
+            await action
+    saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=new["id"])
+    assert saved["status"] == "running" and saved["steps"][0]["result"] == "Saved plan"
+
+
+@pytest.mark.parametrize("limit", ["attempts", "operations", "time"])
+async def test_rerun_rejects_exhausted_allowances_without_erasing_saved_work(state, limit):
+    limits = (
+        {"max_operations": 2}
+        if limit == "operations"
+        else {"max_active_seconds": 2}
+        if limit == "time"
+        else {}
+    )
+    _, terminal = await _terminal_task(state, limits=limits)
+    with pytest.raises(AgentTaskError, match="allowance exhausted"):
+        await _control(state, terminal, "rerun", max_attempts=1 if limit == "attempts" else 6)
+    assert (
+        await state.store.agents.get(user_id=state.owner.user_id, task_id=terminal["id"])
+        == terminal
+    )
+
+
+@pytest.mark.parametrize("scope", ["owner", "global"])
+async def test_rerun_obeys_current_queue_limits_and_retains_report_on_rejection(state, scope):
+    _, terminal = await _terminal_task(state, 3, "completed")
+    await _create(
+        state,
+        request_id="occupying-queue",
+        user_id=state.other.user_id if scope == "global" else state.owner.user_id,
+    )
+    limits = {"max_queued_global": 1} if scope == "global" else {"max_queued_per_user": 1}
+    with pytest.raises(AgentTaskError, match="capacity"):
+        await _control(state, terminal, "rerun", admission_limits=limits)
+    assert (
+        await state.store.agents.get(user_id=state.owner.user_id, task_id=terminal["id"])
+        == terminal
+    )
+
+
+async def test_rerun_persists_same_identity_checkpoints_and_cumulative_usage_after_restart(state):
+    _, terminal = await _terminal_task(state)
+    await _control(state, terminal, "rerun")
+    path = state.store.path
+    state.store.close()
+    state.store = ApplicationStore(path)
+    state.store.agents._clock = state.clock
+    claimed = await state.store.agents.claim()
+    assert claimed["id"] == terminal["id"] and claimed["current_step"] == "research"
+    assert claimed["steps"][0]["result"] == "Saved plan"
+    assert claimed["operations"] == 2 and claimed["active_seconds"] == 2
+    assert claimed["attempts"] == 2

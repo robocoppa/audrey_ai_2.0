@@ -89,7 +89,10 @@ agent_tasks:
   max_active_seconds: 1800
   max_queued_per_user: 5
   max_queued_global: 50
-  max_tokens_per_call: 2048
+  # Research and Review need room for report text as well as model reasoning.
+  max_tokens_per_call: 8192
+  # A saved Plan is concise and reused when the same agent runs again.
+  plan_max_tokens_per_call: 2048
   max_tool_rounds: 6
 
 # ─── Model registry ────────────────────────────────────────────────────
