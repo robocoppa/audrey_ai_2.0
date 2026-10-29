@@ -1,14 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  actOnAgentTask,
   addProjectFile,
   createConversation,
+  createAgentTask,
   createProject,
   createProjectConversation,
   deleteProject,
+  deleteAgentTask,
   fetchVideoFromUrl,
   getFileArtifactDownloadUrl,
   getFileDownloadUrl,
+  getAgentTask,
+  listAgentTasks,
   listProjects,
   removeProjectFile,
   resetAdminModelPolicy,
@@ -19,6 +24,29 @@ import {
   uploadPrivateProjectFile,
   type AudreyFileLimits,
 } from "./api";
+
+describe("saved agent task requests", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("uses the authenticated native API, encoded task IDs, idempotency and revisions", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({ items: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const signal = new AbortController().signal;
+    await listAgentTasks(signal);
+    await createAgentTask("Compare official sources", "request-unique");
+    await getAgentTask("agent / owned", signal);
+    await actOnAgentTask("agent / owned", "pause", 7);
+    await deleteAgentTask("agent / owned", 8);
+    expect(fetchMock).toHaveBeenCalledWith("/api/agents", expect.objectContaining({ credentials: "same-origin", signal, cache: "no-store" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/agents", expect.objectContaining({ method: "POST", credentials: "same-origin", body: JSON.stringify({ objective: "Compare official sources", request_id: "request-unique" }) }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/agents/agent%20%2F%20owned", expect.objectContaining({ credentials: "same-origin", signal }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/agents/agent%20%2F%20owned/actions", expect.objectContaining({ method: "POST", credentials: "same-origin", body: JSON.stringify({ action: "pause", expected_revision: 7 }) }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/agents/agent%20%2F%20owned?expected_revision=8", expect.objectContaining({ method: "DELETE", credentials: "same-origin" }));
+    for (const [, init] of fetchMock.mock.calls as unknown as Array<[string, RequestInit]>) {
+      expect(init.headers).not.toHaveProperty("Authorization");
+    }
+  });
+});
 
 const LIMITS: AudreyFileLimits = {
   max_upload_bytes: 4,

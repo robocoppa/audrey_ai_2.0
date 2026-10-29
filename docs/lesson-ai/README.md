@@ -24,7 +24,7 @@ Lessons are written one at a time, and the course is being extended to
 cover the application around the pipeline. Lesson 0 describes the full
 plan.
 
-**Foundations and the system map**
+**Foundations and the platform**
 
 - [Lesson 0 — Introduction](lesson-00-introduction.md)
 - [Lesson 1 — Foundations I: Python language features](lesson-01-foundations.md)
@@ -32,6 +32,7 @@ plan.
 - [Lesson 3 — Foundations III: the satellite libraries](lesson-03-foundations-satellites.md)
 - [Lesson 4 — The platform and the request lifecycle](lesson-04-request-lifecycle.md)
 - [Lesson 5 — Configuration and startup](lesson-05-configuration-and-startup.md)
+- [Lesson 6a — The application database](lesson-06a-application-database.md)
 
 **The answer pipeline**
 
@@ -61,9 +62,10 @@ repository may use the old numbers.
 with the pipeline taught in the order a request meets it, and identity and the
 application database moved into the platform part. The
 [plan](../plans/lesson-catch-up-plan.md#the-course-structure-revised-2026-10-23)
-has the table. The files keep their current numbers until the database and
-identity lessons are added; that renumber also puts the pipeline lessons in
-their new order.
+has the table. The application database lesson is published as Lesson 6a, read
+between Lessons 5 and 6, so the other files keep their current numbers until the
+identity lesson is added. That renumber gives both lessons their numbers and puts
+the pipeline lessons in their new order.
 
 ## Prerequisites
 

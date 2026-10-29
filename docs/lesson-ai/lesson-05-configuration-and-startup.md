@@ -147,9 +147,11 @@ secret in the file.
 uploads database and the uploaded files all live there. `audrey` mounts it
 read-write (its [`volumes`](../../compose.yaml#L88) list); the worker mounts it
 read-only; the fetcher writes only into a staging folder, and Audrey checks each
-download before moving it into its owner's folder. With one writer, Audrey's
-SQLite databases never have to coordinate writes from two processes, and no
-other container can alter a stored file.
+download before moving it into its owner's folder. With one writing container,
+no other container can alter a database or a stored file. The only other process
+that writes the application database is the `audrey-admin` command, which an
+operator runs inside the `audrey` container, and SQLite's own locking keeps its
+writes and Audrey's apart.
 
 The rule behind the whole table: **each container gets the routes its job
 needs, and nothing more.**
@@ -198,7 +200,7 @@ tool list once a minute (§2.5).
 
 Now open [`src/audrey/main.py`](../../src/audrey/main.py). When uvicorn imports
 `audrey.main:app`, Python executes the module top to bottom and creates the
-FastAPI [`app`](../../src/audrey/main.py#L544) object near the end of the file.
+FastAPI [`app`](../../src/audrey/main.py#L550) object near the end of the file.
 Importing the module does not mean Audrey is ready yet. The app exists, but
 the expensive shared objects are built later, by `lifespan`.
 
@@ -347,7 +349,7 @@ merged config.
 
 ### 2.3 `lifespan`: the startup and shutdown owner
 
-Open [`main.py:74`](../../src/audrey/main.py#L74):
+Open [`main.py:75`](../../src/audrey/main.py#L75):
 
 ```python
 @asynccontextmanager
@@ -397,11 +399,11 @@ workers.
 #### Settling interrupted runs
 
 Opening the application database does real work. The
-[`ApplicationStore`](../../src/audrey/app_state/store.py#L90) constructor
+[`ApplicationStore`](../../src/audrey/app_state/store.py#L96) constructor
 connects to SQLite, switches on the settings Audrey relies on, and applies any
 pending schema migrations before anything else can touch the data. Then
 `lifespan` settles runs a previous process left behind, at
-[`main.py:119`](../../src/audrey/main.py#L119):
+[`main.py:120`](../../src/audrey/main.py#L120):
 
 ```python
 recovered_runs = await application_store.conversations.recover_interrupted_runs()
@@ -410,9 +412,9 @@ recovered_runs = await application_store.conversations.recover_interrupted_runs(
 Lesson 4 showed that a run has two halves: a durable record in the database and
 a live task in memory. A crash or a power cut destroys the task and leaves the
 record saying `running`, which nothing would ever change.
-[`recover_interrupted_runs`](../../src/audrey/app_state/repositories.py#L1237)
+[`recover_interrupted_runs`](../../src/audrey/app_state/repositories.py#L1238)
 marks every such run as failed with the error code `server_restart`, and its
-half-written answer as incomplete, before Audrey serves its first request. A
+unfinished answer as incomplete, before Audrey serves its first request. A
 reloaded page then shows an honest ending instead of an answer that never
 finishes.
 
@@ -453,7 +455,7 @@ deliveries, account purges. `NativeRunManager` holds every live run, and a
 discovery task keeps the tool list current (§2.5).
 
 Ordering matters at startup too. The uploads reconcile,
-[`reconcile_with_qdrant`](../../src/audrey/main.py#L195), must finish before
+[`reconcile_with_qdrant`](../../src/audrey/main.py#L196 'await reconcile_with_qdrant('), must finish before
 uvicorn accepts traffic, because it isn't safe alongside uploads that are in
 progress. It restores missing legacy catalog rows, preserves existing
 ownership and lifecycle metadata, and reports missing search content. Empty
@@ -461,7 +463,7 @@ or partially lost search collections never delete upload records. The
 lifespan runs this before `yield`, so that ordering is structural.
 
 At shutdown, the `finally` block at
-[`main.py:412`](../../src/audrey/main.py#L412) stops things in a deliberate
+[`main.py:418`](../../src/audrey/main.py#L418) stops things in a deliberate
 order:
 
 ```python
@@ -512,7 +514,7 @@ app.state.tools = tool_registry
 
 Then route handlers can retrieve those same objects from `request.app.state`.
 Routes usually do it through small helpers that fail clearly when a service
-isn't there, like [`_store`](../../src/audrey/routes/app/runs.py#L1085) in the
+isn't there, like [`_store`](../../src/audrey/routes/app/runs.py#L1157) in the
 runs module:
 
 ```python
@@ -550,7 +552,7 @@ One subtle part of `main.py` is easy to miss if you are new to Python
 closures.
 
 During startup, Audrey compiles the graph at
-[`main.py:170`](../../src/audrey/main.py#L170):
+[`main.py:171`](../../src/audrey/main.py#L171):
 
 ```python
 graph = build_graph(
@@ -579,8 +581,8 @@ returned, because it captured that object.
 Audrey's graph does the same thing with `tool_registry`. So when tools are
 rediscovered, the existing registry object has to be refreshed in place.
 Every refresh goes through
-[`_refresh_tool_discovery`](../../src/audrey/main.py#L435), whose core is at
-[`main.py:448`](../../src/audrey/main.py#L448):
+[`_refresh_tool_discovery`](../../src/audrey/main.py#L441), whose core is at
+[`main.py:454`](../../src/audrey/main.py#L454):
 
 ```python
 async with lock if lock is not None else asyncio.Lock():
@@ -613,12 +615,12 @@ Now the guard above them. `clear()` followed by `update()` replaces whatever
 the registry held with whatever discovery returned. If custom-tools happened to
 be restarting, discovery would return nothing and wipe the working tools. So
 an empty answer returns `False` and the live registry stays as it was; the
-admin route, [`rediscover_tools`](../../src/audrey/main.py#L626), turns that
+admin route, [`rediscover_tools`](../../src/audrey/main.py#L632), turns that
 `False` into a 503.
 
 The admin route isn't the only caller. Once startup has succeeded, a
 background task,
-[`_maintain_tool_discovery`](../../src/audrey/main.py#L460), takes over. If
+[`_maintain_tool_discovery`](../../src/audrey/main.py#L466), takes over. If
 the first discovery came back empty, or with some tools unavailable, it
 retries every few seconds for about two minutes. After that, or straight away
 after a healthy start, it refreshes once a minute for the life of the process,
@@ -654,7 +656,7 @@ busy the GPU gate is. It boils all of that down to one status:
 - **ready**: everything is up;
 - **degraded**: something optional is down, but chat works;
 - **unready**: a *required* component is down. By default only Ollama is
-  required ([`readiness`](../../config.yaml#L1377) in `config.yaml`), because
+  required ([`readiness`](../../config.yaml#L1360) in `config.yaml`), because
   without it Audrey can't answer at all.
 
 The snapshot can be read three ways: admins call `GET /v1/admin/readiness`
@@ -743,9 +745,9 @@ code that cleans them up live in one function.
 
 ## When you're ready for the next lesson
 
-The next lesson opens the model layer:
-[Lesson 6 — The model layer I: choosing a model](lesson-06-the-model-layer.md).
-It traces what happens when a pipeline node says "I need a general-purpose
-model": which choices a person may pick, how the registry ranks candidates, and
-how the health tracker steps around failing ones. The lesson after it follows
-the call itself to Ollama.
+The next lesson opens the database that startup opened first:
+[Lesson 6a — The application database](lesson-06a-application-database.md).
+It answers where a conversation actually lives, and what makes it safe to change
+that storage while real data is in it: transactions, the write-ahead log, the
+rules the schema enforces, migrations and verified backups. After it, the course
+turns to the answer pipeline, starting with the model layer.

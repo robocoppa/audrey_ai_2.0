@@ -19,6 +19,8 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import Response
 
 from audrey import __version__
+from audrey.agent_executor import ResearchAgentExecutor, agent_settings
+from audrey.agent_runtime import AgentRuntime
 from audrey.app_state import ApplicationStore
 from audrey.auth import AuthedUser, require_admin, require_principal
 from audrey.chat_projection import ChatProjectionPromoter
@@ -376,6 +378,17 @@ async def lifespan(app: FastAPI):
     )
     app.state.native_runs = native_runs
 
+    saved_agent_settings = agent_settings(app)
+    agent_runtime = AgentRuntime(
+        application_store.agents,
+        ResearchAgentExecutor(app),
+        poll_seconds=saved_agent_settings.poll_seconds,
+        lease_seconds=saved_agent_settings.lease_seconds,
+        max_attempts=saved_agent_settings.max_attempts,
+        step_timeout_seconds=saved_agent_settings.step_timeout_seconds,
+    )
+    app.state.agent_runtime = agent_runtime
+
     readiness_cfg = cfg.raw.get("readiness", {}) or {}
     required_components = set(
         readiness_cfg.get("required_components", ["ollama"]) or []
@@ -414,8 +427,11 @@ async def lifespan(app: FastAPI):
             name="audrey.tools.discovery",
         )
     try:
+        if saved_agent_settings.enabled:
+            await agent_runtime.start()
         yield
     finally:
+        await agent_runtime.stop()
         await native_runs.stop()
         if tools_discovery_task is not None and not tools_discovery_task.done():
             tools_discovery_task.cancel()

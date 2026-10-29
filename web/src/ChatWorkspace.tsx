@@ -198,6 +198,7 @@ const ATTACHMENT_FOLDERS: ReadonlyArray<{
 const SavedSourcesContext = createContext<ReadonlyMap<string, MessageSource[]>>(new Map());
 const SavedModelsContext = createContext<ReadonlyMap<string, MessageModelUsage[]>>(new Map());
 const SavedToolsContext = createContext<ReadonlyMap<string, RunTool[]>>(new Map());
+const WorkspaceVisibleContext = createContext(true);
 
 type ComposerDraft = { text: string; notice: string };
 
@@ -217,6 +218,7 @@ const DEFAULT_PROJECT_LIMITS: ProjectLimits = {
 };
 
 export function ChatWorkspace({
+  visible = true,
   user,
   preferences,
   models,
@@ -228,6 +230,7 @@ export function ChatWorkspace({
   menuActions,
   menuFooter,
 }: {
+  visible?: boolean;
   navigationOpen: boolean;
   onNavigationOpenChange: (open: boolean) => void;
   mobileMenuHost: HTMLElement | null;
@@ -257,6 +260,7 @@ export function ChatWorkspace({
     const viewport = window.matchMedia?.("(max-width: 1100px)");
     if (!viewport) return;
     const rememberFocus = (event: FocusEvent) => {
+      if (!visible) return;
       if (event.target instanceof HTMLElement && event.target !== document.body) {
         lastFocusedRef.current = event.target;
       }
@@ -274,6 +278,7 @@ export function ChatWorkspace({
         && focused.closest(".session-controls:not(.session-controls-drawer)");
       setCompactNavigation(event.matches);
       setNavigationOpen(false);
+      if (!visible) return;
       if (event.matches && (focusInHistory || focusInDesktopActions)) {
         window.requestAnimationFrame(() => navigationToggleRef.current?.focus({ preventScroll: true }));
       } else if (!event.matches && focusInCompactControls) {
@@ -286,10 +291,10 @@ export function ChatWorkspace({
       document.removeEventListener("focusin", rememberFocus);
       viewport.removeEventListener("change", updateViewport);
     };
-  }, [setNavigationOpen]);
+  }, [setNavigationOpen, visible]);
 
   useEffect(() => {
-    if (!compactNavigation || !navigationOpen) return;
+    if (!visible || !compactNavigation || !navigationOpen) return;
     const navigation = navigationRef.current;
     navigation?.querySelector<HTMLButtonElement>(".conversation-drawer-close")?.focus({ preventScroll: true });
     const handleKey = (event: KeyboardEvent) => {
@@ -313,7 +318,7 @@ export function ChatWorkspace({
     };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [closeNavigation, compactNavigation, navigationOpen]);
+  }, [closeNavigation, compactNavigation, navigationOpen, visible]);
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [openedConversations, setOpenedConversations] = useState<Conversation[]>([]);
@@ -950,6 +955,7 @@ export function ChatWorkspace({
   );
 
   return (
+    <WorkspaceVisibleContext.Provider value={visible}>
     <div className="workspace" data-navigation-open={navigationOpen}>
       {mobileMenuHost ? createPortal(
         <button
@@ -1219,6 +1225,7 @@ export function ChatWorkspace({
         ) : null}
       </section>
     </div>
+    </WorkspaceVisibleContext.Provider>
   );
 }
 
@@ -3333,9 +3340,15 @@ function ComposerPickerPanel({
   children: ReactNode;
 }) {
   const { activePicker, setActivePicker } = useContext(ComposerPickerContext);
+  const workspaceVisible = useContext(WorkspaceVisibleContext);
   const panelRef = useRef<HTMLElement>(null);
 
+  useEffect(() => {
+    if (!workspaceVisible) setActivePicker(null);
+  }, [setActivePicker, workspaceVisible]);
+
   useLayoutEffect(() => {
+    if (!workspaceVisible) return;
     const trigger = triggerRef.current;
     const panel = panelRef.current;
     const composer = trigger?.closest<HTMLElement>(".composer");
@@ -3394,9 +3407,10 @@ function ComposerPickerPanel({
       visualViewport?.removeEventListener("resize", place);
       visualViewport?.removeEventListener("scroll", place);
     };
-  }, [activePicker, triggerRef]);
+  }, [activePicker, triggerRef, workspaceVisible]);
 
   useEffect(() => {
+    if (!workspaceVisible) return;
     const outside = (event: Event) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
@@ -3418,8 +3432,9 @@ function ComposerPickerPanel({
       document.removeEventListener("focusin", outside);
       document.removeEventListener("keydown", escape);
     };
-  }, [setActivePicker, triggerRef]);
+  }, [setActivePicker, triggerRef, workspaceVisible]);
 
+  if (!workspaceVisible) return null;
   return createPortal(
     <section
       ref={panelRef}

@@ -1080,6 +1080,56 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           CHECK (origin IN ('upload', 'generated'));
         """ + PROJECT_FILE_ORIGIN_GUARD_SQL + ";",
     ),
+    (
+        26,
+        """
+        CREATE TABLE IF NOT EXISTS app_agent_tasks (
+          task_id          TEXT PRIMARY KEY,
+          user_id          TEXT NOT NULL,
+          request_id       TEXT NOT NULL CHECK (length(request_id) BETWEEN 1 AND 200),
+          objective        TEXT NOT NULL CHECK (length(objective) BETWEEN 1 AND 8000),
+          status           TEXT NOT NULL CHECK (status IN (
+                             'queued', 'running', 'paused', 'completed', 'cancelled', 'failed'
+                           )),
+          revision         INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+          attempts         INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+          fence            INTEGER NOT NULL DEFAULT 0 CHECK (fence >= 0),
+          lease_token      TEXT NOT NULL DEFAULT '',
+          lease_expires_at TEXT,
+          accounted_at     TEXT,
+          active_seconds   REAL NOT NULL DEFAULT 0 CHECK (active_seconds >= 0),
+          operations       INTEGER NOT NULL DEFAULT 0 CHECK (operations >= 0),
+          limits_json      TEXT NOT NULL CHECK (length(limits_json) <= 2000),
+          steps_json       TEXT NOT NULL CHECK (length(CAST(steps_json AS BLOB)) <= 200000),
+          result           TEXT NOT NULL DEFAULT '' CHECK (length(CAST(result AS BLOB)) <= 64000),
+          error            TEXT NOT NULL DEFAULT '' CHECK (length(error) <= 2000),
+          created_at       TEXT NOT NULL,
+          updated_at       TEXT NOT NULL,
+          UNIQUE (user_id, request_id),
+          FOREIGN KEY (user_id) REFERENCES app_users(user_id) ON DELETE CASCADE,
+          CHECK ((status = 'running' AND lease_token != '' AND lease_expires_at IS NOT NULL
+                    AND accounted_at IS NOT NULL)
+                 OR (status != 'running' AND lease_token = '' AND lease_expires_at IS NULL
+                    AND accounted_at IS NULL))
+        );
+        CREATE INDEX IF NOT EXISTS idx_app_agent_tasks_owner_created
+          ON app_agent_tasks(user_id, created_at DESC, task_id DESC);
+        CREATE INDEX IF NOT EXISTS idx_app_agent_tasks_claim
+          ON app_agent_tasks(status, lease_expires_at, created_at, task_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_app_agent_tasks_active_owner
+          ON app_agent_tasks(user_id) WHERE status = 'running';
+        CREATE TABLE IF NOT EXISTS app_agent_operations (
+          operation_id TEXT PRIMARY KEY,
+          task_id      TEXT NOT NULL,
+          fence        INTEGER NOT NULL CHECK (fence >= 1),
+          step_id      TEXT NOT NULL CHECK (step_id IN ('plan', 'research', 'review')),
+          status       TEXT NOT NULL CHECK (status IN ('reserved', 'committed')),
+          created_at   TEXT NOT NULL,
+          committed_at TEXT,
+          FOREIGN KEY (task_id) REFERENCES app_agent_tasks(task_id) ON DELETE CASCADE
+        );
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

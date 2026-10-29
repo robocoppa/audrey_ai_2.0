@@ -160,6 +160,16 @@ describe("mobile conversation swipes", () => {
     expect(drawerEscape).not.toHaveBeenCalled();
   });
 
+  it("leaves Escape available when the conversation workspace is hidden", () => {
+    const { target, container } = row();
+    fireEvent.keyDown(target, { key: "ArrowLeft" });
+    expect(screen.getByRole("button", { name: "Confirm delete conversation Example chat" })).toBeInTheDocument();
+    container.hidden = true;
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    document.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(false);
+  });
+
   it("supports mouse dragging in the compact drawer and leaves desktop rows unchanged", () => {
     const { target, archive, open } = row();
     pointer(target, "pointerdown", 150, 100, { pointerType: "mouse" });

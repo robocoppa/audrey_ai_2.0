@@ -34,6 +34,7 @@ export function SwipeConversationRow({
   useEffect(() => {
     function dismiss(event: Event) {
       if (event instanceof KeyboardEvent) {
+        if (rowRef.current?.closest("[hidden], [inert]")) return;
         if (event.key !== "Escape" || !rowRef.current?.querySelector(".swipe-conversation-actions")) return;
         event.preventDefault();
         event.stopPropagation();

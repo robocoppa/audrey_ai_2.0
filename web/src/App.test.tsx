@@ -95,6 +95,51 @@ describe("App", () => {
     window.history.replaceState({}, "", "/");
   });
 
+  it("opens Agents as a primary workspace while preserving Chat and the research draft", async () => {
+    workspaceMock.enabled = true;
+    mockCapabilitySession("degraded");
+    render(<App />);
+    const chat = await screen.findByText("Workspace ready", {}, { timeout: 5000 });
+    const navigation = within(screen.getByRole("navigation", { name: "Workspaces" }));
+    fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
+    expect(screen.getByRole("heading", { name: "Agents", level: 1 })).toBeVisible();
+    expect(chat).not.toBeVisible();
+    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "Keep this research draft" } });
+    fireEvent.click(navigation.getByRole("button", { name: "Chat" }));
+    expect(screen.getByText("Workspace ready")).toBe(chat);
+    expect(chat).toBeVisible();
+    fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
+    expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("Keep this research draft");
+  });
+
+  it("closes portalled Chat pickers and releases Escape when Agents opens", async () => {
+    const conversation = {
+      id: "con_visibility", title: "Visibility boundary", default_mode: "auto", default_model_id: "auto",
+      created_at: "2026-10-28T16:00:00Z", updated_at: "2026-10-28T16:00:00Z", last_message_at: "2026-10-28T16:00:00Z", archived_at: null,
+    };
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => {
+      const payload = path === "/api/me" ? {
+        id: "usr_example", email: "alice@example.com", display_name: "Alice", role: "user", status: "active", groups: ["users"], auth_provider: "cloudflare_access",
+      } : path === "/api/me/preferences" ? DEFAULT_PREFERENCES
+        : path.startsWith("/api/conversations?") ? { items: [conversation], next_cursor: null }
+        : path === "/api/conversations/con_visibility" ? conversation
+        : collectionPayload(path);
+      return new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } });
+    }));
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Audrey model" }, { timeout: 5000 }));
+    expect(screen.getByRole("dialog", { name: "Choose an Audrey model" })).toBeVisible();
+    // click alone deliberately omits pointerdown/focus: visibility must close the body portal.
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Workspaces" })).getByRole("button", { name: "Agents" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Choose an Audrey model" })).not.toBeInTheDocument());
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    document.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(false);
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Workspaces" })).getByRole("button", { name: "Chat" }));
+    expect(screen.getByRole("button", { name: "Audrey model" })).toBeVisible();
+    expect(screen.queryByRole("dialog", { name: "Choose an Audrey model" })).not.toBeInTheDocument();
+  });
+
   it("shows the Cloudflare account check beneath the centered Audrey Auto portrait", () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
 

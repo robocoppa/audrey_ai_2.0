@@ -14,7 +14,8 @@ when possible; otherwise a character cut reports how much text was omitted.
 
 Errors (network, 4xx, 5xx) become tool messages too — the model can decide
 whether to retry, re-prompt the user, or apologize. We never raise out of
-this module so the ReAct loop stays in control.
+this module for ordinary tool failures so the ReAct loop stays in control.
+Saved-agent and Private authority failures propagate to stop the attempt.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from typing import Any
 
 import httpx
 
+from audrey.agent_dispatch import authorize_agent_tool
 from audrey.metrics import tool_call_seconds, tool_calls_total
 from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
 from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, ToolUserScope
@@ -177,7 +179,7 @@ async def dispatch_one(
     timeout_s: float,
     user_id: str | None = None,
 ) -> ToolResult:
-    """Execute one tool_call. Always returns a ToolResult — never raises.
+    """Execute a tool call; a revoked saved-agent scope stops before dispatch.
 
     Emits `audrey_tool_calls_total{tool,outcome}` for every return path and
     `audrey_tool_call_seconds{tool}` for paths that actually made a network
@@ -186,6 +188,7 @@ async def dispatch_one(
     """
     fn = (tool_call.get("function") or {})
     name = str(fn.get("name") or "?")
+    await authorize_agent_tool(name)
     call_id = tool_call.get("id")
     policy = current_processing_policy()
     private_handler: PrivateToolHandler | None = None

@@ -387,6 +387,61 @@ export class ApiError extends Error {
   }
 }
 
+export type AgentTaskStatus = "queued" | "running" | "paused" | "completed" | "cancelled" | "failed";
+
+export interface AgentTask {
+  summary?: boolean;
+  id: string;
+  objective: string;
+  status: AgentTaskStatus;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+  steps: Array<{
+    id: "plan" | "research" | "review";
+    label: string;
+    status: "pending" | "running" | "completed";
+    result: string;
+  }>;
+  result: string;
+  error: string;
+  attempts: number;
+}
+
+export function listAgentTasks(signal?: AbortSignal): Promise<{ items: AgentTask[] }> {
+  return apiJson<{ items: AgentTask[] }>("/api/agents", { signal, cache: "no-store" });
+}
+
+export function getAgentTask(taskId: string, signal?: AbortSignal): Promise<AgentTask> {
+  return apiJson<AgentTask>(`/api/agents/${encodeURIComponent(taskId)}`, { signal, cache: "no-store" });
+}
+
+export function createAgentTask(objective: string, requestId: string): Promise<AgentTask> {
+  return apiJson<AgentTask>("/api/agents", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ objective, request_id: requestId }),
+  });
+}
+
+export function actOnAgentTask(
+  taskId: string,
+  action: "pause" | "resume" | "cancel",
+  expectedRevision: number,
+): Promise<AgentTask> {
+  return apiJson<AgentTask>(`/api/agents/${encodeURIComponent(taskId)}/actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, expected_revision: expectedRevision }),
+  });
+}
+
+export async function deleteAgentTask(taskId: string, expectedRevision: number): Promise<void> {
+  await apiResponse(`/api/agents/${encodeURIComponent(taskId)}?expected_revision=${expectedRevision}`, {
+    method: "DELETE",
+  });
+}
+
 export async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiResponse(path, init);
   return (await response.json()) as T;

@@ -1,0 +1,480 @@
+"""Durable agent ownership, recovery, resource reservations and write failures."""
+
+from __future__ import annotations
+
+import asyncio
+import datetime as dt
+import sqlite3
+from types import SimpleNamespace
+
+import pytest
+
+from audrey.app_state import ApplicationStore
+from audrey.app_state.agents import (
+    AgentTaskAccessError,
+    AgentTaskConflictError,
+    AgentTaskError,
+)
+
+
+class Clock:
+    def __init__(self):
+        self.now = dt.datetime(2026, 10, 28, 12, tzinfo=dt.UTC)
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += dt.timedelta(seconds=seconds)
+
+
+async def _owner(store, name="alice"):
+    return await store.resolve_external_identity(
+        provider="test", subject=name, email=f"{name}@example.com",
+        display_name=name.title(), role="user", auth_method="test",
+    )
+
+
+@pytest.fixture
+async def state(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner, other = await _owner(store), await _owner(store, "bob")
+    clock = Clock()
+    store.agents._clock = clock
+    yield SimpleNamespace(store=store, owner=owner, other=other, clock=clock)
+    store.close()
+
+
+async def _create(state, **changes):
+    kwargs = dict(user_id=state.owner.user_id, objective="Compare public research.", request_id="request-1")
+    kwargs.update(changes)
+    return await state.store.agents.create(**kwargs)
+
+
+def _lease(task):
+    return {"task_id": task["id"], "lease_token": task["lease_token"], "fence": task["fence"]}
+
+
+async def _step(state, task, step_id, result="Observed result."):
+    await state.store.agents.reserve_operation(**_lease(task), step_id=step_id)
+    return await state.store.agents.checkpoint(**_lease(task), step_id=step_id, result=result)
+
+
+async def _control(state, task, action, **changes):
+    kwargs = dict(user_id=state.owner.user_id, task_id=task["id"],
+                  expected_revision=task["revision"], action=action)
+    kwargs.update(changes)
+    return await state.store.agents.control(**kwargs)
+
+
+async def test_create_idempotent_and_public_records_have_no_worker_credentials(state):
+    first, second = await asyncio.gather(_create(state), _create(state))
+    assert first == second
+    assert set(first) == {
+        "id", "objective", "status", "revision", "created_at", "updated_at", "steps",
+        "result", "error", "attempts",
+    }
+    assert [step["id"] for step in first["steps"]] == ["plan", "research", "review"]
+    assert all(step["status"] == "pending" for step in first["steps"])
+    with pytest.raises(AgentTaskConflictError):
+        await _create(state, objective="A different objective.")
+    assert await state.store.agents.list(user_id=state.owner.user_id) == [first]
+    assert await state.store.agents.list(user_id=state.other.user_id) == []
+
+
+async def test_foreign_and_missing_ids_are_indistinguishable(state):
+    task = await _create(state)
+    messages = []
+    for task_id in (task["id"], "missing"):
+        with pytest.raises(AgentTaskAccessError) as error:
+            await state.store.agents.get(user_id=state.other.user_id, task_id=task_id)
+        messages.append(str(error.value))
+        with pytest.raises(AgentTaskAccessError):
+            await _control(state, task, "cancel", user_id=state.other.user_id, task_id=task_id)
+    assert messages[0] == messages[1]
+
+
+async def test_summary_listing_omits_all_report_bodies_but_preserves_public_steps(state):
+    await _create(state)
+    task = await state.store.agents.claim()
+    task = await _step(state, task, "plan", result="Saved plan report body.")
+    partial = await state.store.agents.list(user_id=state.owner.user_id, summary=True)
+    assert [step["status"] for step in partial[0]["steps"]] == ["completed", "running", "pending"]
+    assert "report body" not in repr(partial)
+    for step_id in ("research", "review"):
+        task = await _step(state, task, step_id, result=f"Saved {step_id} report body.")
+    await state.store.agents.complete(**_lease(task), result="Saved final report body.")
+    full = await state.store.agents.list(user_id=state.owner.user_id)
+    summary = await state.store.agents.list(user_id=state.owner.user_id, summary=True)
+    assert len(summary) == 1
+    assert set(summary[0]) == set(full[0]) | {"summary"}
+    assert summary[0]["summary"] is True
+    assert summary[0]["result"] == ""
+    assert summary[0]["status"] == "completed"
+    assert summary[0]["steps"] == [
+        {"id": "plan", "label": "Plan", "status": "completed", "result": ""},
+        {"id": "research", "label": "Research", "status": "completed", "result": ""},
+        {"id": "review", "label": "Review", "status": "completed", "result": ""},
+    ]
+    assert full[0]["result"] == "Saved final report body."
+    assert full[0]["steps"][0]["result"] == "Saved plan report body."
+    assert "report body" not in repr(summary)
+    assert await state.store.agents.list(user_id=state.other.user_id, summary=True) == []
+
+
+async def test_active_owner_required_on_create_read_control_and_dispatch(state):
+    await _create(state)
+    task = await state.store.agents.claim()
+    with state.store._lock, state.store._conn:
+        state.store._conn.execute("UPDATE app_users SET status='disabled' WHERE user_id=?",
+                                  (state.owner.user_id,))
+    for call in (
+        _create(state, request_id="request-2"),
+        state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"]),
+        state.store.agents.list(user_id=state.owner.user_id),
+        _control(state, task, "cancel"),
+        state.store.agents.validate_lease(**_lease(task)),
+        state.store.agents.heartbeat(**_lease(task)),
+        state.store.agents.reserve_operation(**_lease(task), step_id="plan"),
+        state.store.agents.checkpoint(**_lease(task), step_id="plan", result="No write."),
+        state.store.agents.fail(**_lease(task), error="No write."),
+    ):
+        with pytest.raises(AgentTaskAccessError):
+            await call
+    assert await state.store.agents.claim() is None
+
+
+async def test_deletion_request_fences_even_an_active_owner(state):
+    await _create(state)
+    task = await state.store.agents.claim()
+    with state.store._lock, state.store._conn:
+        state.store._conn.execute(
+            "INSERT INTO account_deletion_requests(user_id,purge_id,storage_namespace,requested_at) "
+            "VALUES (?,?,?,?)", (state.owner.user_id, "purge", "alice", state.clock().isoformat()),
+        )
+    with pytest.raises(AgentTaskAccessError):
+        await state.store.agents.validate_lease(**_lease(task))
+    with pytest.raises(AgentTaskAccessError):
+        await _create(state, request_id="request-2")
+
+
+async def test_claim_is_atomic_and_one_running_task_per_owner(state):
+    await _create(state)
+    await _create(state, request_id="request-2")
+    claims = await asyncio.gather(*(state.store.agents.claim() for _ in range(5)))
+    assert sum(task is not None for task in claims) == 1
+    await _create(state, request_id="other", user_id=state.other.user_id)
+    assert (await state.store.agents.claim())["user_id"] == state.other.user_id
+
+
+async def test_claim_is_atomic_between_separate_store_connections(state):
+    await _create(state)
+    second = ApplicationStore(state.store.path)
+    second.agents._clock = state.clock
+    try:
+        claims = await asyncio.gather(state.store.agents.claim(), second.agents.claim())
+        assert sum(task is not None for task in claims) == 1
+    finally:
+        second.close()
+
+
+async def test_steps_require_reservations_and_ordered_commits(state):
+    await _create(state)
+    task = await state.store.agents.claim()
+    with pytest.raises(AgentTaskConflictError):
+        await state.store.agents.checkpoint(**_lease(task), step_id="plan", result="Unreserved.")
+    with pytest.raises(AgentTaskConflictError):
+        await state.store.agents.reserve_operation(**_lease(task), step_id="review")
+    with pytest.raises(AgentTaskConflictError):
+        await state.store.agents.complete(**_lease(task), result="Too early.")
+    task = await _step(state, task, "plan")
+    with pytest.raises(AgentTaskConflictError):
+        await state.store.agents.checkpoint(**_lease(task), step_id="plan", result="Overwrite.")
+    task = await _step(state, task, "research")
+    task = await _step(state, task, "review")
+    assert task["current_step"] == ""
+    completed = await state.store.agents.complete(**_lease(task), result="Saved final report.")
+    assert completed["status"] == "completed"
+    assert completed["result"] == "Saved final report."
+    with pytest.raises(AgentTaskConflictError):
+        await state.store.agents.complete(**_lease(task), result="Late result.")
+
+
+async def test_expiry_recovers_steps_and_rejects_old_worker(state):
+    await _create(state)
+    first = await state.store.agents.claim(lease_seconds=10)
+    first = await _step(state, first, "plan", result="Saved plan.")
+    await state.store.agents.reserve_operation(**_lease(first), step_id="research")
+    state.clock.advance(11)
+    with pytest.raises(AgentTaskConflictError):
+        await state.store.agents.heartbeat(**_lease(first))
+    second = await state.store.agents.claim(lease_seconds=10)
+    assert second["id"] == first["id"]
+    assert second["attempts"] == 2
+    assert second["fence"] > first["fence"]
+    assert second["lease_token"] != first["lease_token"]
+    assert second["current_step"] == "research"
+    assert second["steps"][0]["result"] == "Saved plan."
+    assert second["operations"] == 2
+    assert second["active_seconds"] == 10
+    for call in (
+        state.store.agents.validate_lease(**_lease(first)),
+        state.store.agents.checkpoint(**_lease(first), step_id="research", result="Stale result."),
+        state.store.agents.fail(**_lease(first), error="Stale failure."),
+    ):
+        with pytest.raises(AgentTaskConflictError):
+            await call
+    assert await state.store.agents.validate_lease(**_lease(second))
+
+
+async def test_restart_preserves_live_lease_and_recovers_only_after_expiry(state):
+    await _create(state)
+    first = await state.store.agents.claim(lease_seconds=20)
+    first = await _step(state, first, "plan")
+    restarted = ApplicationStore(state.store.path)
+    restarted.agents._clock = state.clock
+    try:
+        assert await restarted.agents.claim() is None
+        assert await restarted.agents.validate_lease(**_lease(first))
+        state.clock.advance(21)
+        recovered = await restarted.agents.claim()
+        assert recovered["current_step"] == "research"
+        assert recovered["steps"][0]["status"] == "completed"
+    finally:
+        restarted.close()
+
+
+async def test_heartbeat_charges_incrementally_without_churning_control_revision(state):
+    await _create(state)
+    task = await state.store.agents.claim(lease_seconds=10)
+    state.clock.advance(4)
+    first = await state.store.agents.heartbeat(**_lease(task), lease_seconds=10)
+    assert first["active_seconds"] == 4
+    assert first["revision"] == task["revision"]
+    state.clock.advance(4)
+    second = await state.store.agents.heartbeat(**_lease(task), lease_seconds=10)
+    assert second["active_seconds"] == 8
+    assert second["revision"] == task["revision"]
+
+
+async def test_clock_backstep_does_not_double_charge_or_contract_the_lease(state):
+    await _create(state)
+    task = await state.store.agents.claim(lease_seconds=20)
+    state.clock.advance(5)
+    task = await state.store.agents.heartbeat(**_lease(task), lease_seconds=20)
+    expiry = task["lease_expires_at"]
+    state.clock.advance(-3)
+    task = await state.store.agents.heartbeat(**_lease(task), lease_seconds=20)
+    assert task["active_seconds"] == 5
+    assert task["lease_expires_at"] == expiry
+    state.clock.advance(4)
+    task = await state.store.agents.heartbeat(**_lease(task), lease_seconds=20)
+    assert task["active_seconds"] == 6
+
+
+@pytest.mark.parametrize("action,expected", [("pause", "paused"), ("cancel", "cancelled")])
+async def test_user_controls_fence_inflight_writes(state, action, expected):
+    await _create(state)
+    task = await state.store.agents.claim()
+    task = await _step(state, task, "plan")
+    state.clock.advance(5)
+    controlled = await _control(state, task, action)
+    assert controlled["status"] == expected
+    assert controlled["steps"][0]["status"] == "completed"
+    assert controlled["steps"][1]["status"] == "pending"
+    with pytest.raises(AgentTaskConflictError):
+        await state.store.agents.checkpoint(**_lease(task), step_id="research", result="Stale result.")
+    assert await state.store.agents.claim() is None
+
+
+async def test_pause_waiting_time_does_not_consume_active_allowance_or_reset_usage(state):
+    await _create(state)
+    task = await state.store.agents.claim()
+    task = await _step(state, task, "plan")
+    state.clock.advance(5)
+    paused = await _control(state, task, "pause")
+    state.clock.advance(50000)
+    await _control(state, paused, "resume")
+    resumed = await state.store.agents.claim()
+    assert resumed["active_seconds"] == 5
+    assert resumed["operations"] == 1
+    assert resumed["attempts"] == 2
+    assert resumed["current_step"] == "research"
+
+
+async def test_optimistic_revision_rejects_a_stale_control(state):
+    original = await _create(state)
+    task = await state.store.agents.claim()
+    with pytest.raises(AgentTaskConflictError):
+        await _control(state, original, "pause")
+    assert (await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"]))["status"] == "running"
+
+
+async def test_retry_and_expired_attempts_have_one_cumulative_limit(state):
+    task = await _create(state)
+    first = await state.store.agents.claim(max_attempts=2)
+    await state.store.agents.fail(**_lease(first), error="Temporary failure.", retry=True)
+    second = await state.store.agents.claim(lease_seconds=5, max_attempts=2)
+    assert second["attempts"] == 2
+    state.clock.advance(6)
+    assert await state.store.agents.claim(max_attempts=2) is None
+    failed = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert failed["status"] == "failed"
+    assert failed["attempts"] == 2
+    with pytest.raises(AgentTaskConflictError):
+        await _control(state, failed, "resume")
+    again = await _create(state, request_id="new-history")
+    assert again["id"] != failed["id"]
+    assert again["attempts"] == 0
+
+
+async def test_operation_reservations_are_durable_and_cannot_reset_on_resume(state):
+    await _create(state, limits={"max_operations": 2})
+    task = await state.store.agents.claim()
+    first = await state.store.agents.reserve_operation(**_lease(task), step_id="plan")
+    second = await state.store.agents.reserve_operation(**_lease(task), step_id="plan")
+    assert first != second
+    await state.store.agents.fail(**_lease(task), error="Interrupted.", retry=True)
+    resumed = await state.store.agents.claim()
+    assert resumed["operations"] == 2
+    with pytest.raises(AgentTaskError, match="operation allowance"):
+        await state.store.agents.reserve_operation(**_lease(resumed), step_id="plan")
+    count = state.store._conn.execute("SELECT COUNT(*) FROM app_agent_operations").fetchone()[0]
+    assert count == 2
+
+
+async def test_active_wall_budget_blocks_dispatch_and_recovery(state):
+    task = await _create(state, limits={"max_active_seconds": 5})
+    claimed = await state.store.agents.claim(lease_seconds=10)
+    state.clock.advance(5)
+    with pytest.raises(AgentTaskError, match="active execution allowance"):
+        await state.store.agents.validate_lease(**_lease(claimed))
+    with pytest.raises(AgentTaskError):
+        await state.store.agents.reserve_operation(**_lease(claimed), step_id="plan")
+    state.clock.advance(6)
+    assert await state.store.agents.claim() is None
+    failed = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert failed["status"] == "failed"
+
+
+async def test_content_and_queue_bounds_are_enforced_before_write(state):
+    for changes in (
+        {"objective": " "}, {"objective": "x" * 8001}, {"request_id": ""},
+        {"objective": "invalid surrogate \ud800"},
+        {"limits": {"max_operations": True}}, {"limits": {"untrusted_limit": 1}},
+    ):
+        with pytest.raises(AgentTaskError):
+            await _create(state, **changes)
+    await _create(state, limits={"max_queued_per_user": 1})
+    with pytest.raises(AgentTaskError, match="capacity"):
+        await _create(state, request_id="excess", limits={"max_queued_per_user": 1})
+    claimed = await state.store.agents.claim()
+    await state.store.agents.reserve_operation(**_lease(claimed), step_id="plan")
+    with pytest.raises(AgentTaskError):
+        await state.store.agents.checkpoint(**_lease(claimed), step_id="plan", result="é" * 32001)
+    with pytest.raises(AgentTaskError, match="saved step storage allowance"):
+        await state.store.agents.checkpoint(**_lease(claimed), step_id="plan", result="x" + "\0" * 40000)
+    assert not state.store._conn.in_transaction
+    assert state.store._conn.execute("SELECT status FROM app_agent_operations").fetchone()[0] == "reserved"
+
+
+async def test_global_queue_bound_includes_other_owners_and_paused_tasks(state):
+    first = await _create(state, limits={"max_queued_global": 1})
+    await _control(state, first, "pause")
+    with pytest.raises(AgentTaskError, match="capacity"):
+        await _create(state, user_id=state.other.user_id, limits={"max_queued_global": 1})
+
+
+async def test_failed_checkpoint_rolls_back_result_and_receipt_then_connection_recovers(state):
+    await _create(state)
+    task = await state.store.agents.claim()
+    await state.store.agents.reserve_operation(**_lease(task), step_id="plan")
+    state.store._conn.execute(
+        "CREATE TEMP TRIGGER reject_agent_write BEFORE UPDATE ON app_agent_tasks "
+        "BEGIN SELECT RAISE(ABORT,'injected checkpoint failure'); END"
+    )
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="injected checkpoint"):
+            await state.store.agents.checkpoint(**_lease(task), step_id="plan", result="Must roll back.")
+        assert not state.store._conn.in_transaction
+        receipt = state.store._conn.execute("SELECT status FROM app_agent_operations").fetchone()[0]
+        assert receipt == "reserved"
+    finally:
+        state.store._conn.execute("DROP TRIGGER reject_agent_write")
+    current = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert current["steps"][0]["result"] == ""
+    recovered = await state.store.agents.checkpoint(**_lease(task), step_id="plan", result="Recovered.")
+    assert recovered["steps"][0]["result"] == "Recovered."
+
+
+async def test_local_purge_erases_tasks_receipts_and_rejects_delayed_worker(state):
+    await _create(state)
+    task = await state.store.agents.claim()
+    await state.store.agents.reserve_operation(**_lease(task), step_id="plan")
+    await state.store.purge_local_user_data(user_id=state.owner.user_id)
+    assert await state.store.agents.list(user_id=state.owner.user_id) == []
+    assert state.store._conn.execute("SELECT COUNT(*) FROM app_agent_operations").fetchone()[0] == 0
+    with pytest.raises(AgentTaskAccessError):
+        await state.store.agents.checkpoint(**_lease(task), step_id="plan", result="Cannot resurrect.")
+
+
+async def test_account_delete_cascades_agent_records(state):
+    await _create(state)
+    task = await state.store.agents.claim()
+    await state.store.agents.reserve_operation(**_lease(task), step_id="plan")
+    with state.store._lock, state.store._conn:
+        state.store._conn.execute("DELETE FROM app_users WHERE user_id=?", (state.owner.user_id,))
+    assert state.store._conn.execute("SELECT COUNT(*) FROM app_agent_tasks").fetchone()[0] == 0
+    assert state.store._conn.execute("SELECT COUNT(*) FROM app_agent_operations").fetchone()[0] == 0
+    assert state.store._conn.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+async def test_delete_terminal_history_erases_receipts_and_fences_delayed_writes(state):
+    await _create(state)
+    task = await state.store.agents.claim()
+    await state.store.agents.reserve_operation(**_lease(task), step_id="plan")
+    cancelled = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    cancelled = await _control(state, cancelled, "cancel")
+    assert await state.store.agents.delete(
+        user_id=state.owner.user_id, task_id=task["id"], expected_revision=cancelled["revision"],
+    )
+    assert await state.store.agents.list(user_id=state.owner.user_id) == []
+    assert state.store._conn.execute("SELECT COUNT(*) FROM app_agent_operations").fetchone()[0] == 0
+    with pytest.raises(AgentTaskAccessError):
+        await state.store.agents.checkpoint(**_lease(task), step_id="plan", result="Cannot resurrect.")
+
+
+async def test_delete_refuses_foreign_missing_active_and_stale_revision(state):
+    task = await _create(state)
+    for task_id in (task["id"], "missing"):
+        with pytest.raises(AgentTaskAccessError, match="unavailable"):
+            await state.store.agents.delete(
+                user_id=state.other.user_id, task_id=task_id, expected_revision=task["revision"],
+            )
+    with pytest.raises(AgentTaskConflictError, match="Cancel active"):
+        await state.store.agents.delete(
+            user_id=state.owner.user_id, task_id=task["id"], expected_revision=task["revision"],
+        )
+    cancelled = await _control(state, task, "cancel")
+    with pytest.raises(AgentTaskConflictError, match="changed"):
+        await state.store.agents.delete(
+            user_id=state.owner.user_id, task_id=task["id"], expected_revision=task["revision"],
+        )
+    assert await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"]) == cancelled
+
+
+async def test_saved_history_bound_and_deletion_free_capacity(state):
+    first = None
+    for number in range(200):
+        task = await _create(state, request_id=f"saved-{number}")
+        task = await _control(state, task, "cancel")
+        if first is None:
+            first = task
+    with pytest.raises(AgentTaskError, match="capacity"):
+        await _create(state, request_id="over-capacity")
+    await state.store.agents.delete(
+        user_id=state.owner.user_id, task_id=first["id"], expected_revision=first["revision"],
+    )
+    replacement = await _create(state, request_id="over-capacity")
+    assert replacement["status"] == "queued"
+    assert len(await state.store.agents.list(user_id=state.owner.user_id, limit=200)) == 200

@@ -6,6 +6,7 @@ import { AdminPanel } from "./AdminPanel";
 import builtryteWordmark from "./assets/brand/builtryte-wordmark.png";
 import { AccountSettings } from "./AccountSettings";
 import { FileManager } from "./FileManager";
+import { AgentsWorkspace } from "./AgentsWorkspace";
 import {
   ApiError,
   getCapabilities,
@@ -77,6 +78,8 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const [activeWorkspace, setActiveWorkspace] = useState<"chat" | "agents">("chat");
+  const [activeAgentCount, setActiveAgentCount] = useState(0);
   const [mobileMenuHost, setMobileMenuHost] = useState<HTMLDivElement | null>(null);
   const [mobileNewChatHost, setMobileNewChatHost] = useState<HTMLDivElement | null>(null);
   const [showAccessHandoff, setShowAccessHandoff] = useState(true);
@@ -232,7 +235,9 @@ export function App() {
         </filter>
       </svg>
       <header className="topbar" inert={navigationOpen ? true : undefined}>
-        <div className="topbar-mobile-menu" ref={setMobileMenuHost} />
+        <div className="topbar-mobile-menu" ref={setMobileMenuHost}>
+          {activeWorkspace === "agents" ? <button className="workspace-header-button" type="button" onClick={() => setActiveWorkspace("chat")} aria-label="Back to Chat">←</button> : null}
+        </div>
         <a className="brand" href="/" aria-label="Audrey home">
           <span className="brand-wordmark" aria-hidden="true">
             <img src={builtryteWordmark} alt="" />
@@ -245,24 +250,37 @@ export function App() {
         <SessionActions {...sessionActions} variant="header" />
       </header>
 
-      {!navigationOpen && !filesOpen && !settingsOpen && !adminOpen ? <PullToRefresh /> : null}
+      <nav className="app-workspace-navigation" aria-label="Workspaces" inert={navigationOpen ? true : undefined}>
+        <button type="button" aria-current={activeWorkspace === "chat" ? "page" : undefined} onClick={() => { setNavigationOpen(false); setActiveWorkspace("chat"); }}>Chat</button>
+        <button type="button" aria-current={activeWorkspace === "agents" ? "page" : undefined} onClick={() => { setNavigationOpen(false); setActiveWorkspace("agents"); }}>
+          Agents{activeAgentCount > 0 ? <span className="agents-active-count" aria-label={`${activeAgentCount} active agent tasks`}>{activeAgentCount}</span> : null}
+        </button>
+      </nav>
+
+      {activeWorkspace === "chat" && !navigationOpen && !filesOpen && !settingsOpen && !adminOpen ? <PullToRefresh /> : null}
 
       <main className="native-main">
-        <Suspense fallback={<AudreyLoader fullscreen label="Loading Audrey workspace" />}>
-          <ChatWorkspace
-            key={workspaceRevision}
-            user={session.user}
-            preferences={session.preferences}
-            models={session.models}
-            skills={session.skills}
-            navigationOpen={navigationOpen}
-            onNavigationOpenChange={setNavigationOpen}
-            mobileMenuHost={mobileMenuHost}
-            mobileNewChatHost={mobileNewChatHost}
-            menuActions={<SessionActions {...sessionActions} variant="drawer" />}
-            menuFooter={<SessionActions {...sessionActions} variant="footer" />}
-          />
-        </Suspense>
+        <div className="app-workspace-view" hidden={activeWorkspace !== "chat"} inert={activeWorkspace !== "chat" ? true : undefined}>
+          <Suspense fallback={<AudreyLoader fullscreen label="Loading Audrey workspace" />}>
+            <ChatWorkspace
+              key={`${session.user.id}:${workspaceRevision}`}
+              visible={activeWorkspace === "chat"}
+              user={session.user}
+              preferences={session.preferences}
+              models={session.models}
+              skills={session.skills}
+              navigationOpen={navigationOpen}
+              onNavigationOpenChange={setNavigationOpen}
+              mobileMenuHost={activeWorkspace === "chat" ? mobileMenuHost : null}
+              mobileNewChatHost={activeWorkspace === "chat" ? mobileNewChatHost : null}
+              menuActions={<SessionActions {...sessionActions} variant="drawer" />}
+              menuFooter={<SessionActions {...sessionActions} variant="footer" />}
+            />
+          </Suspense>
+        </div>
+        <div className="app-workspace-view" hidden={activeWorkspace !== "agents"} inert={activeWorkspace !== "agents" ? true : undefined}>
+          <AgentsWorkspace key={`${session.user.id}:${workspaceRevision}`} visible={activeWorkspace === "agents"} timezone={session.preferences.timezone} onActiveCountChange={setActiveAgentCount} />
+        </div>
       </main>
       {filesOpen ? (
         <FileManager onClose={() => {

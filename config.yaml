@@ -75,6 +75,23 @@ router:
 application:
   sqlite_path: "/data/audrey_app.sqlite"
 
+# Saved public-source research agents use verified local Qwen only, without fallback.
+# They share Audrey's model/tool admission.
+# Limits persist with each task; retries and resume retain consumed allowance.
+agent_tasks:
+  enabled: true
+  model: "qwen3.8:latest"
+  poll_seconds: 2.0
+  lease_seconds: 60
+  max_attempts: 6
+  step_timeout_seconds: 600.0
+  max_operations: 96
+  max_active_seconds: 1800
+  max_queued_per_user: 5
+  max_queued_global: 50
+  max_tokens_per_call: 2048
+  max_tool_rounds: 6
+
 # ─── Model registry ────────────────────────────────────────────────────
 # Per task type, ranked by priority (higher = preferred when healthy).
 model_registry:

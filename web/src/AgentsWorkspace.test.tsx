@@ -1,0 +1,239 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { AgentsWorkspace } from "./AgentsWorkspace";
+import * as api from "./api";
+import type { AgentTask } from "./api";
+
+function task(patch: Partial<AgentTask> = {}): AgentTask {
+  return {
+    id: "agt_first", objective: "Compare public documentation", status: "running", revision: 2,
+    created_at: "2026-10-28T16:00:00Z", updated_at: "2026-10-28T16:01:00Z", attempts: 1,
+    steps: [
+      { id: "plan", label: "Plan the research", status: "completed", result: "Compare the official sources." },
+      { id: "research", label: "Research public sources", status: "running", result: "" },
+      { id: "review", label: "Review the report", status: "pending", result: "" },
+    ],
+    result: "", error: "", ...patch,
+  };
+}
+
+beforeEach(() => {
+  vi.spyOn(api, "listAgentTasks").mockResolvedValue({ items: [] });
+  vi.spyOn(api, "getAgentTask").mockResolvedValue(task());
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+describe("AgentsWorkspace", () => {
+  it("starts a saved public research task from the objective", async () => {
+    const created = task({ status: "queued", revision: 1 });
+    const create = vi.spyOn(api, "createAgentTask").mockImplementation(async () => {
+      vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [created] });
+      return created;
+    });
+    vi.mocked(api.getAgentTask).mockResolvedValue(created);
+    render(<AgentsWorkspace />);
+    expect(await screen.findByText("No agents yet. Start with a research objective above.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Start agent" })).toBeDisabled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "  Compare public documentation  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    expect(await screen.findByRole("heading", { name: created.objective })).toBeVisible();
+    expect(create).toHaveBeenCalledWith(created.objective, expect.any(String));
+    expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("");
+    expect(screen.getByRole("heading", { name: "Plan and progress" })).toBeVisible();
+    expect(screen.getByText("Research public sources", { selector: "strong" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Schedule" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete task" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the same creation identity when retrying after a lost response", async () => {
+    const create = vi.spyOn(api, "createAgentTask")
+      .mockRejectedValueOnce(new TypeError("The connection was lost."))
+      .mockImplementationOnce(async () => {
+        vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [task()] });
+        return task();
+      });
+    render(<AgentsWorkspace />);
+    await screen.findByText("No agents yet. Start with a research objective above.");
+    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "Compare public documentation" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The connection was lost.");
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    await screen.findByRole("heading", { name: "Compare public documentation" });
+    expect(create.mock.calls[0][1]).toBe(create.mock.calls[1][1]);
+  });
+
+  it("uses saved revisions for pause, resume, and cancellation", async () => {
+    let current = task();
+    vi.mocked(api.listAgentTasks).mockImplementation(async () => ({ items: [current] }));
+    vi.mocked(api.getAgentTask).mockImplementation(async () => current);
+    const action = vi.spyOn(api, "actOnAgentTask").mockImplementation(async (_id, value) => {
+      current = { ...current, revision: current.revision + 1, status: value === "pause" ? "paused" : value === "resume" ? "queued" : "cancelled" };
+      return current;
+    });
+    render(<AgentsWorkspace />);
+    const detail = within(screen.getByRole("region", { name: "Selected agent" }));
+    fireEvent.click(await detail.findByRole("button", { name: "Pause" }));
+    fireEvent.click(await detail.findByRole("button", { name: "Resume" }));
+    fireEvent.click(await detail.findByRole("button", { name: "Cancel" }));
+    expect(await detail.findByRole("button", { name: "Run again" })).toBeEnabled();
+    expect(action.mock.calls).toEqual([
+      ["agt_first", "pause", 2], ["agt_first", "resume", 3], ["agt_first", "cancel", 4],
+    ]);
+  });
+
+  it("reloads a revision conflict without repeating the user's action", async () => {
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [task()] });
+    const action = vi.spyOn(api, "actOnAgentTask").mockRejectedValue(new api.ApiError(409, "Revision changed"));
+    render(<AgentsWorkspace />);
+    const pause = await screen.findByRole("button", { name: "Pause" });
+    await waitFor(() => expect(api.getAgentTask).toHaveBeenCalled());
+    vi.mocked(api.getAgentTask).mockResolvedValue(task({ status: "completed", revision: 5, result: "Reviewed report." }));
+    fireEvent.click(pause);
+    expect(await screen.findByText(/This agent changed while you were acting/u)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Run again" })).toBeEnabled();
+    expect(screen.getByText("Reviewed report.")).toBeVisible();
+    expect(action).toHaveBeenCalledOnce();
+  });
+
+  it("creates a new historical task when Run again is selected", async () => {
+    const original = task({ status: "completed", result: "Original report." });
+    const next = task({ id: "agt_new", status: "queued", revision: 1, created_at: "2026-10-28T17:00:00Z" });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [original] });
+    vi.mocked(api.getAgentTask).mockImplementation(async (id) => id === original.id ? original : next);
+    const create = vi.spyOn(api, "createAgentTask").mockImplementation(async () => {
+      vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [next, original] });
+      return next;
+    });
+    render(<AgentsWorkspace />);
+    fireEvent.click(await screen.findByRole("button", { name: "Run again" }));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: `Open agent: ${original.objective}` })).toHaveLength(2));
+    expect(create).toHaveBeenCalledWith(original.objective, expect.any(String));
+    const cards = screen.getAllByRole("button", { name: `Open agent: ${original.objective}` });
+    expect(cards[0]).toHaveAttribute("aria-pressed", "true");
+    expect(cards[1]).toHaveTextContent("Completed");
+  });
+
+  it("confirms terminal task deletion and prevents stale listings from restoring it", async () => {
+    const saved = task({ status: "completed", revision: 8, result: "Saved report." });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
+    vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const remove = vi.spyOn(api, "deleteAgentTask").mockResolvedValue();
+    render(<AgentsWorkspace />);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete task" }));
+    expect(remove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Keep task" }));
+    expect(screen.queryByRole("button", { name: "Confirm delete task" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm delete task" }));
+    expect(await screen.findByText("No agents yet. Start with a research objective above.")).toBeVisible();
+    expect(remove).toHaveBeenCalledWith(saved.id, 8);
+    expect(screen.queryByRole("heading", { name: saved.objective })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh agent tasks" })).toBeEnabled());
+    expect(screen.queryByRole("button", { name: `Open agent: ${saved.objective}` })).not.toBeInTheDocument();
+  });
+
+  it("reloads a deletion conflict and requires a fresh confirmation", async () => {
+    const saved = task({ status: "completed" });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
+    vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const remove = vi.spyOn(api, "deleteAgentTask").mockRejectedValue(new api.ApiError(409, "Revision changed"));
+    render(<AgentsWorkspace />);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete task" }));
+    vi.mocked(api.getAgentTask).mockResolvedValue({ ...saved, revision: 6 });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm delete task" }));
+    await screen.findByText(/This agent changed while you were acting/u);
+    expect(remove).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Confirm delete task" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete task" })).toBeEnabled();
+  });
+
+  it("retains selection and newer revisions when an older refresh completes", async () => {
+    const first = task();
+    const second = task({ id: "agt_second", objective: "Check release documentation", revision: 3 });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [first, second] });
+    vi.mocked(api.getAgentTask).mockImplementation(async (id) => id === first.id ? first : second);
+    vi.spyOn(api, "actOnAgentTask").mockResolvedValue({ ...second, status: "paused", revision: 4 });
+    render(<AgentsWorkspace />);
+    fireEvent.click(await screen.findByRole("button", { name: `Open agent: ${second.objective}` }));
+    await screen.findByRole("heading", { name: second.objective });
+    let finishRefresh!: (value: { items: AgentTask[] }) => void;
+    vi.mocked(api.listAgentTasks).mockImplementationOnce(() => new Promise((resolve) => { finishRefresh = resolve; }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh agent tasks" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await screen.findByRole("button", { name: "Resume" });
+    await act(async () => { finishRefresh({ items: [first, second] }); });
+    expect(screen.getByRole("heading", { name: second.objective })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeEnabled();
+  });
+
+  it("removes a task deleted in another session when the full catalog refreshes", async () => {
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [task()] });
+    const count = vi.fn();
+    render(<AgentsWorkspace onActiveCountChange={count} />);
+    await screen.findByRole("heading", { name: task().objective });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh agent tasks" })).toBeEnabled());
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
+    expect(await screen.findByText("No agents yet. Start with a research objective above.")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: task().objective })).not.toBeInTheDocument();
+    expect(count).toHaveBeenLastCalledWith(0);
+  });
+
+  it("polls active tasks, reports the active count, and stops polling on unmount", async () => {
+    vi.useFakeTimers();
+    let current = task();
+    vi.mocked(api.listAgentTasks).mockImplementation(async () => ({ items: [{ ...current, summary: true, result: "", steps: current.steps.map((step) => ({ ...step, result: "" })) }] }));
+    vi.mocked(api.getAgentTask).mockImplementation(async () => current);
+    const count = vi.fn();
+    const { unmount } = render(<AgentsWorkspace onActiveCountChange={count} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(count).toHaveBeenLastCalledWith(1);
+    current = { ...current, status: "completed", revision: 4, result: "The completed report." };
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.getByText("The completed report.")).toBeVisible();
+    expect(count).toHaveBeenLastCalledWith(0);
+    unmount();
+    const calls = vi.mocked(api.listAgentTasks).mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    expect(api.listAgentTasks).toHaveBeenCalledTimes(calls);
+  });
+
+  it("hydrates summary records from detail and preserves saved bodies during a refresh", async () => {
+    const full = task({ status: "completed", result: "The saved detailed report." });
+    const summary = { ...full, summary: true, result: "", steps: full.steps.map((step) => ({ ...step, result: "" })) };
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [summary] });
+    vi.mocked(api.getAgentTask).mockResolvedValue(full);
+    render(<AgentsWorkspace />);
+    expect(await screen.findByText("The saved detailed report.")).toBeVisible();
+    fireEvent.click(screen.getByText("View saved plan"));
+    expect(screen.getByText("Compare the official sources.")).toBeVisible();
+    vi.mocked(api.getAgentTask).mockImplementation(() => new Promise(() => {}));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh agent tasks" })).toBeEnabled());
+    expect(screen.getByText("The saved detailed report.")).toBeVisible();
+    expect(screen.getByText("Compare the official sources.")).toBeVisible();
+  });
+
+  it("recovers from a failed list refresh and renders report Markdown safely", async () => {
+    vi.mocked(api.listAgentTasks).mockRejectedValueOnce(new Error("Temporarily unavailable"));
+    const saved = task({ status: "completed", result: "## Findings\n[Source](https://example.com/report)\n<script>alert('unsafe')</script>\n[unsafe](javascript:alert)\n![tracking](https://example.com/tracker.png)" });
+    vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    render(<AgentsWorkspace />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Temporarily unavailable");
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
+    expect(await screen.findByRole("heading", { name: "Findings" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "Source" })).toHaveAttribute("rel", "noopener noreferrer");
+    expect(document.querySelector("script")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getByText("unsafe", { selector: "a" })).not.toHaveAttribute("href", expect.stringContaining("javascript:"));
+  });
+});

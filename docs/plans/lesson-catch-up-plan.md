@@ -72,6 +72,7 @@ content belongs; they do not authorize new writing or immediate file removal.
 | `lesson-03-foundations-satellites.md` | 2: httpx and brief test-suite context; 13: embeddings/Qdrant; 26: Prometheus; then retire source |
 | `lesson-04-request-lifecycle.md` | 3: Platform map; shorten its detailed native trace when 17 exists |
 | `lesson-05-configuration-and-startup.md` | 4: Configuration/startup; introduce store initialization alongside 5 |
+| `lesson-06a-application-database.md` | 5: The application database; published early as 6a (2026-10-28), read between 5 and 6 |
 | `lesson-06-the-model-layer.md` | 8: Choosing a model |
 | `lesson-07-calling-models.md` | 9: Calling models, including a high-level Private explanation |
 | `lesson-08-classification-and-routing.md` | 7: Routing; move model-access detail to 6 |
@@ -87,8 +88,9 @@ content belongs; they do not authorize new writing or immediate file removal.
 
 Two scripted renumbers implement this design when lesson work resumes:
 
-1. **Database and identity enter together.** Review both drafts, insert them
-   after configuration, and put the pipeline in request order. Keep the four
+1. **Identity joins the database lesson.** The database lesson is already
+   published as 6a. Review the identity draft, insert both after configuration
+   as 6 and 7, and put the pipeline in request order. Keep the four
    source lessons awaiting merges beside their destination area. Interim order:
    0 introduction; 1 Python; 2 libraries; 3 satellite libraries; 4 lifecycle;
    5 configuration; 6 database; 7 identity; 8 routing; 9–10 model layer;

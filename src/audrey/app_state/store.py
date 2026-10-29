@@ -22,6 +22,7 @@ import uuid
 from collections.abc import Iterable
 from pathlib import Path
 
+from audrey.app_state.agents import AgentsRepository
 from audrey.app_state.history_import import HistoryImportRepository
 from audrey.app_state.migrations import (
     MIGRATIONS,
@@ -116,6 +117,7 @@ class ApplicationStore:
         self.responses = ResponsesRepository(self._conn, self._lock)
         self.tax_cases = TaxCasesRepository(self._conn, self._lock)
         self.private_tasks = PrivateTasksRepository(self._conn, self._lock)
+        self.agents = AgentsRepository(self._conn, self._lock)
         self.responses._prune_expired_sync()
 
     def _migrate_locked(self) -> None:
@@ -799,6 +801,10 @@ class ApplicationStore:
                 )
                 self._conn.execute(
                     "DELETE FROM app_responses WHERE owner_id = ?",
+                    (user_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM app_agent_tasks WHERE user_id = ?",
                     (user_id,),
                 )
                 self._conn.execute(
