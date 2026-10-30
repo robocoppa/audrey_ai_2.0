@@ -88,7 +88,12 @@ def agent_settings(app: Any) -> AgentSettings:
 async def research_authority(app: Any, user_id: str) -> Any:
     store = app.state.application_store
     principal = await store.get_principal(user_id=user_id)
-    if principal is None or principal.status != "active" or principal.role == "bot":
+    if (
+        principal is None
+        or principal.status != "active"
+        or principal.role == "bot"
+        or "bots" in principal.groups
+    ):
         raise AgentDispatchStoppedError("Agent account access is unavailable.")
     if not agent_settings(app).enabled or current_processing_policy() is not None:
         raise AgentDispatchStoppedError("Public research agents are unavailable.")

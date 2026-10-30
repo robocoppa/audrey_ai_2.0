@@ -749,5 +749,5 @@ The next lesson opens the database that startup opened first:
 [Lesson 6a — The application database](lesson-06a-application-database.md).
 It answers where a conversation actually lives, and what makes it safe to change
 that storage while real data is in it: transactions, the write-ahead log, the
-rules the schema enforces, migrations and verified backups. After it, the course
-turns to the answer pipeline, starting with the model layer.
+rules the schema enforces and migrations. Identity and access follow it, and
+then the course turns to the answer pipeline, starting with the model layer.

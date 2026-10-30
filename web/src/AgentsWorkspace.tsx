@@ -8,12 +8,14 @@ import {
   createAgentTask,
   deleteAgentTask,
   getAgentTask,
+  getWatchUnreadCount,
   listAgentTasks,
   type AgentTask,
   type AgentTaskStatus,
 } from "./api";
 import "./AgentsWorkspace.css";
 import { AgentKnowledgeDialog } from "./AgentKnowledgeDialog";
+import { WatchesWorkspace } from "./WatchesWorkspace";
 
 const STATUS_LABELS: Record<AgentTaskStatus, string> = {
   queued: "Queued", running: "Running", paused: "Paused", completed: "Completed",
@@ -61,19 +63,81 @@ function newRequestId(): string {
   return `agent-ui-${Array.from(values, (value) => value.toString(16)).join("-")}`;
 }
 
-export function AgentsWorkspace({
-  visible = true,
-  timezone,
-  onActiveCountChange,
-  navigationOpen,
-  onNavigationOpenChange,
-}: {
+interface AgentsWorkspaceProps {
   visible?: boolean;
   timezone?: string;
   onActiveCountChange?: (count: number) => void;
   navigationOpen?: boolean;
   onNavigationOpenChange?: (open: boolean) => void;
-}) {
+}
+
+export function AgentsWorkspace(props: AgentsWorkspaceProps) {
+  const [view, setView] = useState<"tasks" | "watches" | "activity">("tasks");
+  const [watchesOpened, setWatchesOpened] = useState(false);
+  const [unread, setUnread] = useState(0);
+  const unreadGeneration = useRef(0);
+  const visible = props.visible ?? true;
+  const receiveUnread = useCallback((count: number) => {
+    unreadGeneration.current += 1;
+    setUnread(count);
+  }, []);
+  useEffect(() => {
+    if (!visible) return;
+    const controller = new AbortController();
+    let inFlight = false;
+    async function refreshCount() {
+      if (inFlight || controller.signal.aborted || document.visibilityState === "hidden") return;
+      inFlight = true;
+      const generation = unreadGeneration.current;
+      try {
+        const result = await getWatchUnreadCount(controller.signal);
+        if (!controller.signal.aborted && generation === unreadGeneration.current) setUnread(result.unread_count);
+      } catch {
+        // Retain the last known count when this small background read fails.
+      } finally { inFlight = false; }
+    }
+    void refreshCount();
+    const timer = window.setInterval(() => void refreshCount(), 15000);
+    window.addEventListener("focus", refreshCount);
+    document.addEventListener("visibilitychange", refreshCount);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshCount);
+      document.removeEventListener("visibilitychange", refreshCount);
+    };
+  }, [visible]);
+  function navigate(next: typeof view) {
+    if (next !== "tasks") setWatchesOpened(true);
+    setView(next);
+    props.onNavigationOpenChange?.(false);
+  }
+  return <section className="agents-hub" aria-label="Agents workspace">
+    <nav className="agents-subnavigation" aria-label="Agent workspaces">
+      <button type="button" aria-current={view === "tasks" ? "page" : undefined} onClick={() => navigate("tasks")}>Tasks</button>
+      <button type="button" aria-current={view === "watches" ? "page" : undefined} onClick={() => navigate("watches")}>Watches</button>
+      <button type="button" aria-current={view === "activity" ? "page" : undefined} onClick={() => navigate("activity")}>Activity{unread ? <span className="agents-active-count" aria-label={`${unread} unread notifications`}>{unread}</span> : null}</button>
+    </nav>
+    <div className="agents-hub-view" hidden={view !== "tasks"}><AgentTasksWorkspace {...props} visible={(props.visible ?? true) && view === "tasks"} /></div>
+    {watchesOpened ? <div className="agents-hub-view" hidden={view === "tasks"}><WatchesWorkspace
+      visible={(props.visible ?? true) && view !== "tasks"}
+      mode={view === "activity" ? "activity" : "watches"}
+      timezone={props.timezone}
+      navigationOpen={props.navigationOpen}
+      onNavigationOpenChange={props.onNavigationOpenChange}
+      onUnreadChange={receiveUnread}
+      onOpenWatch={() => navigate("watches")}
+    /></div> : null}
+  </section>;
+}
+
+function AgentTasksWorkspace({
+  visible = true,
+  timezone,
+  onActiveCountChange,
+  navigationOpen,
+  onNavigationOpenChange,
+}: AgentsWorkspaceProps) {
   const [compactNavigation, setCompactNavigation] = useState(() =>
     window.matchMedia?.("(max-width: 760px)").matches ?? false);
   const [internalNavigationOpen, setInternalNavigationOpen] = useState(false);

@@ -19,6 +19,7 @@ function task(patch: Partial<AgentTask> = {}): AgentTask {
 }
 
 beforeEach(() => {
+  vi.spyOn(api, "getWatchUnreadCount").mockResolvedValue({ unread_count: 0 });
   vi.spyOn(api, "listAgentTasks").mockResolvedValue({ items: [] });
   vi.spyOn(api, "getAgentTask").mockResolvedValue(task());
 });

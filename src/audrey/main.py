@@ -69,6 +69,8 @@ from audrey.tax_exports import TaxReviewExports
 from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, discover_all
 from audrey.tools.dispatch import audit_user_scoping
 from audrey.user_data_purge import UserDataPurgeCoordinator
+from audrey.watch_executor import WatchExecutor, watch_settings
+from audrey.watch_runtime import WatchRuntime
 
 logging.basicConfig(
     level=logging.INFO,
@@ -399,6 +401,18 @@ async def lifespan(app: FastAPI):
     )
     app.state.agent_runtime = agent_runtime
 
+    saved_watch_settings = watch_settings(app)
+    watch_runtime = WatchRuntime(
+        application_store.watches,
+        WatchExecutor(app),
+        poll_seconds=saved_watch_settings.poll_seconds,
+        lease_seconds=saved_watch_settings.lease_seconds,
+        max_attempts=saved_watch_settings.max_attempts,
+        check_timeout_seconds=saved_watch_settings.check_timeout_seconds,
+        run_limits=saved_watch_settings.run_limits(),
+    )
+    app.state.watch_runtime = watch_runtime
+
     search_cfg = cfg.raw.get("content_search", {}) or {}
     content_search = None
     if search_cfg.get("enabled", True):
@@ -462,12 +476,15 @@ async def lifespan(app: FastAPI):
                 log.warning("Local content search recovery failed; search is unavailable")
         if saved_agent_settings.enabled:
             await agent_runtime.start()
+        if saved_agent_settings.enabled and saved_watch_settings.enabled:
+            await watch_runtime.start()
         yield
     finally:
         await user_data_purges.stop()
         if content_search is not None:
             await content_search.stop()
             content_search.index.close()
+        await watch_runtime.stop()
         await agent_runtime.stop()
         await native_runs.stop()
         if tools_discovery_task is not None and not tools_discovery_task.done():

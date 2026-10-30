@@ -6,21 +6,46 @@ and Lesson 5 showed startup opening it before anything else runs. This lesson
 looks inside. It answers two questions: Where does a conversation live, and what
 keeps that data safe while the code around it keeps changing?
 
-The answer rests on four guarantees, and the read-along takes them in turn:
+The answer rests on three guarantees, and the read-along takes them in turn:
 writes that happen completely or not at all, rules the database enforces itself,
-a schema that can change under existing rows, and backups that are checked by
-restoring them.
+and a schema that can change under existing rows.
 
 ## 1. Context
 
-### 1.1 One file, many tables
+### 1.1 The canonical records
 
-Audrey keeps its canonical records in SQLite: one file, named by
+Audrey's **canonical records** are the original copy of each person's account,
+conversations, settings and Projects. Every other copy defers to them: The
+browser shows one, and the searchable chat archive keeps one arranged for
+search, but when a copy and the records disagree, the records are right.
+
+An account holds the person's email, display name and role, whether an
+administrator has approved or disabled them, and any personal access tokens that
+let scripts and bots act for them. A conversation is a titled thread that
+remembers the model chosen for it. Its messages are the person's questions and
+Audrey's answers, in order, with their attachments, the sources each answer drew
+on and the tools it called, and every turn adds a **run**, which records the
+model that answered, the tokens it used and how the turn ended. Settings are a
+time zone, a persona and a preferred response style. A Project gathers
+conversations and files under its own instructions.
+
+Audrey uses these records on almost every request. Each request starts by
+loading the caller's account and checking that it's active, and the
+conversation list, an open conversation and a Project page are all read from
+them. Sending a message writes to them when the turn starts and again when the
+answer is saved (§2.4). In between, Audrey builds what the model reads from the
+records: the conversation's stored messages
+([`_history_messages`](../../src/audrey/routes/app/runs.py#L1278)), leaving out
+answers that didn't finish, plus the person's settings and, in a Project, its
+instructions. The browser sends only the newest message (Lesson 4), so nothing
+it holds can change what the model is told about the past.
+
+The records live in SQLite: one file, named by
 [`application.sqlite_path`](../../config.yaml#L76) and opened through Python's
 built-in `sqlite3` module. There's no database server to run. That suits one
 machine serving a handful of people, with one container writing the data
-(Lesson 5), and SQLite still provides what matters here: transactions,
-constraints and online backups.
+(Lesson 5), and SQLite still provides what matters here: transactions and
+constraints.
 
 What lives in it:
 
@@ -33,15 +58,14 @@ What lives in it:
 | Projects and other features | `app_projects`, `app_tax_cases`, `app_private_tasks` and more |
 
 This lesson reads the database through conversations, messages and runs, the
-tables every chat request touches, with preferences as its simplest example.
-What it teaches about transactions, schema rules, migrations and backups applies
-to every table above. Accounts and access, the delivery of archive hand-offs, and
-Projects and the other features each get their own explanation in later lessons.
+tables every chat request touches. What it teaches about transactions, schema
+rules and migrations applies to every table above. Accounts and access, the
+delivery of archive hand-offs, and Projects and the other features each get
+their own explanation in later lessons.
 
 Some data lives elsewhere: Uploaded files are tracked in their own SQLite
 database, saved memories live in Qdrant, and the searchable chat archive belongs
-to the tools sidecar. Lesson 4 sorted those into authorities and projections,
-and this lesson returns to that distinction at the end.
+to the tools sidecar.
 
 ### 1.2 The files
 
@@ -52,8 +76,6 @@ and this lesson returns to that distinction at the end.
 | The commit-or-rollback boundary for writes | [`transactions.py`](../../src/audrey/app_state/transactions.py) |
 | Conversations, messages, runs, preferences and archive receipts | [`repositories.py`](../../src/audrey/app_state/repositories.py) |
 | The typed records callers get back | [`records.py`](../../src/audrey/app_state/records.py) |
-| The worker that hands finished turns to the archive | [`chat_projection.py`](../../src/audrey/chat_projection.py) |
-| Operator commands, including backup and verification | [`admin_cli.py`](../../src/audrey/admin_cli.py) |
 
 The other repositories in `src/audrey/app_state/` share the same connection and
 lock, and follow the same rules.
@@ -97,11 +119,11 @@ same time, so the lock makes them take turns on the connection. Every write has
 the same shape:
 
 ```text
-repository method (async)            what routes call
- -> asyncio.to_thread                the event loop keeps running
-     -> validate the input           no lock needed yet
-     -> take the store's lock        one thread at a time
-         -> BEGIN IMMEDIATE          the write lock, up front
+repository method (async)            # what routes call
+ -> asyncio.to_thread                # the event loop keeps running
+     -> validate the input           # no lock needed yet
+     -> take the store's lock        # one thread at a time
+         -> BEGIN IMMEDIATE          # the write lock, up front
          -> the SQL
          -> commit, or roll back on any error
  -> a typed record
@@ -194,21 +216,37 @@ sees it:
 
 ```text
 Send
- -> begin_run                one write transaction
+ -> begin_run                    # one write transaction
       check: the conversation is yours and not archived, your account is
              active, no other run is in progress
-      INSERT the run           status 'running'
+      INSERT the run             # status 'running'
       INSERT your message and its attachments
       INSERT the assistant message, empty, status 'in_progress'
       UPDATE the conversation's timestamps
     COMMIT
- -> the answer streams       in memory only; the database still says 'running'
- -> finish_run               one write transaction
+ -> the answer streams           # to the browser, held in memory, not yet saved
+ -> finish_run                   # one write transaction
       UPDATE the run: outcome, models, token counts, only if still 'running'
       UPDATE the assistant message: its text, 'completed' or 'incomplete'
       INSERT the sources, tool calls and an archive receipt
     COMMIT
 ```
+
+The answer is the assistant's reply, and streaming is how it reaches the screen
+(Lesson 4). The model writes the reply in pieces, usually a few words each. Each
+piece reaches the run as an event, and so do the sources consulted, the tool
+calls and the models used along the way. The run holds those events in memory,
+and the browser's stream reads them from there, so the person watches the reply
+being written. The database sees none of it until the run ends: The assistant
+message stays empty, and then
+[`_persist_terminal`](../../src/audrey/routes/app/runs.py#L1017) joins the text
+pieces and hands them to `finish_run` with everything else the run collected.
+That's one write per turn, however long the answer.
+
+The run belongs to Audrey's process, not to the browser's connection, so
+closing or reloading the tab doesn't stop the answer. A reloaded page reads the
+conversation from the database, finds the run still `running`, says Audrey is
+still answering, and shows the answer once it's saved.
 
 Four things to notice:
 
@@ -217,20 +255,27 @@ Four things to notice:
   ([`_begin_run_sync`](../../src/audrey/app_state/repositories.py#L792)), so
   nothing can change between a check and the inserts that depend on it. Two tabs
   pressing Send at once produce one run and one 409 Conflict.
-- **A run ends once.** `finish_run` refuses a second outcome in Python, its
-  `UPDATE` matches only a run that is still running
+- **A run ends once.** It ends in one of three ways: The model finishes
+  (`succeeded`), the person presses Stop (`cancelled`), or something fails
+  (`failed`). Whichever comes first, `finish_run` saves the text written by
+  then: the whole answer, marked `completed`, or the part written before the
+  Stop or the failure, marked `incomplete`. `finish_run` refuses a second
+  outcome in Python, its `UPDATE` matches only a run that is still running
   ([`_finish_run_sync`](../../src/audrey/app_state/repositories.py#L1093)), and
-  the trigger from §2.2 backs both up. Whatever text had streamed is saved: the
-  whole answer, or the part that arrived, marked incomplete.
+  the trigger from §2.2 backs both up.
 - **The archive receipt commits with the answer.** It's a row saying this turn
   still has to reach the searchable archive
   ([`_insert_native_projection_locked`](../../src/audrey/app_state/repositories.py#L1275)),
   and Private turns never get one. Because both commit together, no turn is
   saved without its receipt. A later lesson follows the delivery.
-- **A crash leaves an honest ending.** If the process dies mid-answer, the run
-  still says `running`. Before serving anyone, the next startup's
+- **A crash leaves an honest ending.** If the process dies mid-answer, the text
+  in memory dies with it, and the database still holds what `begin_run` wrote:
+  a run that says `running` and an empty assistant message. Before serving
+  anyone, the next startup's
   [`recover_interrupted_runs`](../../src/audrey/app_state/repositories.py#L1238)
-  marks it failed with `server_restart`, and its message incomplete.
+  marks the run failed with `server_restart` and the message incomplete. The
+  person sees an interrupted turn they can retry, not an answer that never
+  comes.
 
 ### 2.5 Migrations
 
@@ -246,69 +291,15 @@ serve requests until every migration has applied. The highest recorded version
 is the **schema version**, which startup logs
 ([`main.py:115`](../../src/audrey/main.py#L115 '"application_store: ready sqlite=%s schema=%d",')).
 
-Migrations come in three kinds:
-
-1. **New tables and indexes**, the common case. Existing rows are untouched.
-2. **New columns**, always with a default, so existing rows get a value and
-   older code keeps working. SQLite can't add a column only if it's missing, so
-   the store adds these one at a time and skips any that exist
-   ([`_apply_additive_column_migration_locked`](../../src/audrey/app_state/store.py#L184)).
-3. **Table rebuilds**, for changes SQLite can't make in place, such as a new
-   allowed value in a `CHECK`. The migration renames the old table aside,
-   creates the new one, copies the rows and drops the old table
-   ([`migrations.py:471`](../../src/audrey/app_state/migrations.py#L471 'PRAGMA legacy_alter_table = ON;')).
-
-A rebuild's dangerous step is the drop. Messages reference runs with
-`ON DELETE CASCADE`, and with foreign keys on, renaming a table drags those
-references along, so dropping the renamed table would delete every message. So
-rebuilds take their own path
-([`_apply_table_rebuild_migration_locked`](../../src/audrey/app_state/store.py#L155)):
-Foreign keys go off before the transaction starts, the rename leaves other
-tables pointing at the table's name, and a full foreign-key check runs before the
-commit, rolling the whole rebuild back if any row now points at nothing.
-
-The rules for the next migration follow:
+Most migrations add new tables, indexes or columns and leave existing rows as
+they are. The rules for the next one follow:
 
 - **Append, never edit.** A database that recorded a version never runs it
   again, so an edited migration reaches only new databases.
-- **Give new columns defaults.**
-- **Register the special kinds** in
-  [`_FOREIGN_KEYS_OFF_MIGRATIONS`](../../src/audrey/app_state/store.py#L61) or
-  [`_ADDITIVE_COLUMN_MIGRATIONS`](../../src/audrey/app_state/store.py#L62).
+- **Give new columns defaults,** so existing rows get a value and older code
+  keeps working.
 - **Back up first.** Nothing reverses a migration, and one that runs cleanly but
   does the wrong thing commits like any other.
-
-### 2.6 Backups and rebuilds
-
-Copying the file isn't a backup while Audrey runs. Recent commits may still sit
-in the WAL file, and copying files that are changing can catch them at different
-moments. The operator command `audrey-admin backup-app-state` uses SQLite's
-online backup instead, which copies one consistent snapshot while Audrey keeps
-working
-([`_online_application_backup`](../../src/audrey/admin_cli.py#L133)). It never
-overwrites an existing file, makes the copy readable only by its owner, opens
-production read-only, checks the copy's integrity, and deletes the copy if
-anything failed.
-
-A backup is only as good as a restore you've seen work, so
-`verify-app-state-backup`
-([`_verify_application_backup`](../../src/audrey/admin_cli.py#L261)) restores
-one into a throwaway file, never into production. It checks the restored copy's
-integrity and foreign keys, and that its schema version and record counts match
-the backup's.
-
-Audrey doesn't back itself up. The operator takes a backup, and verifies it,
-before deploying a release with new migrations. The one bulk import an operator
-can run won't start without a backup path, and takes that backup itself before
-writing
-([`admin_cli.py:367`](../../src/audrey/admin_cli.py#L367 '_online_application_backup(path, backup_to)')).
-
-The archive receipts close the loop on Lesson 4's distinction.
-[`ChatProjectionPromoter.rebuild`](../../src/audrey/chat_projection.py#L92)
-marks every receipt undelivered, and the worker delivers every finished turn
-again. A turn delivered twice does no harm, because each delivery carries the
-receipt's stable id. Nothing works the other way: The archive can't rebuild the
-database. **Back up authorities; rebuild projections.**
 
 ## 3. Comprehension questions
 
@@ -330,16 +321,7 @@ committed. After the second, the run and an empty assistant message, since the
 streamed text lived only in memory. Before anyone sees them, startup marks the
 run failed with `server_restart` and the message incomplete (§2.4).
 
-**3. A release adds a new allowed run mode. Why is that a table rebuild, and
-why must foreign keys be off while it runs?**
-
-The allowed modes are a `CHECK` constraint, which SQLite can't change in place,
-so the table is recreated and its rows copied (§2.5). With foreign keys on,
-renaming the old table would drag the messages' references along, and dropping
-it would delete every message attached to a run. The rebuild path turns them
-off first and checks every foreign key before it commits.
-
-**4. A teammate adds a column to `app_messages` by editing the migration that
+**3. A teammate adds a column to `app_messages` by editing the migration that
 creates the table, instead of adding a new migration. The tests pass. What
 happens on the server?**
 
@@ -348,24 +330,11 @@ it again, so the column never appears there, and the first query that uses it
 fails. The tests passed because they start from empty databases. A new migration
 that adds the column, with a default, is the fix (§2.5).
 
-**5. An operator copies `audrey_app.sqlite` with `cp` while Audrey runs, and
-later restores it. Recent conversations are missing, or the file won't open.
-Why, and what should they have done?**
-
-Recent commits can sit in the WAL file until a checkpoint moves them, so the
-main file alone misses them, and copying files while they change can catch them
-at different moments. `audrey-admin backup-app-state` takes one consistent
-snapshot while Audrey runs, and `verify-app-state-backup` proves it restores
-(§2.6).
-
 ## When you're ready for the next lesson
 
 Every query in this lesson filtered by a `user_id` taken from an authenticated
-caller. How Audrey decides who that caller is, and what they may use, gets a
-lesson of its own later. The next lesson returns to the answer pipeline and
-opens the model layer:
-[Lesson 6 — The model layer I: choosing a model](lesson-06b-the-model-layer.md).
-It traces what happens when a pipeline node says "I need a general-purpose
-model": which choices a person may pick, how the registry ranks candidates, and
-how the health tracker steps around failing ones. The lesson after it follows
-the call itself to Ollama.
+caller. The next lesson is about that caller:
+[Lesson 6b — Identity and access](lesson-06b-identity-and-access.md). It covers
+how Audrey knows who is calling, through Cloudflare Access, a personal access
+token or its own service token, and what decides what each caller may do:
+account status, groups, token scopes and which models they may use.

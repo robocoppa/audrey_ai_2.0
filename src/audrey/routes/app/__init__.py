@@ -15,12 +15,14 @@ from audrey.routes.app.projects import router as projects_router
 from audrey.routes.app.runs import router as runs_router
 from audrey.routes.app.search import router as search_router
 from audrey.routes.app.tax_review import router as tax_review_router
+from audrey.routes.app.watches import router as watches_router
 
 router = APIRouter(prefix="/api")
 router.include_router(me_router)
 router.include_router(capabilities_router)
 router.include_router(models_router)
 router.include_router(agents_router)
+router.include_router(watches_router)
 router.include_router(conversations_router)
 router.include_router(projects_router)
 router.include_router(knowledge_router)

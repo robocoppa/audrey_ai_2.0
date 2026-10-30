@@ -552,6 +552,117 @@ export async function deleteAgentTask(taskId: string, expectedRevision: number):
   });
 }
 
+export type WatchSchedule = {
+  kind: "interval" | "daily" | "weekly";
+  timezone: string;
+  interval_minutes?: number;
+  time?: string;
+  weekday?: number;
+};
+
+export interface WatchRunSummary {
+  id: string;
+  definition?: {
+    title: string;
+    url: string;
+    criterion: string;
+    schedule: WatchSchedule;
+  };
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  outcome: "baseline" | "unchanged" | "changed" | null;
+  kind: "scheduled" | "catchup" | "manual";
+  created_at: string;
+  scheduled_at: string;
+  completed_at: string | null;
+  report: string;
+  diff: string;
+  significant: boolean | null;
+  error: string;
+}
+
+export interface WatchRun extends WatchRunSummary {
+  watch_id: string;
+  watch_revision: number;
+  updated_at: string;
+  attempts: number;
+}
+
+export interface PublicWatch {
+  id: string;
+  title: string;
+  url: string;
+  criterion: string;
+  schedule: WatchSchedule;
+  enabled: boolean;
+  revision: number;
+  next_run_at: string | null;
+  active_run_id: string | null;
+  latest_run: WatchRunSummary | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type WatchDefinition = Pick<PublicWatch, "title" | "url" | "criterion" | "schedule" | "enabled">;
+
+export interface WatchNotification {
+  id: string;
+  watch_id: string;
+  run_id: string;
+  kind: "change" | "failure";
+  title: string;
+  body: string;
+  created_at: string;
+  read_at: string | null;
+}
+
+export function listWatches(signal?: AbortSignal): Promise<{ items: PublicWatch[] }> {
+  return apiJson("/api/watches", { signal, cache: "no-store" });
+}
+
+export function getWatch(id: string, signal?: AbortSignal): Promise<PublicWatch> {
+  return apiJson(`/api/watches/${encodeURIComponent(id)}`, { signal, cache: "no-store" });
+}
+
+export function previewWatchSchedule(schedule: WatchSchedule, signal?: AbortSignal): Promise<{ occurrences: string[] }> {
+  return apiJson("/api/watches/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ schedule }), signal });
+}
+
+export function createWatch(definition: WatchDefinition, requestId: string): Promise<PublicWatch> {
+  return apiJson("/api/watches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...definition, request_id: requestId }) });
+}
+
+export function updateWatch(id: string, definition: WatchDefinition, expectedRevision: number): Promise<PublicWatch> {
+  return apiJson(`/api/watches/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...definition, expected_revision: expectedRevision }) });
+}
+
+export function actOnWatch(id: string, action: "pause" | "resume" | "run", expectedRevision: number): Promise<PublicWatch> {
+  return apiJson(`/api/watches/${encodeURIComponent(id)}/actions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, expected_revision: expectedRevision }) });
+}
+
+export async function deleteWatch(id: string, expectedRevision: number): Promise<void> {
+  await apiResponse(`/api/watches/${encodeURIComponent(id)}?expected_revision=${expectedRevision}`, { method: "DELETE" });
+}
+
+export function listWatchRuns(id: string, signal?: AbortSignal): Promise<{ items: WatchRun[] }> {
+  return apiJson(`/api/watches/${encodeURIComponent(id)}/runs`, { signal, cache: "no-store" });
+}
+
+export function getWatchRun(watchId: string, runId: string, signal?: AbortSignal): Promise<WatchRun> {
+  return apiJson(`/api/watches/${encodeURIComponent(watchId)}/runs/${encodeURIComponent(runId)}`, { signal, cache: "no-store" });
+}
+
+export function listWatchNotifications(signal?: AbortSignal): Promise<{ items: WatchNotification[]; unread_count: number }> {
+  return apiJson("/api/notifications", { signal, cache: "no-store" });
+}
+
+export function getWatchUnreadCount(signal?: AbortSignal): Promise<{ unread_count: number }> {
+  return apiJson("/api/notifications/unread", { signal, cache: "no-store" });
+}
+
+export function readWatchNotification(id: string): Promise<WatchNotification> {
+  return apiJson(`/api/notifications/${encodeURIComponent(id)}/read`, { method: "POST" });
+}
+
 export async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiResponse(path, init);
   return (await response.json()) as T;

@@ -52,6 +52,21 @@ async def _rerun(state, task, **changes):
     })
 
 
+async def _add_owner_to_bots(state):
+    administrator = await state.store.resolve_external_identity(
+        provider="test", subject="operator", email="operator@example.com", display_name="Operator",
+        role="admin", auth_method="test",
+    )
+    await state.store.admin_update_user(
+        actor_user_id=administrator.user_id,
+        target_user_id=state.owners[0].user_id,
+        groups=["users", "bots"],
+    )
+    principal = await state.store.get_principal(user_id=state.owners[0].user_id)
+    assert principal.role == "user" and principal.groups == frozenset({"users", "bots"})
+    state.current[0] = principal
+
+
 async def _complete_task(state):
     task = (await _create(state)).json()
 
@@ -150,6 +165,33 @@ async def test_disabled_tools_block_new_work_but_preserve_saved_access(agents):
     assert (await agents.client.get("/api/agents")).json()["items"][0]["id"] == task["id"]
 
 
+async def test_bots_group_blocks_new_and_resumed_work_but_preserves_owned_controls(agents):
+    task = (await _create(agents)).json()
+    url = f"/api/agents/{task['id']}"
+    await _add_owner_to_bots(agents)
+    wakes = len(agents.wakes)
+    assert (await _create(agents, request_id="bot-work")).status_code == 503
+    assert (await agents.client.get(url)).json() == task
+    assert (await agents.client.get("/api/agents")).json()["items"][0]["id"] == task["id"]
+    assert len(agents.wakes) == wakes
+    paused = await agents.client.post(f"{url}/actions", json={
+        "action": "pause", "expected_revision": task["revision"],
+    })
+    assert paused.status_code == 200 and paused.json()["status"] == "paused"
+    resumed = await agents.client.post(f"{url}/actions", json={
+        "action": "resume", "expected_revision": paused.json()["revision"],
+    })
+    assert resumed.status_code == 503
+    assert (await agents.client.get(url)).json() == paused.json()
+    assert len(agents.wakes) == wakes + 1
+    cancelled = await agents.client.post(f"{url}/actions", json={
+        "action": "cancel", "expected_revision": paused.json()["revision"],
+    })
+    assert cancelled.status_code == 200 and cancelled.json()["status"] == "cancelled"
+    removed = await agents.client.delete(url, params={"expected_revision": cancelled.json()["revision"]})
+    assert removed.status_code == 200 and removed.json() == {"deleted": True}
+
+
 async def test_http_creation_connects_to_durable_runtime_and_saved_result(agents):
     task = (await _create(agents)).json()
 
@@ -225,7 +267,7 @@ async def test_http_completed_rerun_keeps_plan_and_rejects_duplicate_revision(ag
     assert len(agents.wakes) == wakes + 1
 
 
-@pytest.mark.parametrize("revocation", ["tool", "model", "disabled"])
+@pytest.mark.parametrize("revocation", ["tool", "model", "disabled", "bots"])
 async def test_http_rerun_rechecks_authority_and_keeps_the_saved_report(agents, revocation):
     completed = await _complete_task(agents)
     if revocation == "tool":
@@ -238,6 +280,8 @@ async def test_http_rerun_rechecks_authority_and_keeps_the_saved_report(agents, 
         await agents.store.set_model_access_policy(
             actor_user_id=administrator.user_id, model_id="local", enabled=False, audience="users",
         )
+    elif revocation == "bots":
+        await _add_owner_to_bots(agents)
     else:
         agents.app.state.cfg.raw["agent_tasks"] = {"enabled": False}
     wakes = len(agents.wakes)

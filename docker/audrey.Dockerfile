@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxslt1.1 \
         libmagic1 \
         poppler-utils \
+        tzdata \
         ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 

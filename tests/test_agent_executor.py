@@ -366,6 +366,12 @@ async def _revoke(state, task, kind):
         )
     elif kind == "tool":
         state.tools.by_name["web_fetch"].available = False
+    elif kind == "bots":
+        await state.store.admin_update_user(
+            actor_user_id=state.owner.user_id,
+            target_user_id=state.owner.user_id,
+            groups=[*state.owner.groups, "bots"],
+        )
     else:
         current = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
         await state.store.agents.control(
@@ -376,8 +382,19 @@ async def _revoke(state, task, kind):
         )
 
 
+@pytest.mark.parametrize("generated_title", [True, False])
+async def test_canonical_bots_group_stops_before_any_local_model_request(state, generated_title):
+    task = await _step(state, generated_title=generated_title)
+    await _revoke(state, task, "bots")
+    principal = await state.store.get_principal(user_id=state.owner.user_id)
+    assert principal.role == "admin" and "bots" in principal.groups
+    with pytest.raises(AgentDispatchStoppedError, match="Agent account access is unavailable"):
+        await state.executor(task, "plan")
+    assert not state.provider_requests and not state.tool_requests and not state.clients
+
+
 @pytest.mark.parametrize("metadata_read", [1, 2])
-@pytest.mark.parametrize("kind", ["account", "model", "tool", "pause"])
+@pytest.mark.parametrize("kind", ["account", "model", "tool", "pause", "bots"])
 async def test_live_authority_revocation_before_generation_prevents_content(
     state, kind, metadata_read
 ):
@@ -393,7 +410,7 @@ async def test_live_authority_revocation_before_generation_prevents_content(
     assert not _content_requests(state)
 
 
-@pytest.mark.parametrize("kind", ["account", "model", "tool", "pause", "endpoint"])
+@pytest.mark.parametrize("kind", ["account", "model", "tool", "pause", "endpoint", "bots"])
 async def test_live_authority_checked_again_before_public_tool_dispatch(state, kind):
     task = await _step(state, "research")
     state.responses.append(_search())
@@ -715,12 +732,12 @@ async def test_title_timeout_is_optional_and_keeps_its_uncertain_operation_charg
     assert len(_content_requests(state, include_titles=True)) == 2
 
 
-async def test_revocation_during_title_generation_stops_plan_and_prevents_title_delivery(state):
+@pytest.mark.parametrize("kind", ["account", "bots"])
+async def test_revocation_during_title_generation_stops_plan_and_prevents_title_delivery(state, kind):
     task = await _step(state, generated_title=False)
 
     async def revoke():
-        with state.store._lock, state.store._conn:
-            state.store._conn.execute("UPDATE app_users SET status='disabled' WHERE user_id=?", (state.owner.user_id,))
+        await _revoke(state, task, kind)
 
     state.on_title = revoke
     with pytest.raises((AgentDispatchStoppedError, AgentTaskError)):

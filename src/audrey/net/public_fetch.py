@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import httpx
@@ -64,9 +65,14 @@ class ResolvedURL:
     addresses: tuple[str, ...]
 
 
-async def resolve_public_url(value: str) -> ResolvedURL:
+async def resolve_public_url(
+    value: str, *, authorize: Callable[[], Awaitable[None]] | None = None,
+    no_query: bool = False,
+) -> ResolvedURL:
     try:
         url = parse_public_url(value)
+        if no_query and url.query:
+            raise ValueError("Public page watches do not allow URL query parameters.")
     except ValueError as exc:
         raise _error(422, "responses_remote_input_blocked", str(exc)) from exc
     try:
@@ -79,6 +85,8 @@ async def resolve_public_url(value: str) -> ResolvedURL:
     else:
         host = url.host
     try:
+        if authorize is not None:
+            await authorize()
         infos = await asyncio.to_thread(socket.getaddrinfo, host, url.port or (443 if url.scheme == "https" else 80), type=socket.SOCK_STREAM)
     except OSError as exc:
         raise _error(502, "responses_remote_fetch_failed", "Remote input host could not be resolved.") from exc
@@ -95,7 +103,10 @@ class PublicAsset:
     source_url: str
 
 
-async def _send(transport: httpx.AsyncBaseTransport, resolved: ResolvedURL) -> httpx.Response:
+async def _send(
+    transport: httpx.AsyncBaseTransport, resolved: ResolvedURL,
+    authorize: Callable[[], Awaitable[None]] | None = None,
+) -> httpx.Response:
     for address in resolved.addresses:
         request = httpx.Request(
             "GET", resolved.url.copy_with(host=address),
@@ -109,6 +120,8 @@ async def _send(transport: httpx.AsyncBaseTransport, resolved: ResolvedURL) -> h
             },
         )
         try:
+            if authorize is not None:
+                await authorize()
             # The transport has no cookie jar or automatic redirects. Bypassing
             # AsyncClient also avoids its INFO log of signed query parameters.
             return await transport.handle_async_request(request)
@@ -120,6 +133,9 @@ async def _send(transport: httpx.AsyncBaseTransport, resolved: ResolvedURL) -> h
 async def fetch_public_asset(
     resolved: ResolvedURL, *, max_bytes: int,
     transport: httpx.AsyncBaseTransport | None = None,
+    authorize: Callable[[], Awaitable[None]] | None = None,
+    no_query: bool = False,
+    strict_length: bool = False,
 ) -> PublicAsset:
     if max_bytes <= 0:
         raise _error(413, "responses_remote_input_too_large", "Remote input byte budget is exhausted.")
@@ -132,8 +148,12 @@ async def fetch_public_asset(
         async with asyncio.timeout(FETCH_DEADLINE_SECONDS), outbound:
             current = resolved
             for hop in range(MAX_REDIRECTS + 1):
-                response = await _send(outbound, current)
+                if no_query and current.url.query:
+                    raise _error(422, "responses_remote_input_blocked", "Public page watches do not allow URL query parameters.")
+                response = await _send(outbound, current, authorize)
                 try:
+                    if authorize is not None:
+                        await authorize()
                     if response.status_code in {301, 302, 303, 307, 308}:
                         location = response.headers.get("location")
                         if not location or hop == MAX_REDIRECTS:
@@ -142,7 +162,7 @@ async def fetch_public_asset(
                         next_url = parse_public_url(target)
                         if current.url.scheme == "https" and next_url.scheme != "https":
                             raise _error(422, "responses_remote_input_blocked", "HTTPS input redirects cannot downgrade to HTTP.")
-                        current = await resolve_public_url(target)
+                        current = await resolve_public_url(target, authorize=authorize, no_query=no_query)
                         continue
                     if response.status_code != 200:
                         raise _error(502, "responses_remote_fetch_failed", f"Remote input returned HTTP {response.status_code}.")
@@ -161,10 +181,14 @@ async def fetch_public_asset(
                     chunks = []
                     size = 0
                     async for chunk in response.aiter_raw():
+                        if authorize is not None:
+                            await authorize()
                         size += len(chunk)
                         if size > max_bytes:
                             raise _error(413, "responses_remote_input_too_large", "Remote input exceeds the byte limit.")
                         chunks.append(chunk)
+                    if strict_length and declared is not None and size != length:
+                        raise _error(502, "responses_remote_fetch_failed", "Remote input body was incomplete.")
                     if not size:
                         raise _error(422, "responses_remote_input_invalid", "Remote input is empty.")
                     return PublicAsset(

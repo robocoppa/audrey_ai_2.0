@@ -57,6 +57,7 @@ const DEFAULT_SKILLS = [
 ] as const;
 
 function collectionPayload(path: string) {
+  if (path === "/api/notifications/unread") return { unread_count: 0 };
   if (path.startsWith("/api/search?")) return { items: [], next_cursor: null, partial: false, indexing: false, warnings: [] };
   if (path === "/api/models") return { items: DEFAULT_MODELS };
   if (path === "/api/skills") {

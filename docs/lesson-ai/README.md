@@ -33,10 +33,11 @@ plan.
 - [Lesson 4 — The platform and the request lifecycle](lesson-04-request-lifecycle.md)
 - [Lesson 5 — Configuration and startup](lesson-05-configuration-and-startup.md)
 - [Lesson 6a — The application database](lesson-06a-application-database.md)
+- [Lesson 6b — Identity and access](lesson-06b-identity-and-access.md)
 
 **The answer pipeline**
 
-- [Lesson 6 — The model layer I: choosing a model](lesson-06b-the-model-layer.md)
+- [Lesson 6 — The model layer I: choosing a model](lesson-06c-the-model-layer.md)
 - [Lesson 7 — The model layer II: calling models](lesson-07-calling-models.md)
 - [Lesson 8 — Classification and routing](lesson-08-classification-and-routing.md)
 - [Lesson 9 — Deep mode and research mode](lesson-09-deep-mode.md)
@@ -62,10 +63,11 @@ repository may use the old numbers.
 with the pipeline taught in the order a request meets it, and identity and the
 application database moved into the platform part. The
 [plan](../plans/lesson-catch-up-plan.md#the-course-structure-revised-2026-10-23)
-has the table. The application database lesson is published as Lesson 6a, read
-between Lessons 5 and 6, so the other files keep their current numbers until the
-identity lesson is added. That renumber gives both lessons their numbers and puts
-the pipeline lessons in their new order.
+has the table. The application database and identity lessons are published
+early as Lessons 6a and 6b, and the model layer's file is
+`lesson-06c-the-model-layer.md`, so the files sort in reading order. The other
+files keep their current numbers until the renumber, which gives every lesson its
+final number and puts the pipeline lessons in their new order.
 
 ## Prerequisites
 

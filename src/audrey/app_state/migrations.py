@@ -1223,6 +1223,113 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           CHECK (typeof(title_attempted)='integer' AND title_attempted IN (0,1));
         """,
     ),
+    (
+        29,
+        """
+        CREATE TABLE IF NOT EXISTS app_watches (
+          watch_id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+          request_id TEXT NOT NULL CHECK (length(request_id) BETWEEN 1 AND 200),
+          request_digest TEXT NOT NULL CHECK (length(request_digest)=64),
+          title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 100),
+          url TEXT NOT NULL CHECK (length(url) BETWEEN 1 AND 4096),
+          criterion TEXT NOT NULL CHECK (length(criterion) BETWEEN 1 AND 2000),
+          schedule_json TEXT NOT NULL CHECK (length(schedule_json)<=1000),
+          limits_json TEXT NOT NULL CHECK (length(limits_json)<=1000),
+          enabled INTEGER NOT NULL CHECK (typeof(enabled)='integer' AND enabled IN (0,1)),
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (revision>=1),
+          next_run_at TEXT,
+          failure_key TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (user_id,request_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_app_watches_due ON app_watches(enabled,next_run_at);
+        CREATE INDEX IF NOT EXISTS idx_app_watches_owner ON app_watches(user_id,created_at DESC,watch_id);
+        CREATE TABLE IF NOT EXISTS app_watch_snapshots (
+          snapshot_id TEXT PRIMARY KEY,
+          watch_id TEXT NOT NULL REFERENCES app_watches(watch_id) ON DELETE CASCADE,
+          record_json TEXT NOT NULL CHECK (length(CAST(record_json AS BLOB))<=400000),
+          created_at TEXT NOT NULL
+        );
+        CREATE TRIGGER IF NOT EXISTS trg_app_watch_snapshot_immutable
+        BEFORE UPDATE ON app_watch_snapshots BEGIN
+          SELECT RAISE(ABORT,'Watch source snapshots are immutable');
+        END;
+        CREATE TABLE IF NOT EXISTS app_watch_baselines (
+          watch_id TEXT PRIMARY KEY REFERENCES app_watches(watch_id) ON DELETE CASCADE,
+          snapshot_id TEXT NOT NULL REFERENCES app_watch_snapshots(snapshot_id)
+            DEFERRABLE INITIALLY DEFERRED
+        );
+        CREATE TABLE IF NOT EXISTS app_watch_runs (
+          run_id TEXT PRIMARY KEY,
+          watch_id TEXT NOT NULL REFERENCES app_watches(watch_id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+          watch_revision INTEGER NOT NULL CHECK (watch_revision>=1),
+          definition_json TEXT NOT NULL CHECK (length(CAST(definition_json AS BLOB))<=20000),
+          limits_json TEXT NOT NULL CHECK (length(limits_json)<=1000),
+          baseline_json TEXT CHECK (length(CAST(baseline_json AS BLOB))<=400000),
+          kind TEXT NOT NULL CHECK (kind IN ('scheduled','catchup','manual')),
+          scheduled_at TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('queued','running','completed','failed','cancelled')),
+          attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts>=0),
+          fence INTEGER NOT NULL DEFAULT 0 CHECK (fence>=0),
+          lease_token TEXT NOT NULL DEFAULT '',
+          lease_expires_at TEXT,
+          accounted_at TEXT,
+          active_seconds REAL NOT NULL DEFAULT 0 CHECK (active_seconds>=0),
+          operations INTEGER NOT NULL DEFAULT 0 CHECK (operations>=0),
+          available_at TEXT NOT NULL,
+          source_snapshot_id TEXT REFERENCES app_watch_snapshots(snapshot_id),
+          outcome TEXT CHECK (outcome IN ('baseline','unchanged','changed')),
+          significant INTEGER CHECK (significant IN (0,1)),
+          report TEXT NOT NULL DEFAULT '' CHECK (length(CAST(report AS BLOB))<=16000),
+          diff TEXT NOT NULL DEFAULT '' CHECK (length(CAST(diff AS BLOB))<=16000),
+          error TEXT NOT NULL DEFAULT '' CHECK (length(error)<=2000),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT,
+          UNIQUE (watch_id,watch_revision,scheduled_at,kind),
+          CHECK ((status='running' AND lease_token!='' AND lease_expires_at IS NOT NULL
+            AND accounted_at IS NOT NULL) OR (status!='running' AND lease_token=''
+            AND lease_expires_at IS NULL AND accounted_at IS NULL))
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_app_watch_runs_active_watch
+          ON app_watch_runs(watch_id) WHERE status IN ('queued','running');
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_app_watch_runs_active_owner
+          ON app_watch_runs(user_id) WHERE status='running';
+        CREATE INDEX IF NOT EXISTS idx_app_watch_runs_claim
+          ON app_watch_runs(status,available_at,lease_expires_at,created_at);
+        CREATE TRIGGER IF NOT EXISTS trg_app_watch_run_definition_immutable
+        BEFORE UPDATE OF watch_id,user_id,watch_revision,definition_json,baseline_json,kind,scheduled_at
+        ON app_watch_runs BEGIN
+          SELECT RAISE(ABORT,'Watch run input snapshots are immutable');
+        END;
+        CREATE TABLE IF NOT EXISTS app_watch_operations (
+          operation_id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES app_watch_runs(run_id) ON DELETE CASCADE,
+          fence INTEGER NOT NULL CHECK (fence>=1),
+          kind TEXT NOT NULL CHECK (kind IN ('fetch','model')),
+          status TEXT NOT NULL CHECK (status IN ('reserved','committed')),
+          created_at TEXT NOT NULL,
+          committed_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS app_watch_notices (
+          notice_id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+          watch_id TEXT NOT NULL REFERENCES app_watches(watch_id) ON DELETE CASCADE,
+          run_id TEXT NOT NULL REFERENCES app_watch_runs(run_id) ON DELETE CASCADE,
+          dedup_key TEXT NOT NULL UNIQUE,
+          kind TEXT NOT NULL CHECK (kind IN ('change','failure')),
+          title TEXT NOT NULL CHECK (length(title)<=100),
+          body TEXT NOT NULL CHECK (length(CAST(body AS BLOB))<=16000),
+          created_at TEXT NOT NULL,
+          read_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_app_watch_notices_owner
+          ON app_watch_notices(user_id,created_at DESC,notice_id DESC);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

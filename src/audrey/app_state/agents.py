@@ -310,6 +310,8 @@ class AgentsRepository:
                 "(t.status='running' AND t.lease_expires_at<=?)) AND NOT EXISTS "
                 "(SELECT 1 FROM app_agent_tasks other WHERE other.user_id=t.user_id "
                 "AND other.status='running' AND other.task_id!=t.task_id) "
+                "AND NOT EXISTS (SELECT 1 FROM app_watch_runs w WHERE w.user_id=t.user_id "
+                "AND w.status='running') "
                 "ORDER BY t.created_at,t.task_id LIMIT 1000", (_stamp(now),),
             ).fetchall()
             for row in rows:

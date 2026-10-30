@@ -1,7 +1,7 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
 **Status:** In progress, October 30, 2026. Public-research Agents, unified lexical
-Search and the first Project Knowledge slice are implemented locally. The owner confirms Search
+Search, Project Knowledge and the first public-page Watch slice are implemented locally. The owner confirms Search
 returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
 
 The owner selected unified search, saved background tasks, project working
@@ -56,8 +56,8 @@ output-limit failure; live acceptance of the larger allowance remains pending.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
 User-input requests, adaptive multi-step plans, Project/file/Private agent inputs,
-foreground-priority enhancements, separate notifications, semantic search and
-watches remain implementation work. Existing Private Tax tasks keep
+foreground-priority enhancements, agent completion/input notices, semantic search,
+owned-file watches and Project-associated watches remain implementation work. Existing Private Tax tasks keep
 their current behavior. The remaining sections specify the intended full feature.
 
 The first unified Search slice searches native completed/incomplete user and
@@ -121,6 +121,37 @@ Limits are 200 entries per Project, 8,000 characters per entry, eight references
 100 revisions per entry. No knowledge model calls, global-memory writes or cloud
 summaries were added. Local tests and mocked browser flows pass; real-model reuse
 and deployed acceptance remain manual.
+
+Public-page Watches now appear beside Tasks and Activity inside Agents. Creating a
+watch explicitly saves one public HTTP(S) URL, a criterion and a previewed interval,
+daily or weekly schedule in an IANA timezone. Query parameters, URL credentials,
+fragments, nonstandard ports and local destinations are excluded. Saving schedules
+the first future check; Run now is separate and can check a paused watch without
+resuming its schedule. A fresh deployment has no watch definitions and starts no page checks.
+
+Schema 29 stores watch definitions, immutable run inputs/source snapshots, baselines,
+operation receipts and in-app notices. The scheduler coalesces missed occurrences,
+runs repeated DST times once and moves nonexistent wall clocks to the first valid
+minute. Leases, revision fences, cumulative allowances and capped retry/backoff cover
+restarts; research agents and watches share the one-active-task-per-owner boundary.
+Pause/edit/delete revoke earlier work. Owner purge removes all new derivatives.
+
+The guarded fetcher authorizes every network hop and rejects incomplete/oversized
+responses. Versioned deterministic extraction establishes the first baseline and
+skips model calls for unchanged text. Changed text has exact Unicode-offset evidence
+and a separate bounded significance assessment by verified local Qwen, without tools
+or cloud fallback. Failed fetches, extraction, comparison or model assessment retain
+the last valid baseline. The current bounds are 256 KiB downloaded, 64,000 UTF-8 bytes
+of normalized text, and 16,000 bytes of complete changed-span evidence; larger work
+fails visibly rather than silently truncating a comparison. Compatible criterion and
+cadence edits retain the baseline; URL/redirect identity or extraction changes rebaseline.
+History exposes each run's saved URL, criterion and schedule separately from the
+current definition. Significant changes and persistent failures create deduplicated in-app Activity
+notices linked to the exact saved check. Unchanged checks remain in history. There
+are no external notifications. Owned-file/Private and Project-associated watches,
+multiple-source definitions and task completion notices remain later work.
+Affected hermetic checks and mocked desktop/phone browser flows pass; real public
+page changes, scheduled runtime and model-judgment acceptance remain manual.
 
 ## Product outcome
 

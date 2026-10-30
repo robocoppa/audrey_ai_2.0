@@ -47,6 +47,7 @@ from audrey.app_state.repositories import (
 from audrey.app_state.responses import ResponsesRepository
 from audrey.app_state.tax_cases import TaxCasesRepository
 from audrey.app_state.transactions import write_transaction
+from audrey.app_state.watches import WatchesRepository
 from audrey.identity import (
     TOKEN_SCOPES,
     IssuedPersonalToken,
@@ -59,6 +60,7 @@ _ALLOWED_ACCOUNT_STATUSES = frozenset({"pending", "active", "disabled"})
 _ALLOWED_MODEL_AUDIENCES = frozenset({"users", "testers", "bots", "admins"})
 _TOKEN_RE = re.compile(r"\Aaud_(pat_[0-9a-f]{32})\.([A-Za-z0-9_-]{32,})\Z")
 _LAST_USED_WRITE_INTERVAL = dt.timedelta(minutes=5)
+_LAST_SEEN_WRITE_INTERVAL = dt.timedelta(minutes=5)
 _FOREIGN_KEYS_OFF_MIGRATIONS = frozenset({5, 7, 8, 16, 18})
 _ADDITIVE_COLUMN_MIGRATIONS = {
     15: {
@@ -121,6 +123,7 @@ class ApplicationStore:
         self.private_tasks = PrivateTasksRepository(self._conn, self._lock)
         self.agents = AgentsRepository(self._conn, self._lock)
         self.knowledge = KnowledgeRepository(self._conn, self._lock)
+        self.watches = WatchesRepository(self._conn, self._lock)
         self.responses._prune_expired_sync()
 
     def _migrate_locked(self) -> None:
@@ -315,8 +318,18 @@ class ApplicationStore:
             )
 
         with self._lock:
+            row = self._identity_row_locked(provider, subject)
+            now = _utc_now()
+            if row is not None and not self._external_identity_needs_write(
+                row, email, display_name, role, sync_role, sync_display_name, now
+            ):
+                # Re-read current status and groups on every request without
+                # making ordinary browser polls compete for SQLite's writer.
+                return _principal_from_row(row, auth_method=auth_method)
             self._conn.execute("BEGIN IMMEDIATE")
             try:
+                # Another connection may have linked the identity or changed
+                # account authority while we waited for the write lock.
                 row = self._identity_row_locked(provider, subject)
                 now = _utc_now()
                 if row is None:
@@ -355,40 +368,49 @@ class ApplicationStore:
                             "provider email changed; explicit account migration is required"
                         )
                     user_id = str(row["user_id"])
-                    self._conn.execute(
-                        "UPDATE app_users SET "
-                        "display_name = CASE WHEN ? THEN ? ELSE display_name END, "
-                        "role = CASE WHEN ? THEN ? ELSE role END, updated_at = ? "
-                        "WHERE user_id = ?",
-                        (
-                            sync_display_name,
-                            display_name,
-                            sync_role,
-                            role,
-                            now,
-                            user_id,
-                        ),
-                    )
-                    self._conn.execute(
-                        "UPDATE external_identities SET email = ?, last_seen_at = ? "
-                        "WHERE provider = ? AND subject = ?",
-                        (email, now, provider, subject),
-                    )
-                    if sync_role:
+                    if (
+                        (sync_display_name and str(row["display_name"]) != display_name)
+                        or (sync_role and str(row["role"]) != role)
+                    ):
                         self._conn.execute(
-                            "INSERT OR IGNORE INTO user_group_memberships "
-                            "(user_id, group_id, granted_by_user_id, granted_at) "
-                            "VALUES (?, 'users', NULL, ?)",
-                            (user_id, now),
+                            "UPDATE app_users SET "
+                            "display_name = CASE WHEN ? THEN ? ELSE display_name END, "
+                            "role = CASE WHEN ? THEN ? ELSE role END, updated_at = ? "
+                            "WHERE user_id = ?",
+                            (
+                                sync_display_name,
+                                display_name,
+                                sync_role,
+                                role,
+                                now,
+                                user_id,
+                            ),
                         )
-                        if role == "admin":
+                    last_seen_due = _external_identity_last_seen_due(row, now)
+                    if str(row["identity_email"]) != email or last_seen_due:
+                        self._conn.execute(
+                            "UPDATE external_identities SET email = ?, "
+                            "last_seen_at = CASE WHEN ? THEN ? ELSE last_seen_at END "
+                            "WHERE provider = ? AND subject = ?",
+                            (email, last_seen_due, now, provider, subject),
+                        )
+                    if sync_role:
+                        groups = _groups_from_csv(str(row["groups_csv"]))
+                        if "users" not in groups:
                             self._conn.execute(
-                                "INSERT OR IGNORE INTO user_group_memberships "
+                                "INSERT INTO user_group_memberships "
+                                "(user_id, group_id, granted_by_user_id, granted_at) "
+                                "VALUES (?, 'users', NULL, ?)",
+                                (user_id, now),
+                            )
+                        if role == "admin" and "admins" not in groups:
+                            self._conn.execute(
+                                "INSERT INTO user_group_memberships "
                                 "(user_id, group_id, granted_by_user_id, granted_at) "
                                 "VALUES (?, 'admins', NULL, ?)",
                                 (user_id, now),
                             )
-                        else:
+                        elif role != "admin" and "admins" in groups:
                             self._conn.execute(
                                 "DELETE FROM user_group_memberships "
                                 "WHERE user_id = ? AND group_id = 'admins'",
@@ -460,7 +482,31 @@ class ApplicationStore:
 
         return _principal_from_row(row, auth_method=auth_method)
 
-
+    @staticmethod
+    def _external_identity_needs_write(
+        row: sqlite3.Row,
+        email: str,
+        display_name: str,
+        role: str,
+        sync_role: bool,
+        sync_display_name: bool,
+        now: str,
+    ) -> bool:
+        if str(row["current_email"]).casefold() != email.casefold():
+            raise IdentityConflictError(
+                "provider email changed; explicit account migration is required"
+            )
+        groups = _groups_from_csv(str(row["groups_csv"]))
+        return (
+            (sync_display_name and str(row["display_name"]) != display_name)
+            or (sync_role and str(row["role"]) != role)
+            or (
+                sync_role
+                and ("users" not in groups or ("admins" in groups) != (role == "admin"))
+            )
+            or str(row["identity_email"]) != email
+            or _external_identity_last_seen_due(row, now)
+        )
 
     def _identity_row_locked(
         self,
@@ -470,6 +516,7 @@ class ApplicationStore:
         return self._conn.execute(
             "SELECT u.user_id, u.storage_namespace, u.current_email, "
             "u.display_name, u.role, u.status, i.provider, i.subject, "
+            "i.email AS identity_email, i.last_seen_at, "
             "COALESCE((SELECT group_concat(m.group_id, ',') "
             "FROM user_group_memberships AS m WHERE m.user_id = u.user_id), '') "
             "AS groups_csv "
@@ -815,6 +862,10 @@ class ApplicationStore:
                 )
                 self._conn.execute(
                     "DELETE FROM app_agent_tasks WHERE user_id = ?",
+                    (user_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM app_watches WHERE user_id = ?",
                     (user_id,),
                 )
                 self._conn.execute(
@@ -2174,6 +2225,17 @@ def _parse_utc(value: str) -> dt.datetime | None:
     if parsed.tzinfo is None:
         raise ValueError("timestamp has no timezone")
     return parsed.astimezone(dt.UTC)
+
+
+def _external_identity_last_seen_due(row: sqlite3.Row, now: str) -> bool:
+    try:
+        last_seen = _parse_utc(str(row["last_seen_at"]))
+    except ValueError:
+        # Repair malformed historical metadata without rejecting valid auth.
+        last_seen = None
+    now_dt = _parse_utc(now)
+    assert now_dt is not None
+    return last_seen is None or now_dt - last_seen >= _LAST_SEEN_WRITE_INTERVAL
 
 
 def _scopes_from_json(value: str) -> tuple[str, ...]:
