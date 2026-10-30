@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from audrey.app_state import ApplicationStore
-from audrey.content_sources import MAX_FILE_BYTES, ContentSourceReader
+from audrey.content_sources import MAX_FILE_BYTES, ContentSourceReader, SearchCoverageIssue
 from audrey.kb.uploads_db import UploadsDB
 from audrey.kb.user_store import sanitize_user
 
@@ -179,6 +179,55 @@ async def test_file_text_uses_canonical_identity_and_new_pages_are_bounded(state
     assert second[0].source_id == f"file:{fid}:text"
     assert state.reader.is_current(second[0])
     assert await state.reader.resolve(*args(state, state.other), second[0].source_id) is None
+
+
+@pytest.mark.parametrize("status", ["pending", "processing", "failed", "fetch_pending"])
+async def test_unfinished_and_failed_uploads_do_not_report_missing_completed_text(state, status):
+    file(state, kind="video", name="lecture.mp4", status=status)
+    assert await state.reader.list_page(*args(state), "file") == ([], None, [])
+
+
+async def test_unsupported_file_kind_has_no_missing_text_warning(state):
+    fid, _ = file(state)
+    with state.uploads._lock:
+        state.uploads._conn.execute("UPDATE uploads SET kind='binary' WHERE file_id=?", (fid,))
+    assert await state.reader.list_page(*args(state), "file") == ([], None, [])
+
+
+async def test_ready_image_without_saved_text_reports_one_scoped_coverage_issue(state):
+    fid, _ = file(state, kind="image", name="picture.png")
+    project = await state.store.projects.create(user_id=state.owner.user_id, name="Pictures")
+    with state.store._lock, state.store._conn:
+        state.store._conn.execute(
+            "INSERT INTO app_project_files(project_id,file_id,added_at) VALUES (?,?,?)",
+            (project.project_id, fid, STAMP),
+        )
+    docs, _, warnings = await state.reader.list_page(*args(state), "file")
+    assert docs == []
+    assert warnings == [SearchCoverageIssue(
+        source_id=f"file:{fid}", kind="file", reason="text_unavailable", updated_at=STAMP,
+        project_ids=(project.project_id,),
+    )]
+
+
+async def test_missing_optional_artifact_does_not_hide_valid_mixed_results(state):
+    text_id, _ = file(state)
+    media_id, path = file(state, kind="audio", name="lecture.mp3")
+    path.with_suffix(".transcript.txt").write_text("Saved speech evidence.", encoding="utf-8")
+    file(state, kind="image", name="still-pending.png", status="pending")
+    docs, _, warnings = await state.reader.list_page(*args(state), "file")
+    assert {doc.source_id for doc in docs} == {
+        f"file:{text_id}:text", f"file:{media_id}:transcript",
+    }
+    assert warnings == []
+
+
+async def test_readable_summary_does_not_hide_oversized_full_text_coverage_gap(state):
+    fid, path = file(state, text="x" * 500_001)
+    path.with_suffix(".summary.txt").write_text("A short saved summary.", encoding="utf-8")
+    docs, _, warnings = await state.reader.list_page(*args(state), "file")
+    assert [doc.source_id for doc in docs] == [f"file:{fid}:summary"]
+    assert len(warnings) == 1 and warnings[0].reason == "size_limit"
 
 
 async def test_protected_file_reads_cached_text_without_extracting_or_calling_models(
@@ -358,6 +407,7 @@ async def test_oversized_or_linked_file_is_unavailable_without_partial_text(stat
     assert await state.reader.resolve(*args(state), f"file:{fid}:text") is None
     docs, _, warnings = await state.reader.list_page(*args(state), "file")
     assert docs == [] and warnings
+    assert warnings[0].reason == ("text_unavailable" if mode == "symlink" else "size_limit")
 
 
 async def test_saved_agent_final_report_is_generated_and_revision_fenced(state):

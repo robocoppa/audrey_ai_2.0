@@ -8,6 +8,7 @@ import hmac
 import json
 import secrets
 import sqlite3
+from collections import Counter
 from datetime import UTC, date, datetime
 from typing import Literal
 
@@ -62,6 +63,39 @@ def _updated_date(value: str) -> date | None:
         return timestamp.replace(tzinfo=timestamp.tzinfo or UTC).astimezone(UTC).date()
     except (ValueError, TypeError):
         return None
+
+
+def _coverage_warnings(scan, kind, project_id, archived, since, until) -> list[str]:
+    counts = Counter()
+    for issue in scan.coverage.values():
+        if kind != "all" and issue.kind != kind:
+            continue
+        if project_id is not None and project_id not in issue.project_ids:
+            continue
+        if archived != "all" and issue.archived != (archived == "archived"):
+            continue
+        if since is not None or until is not None:
+            updated = _updated_date(issue.updated_at)
+            if (
+                updated is None
+                or (since is not None and updated < since)
+                or (until is not None and updated > until)
+            ):
+                continue
+        counts[(issue.kind, issue.reason)] += 1
+    warnings = []
+    names = {"message": "saved message", "file": "saved file", "agent": "agent report"}
+    for (source_kind, reason), count in sorted(counts.items()):
+        noun = names[source_kind] + ("s" if count != 1 else "")
+        if reason == "size_limit":
+            warnings.append(
+                f"{count} {noun} {'exceeds' if count == 1 else 'exceed'} the local search size limits."
+            )
+        else:
+            warnings.append(
+                f"{count} {noun} {'has' if count == 1 else 'have'} no readable text for search."
+            )
+    return warnings
 
 
 def _cursor(offset: int, fingerprint: str) -> str:
@@ -183,6 +217,7 @@ async def search_content(
             )
             more |= scanned < len(candidates)
             warnings = sorted(scan.warnings)[:20]
+            warnings.extend(_coverage_warnings(scan, kind, project_id, archived, since, until))
             changed = stale or generation != scan.generation
             if changed:
                 warnings.append(

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
 import {
   listProjects,
@@ -28,8 +28,9 @@ interface SearchRequest {
   serial: number;
 }
 
-export function SearchWorkspace({ visible = true, onOpenResult }: {
+export function SearchWorkspace({ visible = true, openRequest, onOpenResult }: {
   visible?: boolean;
+  openRequest?: { query: string; serial: number };
   onOpenResult: (result: SearchResult) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -47,6 +48,10 @@ export function SearchWorkspace({ visible = true, onOpenResult }: {
   const [error, setError] = useState("");
   const serial = useRef(0);
   const requestController = useRef<AbortController | null>(null);
+  const queryInput = useRef<HTMLInputElement | null>(null);
+  const handledOpenRequest = useRef<number | null>(null);
+  const incomingQuery = openRequest?.query.trim() ?? "";
+  const incomingSearchSerial = incomingQuery ? openRequest?.serial : undefined;
 
   useEffect(() => {
     let current = true;
@@ -75,7 +80,7 @@ export function SearchWorkspace({ visible = true, onOpenResult }: {
   }, []);
 
   useEffect(() => {
-    if (!visible || !request) return;
+    if (!visible || !request || (incomingSearchSerial !== undefined && handledOpenRequest.current !== incomingSearchSerial)) return;
     let current = true;
     const controller = new AbortController();
     requestController.current = controller;
@@ -86,8 +91,6 @@ export function SearchWorkspace({ visible = true, onOpenResult }: {
         setResponse((saved) => request!.append && saved ? {
           ...next,
           items: [...new Map([...saved.items, ...next.items].map((item) => [item.id, item])).values()].slice(0, MAX_RESULTS),
-          partial: saved.partial || next.partial,
-          warnings: [...new Set([...saved.warnings, ...next.warnings])],
         } : { ...next, items: next.items.slice(0, MAX_RESULTS) });
         setError("");
       } catch (reason) {
@@ -103,16 +106,42 @@ export function SearchWorkspace({ visible = true, onOpenResult }: {
       controller.abort();
       if (requestController.current === controller) requestController.current = null;
     };
-  }, [request, visible]);
+  }, [request, visible, incomingQuery, incomingSearchSerial]);
 
-  function begin(queryText: string, options: SearchOptions, append = false) {
+  const begin = useCallback((queryText: string, options: SearchOptions, append = false) => {
     requestController.current?.abort();
     serial.current += 1;
     setError("");
     setLoading(true);
     if (!append) setResponse(null);
     setRequest({ query: queryText, options, append, serial: serial.current });
-  }
+  }, []);
+
+  const validDates = useCallback((options: SearchOptions) => {
+    if (options.since && options.until && options.since > options.until) {
+      setDateError("The start date must be on or before the end date.");
+      return false;
+    }
+    setDateError("");
+    return true;
+  }, []);
+
+  useEffect(() => {
+    if (!visible || !openRequest || handledOpenRequest.current === openRequest.serial) return;
+    let current = true;
+    // Wait until the workspace is visible before focusing or starting a header query.
+    queueMicrotask(() => {
+      if (!current) return;
+      handledOpenRequest.current = openRequest.serial;
+      queryInput.current?.focus();
+      const text = openRequest.query.trim();
+      if (!text) return;
+      setQuery(text);
+      const options = { kind, project_id: projectId || undefined, archived, since: since || undefined, until: until || undefined };
+      if (validDates(options)) begin(text, options);
+    });
+    return () => { current = false; };
+  }, [visible, openRequest, kind, projectId, archived, since, until, begin, validDates]);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -130,21 +159,14 @@ export function SearchWorkspace({ visible = true, onOpenResult }: {
     return { kind, project_id: projectId || undefined, archived, since: since || undefined, until: until || undefined };
   }
 
-  function validDates(options: SearchOptions) {
-    if (options.since && options.until && options.since > options.until) {
-      setDateError("The start date must be on or before the end date.");
-      return false;
-    }
-    setDateError("");
-    return true;
-  }
-
   function retry() {
     if (request) begin(request.query, request.options, request.append);
   }
 
   const results = response?.items ?? [];
   const atLimit = results.length >= MAX_RESULTS;
+  const coverageWarnings = [...new Set(response?.warnings.map((warning) => warning.trim()).filter(Boolean) ?? [])];
+  if (response?.partial && !response.indexing && !coverageWarnings.length) coverageWarnings.push("Some saved content is not included in these results.");
 
   return (
     <section className="search-workspace" aria-labelledby="search-title">
@@ -159,6 +181,7 @@ export function SearchWorkspace({ visible = true, onOpenResult }: {
         <div className="search-input-row">
           <input
             id="content-search-query"
+            ref={queryInput}
             type="search"
             value={query}
             maxLength={256}
@@ -211,9 +234,9 @@ export function SearchWorkspace({ visible = true, onOpenResult }: {
         {request ? <h2>Results for “{request.query}”</h2> : null}
         {error ? <div className="search-error" role="alert"><p>{error}</p><button type="button" className="search-secondary" onClick={retry}>Try again</button></div> : null}
         {loading ? <p className="search-state" role="status">{request?.append ? "Loading more results…" : "Searching your saved content…"}</p> : null}
-        {response?.indexing ? <p className="search-notice" role="status">Your saved content is still being indexed. More matches may appear when you search again.</p> : null}
-        {response?.partial ? <p className="search-notice" role="status">These results are partial. Some saved content could not be searched yet.</p> : null}
-        {response?.warnings.map((warning) => <p className="search-notice" key={warning}>{warning}</p>)}
+        {response?.indexing ? <p className="search-indexing" role="status">Indexing saved content. Search again for more matches.</p> : null}
+        {coverageWarnings.length === 1 ? <p className="search-coverage-note">{coverageWarnings[0]}</p> : null}
+        {coverageWarnings.length > 1 ? <details className="search-coverage"><summary>Search coverage: {coverageWarnings.length} limitations</summary><ul>{coverageWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}
         {!request ? <div className="search-welcome"><span aria-hidden="true">⌕</span><h2>Your work, easier to find</h2><p>Search the contents of saved messages, file text, and agent reports.</p></div> : null}
         {response && !results.length && !loading && !error ? <p className="search-state">No matches found. Try fewer words or broader filters.</p> : null}
         {results.length ? <ul className="search-result-list">

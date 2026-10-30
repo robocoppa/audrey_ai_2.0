@@ -57,6 +57,7 @@ const DEFAULT_SKILLS = [
 ] as const;
 
 function collectionPayload(path: string) {
+  if (path.startsWith("/api/search?")) return { items: [], next_cursor: null, partial: false, indexing: false, warnings: [] };
   if (path === "/api/models") return { items: DEFAULT_MODELS };
   if (path === "/api/skills") {
     return { enabled: true, status: "ready", items: DEFAULT_SKILLS };
@@ -140,11 +141,13 @@ describe("App", () => {
     render(<App />);
     const chat = await screen.findByText("Workspace ready", {}, { timeout: 5000 });
     const navigation = within(screen.getByRole("navigation", { name: "Workspaces" }));
-    fireEvent.click(navigation.getByRole("button", { name: "Search" }));
+    const headerSearch = within(screen.getByRole("search", { name: "Search saved content" }));
+    expect(navigation.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
+    fireEvent.click(headerSearch.getByRole("button", { name: "Open Search" }));
     expect(chat).not.toBeVisible();
-    expect(navigation.getByRole("button", { name: "Search" })).toHaveAttribute("aria-current", "page");
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search your content" }), { target: { value: "heliotrope" } });
-    fireEvent.submit(screen.getByRole("search"));
+    await waitFor(() => expect(screen.getByRole("searchbox", { name: "Search your content" })).toHaveFocus());
+    fireEvent.change(headerSearch.getByRole("searchbox"), { target: { value: "heliotrope" } });
+    fireEvent.submit(screen.getByRole("search", { name: "Search saved content" }));
     fireEvent.click(await screen.findByRole("button", { name: "Open chat: Saved decision" }));
     const dialog = await screen.findByRole("dialog", { name: "Saved decision" });
     await waitFor(() => expect(within(dialog).getByLabelText("Saved source text")).toHaveTextContent("Here is the saved source context."));
@@ -153,8 +156,26 @@ describe("App", () => {
     expect(screen.queryByRole("dialog", { name: "Saved decision" })).not.toBeInTheDocument();
     fireEvent.click(navigation.getByRole("button", { name: "Chat" }));
     expect(chat).toBeVisible();
-    fireEvent.click(navigation.getByRole("button", { name: "Search" }));
+    fireEvent.click(headerSearch.getByRole("button", { name: "Open Search" }));
     expect(screen.getByRole("searchbox", { name: "Search your content" })).toHaveValue("heliotrope");
+  });
+
+  it("submits the header search from Agents without losing the agent draft", async () => {
+    workspaceMock.enabled = true;
+    const fetchMock = mockCapabilitySession("degraded");
+    render(<App />);
+    await screen.findByText("Workspace ready", {}, { timeout: 5000 });
+    const navigation = within(screen.getByRole("navigation", { name: "Workspaces" }));
+    fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "Keep this agent draft" } });
+    const headerSearch = screen.getByRole("search", { name: "Search saved content" });
+    fireEvent.change(within(headerSearch).getByRole("searchbox"), { target: { value: "  trees in Minecraft  " } });
+    fireEvent.submit(headerSearch);
+    expect(await screen.findByRole("heading", { name: "Results for “trees in Minecraft”" })).toBeVisible();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("q=trees+in+Minecraft"), expect.anything()));
+    expect(screen.getByRole("searchbox", { name: "Search your content" })).toHaveValue("trees in Minecraft");
+    fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
+    expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("Keep this agent draft");
   });
 
   it("closes portalled Chat pickers and releases Escape when Agents opens", async () => {

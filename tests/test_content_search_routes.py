@@ -15,6 +15,7 @@ from audrey.app_state import ApplicationStore
 from audrey.auth import require_principal
 from audrey.content_search import ContentSearchError, ContentSearchIndex, SearchDocument
 from audrey.content_search_service import ContentSearchService
+from audrey.content_sources import SearchCoverageIssue
 from audrey.routes.app import router
 
 
@@ -24,6 +25,7 @@ class Sources:
         self.deleted = set()
         self.on_resolve = None
         self.pages = []
+        self.coverage = []
 
     async def list_page(self, owner, namespace, kind, *, after=None, limit=50):
         self.pages.append((owner, kind, after, limit))
@@ -33,7 +35,11 @@ class Sources:
         )
         documents = [d for d in documents if after is None or d.source_id > after]
         page = documents[:limit]
-        return page, page[-1].source_id if len(documents) > limit else None, []
+        return (
+            page,
+            page[-1].source_id if len(documents) > limit else None,
+            [issue for issue in self.coverage if issue.kind == kind],
+        )
 
     async def resolve(self, owner, namespace, source):
         if self.on_resolve:
@@ -400,6 +406,45 @@ async def test_dates_filter_canonical_update_date_inclusively_in_utc(search):
         "message:start",
         "message:offset",
     }
+
+
+async def test_coverage_notices_count_unique_sources_and_follow_current_filters(search):
+    document(search)
+    owner = search.owners[0]
+    project = await search.store.projects.create(user_id=owner.user_id, name="History")
+    issues = [
+        SearchCoverageIssue("file:one", "file", "text_unavailable", "2026-10-29T12:00:00Z"),
+        SearchCoverageIssue("file:two", "file", "text_unavailable", "2026-10-29T12:00:00Z"),
+        SearchCoverageIssue(
+            "file:large", "file", "size_limit", "2026-10-28T12:00:00Z",
+            project_ids=(project.project_id,),
+        ),
+        SearchCoverageIssue(
+            "message:large", "message", "size_limit", "2026-10-29T12:00:00Z",
+            archived=True,
+        ),
+    ]
+    search.sources.coverage = [*issues, issues[0]]
+    response = await search.client.get("/api/search", params={"q": "heliotrope"})
+    assert response.json()["warnings"] == [
+        "1 saved file exceeds the local search size limits.",
+        "2 saved files have no readable text for search.",
+        "1 saved message exceeds the local search size limits.",
+    ]
+    assert len(response.json()["items"]) == 1 and response.json()["partial"]
+    cases = [
+        ({"kind": "agent"}, []),
+        ({"kind": "message", "archived": "active"}, []),
+        ({"project_id": project.project_id}, ["1 saved file exceeds the local search size limits."]),
+        ({"kind": "file", "since": "2026-10-29"}, ["2 saved files have no readable text for search."]),
+        ({"kind": "file", "archived": "archived"}, []),
+    ]
+    for filters, expected in cases:
+        body = (await search.client.get(
+            "/api/search", params={"q": "heliotrope", **filters}
+        )).json()
+        assert body["warnings"] == expected
+        assert body["partial"] == bool(expected)
 
 
 async def test_dates_are_validated_and_bound_to_cursor(search):

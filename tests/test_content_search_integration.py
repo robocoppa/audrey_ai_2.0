@@ -65,6 +65,18 @@ async def test_actual_sources_search_open_delete_and_rebuild_without_model_or_em
             chunks=0,
             uploaded_at="2026-10-29T12:00:00Z",
         )
+        await uploads.record_upload(
+            file_id="pending-video",
+            user=owner.storage_namespace,
+            filename="pending.mp4",
+            mime="video/mp4",
+            bytes_=100,
+            kind="video",
+            collection="unused",
+            chunks=0,
+            uploaded_at="2026-10-29T12:00:00Z",
+            status="pending",
+        )
         task = await store.agents.create(
             user_id=owner.user_id, objective="A saved report", request_id="one"
         )
@@ -78,6 +90,7 @@ async def test_actual_sources_search_open_delete_and_rebuild_without_model_or_em
         ) as client:
             result = await client.get("/api/search", params={"q": "heliotrope"})
             assert result.status_code == 200, result.text
+            assert result.json()["warnings"] == [] and not result.json()["partial"]
             items = result.json()["items"]
             assert {item["kind"] for item in items} == {"message", "file", "agent"}
             for item in items:

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -60,11 +60,18 @@ export function AgentsWorkspace({
   visible = true,
   timezone,
   onActiveCountChange,
+  navigationOpen,
+  onNavigationOpenChange,
 }: {
   visible?: boolean;
   timezone?: string;
   onActiveCountChange?: (count: number) => void;
+  navigationOpen?: boolean;
+  onNavigationOpenChange?: (open: boolean) => void;
 }) {
+  const [compactNavigation, setCompactNavigation] = useState(() =>
+    window.matchMedia?.("(max-width: 760px)").matches ?? false);
+  const [internalNavigationOpen, setInternalNavigationOpen] = useState(false);
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [objective, setObjective] = useState("");
@@ -82,10 +89,71 @@ export function AgentsWorkspace({
   const busyRef = useRef(false);
   const objectiveRef = useRef<HTMLTextAreaElement>(null);
   const detailRef = useRef<HTMLElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const createRequest = useRef<{ key: string; requestId: string } | null>(null);
   const mounted = useRef(false);
   const activeCount = tasks.filter(isMoving).length;
   const hasActive = activeCount > 0;
+  const sidebarOpen = visible && compactNavigation && (navigationOpen ?? internalNavigationOpen);
+
+  const setSidebarOpen = useCallback((open: boolean) => {
+    setInternalNavigationOpen(open);
+    onNavigationOpenChange?.(open);
+  }, [onNavigationOpenChange]);
+
+  const closeSidebar = useCallback(() => {
+    setSidebarOpen(false);
+    window.requestAnimationFrame(() => sidebarToggleRef.current?.focus({ preventScroll: true }));
+  }, [setSidebarOpen]);
+
+  useEffect(() => {
+    const viewport = window.matchMedia?.("(max-width: 760px)");
+    if (!viewport) return;
+    const updateViewport = (event: MediaQueryListEvent) => {
+      const focused = document.activeElement;
+      const focusInSidebar = focused instanceof HTMLElement && sidebarRef.current?.contains(focused);
+      const focusOnToggle = focused === sidebarToggleRef.current;
+      setCompactNavigation(event.matches);
+      // Chat and Agents share the app drawer state. A hidden workspace must not
+      // dismiss the visible workspace's navigation when the viewport changes.
+      if (!visible) return;
+      setSidebarOpen(false);
+      if (event.matches && focusInSidebar) {
+        window.requestAnimationFrame(() => sidebarToggleRef.current?.focus({ preventScroll: true }));
+      } else if (!event.matches && focusOnToggle) {
+        window.requestAnimationFrame(() => objectiveRef.current?.focus({ preventScroll: true }));
+      }
+    };
+    viewport.addEventListener("change", updateViewport);
+    return () => viewport.removeEventListener("change", updateViewport);
+  }, [setSidebarOpen, visible]);
+
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    sidebarRef.current?.querySelector<HTMLButtonElement>(".agents-sidebar-close")?.focus({ preventScroll: true });
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSidebar();
+      } else if (event.key === "Tab") {
+        const controls = Array.from(sidebarRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), textarea:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex="0"]',
+        ) ?? []);
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [closeSidebar, sidebarOpen]);
 
   useEffect(() => {
     mounted.current = true;
@@ -166,16 +234,20 @@ export function AgentsWorkspace({
     return Number.isNaN(date.getTime()) ? "Time unavailable" : dateFormatter.format(date);
   }
 
-  function scrollToDetail() {
-    if (visible && window.innerWidth <= 760) {
-      window.requestAnimationFrame(() => detailRef.current?.scrollIntoView?.({ block: "start" }));
-    }
+  function showWorkflow() {
+    if (!visible) return;
+    if (compactNavigation) setSidebarOpen(false);
+    window.requestAnimationFrame(() => {
+      if (!detailRef.current) return;
+      detailRef.current.scrollTop = 0;
+      if (compactNavigation) detailRef.current.focus({ preventScroll: true });
+    });
   }
 
   function selectTask(id: string) {
     setSelectedId(id);
     setNotice("");
-    scrollToDetail();
+    showWorkflow();
   }
 
   async function startTask(text: string, key: string) {
@@ -196,7 +268,7 @@ export function AgentsWorkspace({
       knownIds.current?.add(task.id);
       setTasks((current) => mergeTasks(current, [task], deletedIds.current));
       setSelectedId(task.id);
-      scrollToDetail();
+      showWorkflow();
       setFilter("all");
       if (key.startsWith("new:")) setObjective("");
     } catch (reason) {
@@ -226,7 +298,7 @@ export function AgentsWorkspace({
         if (action === "rerun") {
           setSelectedId(updated.id);
           setFilter("all");
-          scrollToDetail();
+          showWorkflow();
         }
       }
     } catch (reason) {
@@ -286,113 +358,156 @@ export function AgentsWorkspace({
     || (filter === "finished" ? isFinished(task) : !isFinished(task)));
 
   return (
-    <section className="agents-workspace" aria-labelledby="agents-title">
-      <header className="agents-header">
-        <div>
-          <p className="agents-eyebrow">Your research, in progress</p>
-          <h1 id="agents-title">Agents</h1>
-          <p>Give Audrey a research objective. It will plan, research public sources, and review a saved report.</p>
-        </div>
-        <button type="button" className="agents-secondary" onClick={() => objectiveRef.current?.focus()}>New agent</button>
-      </header>
-
-      {error ? <p className="agents-error" role="alert">{error}</p> : null}
-      {notice ? <p className="agents-notice" role="status">{notice}</p> : null}
-
+    <section className="agents-workspace" aria-labelledby="agents-title" data-sidebar-open={sidebarOpen}>
+      {compactNavigation ? <div className="agents-mobile-toolbar" inert={sidebarOpen ? true : undefined}>
+        <button
+          type="button"
+          className="agents-secondary agents-sidebar-toggle"
+          ref={sidebarToggleRef}
+          aria-controls="agents-navigation"
+          aria-expanded={sidebarOpen}
+          onClick={() => setSidebarOpen(true)}
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16" /></svg>
+          Agent controls
+        </button>
+        <span>Workflow</span>
+      </div> : null}
+      {sidebarOpen ? <button type="button" className="agents-sidebar-backdrop" tabIndex={-1} aria-label="Dismiss agent controls" onClick={closeSidebar} /> : null}
       <div className="agents-columns">
-        <aside className="agents-sidebar" aria-label="Agent tasks">
-          <form className="agents-composer" onSubmit={submit}>
-            <label htmlFor="agent-objective">Research objective</label>
-            <textarea
-              id="agent-objective"
-              ref={objectiveRef}
-              rows={4}
-              maxLength={6000}
-              value={objective}
-              onChange={(event) => setObjective(event.target.value)}
-              placeholder="Compare the current public documentation for…"
-              aria-describedby="agent-objective-help"
-              required
-              disabled={busy}
-            />
-            <p id="agent-objective-help">All agent steps use local models with no cloud fallback. Research uses public web sources. You can leave this page and return to the saved progress and report.</p>
-            <button className="agents-primary" type="submit" disabled={busy || !objective.trim()}>{busy ? "Saving…" : "Start agent"}</button>
-          </form>
+        <aside
+          className="agents-sidebar"
+          id="agents-navigation"
+          ref={sidebarRef}
+          aria-label="Agent tasks"
+          role={compactNavigation ? "dialog" : undefined}
+          aria-modal={sidebarOpen ? true : undefined}
+          aria-hidden={compactNavigation && !sidebarOpen ? true : undefined}
+          inert={compactNavigation && !sidebarOpen ? true : undefined}
+        >
+          <header className="agents-header">
+            <div>
+              <p className="agents-eyebrow">Your research, in progress</p>
+              <h1 id="agents-title">Agents</h1>
+            </div>
+            {compactNavigation
+              ? <button type="button" className="agents-secondary agents-sidebar-close" aria-label="Close agent controls" onClick={closeSidebar}>✕</button>
+              : <button type="button" className="agents-secondary" onClick={() => objectiveRef.current?.focus()}>New agent</button>}
+          </header>
+          <div className="agents-sidebar-scroll">
+            {sidebarOpen && error ? <p className="agents-error" role="alert">{error}</p> : null}
+            {sidebarOpen && notice ? <p className="agents-notice" role="status">{notice}</p> : null}
+            <form className="agents-composer" onSubmit={submit}>
+              <label htmlFor="agent-objective">Research objective</label>
+              <textarea
+                id="agent-objective"
+                ref={objectiveRef}
+                rows={4}
+                maxLength={6000}
+                value={objective}
+                onChange={(event) => setObjective(event.target.value)}
+                placeholder="Compare the current public documentation for…"
+                aria-describedby="agent-objective-help"
+                required
+                disabled={busy}
+              />
+              <p id="agent-objective-help">All agent steps use local models with no cloud fallback. Research uses public web sources. You can leave this page and return to the saved progress and report.</p>
+              <button className="agents-primary" type="submit" disabled={busy || !objective.trim()}>{busy ? "Saving…" : "Start agent"}</button>
+            </form>
 
-          <div className="agents-task-list-header">
-            <h2>Saved tasks</h2>
-            <button type="button" className="agents-refresh" onClick={() => { setError(""); setRefreshToken((value) => value + 1); }} disabled={refreshing} aria-label="Refresh agent tasks">{refreshing ? "Refreshing…" : "Refresh"}</button>
-          </div>
-          <div className="agents-filters" role="group" aria-label="Filter agent tasks">
-            {([['all', 'All'], ['active', 'Active'], ['finished', 'Finished']] as const).map(([value, label]) => (
-              <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
-            ))}
-          </div>
-          {loading ? <p className="agents-empty" role="status">Loading your agents…</p> : !shownTasks.length ? (
-            <p className="agents-empty">{tasks.length ? "No tasks in this view." : "No agents yet. Start with a research objective above."}</p>
-          ) : (
-            <ul className="agents-task-list">
-              {shownTasks.map((task) => (
-                <li key={task.id}>
-                  <button type="button" className="agents-task-card" aria-pressed={selectedId === task.id} aria-label={`Open agent: ${task.objective}`} onClick={() => selectTask(task.id)}>
-                    <span className={`agents-status agents-status-${task.status}`}>{STATUS_LABELS[task.status]}</span>
-                    <strong>{task.objective}</strong>
-                    <span className="agents-task-stage">{task.steps.find((step) => step.status === "running")?.label ?? (task.status === "paused" ? "Completed steps saved" : task.status === "queued" ? "Waiting to start" : "Saved progress")}</span>
-                    <time dateTime={task.updated_at}>Last activity {timestamp(task.updated_at)}</time>
-                  </button>
-                </li>
+            {selected && !isFinished(selected) ? (
+              <section className="agents-current-controls" aria-labelledby="agent-current-controls-title">
+                <h2 id="agent-current-controls-title">Current agent</h2>
+                <p>{selected.objective}</p>
+                <AgentTaskControls
+                  key={`${selected.id}:active:${visible}:${sidebarOpen}`}
+                  task={selected}
+                  busy={busy}
+                  onAction={(action) => void act(selected, action)}
+                  onDelete={() => void removeTask(selected)}
+                />
+              </section>
+            ) : null}
+
+            <div className="agents-task-list-header">
+              <h2>Saved tasks</h2>
+              <button type="button" className="agents-refresh" onClick={() => { setError(""); setRefreshToken((value) => value + 1); }} disabled={refreshing} aria-label="Refresh agent tasks">{refreshing ? "Refreshing…" : "Refresh"}</button>
+            </div>
+            <div className="agents-filters" role="group" aria-label="Filter agent tasks">
+              {([['all', 'All'], ['active', 'Active'], ['finished', 'Finished']] as const).map(([value, label]) => (
+                <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
               ))}
-            </ul>
-          )}
+            </div>
+            {loading ? <p className="agents-empty" role="status">Loading your agents…</p> : !shownTasks.length ? (
+              <p className="agents-empty">{tasks.length ? "No tasks in this view." : "No agents yet. Start with a research objective above."}</p>
+            ) : (
+              <ul className="agents-task-list">
+                {shownTasks.map((task) => (
+                  <li key={task.id}>
+                    <button type="button" className="agents-task-card" aria-pressed={selectedId === task.id} aria-label={`Open agent: ${task.objective}`} onClick={() => selectTask(task.id)}>
+                      <span className={`agents-status agents-status-${task.status}`}>{STATUS_LABELS[task.status]}</span>
+                      <strong>{task.objective}</strong>
+                      <span className="agents-task-stage">{task.steps.find((step) => step.status === "running")?.label ?? (task.status === "paused" ? "Completed steps saved" : task.status === "queued" ? "Waiting to start" : "Saved progress")}</span>
+                      <time dateTime={task.updated_at}>Last activity {timestamp(task.updated_at)}</time>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </aside>
 
-        <section className="agents-detail" aria-label="Selected agent" ref={detailRef}>
-          {selected ? (
-            <>
-              <header className="agents-detail-header">
-                <div className="agents-detail-toolbar">
-                  <span className={`agents-status agents-status-${selected.status}`}>{STATUS_LABELS[selected.status]}</span>
-                  <AgentTaskControls
-                    key={`${selected.id}:${isFinished(selected) ? selected.revision : "active"}:${visible}`}
-                    task={selected}
-                    busy={busy}
-                    onAction={(action) => void act(selected, action)}
-                    onDelete={() => void removeTask(selected)}
-                  />
-                </div>
-                <h2>{selected.objective}</h2>
-                <p>Last activity <time dateTime={selected.updated_at}>{timestamp(selected.updated_at)}</time></p>
-              </header>
-              {selected.status === "paused" ? <p className="agents-notice">Completed steps are saved. Resume to continue from the next unfinished step.</p> : null}
-              {selected.error ? <p className="agents-error" role="alert">{selected.error}</p> : null}
-              <section className="agents-plan" aria-labelledby="agent-plan-title">
-                <h3 id="agent-plan-title">Plan and progress</h3>
-                <ol>
-                  {selected.steps.map((step) => (
-                    <li key={step.id} className={`agents-step agents-step-${step.status}`}>
-                      <span className="agents-step-mark" aria-hidden="true">{step.status === "completed" ? "✓" : step.status === "running" ? "●" : "○"}</span>
-                      <div>
-                        <strong>{step.label}</strong>
-                        <span className="agents-step-status">{step.status === "completed" ? "Completed" : step.status === "running" ? "In progress" : "Pending"}</span>
-                        {step.result ? <details><summary>View saved {step.id === "plan" ? "plan" : step.id === "research" ? "research" : "review"}</summary><AgentMarkdown text={step.result} /></details> : null}
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              </section>
-              <section className="agents-result" aria-labelledby="agent-result-title">
-                <h3 id="agent-result-title">Report</h3>
-                {selected.result ? <AgentMarkdown text={selected.result} /> : <p>{selected.summary && selected.status === "completed" ? "Loading the saved report…" : selected.status === "failed" ? "This task stopped before a final report was saved. Any completed steps are available above." : selected.status === "cancelled" ? "This task was cancelled. Any completed steps are available above." : "The report will appear here when Audrey completes its review."}</p>}
-              </section>
-            </>
-          ) : (
-            <div className="agents-welcome">
-              <span className="agents-welcome-mark" aria-hidden="true">✦</span>
-              <h2>Work that continues while you’re away</h2>
-              <p>Start a research task or select a saved agent to see its objective, completed steps, and report.</p>
-              <ol><li>Plan the work</li><li>Research public sources</li><li>Review and save the report</li></ol>
-            </div>
-          )}
+        <section className="agents-workflow" aria-label="Selected agent" ref={detailRef} tabIndex={0} inert={sidebarOpen ? true : undefined}>
+          {!sidebarOpen && error ? <p className="agents-error" role="alert">{error}</p> : null}
+          {!sidebarOpen && notice ? <p className="agents-notice" role="status">{notice}</p> : null}
+          <div className="agents-detail">
+            {selected ? (
+              <>
+                <header className="agents-detail-header">
+                  <div className="agents-detail-toolbar">
+                    <span className={`agents-status agents-status-${selected.status}`}>{STATUS_LABELS[selected.status]}</span>
+                    {isFinished(selected) ? <AgentTaskControls
+                      key={`${selected.id}:${isFinished(selected) ? selected.revision : "active"}:${visible}`}
+                      task={selected}
+                      busy={busy}
+                      onAction={(action) => void act(selected, action)}
+                      onDelete={() => void removeTask(selected)}
+                    /> : null}
+                  </div>
+                  <h2>{selected.objective}</h2>
+                  <p>Last activity <time dateTime={selected.updated_at}>{timestamp(selected.updated_at)}</time></p>
+                </header>
+                {selected.status === "paused" ? <p className="agents-notice">Completed steps are saved. Resume to continue from the next unfinished step.</p> : null}
+                {selected.error ? <p className="agents-error" role="alert">{selected.error}</p> : null}
+                <section className="agents-plan" aria-labelledby="agent-plan-title">
+                  <h3 id="agent-plan-title">Plan and progress</h3>
+                  <ol>
+                    {selected.steps.map((step) => (
+                      <li key={step.id} className={`agents-step agents-step-${step.status}`}>
+                        <span className="agents-step-mark" aria-hidden="true">{step.status === "completed" ? "✓" : step.status === "running" ? "●" : "○"}</span>
+                        <div>
+                          <strong>{step.label}</strong>
+                          <span className="agents-step-status">{step.status === "completed" ? "Completed" : step.status === "running" ? "In progress" : "Pending"}</span>
+                          {step.result ? <details><summary>View saved {step.id === "plan" ? "plan" : step.id === "research" ? "research" : "review"}</summary><AgentMarkdown text={step.result} /></details> : null}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+                <section className="agents-result" aria-labelledby="agent-result-title">
+                  <h3 id="agent-result-title">Report</h3>
+                  {selected.result ? <AgentMarkdown text={selected.result} /> : <p>{selected.summary && selected.status === "completed" ? "Loading the saved report…" : selected.status === "failed" ? "This task stopped before a final report was saved. Any completed steps are available above." : selected.status === "cancelled" ? "This task was cancelled. Any completed steps are available above." : "The report will appear here when Audrey completes its review."}</p>}
+                </section>
+              </>
+            ) : (
+              <div className="agents-welcome">
+                <span className="agents-welcome-mark" aria-hidden="true">✦</span>
+                <h2>Work that continues while you’re away</h2>
+                <p>Start a research task or select a saved agent to see its objective, completed steps, and report.</p>
+                <ol><li>Plan the work</li><li>Research public sources</li><li>Review and save the report</li></ol>
+              </div>
+            )}
+          </div>
         </section>
       </div>
     </section>

@@ -1,8 +1,8 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
 **Status:** In progress, October 29, 2026. Public-research Agents and the first
-unified lexical Search slice are implemented locally; Tower acceptance of Search
-is pending. Campaigns 1–4 remain closed.
+unified lexical Search slice are implemented locally. The owner confirms Search
+returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
 
 The owner selected unified search, saved background tasks, project working
 memory and scheduled monitoring. Background tasks mean a visible agentic
@@ -12,12 +12,16 @@ part of the requested background execution capability.
 
 ## Current implementation slice
 
-The native app now has centered Chat/Agents/Search navigation in the top bar and a saved public-source
+The native app has Chat/Agents navigation and a compact top-bar search field with
+a magnifying-glass action that opens Search and submits its text. It has a saved public-source
 research workflow: Plan, Research and Review. Users can create tasks, inspect
 saved step results/reports, pause/resume/cancel, rerun the same agent and delete
 terminal history. Run again preserves completed checkpoints on unfinished tasks;
 completed tasks repeat Research/Review using the saved Plan. The agent ID and
 selection stay the same. Lists return compact summaries and load the selected report separately.
+Agents has a left sidebar for creation, history and active controls; its workflow
+and sidebar scroll independently. Small screens use a controls drawer. Terminal
+Run again and the red two-click Delete remain at the workflow card's top right.
 
 Application schema 26 stores owner-bound tasks and operation reservations with
 leases, fenced writes and cumulative limits. The lifecycle worker reuses committed
@@ -65,6 +69,9 @@ and immediately before returning text. Account purge clears projected text, and
 pagination is bound to owner, query, filters and index generation. Search uses no
 models, embeddings, sidecar history/memory or cloud calls. Unsupported/oversized
 sources and incomplete backfill produce an explicit partial-results state.
+Coverage notices now count genuine unreadable/oversized sources within the selected
+filters, exclude unfinished/failed uploads, and avoid duplicate generic warnings.
+Indexing has its own status; multiple coverage details can be expanded.
 Current bounds include 256 query characters/12 literal terms, 500,000 characters
 per source, 5,000 sources/10 million source characters per owner, and the first
 200 matching source candidates per query. File input/expanded parsing is bounded

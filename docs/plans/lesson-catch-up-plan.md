@@ -73,7 +73,7 @@ content belongs; they do not authorize new writing or immediate file removal.
 | `lesson-04-request-lifecycle.md` | 3: Platform map; shorten its detailed native trace when 17 exists |
 | `lesson-05-configuration-and-startup.md` | 4: Configuration/startup; introduce store initialization alongside 5 |
 | `lesson-06a-application-database.md` | 5: The application database; published early as 6a (2026-10-28), read between 5 and 6 |
-| `lesson-06-the-model-layer.md` | 8: Choosing a model |
+| `lesson-06b-the-model-layer.md` | 8: Choosing a model |
 | `lesson-07-calling-models.md` | 9: Calling models, including a high-level Private explanation |
 | `lesson-08-classification-and-routing.md` | 7: Routing; move model-access detail to 6 |
 | `lesson-09-deep-mode.md` | 11: Deep and research together |

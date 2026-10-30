@@ -17,7 +17,7 @@ from audrey.content_search import (
     ContentSearchIndex,
     SearchDocument,
 )
-from audrey.content_sources import ContentSourceReader
+from audrey.content_sources import ContentSourceReader, SearchCoverageIssue
 
 log = logging.getLogger(__name__)
 _KINDS = ("message", "file", "agent")
@@ -30,6 +30,7 @@ class _OwnerScan:
     done: set[str] = field(default_factory=set)
     seen: set[str] = field(default_factory=set)
     warnings: set[str] = field(default_factory=set)
+    coverage: dict[str, SearchCoverageIssue] = field(default_factory=dict)
     completed_at: float = 0
     indexed: dict[str, dict] | None = None
     generation: int = field(default_factory=lambda: secrets.randbits(64))
@@ -133,6 +134,7 @@ class ContentSearchService:
         scan.done.clear()
         scan.seen.clear()
         scan.warnings.clear()
+        scan.coverage.clear()
         scan.indexed = None
         scan.completed_at = 0
 
@@ -187,7 +189,14 @@ class ContentSearchService:
                     after=scan.cursors.get(kind),
                     limit=5 if kind == "file" else 50,
                 )
-                scan.warnings.update(warnings[:20])
+                for warning in warnings:
+                    if isinstance(warning, SearchCoverageIssue):
+                        if warning.source_id in scan.coverage or len(scan.coverage) < 5_000:
+                            scan.coverage[warning.source_id] = warning
+                        else:
+                            scan.warnings.add("Some sources exceed the local search allowance.")
+                    else:
+                        scan.warnings.add(warning)
                 for document in documents:
                     if len(scan.seen) >= 5_000:
                         scan.warnings.add("Some sources exceed the local search allowance.")

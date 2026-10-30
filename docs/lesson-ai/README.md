@@ -36,7 +36,7 @@ plan.
 
 **The answer pipeline**
 
-- [Lesson 6 — The model layer I: choosing a model](lesson-06-the-model-layer.md)
+- [Lesson 6 — The model layer I: choosing a model](lesson-06b-the-model-layer.md)
 - [Lesson 7 — The model layer II: calling models](lesson-07-calling-models.md)
 - [Lesson 8 — Classification and routing](lesson-08-classification-and-routing.md)
 - [Lesson 9 — Deep mode and research mode](lesson-09-deep-mode.md)

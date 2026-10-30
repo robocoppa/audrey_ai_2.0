@@ -32,6 +32,11 @@
 .search-date-filters p.search-date-error { color: #f5a3aa; }
 .search-results h2 { margin: 0.5rem 0 1rem; font-size: 0.95rem; line-height: 1.6; overflow-wrap: anywhere; }
 .search-state { margin: 1.2rem 0; color: var(--muted); font-size: 0.85rem; line-height: 1.7; }
+.search-indexing, .search-coverage-note, .search-coverage { margin: 0.65rem 0 1rem; color: var(--muted); font-size: 0.75rem; line-height: 1.6; overflow-wrap: anywhere; }
+.search-coverage summary { width: fit-content; cursor: pointer; }
+.search-coverage summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 0.15rem; }
+.search-coverage ul { margin: 0.5rem 0 0; padding-left: 1.2rem; }
+.search-coverage li + li { margin-top: 0.35rem; }
 .search-notice, .search-error { margin-top: 0.7rem; margin-bottom: 0.7rem; padding: 0.8rem 1rem; border: 1px solid var(--border); border-radius: 0.65rem; color: var(--muted); font-size: 0.8rem; line-height: 1.6; overflow-wrap: anywhere; }
 .search-error { border-color: rgb(245 128 136 / 35%); background: rgb(245 128 136 / 7%); color: #f5a3aa; }
 .search-error p { margin-top: 0; }

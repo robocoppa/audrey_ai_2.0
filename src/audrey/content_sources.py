@@ -14,6 +14,7 @@ import stat
 import threading
 import zipfile
 from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -25,8 +26,6 @@ from audrey.kb.user_store import sanitize_user
 
 MAX_FILE_BYTES = 8 * 1024 * 1024
 _ARTIFACTS = {"transcript": "transcript.txt", "visual": "frames.txt", "summary": "summary.txt"}
-_MESSAGE_WARNING = "Some messages exceed the content search size limit."
-_FILE_WARNING = "Some file text is unavailable or exceeds the content search limits."
 _OWNER_SQL = (
     "SELECT 1 FROM app_users u WHERE u.user_id=? AND u.storage_namespace=? "
     "AND u.status='active' AND NOT EXISTS "
@@ -36,6 +35,22 @@ _OWNER_SQL = (
 
 class _UnavailableSourceError(ValueError):
     pass
+
+
+class _SourceSizeLimitError(_UnavailableSourceError):
+    pass
+
+
+@dataclass(frozen=True)
+class SearchCoverageIssue:
+    """Content-free coverage metadata, scoped to the same filters as results."""
+
+    source_id: str
+    kind: Literal["message", "file", "agent"]
+    reason: Literal["size_limit", "text_unavailable"]
+    updated_at: str
+    project_ids: tuple[str, ...] = ()
+    archived: bool = False
 
 
 def _digest(value: object) -> str:
@@ -65,8 +80,10 @@ def _presence_pin(path: Path) -> tuple[int, int, int, int] | None:
 
 def _pin(path: Path) -> tuple[int, int, int, int]:
     result = _presence_pin(path)
-    if result is None or result[2] > MAX_FILE_BYTES:
+    if result is None:
         raise _UnavailableSourceError
+    if result[2] > MAX_FILE_BYTES:
+        raise _SourceSizeLimitError
     return result
 
 
@@ -78,7 +95,7 @@ def _validate_archive(path: Path) -> None:
         with zipfile.ZipFile(path) as archive:
             members = archive.infolist()
             if len(members) > 2000 or sum(member.file_size for member in members) > MAX_FILE_BYTES:
-                raise _UnavailableSourceError
+                raise _SourceSizeLimitError
     except zipfile.BadZipFile:
         raise _UnavailableSourceError from None
 
@@ -93,21 +110,23 @@ def _extract_search_text(path: Path) -> str:
     try:
         reader = PdfReader(str(path))
         if not 0 < len(reader.pages) <= 2000:
-            raise _UnavailableSourceError
+            raise _SourceSizeLimitError
         parts, characters, expanded = [], 0, 0
         for page in reader.pages:
             contents = page.get_contents()
             if contents is not None:
                 expanded += len(contents.get_data())
                 if expanded > MAX_FILE_BYTES:
-                    raise _UnavailableSourceError
+                    raise _SourceSizeLimitError
             text = page.extract_text() or ""
             characters += len(text) + 2
             if characters > MAX_SOURCE_CHARS:
-                raise _UnavailableSourceError
+                raise _SourceSizeLimitError
             if text.strip():
                 parts.append(text)
         return "\n\n".join(parts)
+    except _SourceSizeLimitError:
+        raise
     except Exception:  # noqa: BLE001 - untrusted PDF parser failures are content-free refusals
         # Parsers must not return a partial extraction or expose input details.
         raise _UnavailableSourceError from None
@@ -121,7 +140,7 @@ def _read_text(path: Path, expected: tuple[int, int, int, int]) -> str:
             raise _UnavailableSourceError
         data = stream.read(MAX_FILE_BYTES + 1)
     if len(data) > MAX_FILE_BYTES:
-        raise _UnavailableSourceError
+        raise _SourceSizeLimitError
     return data.decode("utf-8")
 
 
@@ -328,8 +347,10 @@ class ContentSourceReader:
             if text_path is not None
             else _extract_search_text(source)
         )
-        if not text.strip() or len(text) > MAX_SOURCE_CHARS:
+        if not text.strip():
             raise _UnavailableSourceError
+        if len(text) > MAX_SOURCE_CHARS:
+            raise _SourceSizeLimitError
         if not self._pins_current(pins):
             raise _UnavailableSourceError
         return text, pins
@@ -342,7 +363,12 @@ class ContentSourceReader:
             return False
 
     async def _file_document(
-        self, owner_id: str, namespace: str, row: dict, artifact: str
+        self,
+        owner_id: str,
+        namespace: str,
+        row: dict,
+        artifact: str,
+        failures: list[str] | None = None,
     ) -> SearchDocument | None:
         if row["status"] != "ready":
             return None
@@ -371,7 +397,11 @@ class ContentSourceReader:
                 self._file_context, owner_id, namespace, row["file_id"]
             ):
                 return None
-        except (OSError, UnicodeError, EmptyExtractionError, _UnavailableSourceError):
+        except (OSError, UnicodeError, EmptyExtractionError, _UnavailableSourceError) as error:
+            if failures is not None:
+                failures.append(
+                    "size_limit" if isinstance(error, _SourceSizeLimitError) else "text_unavailable"
+                )
             return None
         document = SearchDocument(
             owner_id=owner_id,
@@ -404,7 +434,7 @@ class ContentSourceReader:
         kind: Literal["message", "file", "agent"],
         after: str | None = None,
         limit: int = 50,
-    ) -> tuple[list[SearchDocument], str | None, list[str]]:
+    ) -> tuple[list[SearchDocument], str | None, list[SearchCoverageIssue]]:
         if (
             kind not in {"message", "file", "agent"}
             or type(limit) is not int
@@ -424,9 +454,23 @@ class ContentSourceReader:
                 if document is not None:
                     documents.append(document)
                 elif row.get("content") is None and kind == "message":
-                    warnings.append(_MESSAGE_WARNING)
+                    warnings.append(SearchCoverageIssue(
+                        source_id=f"message:{row['message_id']}",
+                        kind="message",
+                        reason="size_limit",
+                        updated_at=row["updated_at"],
+                        project_ids=(row["project_id"],) if row["project_id"] else (),
+                        archived=bool(row["archived_at"]),
+                    ))
+                elif kind == "agent" and len(row["result"]) > MAX_SOURCE_CHARS:
+                    warnings.append(SearchCoverageIssue(
+                        source_id=f"agent:{row['task_id']}:report",
+                        kind="agent",
+                        reason="size_limit",
+                        updated_at=row["updated_at"],
+                    ))
             key = "message_id" if kind == "message" else "task_id"
-            return documents, rows[-1][key] if len(rows) == limit else None, sorted(set(warnings))
+            return documents, rows[-1][key] if len(rows) == limit else None, warnings
         if await self._disk(self._file_context, owner_id, storage_namespace, "") is None:
             return [], None, []
         rows = await self.uploads.list_search_page(
@@ -434,6 +478,10 @@ class ContentSourceReader:
         )
         documents = []
         for row in rows:
+            # Pending/failed uploads have not produced searchable content yet;
+            # they are not failed reads of completed saved content.
+            if row["status"] != "ready":
+                continue
             artifacts = (
                 ("text", "summary")
                 if row["kind"] in {"text", "image"} or row["origin"] == "generated"
@@ -446,14 +494,33 @@ class ContentSourceReader:
                 )
             )
             found = []
+            failures = []
             for artifact in artifacts:
-                document = await self._file_document(owner_id, storage_namespace, row, artifact)
+                document = await self._file_document(
+                    owner_id, storage_namespace, row, artifact, failures
+                )
                 if document is not None:
                     found.append(document)
             documents.extend(found)
-            if artifacts and not found:
-                warnings.append(_FILE_WARNING)
-        return documents, rows[-1]["file_id"] if len(rows) == limit else None, sorted(set(warnings))
+            # A missing optional sidecar does not make a readable file partial.
+            # An existing oversized artifact does leave a real coverage gap,
+            # even when a shorter summary of that file can still be searched.
+            if failures and (not found or "size_limit" in failures):
+                fresh = await self.uploads.get_owned_search_row(
+                    user=storage_namespace, file_id=row["file_id"]
+                )
+                projects = await self._disk(
+                    self._file_context, owner_id, storage_namespace, row["file_id"]
+                )
+                if fresh == row and projects is not None:
+                    warnings.append(SearchCoverageIssue(
+                        source_id=f"file:{row['file_id']}",
+                        kind="file",
+                        reason="size_limit" if "size_limit" in failures else "text_unavailable",
+                        updated_at=row["completed_at"] or row["uploaded_at"],
+                        project_ids=tuple(projects),
+                    ))
+        return documents, rows[-1]["file_id"] if len(rows) == limit else None, warnings
 
     async def resolve(
         self, owner_id: str, storage_namespace: str, source_id: str

@@ -142,14 +142,108 @@ describe("SearchWorkspace", () => {
     expect(await screen.findByRole("heading", { name: "Project decisions" })).toBeVisible();
   });
 
-  it("explains partial indexing and preserves server warnings as plain text", async () => {
+  it("shows indexing separately from one specific coverage note without a duplicate partial warning", async () => {
     vi.mocked(api.searchContent).mockResolvedValue(response({ items: [result()], partial: true, indexing: true, warnings: ["A file is being processed."] }));
     render(<SearchWorkspace onOpenResult={vi.fn()} />);
     search();
-    expect(await screen.findByText(/still being indexed/u)).toBeVisible();
-    expect(screen.getByText(/These results are partial/u)).toBeVisible();
+    expect(await screen.findByText("Indexing saved content. Search again for more matches.")).toHaveAttribute("role", "status");
+    expect(screen.queryByText(/These results are partial/u)).not.toBeInTheDocument();
     expect(screen.getByText("A file is being processed.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Open chat: Project decisions" })).toBeEnabled();
+  });
+
+  it("keeps multiple unique coverage details expandable and renders them as plain text", async () => {
+    vi.mocked(api.searchContent).mockResolvedValue(response({ items: [result()], partial: true, warnings: [
+      "1 saved file has no readable text for search.",
+      "<img src=x onerror=alert(1)> could not be searched.",
+      "1 saved file has no readable text for search.",
+    ] }));
+    const { container } = render(<SearchWorkspace onOpenResult={vi.fn()} />);
+    search();
+    const summary = await screen.findByText("Search coverage: 2 limitations");
+    expect(summary).toBeVisible();
+    const details = summary.closest("details");
+    expect(details).not.toHaveAttribute("open");
+    expect(screen.getByText("1 saved file has no readable text for search.")).not.toBeVisible();
+    fireEvent.click(summary);
+    expect(details).toHaveAttribute("open");
+    expect(screen.getByText("1 saved file has no readable text for search.")).toBeVisible();
+    expect(screen.getByText("<img src=x onerror=alert(1)> could not be searched.")).toBeVisible();
+    expect(container.querySelector("img")).toBeNull();
+    expect(screen.queryByText(/Some saved content is not included/u)).not.toBeInTheDocument();
+  });
+
+  it("uses one coverage fallback only when partial results have no specific explanation", async () => {
+    vi.mocked(api.searchContent).mockResolvedValue(response({ partial: true }));
+    render(<SearchWorkspace onOpenResult={vi.fn()} />);
+    search();
+    expect(await screen.findByText("Some saved content is not included in these results.")).toBeVisible();
+    expect(screen.queryByText(/Indexing saved content/u)).not.toBeInTheDocument();
+    vi.mocked(api.searchContent).mockResolvedValue(response({ partial: true, indexing: true }));
+    search("another query");
+    expect(await screen.findByText(/Indexing saved content/u)).toBeVisible();
+    expect(screen.queryByText("Some saved content is not included in these results.")).not.toBeInTheDocument();
+  });
+
+  it("updates coverage from the latest page instead of retaining an old indexing warning", async () => {
+    vi.mocked(api.searchContent).mockResolvedValueOnce(response({ items: [result()], next_cursor: "next-page", partial: true, indexing: true, warnings: ["1 saved file has no readable text for search."] }))
+      .mockResolvedValueOnce(response({ items: [result({ id: "second", title: "Another saved result" })] }));
+    render(<SearchWorkspace onOpenResult={vi.fn()} />);
+    search();
+    expect(await screen.findByText("Indexing saved content. Search again for more matches.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Load more results" }));
+    expect(await screen.findByRole("heading", { name: "Another saved result" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Project decisions" })).toBeVisible();
+    expect(screen.queryByText(/Indexing saved content/u)).not.toBeInTheDocument();
+    expect(screen.queryByText("1 saved file has no readable text for search.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Some saved content is not included in these results.")).not.toBeInTheDocument();
+  });
+
+  it("submits an incoming header query once and preserves the current filters", async () => {
+    const onOpenResult = vi.fn();
+    const { rerender } = render(<SearchWorkspace onOpenResult={onOpenResult} />);
+    fireEvent.click(screen.getByRole("button", { name: "Files" }));
+    fireEvent.change(screen.getByLabelText("Updated from"), { target: { value: "2026-10-01" } });
+    rerender(<SearchWorkspace openRequest={{ query: "  local storage  ", serial: 1 }} onOpenResult={onOpenResult} />);
+    await waitFor(() => expect(api.searchContent).toHaveBeenCalledExactlyOnceWith("local storage", expect.objectContaining({ kind: "file", since: "2026-10-01" }), expect.any(AbortSignal)));
+    expect(screen.getByRole("searchbox")).toHaveValue("local storage");
+    expect(screen.getByRole("searchbox")).toHaveFocus();
+    rerender(<SearchWorkspace openRequest={{ query: "local storage", serial: 1 }} onOpenResult={onOpenResult} />);
+    await waitFor(() => expect(screen.getByText("No matches found. Try fewer words or broader filters.")).toBeVisible());
+    expect(api.searchContent).toHaveBeenCalledTimes(1);
+    rerender(<SearchWorkspace openRequest={{ query: "local storage", serial: 2 }} onOpenResult={onOpenResult} />);
+    await waitFor(() => expect(api.searchContent).toHaveBeenCalledTimes(2));
+  });
+
+  it("focuses an empty incoming header request without submitting or replacing the draft", async () => {
+    const onOpenResult = vi.fn();
+    const { rerender } = render(<SearchWorkspace visible={false} openRequest={{ query: "", serial: 1 }} onOpenResult={onOpenResult} />);
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "draft query" } });
+    expect(screen.getByRole("searchbox")).not.toHaveFocus();
+    rerender(<SearchWorkspace visible openRequest={{ query: "", serial: 1 }} onOpenResult={onOpenResult} />);
+    await waitFor(() => expect(screen.getByRole("searchbox")).toHaveFocus());
+    expect(screen.getByRole("searchbox")).toHaveValue("draft query");
+    expect(api.searchContent).not.toHaveBeenCalled();
+  });
+
+  it("waits until visible before submitting an incoming header query", async () => {
+    const onOpenResult = vi.fn();
+    const { rerender } = render(<SearchWorkspace visible={false} openRequest={{ query: "local storage", serial: 1 }} onOpenResult={onOpenResult} />);
+    await act(async () => {});
+    expect(api.searchContent).not.toHaveBeenCalled();
+    rerender(<SearchWorkspace visible openRequest={{ query: "local storage", serial: 1 }} onOpenResult={onOpenResult} />);
+    await waitFor(() => expect(api.searchContent).toHaveBeenCalledExactlyOnceWith("local storage", expect.any(Object), expect.any(AbortSignal)));
+  });
+
+  it("replaces a saved hidden query with a header query without restarting the old query", async () => {
+    const onOpenResult = vi.fn();
+    const { rerender } = render(<SearchWorkspace onOpenResult={onOpenResult} />);
+    search("previous query");
+    await screen.findByText("No matches found. Try fewer words or broader filters.");
+    rerender(<SearchWorkspace visible={false} onOpenResult={onOpenResult} />);
+    rerender(<SearchWorkspace visible openRequest={{ query: "next query", serial: 1 }} onOpenResult={onOpenResult} />);
+    await waitFor(() => expect(api.searchContent).toHaveBeenCalledTimes(2));
+    expect(api.searchContent).toHaveBeenLastCalledWith("next query", expect.any(Object), expect.any(AbortSignal));
   });
 
   it("labels retained file text and opens only its stored artifact target", async () => {

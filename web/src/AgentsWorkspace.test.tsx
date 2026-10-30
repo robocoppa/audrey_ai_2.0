@@ -26,6 +26,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -77,14 +78,92 @@ describe("AgentsWorkspace", () => {
       return current;
     });
     render(<AgentsWorkspace />);
+    const sidebar = within(screen.getByRole("complementary", { name: "Agent tasks" }));
     const detail = within(screen.getByRole("region", { name: "Selected agent" }));
-    fireEvent.click(await detail.findByRole("button", { name: "Pause" }));
-    fireEvent.click(await detail.findByRole("button", { name: "Resume" }));
-    fireEvent.click(await detail.findByRole("button", { name: "Cancel" }));
+    expect(sidebar.getByRole("textbox", { name: "Research objective" })).toBeVisible();
+    fireEvent.click(await sidebar.findByRole("button", { name: "Pause" }));
+    fireEvent.click(await sidebar.findByRole("button", { name: "Resume" }));
+    fireEvent.click(await sidebar.findByRole("button", { name: "Cancel" }));
     expect(await detail.findByRole("button", { name: "Run again" })).toBeEnabled();
+    expect(detail.getByRole("button", { name: "Delete task" })).toBeVisible();
+    expect(sidebar.queryByRole("button", { name: "Run again" })).not.toBeInTheDocument();
     expect(action.mock.calls).toEqual([
       ["agt_first", "pause", 2], ["agt_first", "resume", 3], ["agt_first", "cancel", 4],
     ]);
+  });
+
+  it("opens a selected saved agent at the top of the workflow without moving sidebar focus", async () => {
+    const first = task();
+    const second = task({ id: "agt_second", objective: "A different research report" });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [first, second] });
+    vi.mocked(api.getAgentTask).mockImplementation(async (id) => id === first.id ? first : second);
+    render(<AgentsWorkspace />);
+    await screen.findByRole("heading", { name: first.objective });
+    const workflow = screen.getByRole("region", { name: "Selected agent" });
+    workflow.scrollTop = 800;
+    const savedTask = screen.getByRole("button", { name: `Open agent: ${second.objective}` });
+    savedTask.focus();
+    fireEvent.click(savedTask);
+    expect(await screen.findByRole("heading", { name: second.objective })).toBeVisible();
+    await waitFor(() => expect(workflow.scrollTop).toBe(0));
+    expect(savedTask).toHaveFocus();
+    expect(workflow).not.toContainElement(screen.getByRole("textbox", { name: "Research objective" }));
+  });
+
+  it("keeps mobile controls in a dismissible focus-trapped drawer and opens the workflow on selection", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    const saved = task();
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
+    render(<AgentsWorkspace />);
+    await screen.findByRole("heading", { name: saved.objective });
+    const toggle = screen.getByRole("button", { name: "Agent controls" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("dialog", { name: "Agent tasks" })).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    const drawer = screen.getByRole("dialog", { name: "Agent tasks" });
+    const close = within(drawer).getByRole("button", { name: "Close agent controls" });
+    const savedTask = within(drawer).getByRole("button", { name: `Open agent: ${saved.objective}` });
+    expect(drawer).toHaveAttribute("aria-modal", "true");
+    expect(screen.getByRole("region", { name: "Selected agent" })).toHaveAttribute("inert");
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
+    expect(savedTask).toHaveFocus();
+    fireEvent.keyDown(savedTask, { key: "Tab" });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(close, { key: "Escape" });
+    await waitFor(() => expect(toggle).toHaveFocus());
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Agent tasks" })).getByRole("button", { name: `Open agent: ${saved.objective}` }));
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const workflow = screen.getByRole("region", { name: "Selected agent" });
+    await waitFor(() => expect(workflow).toHaveFocus());
+    expect(workflow).not.toHaveAttribute("inert");
+  });
+
+  it("keeps a failed mobile creation visible inside the controls drawer", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    vi.spyOn(api, "createAgentTask").mockRejectedValue(new Error("No local worker is available."));
+    render(<AgentsWorkspace />);
+    fireEvent.click(screen.getByRole("button", { name: "Agent controls" }));
+    const controls = within(screen.getByRole("dialog", { name: "Agent tasks" }));
+    fireEvent.change(controls.getByRole("textbox", { name: "Research objective" }), { target: { value: "Research public sources" } });
+    fireEvent.click(controls.getByRole("button", { name: "Start agent" }));
+    expect(await controls.findByRole("alert")).toHaveTextContent("No local worker is available.");
+    expect(screen.getByRole("dialog", { name: "Agent tasks" })).toHaveAttribute("aria-modal", "true");
+  });
+
+  it("does not close Chat navigation when hidden Agents crosses its sidebar breakpoint", () => {
+    let resize: ((event: MediaQueryListEvent) => void) | undefined;
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: true,
+      addEventListener: (_name: string, listener: (event: MediaQueryListEvent) => void) => { resize = listener; },
+      removeEventListener: vi.fn(),
+    })));
+    const navigationChanged = vi.fn();
+    render(<AgentsWorkspace visible={false} navigationOpen onNavigationOpenChange={navigationChanged} />);
+    act(() => resize?.({ matches: false } as MediaQueryListEvent));
+    expect(navigationChanged).not.toHaveBeenCalled();
   });
 
   it("reloads a revision conflict without repeating the user's action", async () => {

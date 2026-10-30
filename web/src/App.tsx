@@ -9,6 +9,7 @@ import { FileManager } from "./FileManager";
 import { AgentsWorkspace } from "./AgentsWorkspace";
 import { SearchWorkspace } from "./SearchWorkspace";
 import { SearchSourceViewer } from "./SearchSourceViewer";
+import "./App.css";
 import {
   ApiError,
   getCapabilities,
@@ -89,6 +90,8 @@ export function App() {
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [activeWorkspace, setActiveWorkspace] = useState<"chat" | "agents" | "search">("chat");
   const [searchSource, setSearchSource] = useState<SearchResult | null>(null);
+  const [headerSearchQuery, setHeaderSearchQuery] = useState("");
+  const [searchOpenRequest, setSearchOpenRequest] = useState<{ query: string; serial: number }>();
   const [activeAgentCount, setActiveAgentCount] = useState(0);
   const [mobileMenuHost, setMobileMenuHost] = useState<HTMLDivElement | null>(null);
   const [mobileNewChatHost, setMobileNewChatHost] = useState<HTMLDivElement | null>(null);
@@ -261,10 +264,22 @@ export function App() {
           <button type="button" aria-current={activeWorkspace === "agents" ? "page" : undefined} onClick={() => { setNavigationOpen(false); setActiveWorkspace("agents"); }}>
             Agents{activeAgentCount > 0 ? <span className="agents-active-count" aria-label={`${activeAgentCount} active agent tasks`}>{activeAgentCount}</span> : null}
           </button>
-          <button type="button" aria-current={activeWorkspace === "search" ? "page" : undefined} onClick={() => { setNavigationOpen(false); setActiveWorkspace("search"); }}>Search</button>
         </nav>
         <div className="topbar-mobile-new-chat" ref={setMobileNewChatHost} />
-        <SessionActions {...sessionActions} variant="header" />
+        <div className="app-header-tools">
+          <form className="app-topbar-search" role="search" aria-label="Search saved content" onSubmit={(event) => {
+            event.preventDefault();
+            setNavigationOpen(false);
+            setActiveWorkspace("search");
+            setSearchOpenRequest((previous) => ({ query: headerSearchQuery.trim(), serial: (previous?.serial ?? 0) + 1 }));
+          }}>
+            <input type="search" aria-label="Search saved content" placeholder="Search…" autoComplete="off" maxLength={256} value={headerSearchQuery} onChange={(event) => setHeaderSearchQuery(event.target.value)} />
+            <button type="submit" aria-label="Open Search" title="Search saved content">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 4.5 4.5" /></svg>
+            </button>
+          </form>
+          <SessionActions {...sessionActions} variant="header" />
+        </div>
       </header>
 
       {activeWorkspace === "chat" && !navigationOpen && !filesOpen && !settingsOpen && !adminOpen ? <PullToRefresh /> : null}
@@ -289,10 +304,10 @@ export function App() {
           </Suspense>
         </div>
         <div className="app-workspace-view" hidden={activeWorkspace !== "agents"} inert={activeWorkspace !== "agents" ? true : undefined}>
-          <AgentsWorkspace key={`${session.user.id}:${workspaceRevision}`} visible={activeWorkspace === "agents"} timezone={session.preferences.timezone} onActiveCountChange={setActiveAgentCount} />
+          <AgentsWorkspace key={`${session.user.id}:${workspaceRevision}`} visible={activeWorkspace === "agents"} timezone={session.preferences.timezone} onActiveCountChange={setActiveAgentCount} navigationOpen={navigationOpen} onNavigationOpenChange={setNavigationOpen} />
         </div>
         <div className="app-workspace-view" hidden={activeWorkspace !== "search"} inert={activeWorkspace !== "search" ? true : undefined}>
-          <SearchWorkspace key={`${session.user.id}:${workspaceRevision}`} visible={activeWorkspace === "search"} onOpenResult={setSearchSource} />
+          <SearchWorkspace key={`${session.user.id}:${workspaceRevision}`} visible={activeWorkspace === "search"} onOpenResult={setSearchSource} openRequest={searchOpenRequest} />
         </div>
       </main>
       {searchSource ? <SearchSourceViewer result={searchSource} onClose={() => setSearchSource(null)} /> : null}
@@ -318,6 +333,8 @@ export function App() {
           }}
           onDataPurgeAttempted={() => {
             setSearchSource(null);
+            setHeaderSearchQuery("");
+            setSearchOpenRequest(undefined);
             setWorkspaceRevision((current) => current + 1);
             void Promise.all([
               getCurrentUser(),
