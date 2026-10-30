@@ -16,6 +16,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from audrey.app_state.titles import fallback_conversation_title, normalize_agent_title
 from audrey.app_state.transactions import write_transaction
 
 DEFAULT_LIMITS = {
@@ -32,11 +33,11 @@ _LIMIT_BOUNDS = {
 }
 _STEP_LABELS = (("plan", "Plan"), ("research", "Research"), ("review", "Review"))
 _PUBLIC_FIELDS = (
-    "objective", "status", "revision", "created_at", "updated_at", "result", "error", "attempts",
+    "objective", "title", "status", "revision", "created_at", "updated_at", "result", "error", "attempts",
 )
 _SAVED_FIELDS = (
     "status", "revision", "attempts", "fence", "lease_token", "lease_expires_at",
-    "accounted_at", "active_seconds", "operations", "result", "error", "updated_at",
+    "accounted_at", "active_seconds", "operations", "result", "error", "updated_at", "title", "title_attempted",
 )
 
 
@@ -117,6 +118,7 @@ class AgentsRepository:
         return {
             "id": record["task_id"],
             **{key: record[key] for key in _PUBLIC_FIELDS},
+            "title": record["title"] or fallback_conversation_title(record["objective"]),
             "steps": [dict(step) for step in record["steps"]],
         }
 
@@ -126,7 +128,9 @@ class AgentsRepository:
             **{key: record[key] for key in (
                 "user_id", "lease_token", "lease_expires_at", "fence", "limits",
                 "operations", "active_seconds",
+                "title_attempted",
             )},
+            "title_generated": bool(record["title"]),
             "current_step": next(
                 (step["id"] for step in record["steps"] if step["status"] != "completed"), "",
             ),
@@ -153,7 +157,7 @@ class AgentsRepository:
         self._conn.execute(
             "UPDATE app_agent_tasks SET status=?,revision=?,attempts=?,fence=?,lease_token=?,"
             "lease_expires_at=?,accounted_at=?,active_seconds=?,operations=?,result=?,error=?,"
-            "updated_at=?,steps_json=? WHERE task_id=?",
+            "updated_at=?,title=?,title_attempted=?,steps_json=? WHERE task_id=?",
             (*[record[key] for key in _SAVED_FIELDS],
              steps_json, record["task_id"]),
         )
@@ -247,7 +251,7 @@ class AgentsRepository:
                 self._owner(user_id)
                 if summary:
                     rows = self._conn.execute(
-                        "SELECT task_id,objective,status,revision,created_at,updated_at,"
+                        "SELECT task_id,objective,title,status,revision,created_at,updated_at,"
                         "'' AS result,error,attempts,"
                         "json_extract(steps_json,'$[0].status') AS plan_status,"
                         "json_extract(steps_json,'$[1].status') AS research_status,"
@@ -258,6 +262,7 @@ class AgentsRepository:
                     return [{
                         "id": row["task_id"],
                         **{key: row[key] for key in _PUBLIC_FIELDS},
+                        "title": row["title"] or fallback_conversation_title(row["objective"]),
                         "summary": True,
                         "steps": [{
                             "id": key, "label": label, "status": row[f"{key}_status"], "result": "",
@@ -420,6 +425,62 @@ class AgentsRepository:
 
         return await asyncio.to_thread(self._transaction, work)
 
+    async def reserve_title_operation(
+        self, *, task_id: str, lease_token: str, fence: int, step_id: str,
+    ) -> str | None:
+        """Charge at most one title attempt, preserving room for useful model work."""
+        def work() -> str | None:
+            record = self._lease(task_id, lease_token, fence)
+            self._account(record)
+            self._budget(record)
+            if self._internal(record)["current_step"] != step_id:
+                raise AgentTaskConflictError("Agent step changed.")
+            if record["title"] or record["title_attempted"]:
+                return None
+            record["title_attempted"] = 1
+            if record["operations"] + 1 >= record["limits"]["max_operations"]:
+                self._save(record)
+                return None
+            operation_id = str(uuid.uuid4())
+            self._conn.execute(
+                "INSERT INTO app_agent_operations "
+                "(operation_id,task_id,fence,step_id,status,created_at) VALUES (?,?,?,?,'reserved',?)",
+                (operation_id, task_id, fence, step_id, _stamp(self._clock())),
+            )
+            record["operations"] += 1
+            self._save(record)
+            return operation_id
+        return await asyncio.to_thread(self._transaction, work)
+
+    async def save_title(
+        self, *, task_id: str, lease_token: str, fence: int, step_id: str,
+        operation_id: str, title: str,
+    ) -> str:
+        normalized = normalize_agent_title(title)
+        if not normalized:
+            raise AgentTaskError("Invalid generated agent title.")
+
+        def work() -> str:
+            record = self._lease(task_id, lease_token, fence)
+            self._account(record)
+            self._budget(record)
+            operation = self._conn.execute(
+                "SELECT 1 FROM app_agent_operations WHERE operation_id=? AND task_id=? "
+                "AND fence=? AND step_id=? AND status='reserved'",
+                (operation_id, task_id, fence, step_id),
+            ).fetchone()
+            if not record["title_attempted"] or operation is None or self._internal(record)["current_step"] != step_id:
+                raise AgentTaskConflictError("The title generation operation changed.")
+            if not record["title"]:
+                record["title"] = normalized
+                self._save(record)
+            self._conn.execute(
+                "UPDATE app_agent_operations SET status='committed',committed_at=? WHERE operation_id=?",
+                (_stamp(self._clock()), operation_id),
+            )
+            return record["title"]
+        return await asyncio.to_thread(self._transaction, work)
+
     async def complete(self, *, task_id: str, lease_token: str, fence: int, result: str) -> dict:
         result = _text(result, maximum=64000, name="task result")
 
@@ -496,6 +557,8 @@ class AgentsRepository:
                         if step["id"] != "plan":
                             step.update(status="pending", result="")
                 record.update(result="", error="")
+                if not record["title"]:
+                    record["title_attempted"] = 0
             record["status"] = {
                 "pause": "paused",
                 "resume": "queued",

@@ -24,6 +24,7 @@ from pathlib import Path
 
 from audrey.app_state.agents import AgentsRepository
 from audrey.app_state.history_import import HistoryImportRepository
+from audrey.app_state.knowledge import KnowledgeRepository
 from audrey.app_state.migrations import (
     MIGRATIONS,
     PRIVATE_PROCESSING_GUARDS_SQL,
@@ -75,6 +76,7 @@ _ADDITIVE_COLUMN_MIGRATIONS = {
         "app_runs": ("private_required",),
     },
     25: {"app_project_files": ("origin",)},
+    28: {"app_agent_tasks": ("title", "title_attempted")},
 }
 
 
@@ -118,6 +120,7 @@ class ApplicationStore:
         self.tax_cases = TaxCasesRepository(self._conn, self._lock)
         self.private_tasks = PrivateTasksRepository(self._conn, self._lock)
         self.agents = AgentsRepository(self._conn, self._lock)
+        self.knowledge = KnowledgeRepository(self._conn, self._lock)
         self.responses._prune_expired_sync()
 
     def _migrate_locked(self) -> None:
@@ -205,6 +208,13 @@ class ApplicationStore:
                             "INTEGER NOT NULL DEFAULT 0 CHECK "
                             "(typeof(private_required) = 'integer' "
                             "AND private_required IN (0, 1))"
+                        )
+                    elif column == "title":
+                        definition = "TEXT NOT NULL DEFAULT '' CHECK (length(title) <= 100)"
+                    elif column == "title_attempted":
+                        definition = (
+                            "INTEGER NOT NULL DEFAULT 0 CHECK (typeof(title_attempted) = 'integer' "
+                            "AND title_attempted IN (0, 1))"
                         )
                     elif column == "origin":
                         definition = "TEXT NOT NULL DEFAULT 'upload' CHECK (origin IN ('upload', 'generated'))"
@@ -805,6 +815,10 @@ class ApplicationStore:
                 )
                 self._conn.execute(
                     "DELETE FROM app_agent_tasks WHERE user_id = ?",
+                    (user_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM app_project_knowledge WHERE user_id = ?",
                     (user_id,),
                 )
                 self._conn.execute(

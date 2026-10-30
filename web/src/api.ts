@@ -309,6 +309,47 @@ export interface AudreyProjectFileList {
   limits: ProjectLimits;
 }
 
+export type KnowledgeKind = "fact" | "decision" | "question" | "action";
+export interface KnowledgeSourceRef {
+  source_id: string;
+  revision: string;
+}
+
+export interface KnowledgeEntry {
+  id: string;
+  project_id: string;
+  kind: KnowledgeKind;
+  text: string;
+  approval_state: "approved" | "proposed" | "rejected" | "superseded";
+  work_status: "open" | "resolved" | "completed";
+  revision: number;
+  pinned: boolean;
+  origin: "user" | "agent_report";
+  sources: KnowledgeSourceRef[];
+  source_task_id: string | null;
+  created_at: string;
+  updated_at: string;
+  approved_at: string | null;
+  stale: boolean;
+  source_warnings: string[];
+  replaces_id: string | null;
+  base_revision: number | null;
+}
+
+export interface ProjectKnowledgeList {
+  items: KnowledgeEntry[];
+  next_cursor: string | null;
+  limits: { max_entries: number; max_text_chars: number; max_sources: number };
+}
+
+export interface KnowledgeUpdate {
+  expected_revision: number;
+  kind?: KnowledgeKind;
+  text?: string;
+  pinned?: boolean;
+  work_status?: KnowledgeEntry["work_status"];
+}
+
 export interface AudreyFile {
   id: string;
   origin?: "upload" | "generated";
@@ -387,13 +428,14 @@ export class ApiError extends Error {
   }
 }
 
-export type SearchKind = "all" | "message" | "file" | "agent";
+export type SearchKind = "all" | "message" | "file" | "agent" | "knowledge";
 export type SearchArchiveFilter = "all" | "active" | "archived";
 
 export type SearchTarget =
   | { kind: "message"; conversation_id: string; message_id: string; sequence: number }
   | { kind: "file"; file_id: string; artifact: "text" | "transcript" | "visual" | "summary" }
-  | { kind: "agent"; task_id: string; step_id?: "plan" | "research" | "review" };
+  | { kind: "agent"; task_id: string; step_id?: "plan" | "research" | "review" }
+  | { kind: "knowledge"; project_id: string; entry_id: string };
 
 export interface SearchResult {
   id: string;
@@ -457,6 +499,7 @@ export function getSearchSource(result: SearchResult, offset = result.offset, si
 export type AgentTaskStatus = "queued" | "running" | "paused" | "completed" | "cancelled" | "failed";
 
 export interface AgentTask {
+  title?: string;
   summary?: boolean;
   id: string;
   objective: string;
@@ -925,6 +968,61 @@ export function listProjectFiles(projectId: string): Promise<AudreyProjectFileLi
   return apiJson<AudreyProjectFileList>(
     `/api/projects/${encodeURIComponent(projectId)}/files`,
   );
+}
+
+function projectKnowledgePath(projectId: string, entryId?: string): string {
+  const root = `/api/projects/${encodeURIComponent(projectId)}/knowledge`;
+  return entryId ? `${root}/${encodeURIComponent(entryId)}` : root;
+}
+
+export function listProjectKnowledge(projectId: string, cursor?: string, signal?: AbortSignal): Promise<ProjectKnowledgeList> {
+  const params = new URLSearchParams({ limit: "50" });
+  if (cursor) params.set("cursor", cursor);
+  return apiJson<ProjectKnowledgeList>(`${projectKnowledgePath(projectId)}?${params}`, { signal, cache: "no-store" });
+}
+
+export function getProjectKnowledge(projectId: string, entryId: string, signal?: AbortSignal): Promise<KnowledgeEntry> {
+  return apiJson<KnowledgeEntry>(projectKnowledgePath(projectId, entryId), { signal, cache: "no-store" });
+}
+
+export function createProjectKnowledge(projectId: string, entry: { kind: KnowledgeKind; text: string; pinned?: boolean; request_id: string }): Promise<KnowledgeEntry> {
+  return apiJson<KnowledgeEntry>(projectKnowledgePath(projectId), {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry),
+  });
+}
+
+export function createKnowledgeProposal(projectId: string, proposal: {
+  task_id: string; task_revision: number; kind: KnowledgeKind; text: string;
+  pinned?: boolean; replaces_id?: string; base_revision?: number; request_id: string;
+}): Promise<KnowledgeEntry> {
+  return apiJson<KnowledgeEntry>(`${projectKnowledgePath(projectId)}/proposals`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(proposal),
+  });
+}
+
+export function updateProjectKnowledge(projectId: string, entryId: string, patch: KnowledgeUpdate): Promise<KnowledgeEntry> {
+  return apiJson<KnowledgeEntry>(projectKnowledgePath(projectId, entryId), {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch),
+  });
+}
+
+export function decideProjectKnowledge(projectId: string, entryId: string, decision: "approve" | "reject", expectedRevision: number): Promise<KnowledgeEntry> {
+  return apiJson<KnowledgeEntry>(`${projectKnowledgePath(projectId, entryId)}/decision`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision, expected_revision: expectedRevision }),
+  });
+}
+
+export async function deleteProjectKnowledge(projectId: string, entryId: string, expectedRevision: number): Promise<void> {
+  await apiResponse(`${projectKnowledgePath(projectId, entryId)}?expected_revision=${expectedRevision}`, { method: "DELETE" });
+}
+
+export function getProjectKnowledgeHistory(projectId: string, entryId: string, signal?: AbortSignal): Promise<{ items: KnowledgeEntry[] }> {
+  return apiJson<{ items: KnowledgeEntry[] }>(`${projectKnowledgePath(projectId, entryId)}/history`, { signal, cache: "no-store" });
+}
+
+export function getKnowledgeSource(projectId: string, entry: KnowledgeEntry, sourceIndex: number, offset = 0, signal?: AbortSignal): Promise<SearchSource> {
+  const params = new URLSearchParams({ expected_revision: String(entry.revision), offset: String(offset) });
+  return apiJson<SearchSource>(`${projectKnowledgePath(projectId, entry.id)}/sources/${sourceIndex}?${params}`, { signal, cache: "no-store" });
 }
 
 export function addProjectFile(

@@ -18,6 +18,7 @@ const KINDS: ReadonlyArray<{ value: SearchKind; label: string }> = [
   { value: "message", label: "Chats" },
   { value: "file", label: "Files" },
   { value: "agent", label: "Agents" },
+  { value: "knowledge", label: "Knowledge" },
 ];
 const MAX_RESULTS = 200;
 
@@ -243,17 +244,18 @@ export function SearchWorkspace({ visible = true, openRequest, onOpenResult }: {
           {results.map((result) => <li key={result.id}>
             <article className="search-result-card">
               <div className="search-result-meta">
-                <span className={`search-source-badge search-source-${result.kind}`}>{result.kind === "message" ? "Chat" : result.kind === "file" ? "File" : "Agent"}</span>
+                <span className={`search-source-badge search-source-${result.kind}`}>{result.kind === "message" ? "Chat" : result.kind === "file" ? "File" : result.kind === "knowledge" ? "Knowledge" : "Agent"}</span>
                 {result.private_required ? <span className="search-private">Private</span> : null}
                 {result.target.kind === "file" ? <span>{artifactLabel(result.target.artifact)}</span> : null}
                 {result.kind === "agent" ? <span>Generated report</span> : null}
+                {result.target.kind === "knowledge" && "stale" in result.target && result.target.stale ? <span>Source needs review</span> : null}
                 {result.target.kind === "agent" && result.target.step_id ? <span>Saved {result.target.step_id}</span> : null}
                 {result.availability === "text_only" ? <span>Saved text · original unavailable</span> : null}
                 <time dateTime={result.updated_at}>{timestamp(result.updated_at)}</time>
               </div>
               <h3>{result.title || "Untitled"}</h3>
               <p className="search-excerpt"><HighlightedExcerpt text={result.excerpt} ranges={result.highlights} /></p>
-              <button type="button" className="search-open" onClick={() => onOpenResult(result)} aria-label={`Open ${result.kind === "message" ? "chat" : result.kind}: ${result.title || "Untitled"}`}>Open {result.kind === "message" ? "message" : result.kind === "file" ? "saved text" : "agent"}<span aria-hidden="true"> ↗</span></button>
+              <button type="button" className="search-open" onClick={() => onOpenResult(result)} aria-label={`Open ${result.kind === "message" ? "chat" : result.kind}: ${result.title || "Untitled"}`}>Open {result.kind === "message" ? "message" : result.kind === "file" ? "saved text" : result.kind === "knowledge" ? "knowledge" : "agent"}<span aria-hidden="true"> ↗</span></button>
             </article>
           </li>)}
         </ul> : null}

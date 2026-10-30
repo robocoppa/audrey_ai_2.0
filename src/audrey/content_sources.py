@@ -20,6 +20,7 @@ from typing import Literal
 
 import anyio
 
+from audrey.app_state.titles import fallback_conversation_title
 from audrey.content_search import MAX_SOURCE_CHARS, SearchDocument
 from audrey.kb.extract import EmptyExtractionError, extract_text, ocr_text_path
 from audrey.kb.user_store import sanitize_user
@@ -172,6 +173,25 @@ class ContentSourceReader:
             return False
         namespace, proof = saved
         kind, expected = proof[:2]
+        if kind == "knowledge":
+            entry, project_updated_at, private_required, resolution = expected
+            with self.store._lock:
+                try:
+                    current = self.store.knowledge.get_sync(user_id=document.owner_id,
+                        project_id=document.project_id, entry_id=entry["id"])
+                except ValueError:
+                    return False
+                project = self.store._conn.execute(
+                    "SELECT updated_at,private_required FROM app_projects WHERE user_id=? AND project_id=?",
+                    (document.owner_id, document.project_id),
+                ).fetchone()
+                if (not self._owner(document.owner_id, namespace) or project is None
+                        or project["updated_at"] != project_updated_at
+                        or bool(project["private_required"]) != private_required or current != entry):
+                    return False
+            # Explicit user notes and report-linked proposals remain readable
+            # with a missing-source label; only current references ground chat.
+            return resolution.stale or self._knowledge_resolver.is_current(resolution)
         if kind == "file":
             file_id, projects, pins = proof[2:]
             if self._file_context(document.owner_id, namespace, file_id) != projects:
@@ -187,8 +207,7 @@ class ContentSourceReader:
             if kind == "message":
                 row = self.store._conn.execute(
                     "SELECT m.message_id,m.conversation_id,m.sequence_no,m.role,m.status,"
-                    "m.updated_at,c.title,c.project_id,c.archived_at,c.private_required,"
-                    "c.updated_at AS conversation_updated_at "
+                    "m.updated_at,c.title,c.project_id,c.archived_at,c.private_required "
                     "FROM app_messages m JOIN app_conversations c "
                     "ON c.conversation_id=m.conversation_id AND c.user_id=m.user_id "
                     "WHERE m.user_id=? AND m.message_id=?",
@@ -196,7 +215,7 @@ class ContentSourceReader:
                 ).fetchone()
             else:
                 row = self.store._conn.execute(
-                    "SELECT task_id,objective,revision,updated_at FROM app_agent_tasks "
+                    "SELECT task_id,objective,title,revision,updated_at FROM app_agent_tasks "
                     "WHERE user_id=? AND task_id=?",
                     (document.owner_id, expected["task_id"]),
                 ).fetchone()
@@ -234,8 +253,7 @@ class ContentSourceReader:
                 rows = self.store._conn.execute(
                     "SELECT m.message_id,m.conversation_id,m.sequence_no,m.role,m.status,"
                     "CASE WHEN length(m.content)<=? THEN m.content ELSE NULL END AS content,"
-                    "m.updated_at,c.title,c.project_id,c.archived_at,c.private_required,"
-                    "c.updated_at AS conversation_updated_at "
+                    "m.updated_at,c.title,c.project_id,c.archived_at,c.private_required "
                     "FROM app_messages m JOIN app_conversations c "
                     "ON c.conversation_id=m.conversation_id AND c.user_id=m.user_id "
                     "WHERE m.user_id=? AND m.role IN ('user','assistant') "
@@ -245,7 +263,7 @@ class ContentSourceReader:
                 ).fetchall()
             else:
                 rows = self.store._conn.execute(
-                    "SELECT task_id,objective,result,revision,updated_at FROM app_agent_tasks "
+                    "SELECT task_id,objective,title,result,revision,updated_at FROM app_agent_tasks "
                     "WHERE user_id=? AND result!='' AND task_id>? "
                     "AND (? IS NULL OR task_id=?) ORDER BY task_id LIMIT ?",
                     (owner_id, after, source_id, source_id, limit),
@@ -289,7 +307,7 @@ class ContentSourceReader:
             source_id=f"agent:{row['task_id']}:report",
             kind=kind,
             revision=_digest(row),
-            title=row["objective"][:1000],
+            title=row["title"] or fallback_conversation_title(row["objective"]),
             text=row["result"],
             updated_at=row["updated_at"],
             target={"kind": kind, "task_id": row["task_id"], "origin": "generated"},
@@ -431,12 +449,12 @@ class ContentSourceReader:
         self,
         owner_id: str,
         storage_namespace: str,
-        kind: Literal["message", "file", "agent"],
+        kind: Literal["message", "file", "agent", "knowledge"],
         after: str | None = None,
         limit: int = 50,
     ) -> tuple[list[SearchDocument], str | None, list[SearchCoverageIssue]]:
         if (
-            kind not in {"message", "file", "agent"}
+            kind not in {"message", "file", "agent", "knowledge"}
             or type(limit) is not int
             or not 1 <= limit <= 200
         ):
@@ -444,6 +462,14 @@ class ContentSourceReader:
         if after is not None and (not isinstance(after, str) or len(after) > 256):
             raise ValueError("Invalid canonical search cursor.")
         warnings = []
+        if kind == "knowledge":
+            ids = await self._disk(self._knowledge_ids, owner_id, storage_namespace, after or "", limit)
+            documents = []
+            for entry_id in ids:
+                document = await self._knowledge_document(owner_id, storage_namespace, entry_id)
+                if document is not None:
+                    documents.append(document)
+            return documents, ids[-1] if len(ids) == limit else None, []
         if kind != "file":
             rows = await self._disk(
                 self._rows, owner_id, storage_namespace, kind, after or "", limit
@@ -528,6 +554,8 @@ class ContentSourceReader:
         if not isinstance(source_id, str) or len(source_id) > 256:
             return None
         parts = source_id.split(":")
+        if len(parts) == 2 and parts[0] == "knowledge" and _identifier(parts[1]):
+            return await self._knowledge_document(owner_id, storage_namespace, parts[1])
         if len(parts) == 2 and parts[0] == "message" and _identifier(parts[1]):
             rows = await self._disk(
                 self._rows, owner_id, storage_namespace, "message", "", 1, parts[1]
@@ -556,3 +584,53 @@ class ContentSourceReader:
                 else None
             )
         return None
+
+    def _knowledge_ids(self, owner_id, namespace, after, limit):
+        with self.store._lock:
+            if not self._owner(owner_id, namespace):
+                return []
+            return [row[0] for row in self.store._conn.execute(
+                "SELECT k.entry_id FROM app_project_knowledge k JOIN app_projects p "
+                "ON p.project_id=k.project_id AND p.user_id=k.user_id "
+                "WHERE k.user_id=? AND k.approval_state='approved' AND k.entry_id>? "
+                "ORDER BY k.entry_id LIMIT ?", (owner_id, after, limit),
+            ).fetchall()]
+
+    async def _knowledge_document(self, owner_id, namespace, entry_id):
+        from audrey.app_state.knowledge import KnowledgeError
+        from audrey.knowledge_sources import KnowledgeSourceResolver
+
+        principal = await self.store.get_principal(user_id=owner_id)
+        if principal is None or principal.status != "active" or principal.storage_namespace != namespace:
+            return None
+        with self.store._lock:
+            row = self.store._conn.execute(
+                "SELECT project_id FROM app_project_knowledge WHERE user_id=? AND entry_id=?",
+                (owner_id, entry_id),
+            ).fetchone()
+        if row is None:
+            return None
+        project = await self.store.projects.get(user_id=owner_id, project_id=row[0])
+        if project is None:
+            return None
+        try:
+            entry = await self.store.knowledge.get(user_id=owner_id, project_id=project.project_id, entry_id=entry_id)
+        except KnowledgeError:
+            return None
+        if entry["approval_state"] != "approved":
+            return None
+        if not hasattr(self, "_knowledge_resolver"):
+            self._knowledge_resolver = KnowledgeSourceResolver(self.store, self)
+        resolution = await self._knowledge_resolver.resolve(principal, project, entry)
+        document = SearchDocument(
+            owner_id=owner_id, source_id=f"knowledge:{entry_id}", kind="knowledge",
+            revision=_digest([entry, project.updated_at, resolution.stale, resolution.warnings]),
+            title=f"{project.name}: {entry['kind'].capitalize()}", text=entry["text"],
+            updated_at=entry["updated_at"], project_id=project.project_id,
+            private_required=project.private_required,
+            target={"kind": "knowledge", "project_id": project.project_id, "entry_id": entry_id,
+                    "stale": resolution.stale, "source_warnings": list(resolution.warnings)},
+        )
+        document = self._remember(document, namespace,
+            ("knowledge", (entry, project.updated_at, project.private_required, resolution)))
+        return document if self.is_current(document) else None

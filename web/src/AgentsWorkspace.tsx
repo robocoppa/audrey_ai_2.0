@@ -13,6 +13,7 @@ import {
   type AgentTaskStatus,
 } from "./api";
 import "./AgentsWorkspace.css";
+import { AgentKnowledgeDialog } from "./AgentKnowledgeDialog";
 
 const STATUS_LABELS: Record<AgentTaskStatus, string> = {
   queued: "Queued", running: "Running", paused: "Paused", completed: "Completed",
@@ -21,6 +22,10 @@ const STATUS_LABELS: Record<AgentTaskStatus, string> = {
 
 function isMoving(task: AgentTask) {
   return task.status === "queued" || task.status === "running";
+}
+
+function agentTitle(task: AgentTask) {
+  return task.title?.trim() || task.objective;
 }
 
 function isFinished(task: AgentTask) {
@@ -82,6 +87,7 @@ export function AgentsWorkspace({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [knowledgeTask, setKnowledgeTask] = useState<AgentTask | null>(null);
   const [filter, setFilter] = useState<"all" | "active" | "finished">("all");
   const deletedIds = useRef(new Set<string>());
   const knownIds = useRef<Set<string> | null>(null);
@@ -418,7 +424,7 @@ export function AgentsWorkspace({
             {selected && !isFinished(selected) ? (
               <section className="agents-current-controls" aria-labelledby="agent-current-controls-title">
                 <h2 id="agent-current-controls-title">Current agent</h2>
-                <p>{selected.objective}</p>
+                <p>{agentTitle(selected)}</p>
                 <AgentTaskControls
                   key={`${selected.id}:active:${visible}:${sidebarOpen}`}
                   task={selected}
@@ -444,9 +450,9 @@ export function AgentsWorkspace({
               <ul className="agents-task-list">
                 {shownTasks.map((task) => (
                   <li key={task.id}>
-                    <button type="button" className="agents-task-card" aria-pressed={selectedId === task.id} aria-label={`Open agent: ${task.objective}`} onClick={() => selectTask(task.id)}>
+                    <button type="button" className="agents-task-card" aria-pressed={selectedId === task.id} aria-label={`Open agent: ${agentTitle(task)}`} onClick={() => selectTask(task.id)}>
                       <span className={`agents-status agents-status-${task.status}`}>{STATUS_LABELS[task.status]}</span>
-                      <strong>{task.objective}</strong>
+                      <strong>{agentTitle(task)}</strong>
                       <span className="agents-task-stage">{task.steps.find((step) => step.status === "running")?.label ?? (task.status === "paused" ? "Completed steps saved" : task.status === "queued" ? "Waiting to start" : "Saved progress")}</span>
                       <time dateTime={task.updated_at}>Last activity {timestamp(task.updated_at)}</time>
                     </button>
@@ -474,7 +480,8 @@ export function AgentsWorkspace({
                       onDelete={() => void removeTask(selected)}
                     /> : null}
                   </div>
-                  <h2>{selected.objective}</h2>
+                  <h2>{agentTitle(selected)}</h2>
+                  <details className="agents-original-prompt"><summary>Original prompt</summary><p>{selected.objective}</p></details>
                   <p>Last activity <time dateTime={selected.updated_at}>{timestamp(selected.updated_at)}</time></p>
                 </header>
                 {selected.status === "paused" ? <p className="agents-notice">Completed steps are saved. Resume to continue from the next unfinished step.</p> : null}
@@ -496,6 +503,7 @@ export function AgentsWorkspace({
                 </section>
                 <section className="agents-result" aria-labelledby="agent-result-title">
                   <h3 id="agent-result-title">Report</h3>
+                  {selected.status === "completed" && selected.result ? <button className="agents-secondary" type="button" onClick={() => setKnowledgeTask(selected)}>Propose Project knowledge</button> : null}
                   {selected.result ? <AgentMarkdown text={selected.result} /> : <p>{selected.summary && selected.status === "completed" ? "Loading the saved report…" : selected.status === "failed" ? "This task stopped before a final report was saved. Any completed steps are available above." : selected.status === "cancelled" ? "This task was cancelled. Any completed steps are available above." : "The report will appear here when Audrey completes its review."}</p>}
                 </section>
               </>
@@ -510,6 +518,7 @@ export function AgentsWorkspace({
           </div>
         </section>
       </div>
+      {knowledgeTask && visible ? <AgentKnowledgeDialog task={knowledgeTask} onClose={() => setKnowledgeTask(null)} /> : null}
     </section>
   );
 }

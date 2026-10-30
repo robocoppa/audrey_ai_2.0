@@ -46,6 +46,19 @@ def normalize_generated_title(value: str, *, fallback: str) -> str:
     return _fit_title(title, ellipsis=False)
 
 
+def normalize_agent_title(value: str) -> str:
+    """Accept one short model label; an invalid reply leaves the saved fallback."""
+    title = normalize_generated_title(value, fallback="")
+    try:
+        title.encode("utf-8")
+    except UnicodeError:
+        return ""
+    if (not 3 <= len(title.split()) <= 7 or any(char in title for char in "<>[]{}")
+            or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in title)):
+        return ""
+    return title
+
+
 def _fit_title(value: str, *, ellipsis: bool) -> str:
     if len(value) <= AUTOMATIC_TITLE_MAX_CHARS:
         return value
@@ -63,4 +76,5 @@ __all__ = [
     "AUTOMATIC_TITLE_MAX_CHARS",
     "fallback_conversation_title",
     "normalize_generated_title",
+    "normalize_agent_title",
 ]

@@ -1130,6 +1130,99 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        27,
+        """
+        CREATE TABLE IF NOT EXISTS app_project_knowledge (
+          entry_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('fact','decision','question','action')),
+          text TEXT NOT NULL CHECK (length(text) BETWEEN 1 AND 8000),
+          approval_state TEXT NOT NULL CHECK (approval_state IN
+            ('approved','proposed','rejected','superseded')),
+          work_status TEXT NOT NULL CHECK (work_status IN ('open','resolved','completed')),
+          revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 100),
+          pinned INTEGER NOT NULL CHECK (typeof(pinned)='integer' AND pinned IN (0,1)),
+          origin TEXT NOT NULL CHECK (origin IN ('user','agent_report')),
+          sources_json TEXT NOT NULL CHECK (length(sources_json)<=12000),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          approved_at TEXT,
+          source_task_id TEXT,
+          replaces_id TEXT,
+          base_revision INTEGER CHECK (base_revision BETWEEN 1 AND 100),
+          request_id TEXT,
+          request_digest TEXT NOT NULL CHECK (length(request_digest)=64),
+          UNIQUE (entry_id,user_id,project_id),
+          UNIQUE (user_id,project_id,request_id),
+          FOREIGN KEY (project_id,user_id)
+            REFERENCES app_projects(project_id,user_id) ON DELETE CASCADE,
+          CHECK (work_status='open' OR (kind='question' AND work_status='resolved')
+            OR (kind='action' AND work_status='completed')),
+          CHECK ((replaces_id IS NULL AND base_revision IS NULL)
+            OR (replaces_id IS NOT NULL AND base_revision IS NOT NULL))
+        );
+        CREATE INDEX IF NOT EXISTS idx_app_project_knowledge_owner_updated
+          ON app_project_knowledge(user_id,project_id,updated_at DESC,entry_id DESC);
+        CREATE TABLE IF NOT EXISTS app_project_knowledge_revisions (
+          entry_id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 100),
+          user_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          record_json TEXT NOT NULL CHECK (length(CAST(record_json AS BLOB))<=100000),
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (entry_id,revision),
+          FOREIGN KEY (entry_id,user_id,project_id)
+            REFERENCES app_project_knowledge(entry_id,user_id,project_id) ON DELETE CASCADE
+        );
+        CREATE TRIGGER IF NOT EXISTS trg_app_project_knowledge_revision_immutable
+        BEFORE UPDATE ON app_project_knowledge_revisions
+        BEGIN
+          SELECT RAISE(ABORT,'Project knowledge revisions are immutable');
+        END;
+        CREATE TABLE IF NOT EXISTS app_run_project_knowledge_snapshots (
+          run_id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          FOREIGN KEY (run_id) REFERENCES app_runs(run_id) ON DELETE CASCADE,
+          FOREIGN KEY (project_id,user_id)
+            REFERENCES app_projects(project_id,user_id) ON DELETE CASCADE
+        );
+        CREATE TRIGGER IF NOT EXISTS trg_app_run_project_knowledge_snapshot_immutable
+        BEFORE UPDATE ON app_run_project_knowledge_snapshots
+        BEGIN
+          SELECT RAISE(ABORT,'Run knowledge snapshots are immutable');
+        END;
+        CREATE TABLE IF NOT EXISTS app_run_project_knowledge (
+          run_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          entry_id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 100),
+          PRIMARY KEY (run_id,entry_id),
+          FOREIGN KEY (run_id) REFERENCES app_runs(run_id) ON DELETE CASCADE,
+          FOREIGN KEY (project_id,user_id)
+            REFERENCES app_projects(project_id,user_id) ON DELETE CASCADE,
+          FOREIGN KEY (entry_id,user_id,project_id)
+            REFERENCES app_project_knowledge(entry_id,user_id,project_id) ON DELETE CASCADE
+        );
+        CREATE TRIGGER IF NOT EXISTS trg_app_run_project_knowledge_immutable
+        BEFORE UPDATE ON app_run_project_knowledge
+        BEGIN
+          SELECT RAISE(ABORT,'Run knowledge snapshots are immutable');
+        END;
+        """,
+    ),
+    (
+        28,
+        """
+        ALTER TABLE app_agent_tasks ADD COLUMN title TEXT NOT NULL DEFAULT ''
+          CHECK (length(title) <= 100);
+        ALTER TABLE app_agent_tasks ADD COLUMN title_attempted INTEGER NOT NULL DEFAULT 0
+          CHECK (typeof(title_attempted)='integer' AND title_attempted IN (0,1));
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

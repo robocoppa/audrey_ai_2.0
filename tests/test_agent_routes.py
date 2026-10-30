@@ -78,6 +78,22 @@ async def test_native_agents_create_idempotently_and_hide_worker_authority(agent
     assert len(agents.wakes) == 2
 
 
+async def test_api_returns_persisted_title_and_short_fallback_without_exposing_original_paragraph(agents):
+    objective = "Compare the public release notes and explain all meaningful changes. " * 10
+    created = (await _create(agents, objective=objective)).json()
+    assert created["objective"] == objective.strip()
+    assert len(created["title"]) <= 72 and created["title"] != created["objective"]
+    claimed = await agents.store.agents.claim()
+    lease = {"task_id": claimed["id"], "lease_token": claimed["lease_token"], "fence": claimed["fence"]}
+    operation = await agents.store.agents.reserve_title_operation(**lease, step_id="plan")
+    await agents.store.agents.save_title(**lease, step_id="plan", operation_id=operation, title="Public Release Notes Comparison")
+    current = await agents.client.get(f"/api/agents/{created['id']}")
+    listing = await agents.client.get("/api/agents")
+    assert current.json()["title"] == listing.json()["items"][0]["title"] == "Public Release Notes Comparison"
+    assert current.json()["objective"] == created["objective"]
+    assert not {"title_attempted", "title_generated", "operation_id"} & current.json().keys()
+
+
 async def test_foreign_agent_and_missing_agent_are_indistinguishable(agents):
     task = (await _create(agents)).json()
     agents.current[0] = agents.owners[1]

@@ -15,6 +15,7 @@ from audrey.app_state.agents import (
     AgentTaskConflictError,
     AgentTaskError,
 )
+from audrey.app_state.titles import normalize_agent_title
 
 
 class Clock:
@@ -71,7 +72,7 @@ async def test_create_idempotent_and_public_records_have_no_worker_credentials(s
     first, second = await asyncio.gather(_create(state), _create(state))
     assert first == second
     assert set(first) == {
-        "id", "objective", "status", "revision", "created_at", "updated_at", "steps",
+        "id", "objective", "title", "status", "revision", "created_at", "updated_at", "steps",
         "result", "error", "attempts",
     }
     assert [step["id"] for step in first["steps"]] == ["plan", "research", "review"]
@@ -80,6 +81,93 @@ async def test_create_idempotent_and_public_records_have_no_worker_credentials(s
         await _create(state, objective="A different objective.")
     assert await state.store.agents.list(user_id=state.owner.user_id) == [first]
     assert await state.store.agents.list(user_id=state.other.user_id) == []
+
+
+async def test_agent_title_fallback_is_short_and_never_rewrites_the_objective(state):
+    objective = "Explain the history of this detailed public research topic. " * 20
+    task = await _create(state, objective=objective)
+    assert task["objective"] == objective.strip()
+    assert len(task["title"]) <= 72 and task["title"].endswith("…")
+    assert task["title"] != task["objective"]
+    assert "title_attempted" not in task and "title_generated" not in task
+    summary = (await state.store.agents.list(user_id=state.owner.user_id, summary=True))[0]
+    assert summary["title"] == task["title"]
+
+
+async def test_title_is_saved_only_by_a_current_reserved_lease_and_survives_rerun(state):
+    await _create(state)
+    task = await state.store.agents.claim()
+    lease = _lease(task)
+    operation = await state.store.agents.reserve_title_operation(**lease, step_id="plan")
+    assert operation and await state.store.agents.reserve_title_operation(**lease, step_id="plan") is None
+    with pytest.raises(AgentTaskConflictError):
+        await state.store.agents.save_title(**lease, step_id="plan", operation_id="foreign", title="Public Research Release Notes")
+    title = await state.store.agents.save_title(**lease, step_id="plan", operation_id=operation, title='Title: "Public Research Release Notes"')
+    assert title == "Public Research Release Notes"
+    for step_id in ("plan", "research", "review"):
+        task = await _step(state, task, step_id)
+    completed = await state.store.agents.complete(**_lease(task), result="Report.")
+    assert completed["title"] == title
+    queued = await _control(state, completed, "rerun")
+    assert queued["title"] == title and queued["steps"][0] == completed["steps"][0]
+    reclaimed = await state.store.agents.claim()
+    assert reclaimed["title_generated"] is True
+    assert await state.store.agents.reserve_title_operation(**_lease(reclaimed), step_id="research") is None
+    with pytest.raises(AgentTaskConflictError):
+        await state.store.agents.save_title(**lease, step_id="research", operation_id=operation, title="Stale Old Worker Title")
+
+
+async def test_title_attempt_preserves_last_operation_and_missing_title_retries_only_after_rerun(state):
+    await _create(state, limits={"max_operations": 2})
+    task = await state.store.agents.claim()
+    await state.store.agents.reserve_operation(**_lease(task), step_id="plan")
+    assert await state.store.agents.reserve_title_operation(**_lease(task), step_id="plan") is None
+    row = state.store._conn.execute("SELECT title,title_attempted,operations FROM app_agent_tasks").fetchone()
+    assert tuple(row) == ("", 1, 1)
+    failed = await state.store.agents.fail(**_lease(task), error="Useful work failed.")
+    await _control(state, failed, "rerun")
+    claimed = await state.store.agents.claim()
+    assert claimed["title_attempted"] == 0 and not claimed["title_generated"]
+
+
+async def test_title_write_cannot_cross_account_purge(state):
+    await _create(state)
+    task = await state.store.agents.claim()
+    operation = await state.store.agents.reserve_title_operation(**_lease(task), step_id="plan")
+    await state.store.purge_local_user_data(user_id=state.owner.user_id)
+    with pytest.raises(AgentTaskAccessError):
+        await state.store.agents.save_title(**_lease(task), step_id="plan", operation_id=operation, title="Deleted Private Research Title")
+    assert state.store._conn.execute("SELECT COUNT(*) FROM app_agent_operations").fetchone()[0] == 0
+
+
+async def test_title_additive_migration_repairs_partial_schema_without_losing_saved_titles(state):
+    task = await _create(state)
+    task = await state.store.agents.claim()
+    task = await _step(state, task, "plan", result="Previously committed plan survives migration.")
+    with state.store._lock, state.store._conn:
+        state.store._conn.execute("UPDATE app_agent_tasks SET title='Saved Public Research Title' WHERE task_id=?", (task["id"],))
+        state.store._conn.execute("ALTER TABLE app_agent_tasks DROP COLUMN title_attempted")
+        state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=28")
+    upgraded = ApplicationStore(state.store.path)
+    try:
+        assert upgraded.schema_version == 28
+        current = await upgraded.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+        assert current["title"] == "Saved Public Research Title" and current["objective"] == task["objective"]
+        assert current["steps"][0] == task["steps"][0]
+        assert upgraded._conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        upgraded.close()
+
+
+@pytest.mark.parametrize("value,expected", [
+    ('Title: "Public Research Release Notes"', "Public Research Release Notes"),
+    ("```\n# Local Orchard Gate Review\n```", "Local Orchard Gate Review"),
+    ("One Two", ""), ("One Two Three Four Five Six Seven Eight", ""),
+    ("<script> Never Render This", ""), ("", ""),
+    ("Public \ud800 Research", ""), ("Public \x00 Research", ""),
+])
+def test_generated_agent_titles_are_short_plain_labels(value, expected):
+    assert normalize_agent_title(value) == expected
 
 
 async def test_foreign_and_missing_ids_are_indistinguishable(state):

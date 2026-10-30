@@ -7,6 +7,7 @@ from audrey.routes.app.agents import router as agents_router
 from audrey.routes.app.capabilities import router as capabilities_router
 from audrey.routes.app.conversations import router as conversations_router
 from audrey.routes.app.files import router as files_router
+from audrey.routes.app.knowledge import router as knowledge_router
 from audrey.routes.app.me import router as me_router
 from audrey.routes.app.models import router as models_router
 from audrey.routes.app.private_files import router as private_files_router
@@ -22,6 +23,7 @@ router.include_router(models_router)
 router.include_router(agents_router)
 router.include_router(conversations_router)
 router.include_router(projects_router)
+router.include_router(knowledge_router)
 router.include_router(runs_router)
 router.include_router(search_router)
 router.include_router(files_router)

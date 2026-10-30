@@ -491,7 +491,7 @@ async def test_schema23_upgrade_preserves_case_and_creates_empty_task_repository
         db.execute("DELETE FROM app_schema_migrations WHERE version=24")
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 26
+        assert upgraded.schema_version == 28
         assert await upgraded.tax_cases.get(
             user_id=state.owner.user_id, conversation_id=state.conversation.conversation_id,
         ) == case
@@ -591,7 +591,7 @@ async def test_online_backup_restores_exact_task_and_checkpoint_without_source_c
     assert restored_path.stat().st_mode & 0o777 == 0o600
     restored = ApplicationStore(restored_path)
     try:
-        assert restored.schema_version == 26
+        assert restored.schema_version == 28
         assert await restored.private_tasks.get(
             user_id=state.owner.user_id, task_id=saved["id"],
         ) == saved

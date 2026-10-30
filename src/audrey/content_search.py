@@ -31,7 +31,7 @@ MAX_CANDIDATES = 200
 CHUNK_CHARS = 4_000
 CHUNK_OVERLAP = 200
 EXCERPT_CHARS = 400
-_KINDS = frozenset({"message", "file", "agent"})
+_KINDS = frozenset({"message", "file", "agent", "knowledge"})
 _WORDS = re.compile(r"[^\W_]+", re.UNICODE)
 
 

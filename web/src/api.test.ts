@@ -7,26 +7,72 @@ import {
   createAgentTask,
   createProject,
   createProjectConversation,
+  createProjectKnowledge,
+  createKnowledgeProposal,
   deleteProject,
   deleteAgentTask,
+  deleteProjectKnowledge,
+  decideProjectKnowledge,
   fetchVideoFromUrl,
   getFileArtifactDownloadUrl,
   getFileDownloadUrl,
   getAgentTask,
   getSearchSource,
+  getKnowledgeSource,
+  getProjectKnowledge,
+  getProjectKnowledgeHistory,
   listAgentTasks,
   listProjects,
+  listProjectKnowledge,
   removeProjectFile,
   resetAdminModelPolicy,
   searchContent,
   updateAdminModel,
   updateConversation,
   updateConversationModel,
+  updateProjectKnowledge,
   uploadFile,
   uploadPrivateProjectFile,
   type AudreyFileLimits,
   type SearchResult,
+  type KnowledgeEntry,
 } from "./api";
+
+describe("project knowledge requests", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("binds every read and revisioned mutation to the encoded project and entry", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({ items: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const signal = new AbortController().signal;
+    await listProjectKnowledge("project / owned", "page+/=", signal);
+    await getProjectKnowledge("project / owned", "entry / one", signal);
+    await createProjectKnowledge("project / owned", { kind: "decision", text: "Use local models", pinned: true, request_id: "manual-1" });
+    await createKnowledgeProposal("project / owned", { task_id: "task-1", task_revision: 4, kind: "question", text: "Which date?", request_id: "proposal-1" });
+    await updateProjectKnowledge("project / owned", "entry / one", { expected_revision: 4, text: "Updated", pinned: false });
+    await decideProjectKnowledge("project / owned", "entry / one", "approve", 5);
+    await decideProjectKnowledge("project / owned", "entry / one", "reject", 6);
+    await getProjectKnowledgeHistory("project / owned", "entry / one", signal);
+    await getKnowledgeSource("project / owned", { id: "entry / one", revision: 6 } as KnowledgeEntry, 2, 4000, signal);
+    await deleteProjectKnowledge("project / owned", "entry / one", 7);
+    const root = "/api/projects/project%20%2F%20owned/knowledge";
+    const item = `${root}/entry%20%2F%20one`;
+    expect(fetchMock).toHaveBeenCalledWith(`${root}?limit=50&cursor=page%2B%2F%3D`, expect.objectContaining({ signal, cache: "no-store" }));
+    expect(fetchMock).toHaveBeenCalledWith(item, expect.objectContaining({ signal, cache: "no-store" }));
+    expect(fetchMock).toHaveBeenCalledWith(root, expect.objectContaining({ method: "POST", body: JSON.stringify({ kind: "decision", text: "Use local models", pinned: true, request_id: "manual-1" }) }));
+    expect(fetchMock).toHaveBeenCalledWith(`${root}/proposals`, expect.objectContaining({ method: "POST", body: JSON.stringify({ task_id: "task-1", task_revision: 4, kind: "question", text: "Which date?", request_id: "proposal-1" }) }));
+    expect(fetchMock).toHaveBeenCalledWith(item, expect.objectContaining({ method: "PATCH", body: JSON.stringify({ expected_revision: 4, text: "Updated", pinned: false }) }));
+    expect(fetchMock).toHaveBeenCalledWith(`${item}/decision`, expect.objectContaining({ method: "POST", body: JSON.stringify({ decision: "approve", expected_revision: 5 }) }));
+    expect(fetchMock).toHaveBeenCalledWith(`${item}/decision`, expect.objectContaining({ method: "POST", body: JSON.stringify({ decision: "reject", expected_revision: 6 }) }));
+    expect(fetchMock).toHaveBeenCalledWith(`${item}/history`, expect.objectContaining({ signal, cache: "no-store" }));
+    expect(fetchMock).toHaveBeenCalledWith(`${item}/sources/2?expected_revision=6&offset=4000`, expect.objectContaining({ signal, cache: "no-store" }));
+    expect(fetchMock).toHaveBeenCalledWith(`${item}?expected_revision=7`, expect.objectContaining({ method: "DELETE" }));
+    for (const [, init] of fetchMock.mock.calls as unknown as Array<[string, RequestInit]>) {
+      expect(init.credentials).toBe("same-origin");
+      expect(init.headers).not.toHaveProperty("Authorization");
+    }
+  });
+});
 
 describe("native content search requests", () => {
   afterEach(() => { vi.unstubAllGlobals(); });

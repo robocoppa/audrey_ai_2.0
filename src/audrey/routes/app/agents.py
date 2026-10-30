@@ -27,6 +27,7 @@ class AgentStepResponse(BaseModel):
 class AgentTaskResponse(BaseModel):
     id: str
     objective: str
+    title: str = ""
     status: Literal["queued", "running", "paused", "completed", "cancelled", "failed"]
     revision: int
     created_at: str

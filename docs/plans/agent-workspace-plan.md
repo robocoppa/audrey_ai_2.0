@@ -1,7 +1,7 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, October 29, 2026. Public-research Agents and the first
-unified lexical Search slice are implemented locally. The owner confirms Search
+**Status:** In progress, October 30, 2026. Public-research Agents, unified lexical
+Search and the first Project Knowledge slice are implemented locally. The owner confirms Search
 returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
 
 The owner selected unified search, saved background tasks, project working
@@ -22,8 +22,12 @@ selection stay the same. Lists return compact summaries and load the selected re
 Agents has a left sidebar for creation, history and active controls; its workflow
 and sidebar scroll independently. Small screens use a controls drawer. Terminal
 Run again and the red two-click Delete remain at the workflow card's top right.
+Top-bar hover uses the filled, soft glow of My Files; Search has a lighter filled
+glow, with distinct keyboard focus retained. Agent headings/history use a saved
+short title, and the unchanged original objective is available in an expandable
+Original prompt section.
 
-Application schema 26 stores owner-bound tasks and operation reservations with
+Application schema 26 introduced owner-bound tasks and operation reservations with
 leases, fenced writes and cumulative limits. The lifecycle worker reuses committed
 steps after interruption; uncommitted model/read work can repeat within the saved
 allowance. Every provider/tool dispatch revalidates live task/account/model access.
@@ -34,6 +38,13 @@ installed local weights before generation and pins their digest within each step
 missing or changed metadata stops execution. Public web tools still fetch source
 material. Model calls share existing admission and generation limits. Account
 purge removes the new task data and receipts.
+Schema 28 adds persistent agent titles. One bounded local Qwen title call runs
+before the first incomplete step, using the same verified client, model admission,
+lease and cumulative operation allowance. A failed title leaves a short fallback
+and does not block research. Rerun keeps a generated title; untitled legacy agents
+receive a generation attempt on their next explicitly started run. The title call
+has a 64-token allowance, thinking disabled and a ten-second timeout; it uses no
+cloud fallback and does not alter the objective or saved Plan.
 
 Model failures identify the actual stage and distinguish output limits from empty
 report text. Per-call logs retain only stop/usage counts and text lengths;
@@ -45,8 +56,8 @@ output-limit failure; live acceptance of the larger allowance remains pending.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
 User-input requests, adaptive multi-step plans, Project/file/Private agent inputs,
-foreground-priority enhancements, separate notifications, semantic search, Project
-knowledge and watches remain implementation work. Existing Private Tax tasks keep
+foreground-priority enhancements, separate notifications, semantic search and
+watches remain implementation work. Existing Private Tax tasks keep
 their current behavior. The remaining sections specify the intended full feature.
 
 The first unified Search slice searches native completed/incomplete user and
@@ -75,10 +86,41 @@ Indexing has its own status; multiple coverage details can be expanded.
 Current bounds include 256 query characters/12 literal terms, 500,000 characters
 per source, 5,000 sources/10 million source characters per owner, and the first
 200 matching source candidates per query. File input/expanded parsing is bounded
-to 8 MiB; existing cached text can cover larger originals. Semantic candidates,
-approved Project knowledge and navigation into the full chat/file workspace remain
+to 8 MiB; existing cached text can cover larger originals. Approved Project notes
+are now searchable, with source-review labels when references become stale. Semantic
+candidates and navigation into the full chat/file workspace remain
 later work. Local tests and mocked responsive browser checks verify mechanics;
 real deployed file/content acceptance remains manual.
+
+Project Knowledge now stores user-authored Facts, Decisions, Questions and Actions
+in application schema 27, with immutable revisions, pinning, open/completed/resolved
+states and optimistic concurrency. Project home supports editing, history, explicit
+approval/rejection and deletion. A completed Agent report can open a proposal editor:
+the user chooses the statement and Project; saving creates a pending report-linked
+proposal. It does not generate statements or approve them automatically. Replacement
+approval checks the original revision and supersedes it atomically. Approval records
+what the user accepts, rather than independent verification.
+
+Native Project conversations select bounded approved notes (at most 12 entries and
+1,000 content tokens within the existing 3,000-token Project source allowance), with
+pinned/relevant/open-work priority. Notes are quoted data below platform guidance;
+pending, rejected, superseded and stale-source entries cannot ground a new run.
+Each native run saves only its selected entry IDs/revisions; generation rechecks the
+frozen knowledge/source proofs and fails if they change. Private Project chat stays
+inside its existing verified local policy. Public background Agents still have no
+Project inputs, and saved Private Tax tasks keep their established context/admission.
+
+Source references contain canonical IDs/revisions only, with Project-scoped source
+previews and local ownership/deletion/detachment checks. Explicit user notes and
+report-linked user proposals retain their bodies with a source-review notice when
+references disappear, while automatic grounding excludes them. Automatically extracted
+source-derived notes, public-source snapshot references, automatic agent proposals,
+and a full source-reference editor are later work. Entry/Project deletion and account
+purge erase the new rows/history/manifests and invalidate/remove search copies.
+Limits are 200 entries per Project, 8,000 characters per entry, eight references and
+100 revisions per entry. No knowledge model calls, global-memory writes or cloud
+summaries were added. Local tests and mocked browser flows pass; real-model reuse
+and deployed acceptance remain manual.
 
 ## Product outcome
 

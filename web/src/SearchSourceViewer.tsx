@@ -7,11 +7,13 @@ import "./SearchSourceViewer.css";
 
 const PAGE_SIZE = 4000;
 
-export function SearchSourceViewer({ result, onClose }: { result: SearchResult; onClose: () => void }) {
-  return <SourceViewer key={`${result.id}:${result.revision}`} result={result} onClose={onClose} />;
+type ViewerProps = { result: SearchResult; onClose: () => void; loadSource?: (offset: number, signal: AbortSignal) => Promise<SearchSource> };
+
+export function SearchSourceViewer(props: ViewerProps) {
+  return <SourceViewer key={`${props.result.id}:${props.result.revision}`} {...props} />;
 }
 
-function SourceViewer({ result, onClose }: { result: SearchResult; onClose: () => void }) {
+function SourceViewer({ result, onClose, loadSource }: ViewerProps) {
   const [request, setRequest] = useState({ offset: result.offset, serial: 0 });
   const [source, setSource] = useState<SearchSource | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,7 +60,7 @@ function SourceViewer({ result, onClose }: { result: SearchResult; onClose: () =
     let current = true;
     async function load() {
       try {
-        const fresh = await getSearchSource(result, request.offset, controller.signal);
+        const fresh = await (loadSource ? loadSource(request.offset, controller.signal) : getSearchSource(result, request.offset, controller.signal));
         if (!current || controller.signal.aborted) return;
         if (fresh.source_id !== result.source_id || fresh.revision !== result.revision || fresh.kind !== result.kind) {
           throw new ApiError(409, "The saved source changed.");
@@ -68,10 +70,10 @@ function SourceViewer({ result, onClose }: { result: SearchResult; onClose: () =
       } catch (reason) {
         if (!current || controller.signal.aborted) return;
         if (reason instanceof ApiError && reason.status === 404) {
-          setError("This source was deleted or is no longer available to you. Close this view and search again.");
+          setError(`This source was deleted or is no longer available to you. Close this view and ${loadSource ? "refresh Project knowledge" : "search again"}.`);
           setRetryable(false);
         } else if (reason instanceof ApiError && reason.status === 409) {
-          setError("This source changed after the search. Close this view and search again for its latest text.");
+          setError(loadSource ? "This source changed or was detached. Close this view and refresh Project knowledge." : "This source changed after the search. Close this view and search again for its latest text.");
           setRetryable(false);
         } else {
           setError(reason instanceof Error ? reason.message : "The saved source could not be loaded.");
@@ -83,7 +85,7 @@ function SourceViewer({ result, onClose }: { result: SearchResult; onClose: () =
     }
     void load();
     return () => { current = false; controller.abort(); };
-  }, [request, result]);
+  }, [request, result, loadSource]);
 
   function loadPage(offset: number) {
     closeRef.current?.focus();
@@ -98,7 +100,7 @@ function SourceViewer({ result, onClose }: { result: SearchResult; onClose: () =
       <section className="search-source-dialog" role="dialog" aria-modal="true" aria-labelledby="search-source-title" ref={dialogRef}>
         <header>
           <div>
-            <span>Saved source · {result.kind === "message" ? "Chat message" : result.kind === "file" ? "File text" : "Agent work"}</span>
+            <span>Saved source · {result.kind === "message" ? "Chat message" : result.kind === "file" ? "File text" : result.kind === "knowledge" ? "Project knowledge" : "Agent work"}</span>
             <h2 id="search-source-title">{source?.title || result.title || "Untitled"}</h2>
           </div>
           <button type="button" ref={closeRef} onClick={onClose} aria-label="Close saved source">×</button>

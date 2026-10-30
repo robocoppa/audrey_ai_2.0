@@ -31,6 +31,19 @@ afterEach(() => {
 });
 
 describe("AgentsWorkspace", () => {
+  it("uses the saved model title and keeps the unchanged original prompt expandable", async () => {
+    const original = "Give me an exhaustive timeline of the Crusades, including the major campaigns, their context, and the relevant sources.";
+    const saved = task({ title: "Crusades Timeline and Major Campaigns", objective: original });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
+    vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    render(<AgentsWorkspace />);
+    expect(await screen.findByRole("heading", { name: saved.title })).toBeVisible();
+    expect(screen.getByRole("button", { name: `Open agent: ${saved.title}` })).toBeVisible();
+    const prompt = screen.getByText(original, { selector: ".agents-original-prompt > p" });
+    expect(prompt).not.toBeVisible();
+    fireEvent.click(screen.getByText("Original prompt", { selector: "summary" }));
+    expect(prompt).toBeVisible();
+  });
   it("starts a saved public research task from the objective", async () => {
     const created = task({ status: "queued", revision: 1 });
     const create = vi.spyOn(api, "createAgentTask").mockImplementation(async () => {

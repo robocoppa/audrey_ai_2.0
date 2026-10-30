@@ -141,6 +141,9 @@
 .agents-detail-toolbar { display: flex; flex-wrap: wrap-reverse; align-items: flex-start; justify-content: space-between; gap: 0.7rem; }
 .agents-detail-header h2 { margin: 0.85rem 0 0.5rem; font-size: clamp(1.2rem, 2vw, 1.6rem); line-height: 1.4; overflow-wrap: anywhere; white-space: pre-wrap; }
 .agents-detail-header p { margin: 0; color: var(--muted); font-size: 0.75rem; }
+.agents-original-prompt { margin: 0.65rem 0 1rem; }
+.agents-original-prompt summary { width: fit-content; cursor: pointer; color: var(--accent); font-size: 0.78rem; padding-block: 0.25rem; }
+.agents-original-prompt > p { margin-top: 0.6rem; padding: 0.85rem; border: 1px solid var(--border); border-radius: 0.65rem; background: rgb(9 20 37 / 50%); color: var(--text-soft); font-size: 0.85rem; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agents-task-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; max-width: 100%; margin-left: auto; }
 .agents-task-actions .danger-button { min-width: 6.2rem; border-color: rgb(255 145 164 / 30%); background: rgb(255 145 164 / 6%); }
 .agents-task-actions .danger-button:hover:not(:disabled), .agents-task-actions .confirming-delete { border-color: rgb(255 145 164 / 56%); background: rgb(255 145 164 / 12%); }

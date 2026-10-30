@@ -95,6 +95,8 @@ async def state(tmp_path, monkeypatch):
         clients=[],
         client_options=[],
         responses=[],
+        title_responses=[],
+        on_title=None,
         tag_reads=0,
         show_reads=0,
         on_tags=None,
@@ -125,6 +127,11 @@ async def state(tmp_path, monkeypatch):
         assert request.url.path == "/api/chat"
         if value.on_chat:
             await value.on_chat()
+        payload = json.loads(request.content)
+        if payload["messages"][0]["content"].startswith("You create concise agent titles."):
+            if value.on_title:
+                await value.on_title()
+            return httpx.Response(200, json=value.title_responses.pop(0) if value.title_responses else _answer("Public Release Notes Research"))
         return httpx.Response(200, json=value.responses.pop(0) if value.responses else _answer())
 
     def tool(request):
@@ -157,7 +164,7 @@ async def state(tmp_path, monkeypatch):
     store.close()
 
 
-async def _step(state, step_id="plan", *, max_operations=96):
+async def _step(state, step_id="plan", *, max_operations=96, generated_title=True):
     task = await state.store.agents.create(
         user_id=state.owner.user_id,
         objective="Compare the public release notes.",
@@ -166,6 +173,15 @@ async def _step(state, step_id="plan", *, max_operations=96):
     )
     claimed = await state.store.agents.claim()
     assert claimed["id"] == task["id"]
+    if generated_title:
+        # Existing step-boundary tests exercise tasks that already have a title;
+        # the title path has separate transport/budget/revocation coverage below.
+        with state.store._lock, state.store._conn:
+            state.store._conn.execute(
+                "UPDATE app_agent_tasks SET title='Public Release Notes Research',title_attempted=1 WHERE task_id=?",
+                (task["id"],),
+            )
+        claimed.update(title="Public Release Notes Research", title_generated=True, title_attempted=1)
     lease = {key: claimed[key] for key in ("lease_token", "fence")}
     lease["task_id"] = claimed["id"]
     for previous in ("plan", "research", "review"):
@@ -179,11 +195,12 @@ async def _step(state, step_id="plan", *, max_operations=96):
     return claimed
 
 
-def _content_requests(state):
+def _content_requests(state, *, include_titles=False):
     return [
         json.loads(request.content)
         for request in state.provider_requests
         if request.url.path == "/api/chat"
+        and (include_titles or not json.loads(request.content)["messages"][0]["content"].startswith("You create concise agent titles."))
     ]
 
 
@@ -496,7 +513,7 @@ async def test_larger_research_limit_reruns_the_same_agent_with_its_saved_plan_a
             (task["id"],),
         ).fetchone()
     )
-    assert failed_usage["operations"] == 4
+    assert failed_usage["operations"] == 5
     receipt_ids = {
         row[0]
         for row in state.store._conn.execute(
@@ -546,7 +563,7 @@ async def test_larger_research_limit_reruns_the_same_agent_with_its_saved_plan_a
         "SELECT attempts,operations,active_seconds FROM app_agent_tasks WHERE task_id=?",
         (task["id"],),
     ).fetchone()
-    assert final_usage["attempts"] == 2 and final_usage["operations"] == 10
+    assert final_usage["attempts"] == 2 and final_usage["operations"] == 11
     assert final_usage["active_seconds"] >= failed_usage["active_seconds"]
     final_receipt_ids = {
         row[0]
@@ -554,7 +571,7 @@ async def test_larger_research_limit_reruns_the_same_agent_with_its_saved_plan_a
             "SELECT operation_id FROM app_agent_operations WHERE task_id=?", (task["id"],)
         ).fetchall()
     }
-    assert receipt_ids < final_receipt_ids and len(final_receipt_ids) == 10
+    assert receipt_ids < final_receipt_ids and len(final_receipt_ids) == 11
     assert len(state.tool_requests) == 1 and not state.responses
     assert not await runtime.run_once()
 
@@ -629,6 +646,109 @@ async def test_durable_runtime_completes_locally_or_stops_without_fallback(state
         assert "Cloud fallback is disabled" in saved["error"]
         assert not _content_requests(state) and not state.tool_requests
     assert not await runtime.run_once()
+
+
+async def test_first_local_title_is_budgeted_saved_before_plan_and_never_replaces_objective(state):
+    task = await _step(state, generated_title=False)
+    reads = []
+
+    async def observe_title_before_plan():
+        current = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+        reads.append(current)
+
+    state.on_chat = observe_title_before_plan
+    assert await state.executor(task, "plan") == "Grounded report."
+    requests = _content_requests(state, include_titles=True)
+    assert len(requests) == 2
+    title, plan = requests
+    assert title["model"] == _MODEL and title["think"] is False
+    assert title["options"] == {"num_predict": 64, "temperature": 0}
+    assert not title.get("tools") and title["messages"][1]["content"] == task["objective"]
+    assert json.loads(plan["messages"][1]["content"])["objective"] == task["objective"]
+    assert reads[1]["title"] == "Public Release Notes Research"
+    saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert saved["title"] == reads[1]["title"] and saved["objective"] == task["objective"]
+    assert state.store._conn.execute("SELECT operations FROM app_agent_tasks").fetchone()[0] == 3
+    assert state.tag_reads == 3 and state.show_reads == 3
+    assert state.client_options == [("http://ollama.test", {"trust_env": False})]
+
+
+@pytest.mark.parametrize("title_response", [
+    _answer("Unfinished Public Research", done_reason="length"),
+    _answer("Two words"), _answer("", message={"content": "", "thinking": "Hidden reasoning"}),
+    _answer("Public Release Notes Research", eval_count=None),
+])
+async def test_optional_title_failure_keeps_fallback_and_useful_step_work(state, title_response):
+    task = await _step(state, generated_title=False)
+    state.title_responses.append(title_response)
+    assert await state.executor(task, "plan") == "Grounded report."
+    row = state.store._conn.execute("SELECT title,title_attempted,operations FROM app_agent_tasks").fetchone()
+    assert row["title"] == "" and row["title_attempted"] == 1 and row["operations"] == 3
+    assert len(_content_requests(state, include_titles=True)) == 2
+    lease = {"task_id": task["id"], "lease_token": task["lease_token"], "fence": task["fence"]}
+    next_task = await state.store.agents.checkpoint(**lease, step_id="plan", result="Saved plan.")
+    state.responses.extend([_search(), _answer()])
+    assert _PUBLIC_URL in await state.executor(next_task, "research")
+    title_calls = len(_content_requests(state, include_titles=True)) - len(_content_requests(state))
+    assert title_calls == 1
+
+
+async def test_title_does_not_consume_the_last_operation_needed_by_the_real_step(state):
+    task = await _step(state, max_operations=2, generated_title=False)
+    assert await state.executor(task, "plan") == "Grounded report."
+    assert len(_content_requests(state, include_titles=True)) == 1
+    row = state.store._conn.execute("SELECT title,title_attempted,operations FROM app_agent_tasks").fetchone()
+    assert tuple(row) == ("", 1, 2)
+
+
+async def test_title_timeout_is_optional_and_keeps_its_uncertain_operation_charge(state, monkeypatch):
+    task = await _step(state, generated_title=False)
+    monkeypatch.setattr("audrey.agent_executor._TITLE_TIMEOUT_SECONDS", 0.01)
+
+    async def slow_title():
+        await asyncio.sleep(1)
+
+    state.on_title = slow_title
+    assert await state.executor(task, "plan") == "Grounded report."
+    row = state.store._conn.execute("SELECT title,title_attempted,operations FROM app_agent_tasks").fetchone()
+    assert tuple(row) == ("", 1, 3)
+    assert len(_content_requests(state, include_titles=True)) == 2
+
+
+async def test_revocation_during_title_generation_stops_plan_and_prevents_title_delivery(state):
+    task = await _step(state, generated_title=False)
+
+    async def revoke():
+        with state.store._lock, state.store._conn:
+            state.store._conn.execute("UPDATE app_users SET status='disabled' WHERE user_id=?", (state.owner.user_id,))
+
+    state.on_title = revoke
+    with pytest.raises((AgentDispatchStoppedError, AgentTaskError)):
+        await state.executor(task, "plan")
+    assert len(_content_requests(state, include_titles=True)) == 1 and not _content_requests(state)
+    assert state.store._conn.execute("SELECT title FROM app_agent_tasks").fetchone()[0] == ""
+    assert not state.tool_requests and all(client._client.is_closed for client in state.clients)
+
+
+async def test_legacy_completed_rerun_generates_title_before_research_and_reuses_saved_plan(state):
+    task = await state.store.agents.create(user_id=state.owner.user_id, objective="Research all public orchard gates.", request_id="legacy")
+    claimed = await state.store.agents.claim()
+    lease = {"task_id": claimed["id"], "lease_token": claimed["lease_token"], "fence": claimed["fence"]}
+    for step_id in ("plan", "research", "review"):
+        await state.store.agents.reserve_operation(**lease, step_id=step_id)
+        claimed = await state.store.agents.checkpoint(**lease, step_id=step_id, result=f"Legacy saved {step_id}")
+    completed = await state.store.agents.complete(**lease, result="Legacy report.")
+    await state.store.agents.control(user_id=state.owner.user_id, task_id=task["id"], expected_revision=completed["revision"], action="rerun")
+    state.responses.extend([_search(), _answer("Fresh research."), _answer("Fresh reviewed report.")])
+    runtime = AgentRuntime(state.store.agents, state.executor)
+    assert await runtime.run_once()
+    saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert saved["id"] == task["id"] and saved["status"] == "completed"
+    assert saved["steps"][0] == completed["steps"][0]
+    assert saved["title"] == "Public Release Notes Research" and saved["objective"] == task["objective"]
+    requests = _content_requests(state, include_titles=True)
+    assert len(requests) == 4 and requests[0]["options"]["num_predict"] == 64
+    assert json.loads(requests[1]["messages"][1]["content"])["saved_work"] == {"plan": "Legacy saved plan"}
 
 
 async def test_escaped_child_tool_dispatch_loses_authority_after_scope_exit():

@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from audrey.auth import require_scope
 from audrey.content_search import ContentSearchError, ContentSearchQueryError, _query_terms
-from audrey.content_search_service import ContentSearchService
+from audrey.content_search_service import SOURCE_KINDS, ContentSearchService
 from audrey.identity import Principal
 
 router = APIRouter(tags=["application-search"])
@@ -84,7 +84,7 @@ def _coverage_warnings(scan, kind, project_id, archived, since, until) -> list[s
                 continue
         counts[(issue.kind, issue.reason)] += 1
     warnings = []
-    names = {"message": "saved message", "file": "saved file", "agent": "agent report"}
+    names = {"message": "saved message", "file": "saved file", "agent": "agent report", "knowledge": "knowledge entry"}
     for (source_kind, reason), count in sorted(counts.items()):
         noun = names[source_kind] + ("s" if count != 1 else "")
         if reason == "size_limit":
@@ -125,7 +125,7 @@ async def search_content(
     request: Request,
     response: Response,
     q: str = Query(min_length=1, max_length=256),
-    kind: Literal["all", "message", "file", "agent"] = "all",
+    kind: Literal["all", "message", "file", "agent", "knowledge"] = "all",
     project_id: str | None = Query(default=None, min_length=1, max_length=256),
     archived: Literal["all", "active", "archived"] = "all",
     since: date | None = None,
@@ -232,8 +232,8 @@ async def search_content(
                 "next_cursor": _cursor(next_offset, fingerprint)
                 if more and next_offset < 200 and not changed
                 else None,
-                "partial": bool(warnings) or len(scan.done) < 3,
-                "indexing": len(scan.done) < 3,
+                "partial": bool(warnings) or len(scan.done) < len(SOURCE_KINDS),
+                "indexing": len(scan.done) < len(SOURCE_KINDS),
                 "warnings": warnings,
             }
         except (ContentSearchError, sqlite3.Error, OSError):

@@ -33,6 +33,17 @@ beforeEach(() => { vi.spyOn(api, "getSearchSource").mockResolvedValue(source());
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("SearchSourceViewer", () => {
+  it("keeps Project provenance paging within its scoped loader and fences detached sources", async () => {
+    const load = vi.fn().mockResolvedValueOnce(source({ next_offset: 4100, total_chars: 5000 }))
+      .mockRejectedValueOnce(new api.ApiError(409, "Detached"));
+    render(<SearchSourceViewer result={result()} loadSource={load} onClose={vi.fn()} />);
+    expect(await screen.findByLabelText("Saved source text")).toBeVisible();
+    expect(api.getSearchSource).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Next text" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("refresh Project knowledge");
+    expect(screen.queryByLabelText("Saved source text")).not.toBeInTheDocument();
+    expect(load).toHaveBeenLastCalledWith(4100, expect.any(AbortSignal));
+  });
   it("reads pinned canonical text at the returned offset and highlights Unicode matches", async () => {
     const item = result();
     render(<SearchSourceViewer result={item} onClose={vi.fn()} />);

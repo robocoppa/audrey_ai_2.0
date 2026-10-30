@@ -20,7 +20,8 @@ from audrey.content_search import (
 from audrey.content_sources import ContentSourceReader, SearchCoverageIssue
 
 log = logging.getLogger(__name__)
-_KINDS = ("message", "file", "agent")
+SOURCE_KINDS = ("message", "file", "agent", "knowledge")
+_KINDS = SOURCE_KINDS
 
 
 @dataclass
@@ -128,6 +129,37 @@ class ContentSearchService:
             if self._owners.get(owner) is scan:
                 self._owners.pop(owner)
 
+    async def refresh_knowledge(self, owner: str, namespace: str, entry_ids: list[str]) -> None:
+        """Refresh at most a changed entry and its superseded predecessor.
+
+        Canonical writes already succeeded. Never admit a new search owner here,
+        and never let a read begun before purge repopulate the removed projection.
+        """
+        if (
+            not isinstance(entry_ids, (list, tuple)) or len(entry_ids) > 2
+            or any(not isinstance(entry_id, str) or not 0 < len(entry_id) <= 200
+                   for entry_id in entry_ids)
+        ):
+            raise ContentSearchError("Invalid knowledge search refresh.")
+        scan = self._owners.get(owner)
+        if scan is None or scan.namespace != namespace:
+            return
+        documents = [
+            (f"knowledge:{entry_id}", await self.reader.resolve(owner, namespace, f"knowledge:{entry_id}"))
+            for entry_id in dict.fromkeys(entry_ids)
+        ]
+        async with scan.lock:
+            if self._owners.get(owner) is not scan:
+                return
+            for source_id, document in documents:
+                if document is not None and self.reader.is_current(document):
+                    await self.index.replace_source(document)
+                    scan.seen.add(source_id)
+                else:
+                    await self.index.remove_source(owner, source_id)
+                    scan.seen.discard(source_id)
+                self._changed(owner)
+
     @staticmethod
     def _restart_scan(scan: _OwnerScan) -> None:
         scan.cursors.clear()
@@ -187,7 +219,7 @@ class ContentSearchService:
                     principal.storage_namespace,
                     kind,
                     after=scan.cursors.get(kind),
-                    limit=5 if kind == "file" else 50,
+                    limit=5 if kind in {"file", "knowledge"} else 50,
                 )
                 for warning in warnings:
                     if isinstance(warning, SearchCoverageIssue):

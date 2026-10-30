@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -21,6 +22,7 @@ from audrey.app_state import (
     ProjectRecord,
 )
 from audrey.auth import require_scope
+from audrey.content_search import ContentSearchError
 from audrey.identity import Principal
 from audrey.kb.private_documents import private_text_collection
 from audrey.private_processing import prepare_native_private_runtime
@@ -289,6 +291,14 @@ async def delete_project(
     )
     if not deleted:
         raise HTTPException(status_code=404, detail="Project not found.")
+    search = getattr(request.app.state, "content_search", None)
+    if search is not None:
+        try:
+            await search.purge_owner(principal.user_id)
+        except ContentSearchError:
+            # Canonical deletion already fences reads. Reconciliation also
+            # retries removal if the rebuildable projection is unavailable.
+            logging.getLogger(__name__).warning("Project search cleanup will retry")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

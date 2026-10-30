@@ -32,6 +32,7 @@ from audrey.app_state import (
     StartedRun,
     ToolCallSnapshot,
 )
+from audrey.app_state.knowledge import KnowledgeError
 from audrey.app_state.private_tasks import PrivateTaskError
 from audrey.auth import require_scope
 from audrey.conversation_titles import ConversationTitleGenerator
@@ -70,7 +71,9 @@ from audrey.processing_policy import (
     processing_scope,
 )
 from audrey.project_context import (
+    ProjectContextSnapshot,
     ProjectContextUnavailableError,
+    assert_project_knowledge_current,
     resolve_project_context,
     with_project_context,
 )
@@ -245,8 +248,16 @@ class _LiveRun:
     private_task_revision: int | None = None
     defer_terminal: bool = False
     deferred_terminal: RunFinishedEvent | None = None
+    project_context_guard: Callable[[], None] | None = None
+    project_context_error: bool = False
 
     def observe_model_call(self, raw_model: str) -> None:
+        if self.project_context_guard is not None:
+            try:
+                self.project_context_guard()
+            except ProjectContextUnavailableError:
+                self.project_context_error = True
+                raise
         model = str(raw_model).strip()[:200]
         if not model or self.emitter.is_finished or self.observed_model_call_count >= 500:
             return
@@ -291,6 +302,11 @@ class _LiveRun:
         )
 
     def publish(self, event: RunEvent) -> None:
+        if isinstance(event, RunFinishedEvent) and self.project_context_error:
+            event = event.model_copy(update={
+                "status": "failed", "finish_reason": "error",
+                "error_code": "project_context_changed",
+            })
         if isinstance(event, RunFinishedEvent) and self.defer_terminal:
             self.deferred_terminal = event
             return
@@ -565,6 +581,7 @@ class NativeRunManager:
         generate_title: bool = False,
         processing_runtime: PrivateProcessingRuntime | None = None,
         private_task_id: str | None = None,
+        project_context: ProjectContextSnapshot | None = None,
     ) -> None:
         # A task must carry its own durable restriction and exact policy. An
         # ambient request ContextVar alone is not authority for a later run.
@@ -607,6 +624,9 @@ class NativeRunManager:
             private_task_id=private_task_id,
             private_task_revision=task["revision"] if private_task_id is not None else None,
             defer_terminal=private_task_id is not None,
+            project_context_guard=(
+                lambda: assert_project_knowledge_current(self._app, project_context)
+            ) if project_context is not None and project_context.knowledge else None,
         )
         live.emitter.set_sink(live.publish)
         async with self._lock:
@@ -949,7 +969,10 @@ class NativeRunManager:
                 if live.started.run.private_required else "pipeline_error",
             )
         except Exception as exc:
-            if live.started.run.private_required:
+            if live.project_context_error:
+                code = "project_context_changed"
+                log.warning("Project knowledge changed during run_id=%s", live.started.run.run_id)
+            elif live.started.run.private_required:
                 code = exc.code if isinstance(exc, ProcessingPolicyError) else "private_processing_unavailable"
                 log.warning("private run unavailable run_id=%s code=%s", live.started.run.run_id, code)
             else:
@@ -1010,7 +1033,7 @@ class NativeRunManager:
                 outcome=terminal.status,
                 assistant_content=assistant_content,
                 finish_reason=terminal.finish_reason,
-                error_code=terminal.error_code,
+                error_code="project_context_changed" if live.project_context_error else terminal.error_code,
                 virtual_model=terminal.virtual_model,
                 concrete_model=terminal.concrete_model,
                 prompt_tokens=usage.prompt_tokens if usage is not None else 0,
@@ -1516,6 +1539,8 @@ async def create_run(
                 else conversation.project_id
             ),
             enforce_project_id=True,
+            expected_project_updated_at=(project_context.updated_at or None)
+            if project_context is not None else None,
         )
     except (
         ConversationArchivedError,
@@ -1573,6 +1598,7 @@ async def create_run(
         top_p=payload.top_p,
         max_tokens=payload.max_tokens,
     )
+    await _record_project_knowledge(request, principal, started, project_context)
     await manager.launch(
         principal=principal,
         started=started,
@@ -1585,6 +1611,7 @@ async def create_run(
         resolved_skill=resolved_skill,
         model_tools=model_tools,
         initial_sources=project_context.sources if project_context is not None else (),
+        project_context=project_context,
         generate_title=generate_title and started.user_message.sequence_no == 1,
     )
     base = _run_response(
@@ -1598,6 +1625,26 @@ async def create_run(
         agui_events_url=f"/api/runs/{started.run.run_id}/ag-ui-events",
         cancel_url=f"/api/runs/{started.run.run_id}/cancel",
     )
+
+
+async def _record_project_knowledge(request, principal, started, snapshot):
+    if snapshot is None:
+        return
+    store = request.app.state.application_store
+    try:
+        await store.knowledge.record_run_snapshot(
+            user_id=principal.user_id, run_id=started.run.run_id,
+            project_id=snapshot.project_id,
+            entries=[{"id": entry.entry_id, "revision": entry.revision}
+                     for entry in snapshot.knowledge],
+        )
+        assert_project_knowledge_current(request.app, snapshot)
+    except (KnowledgeError, ProjectContextUnavailableError):
+        await store.conversations.finish_run(
+            user_id=principal.user_id, run_id=started.run.run_id,
+            outcome="failed", assistant_content="", error_code="project_context_changed",
+        )
+        raise HTTPException(409, "Project knowledge changed while this run was starting. Try again.") from None
 
 
 async def _create_private_run(request, principal, conversation, payload, manager, store):
@@ -1648,6 +1695,7 @@ async def _create_private_run(request, principal, conversation, payload, manager
             project_context = await resolve_project_context(
                 execution_request, store=store, principal=principal,
                 conversation=conversation, query=payload.content,
+                include_knowledge=tax_case is None,
             )
             if conversation.project_id is not None and project_context is None:
                 raise HTTPException(status_code=409, detail="The conversation's Project changed. Try again.")
@@ -1715,6 +1763,7 @@ async def _create_private_run(request, principal, conversation, payload, manager
             # uses the isolated single-writer tool loop rather than panel fanout.
             pipeline_payload = ChatCompletionRequest(model="audrey_fast" if tax_case is not None else selected.protocol_model, messages=messages, stream=True,
                 temperature=payload.temperature, top_p=payload.top_p, max_tokens=payload.max_tokens)
+            await _record_project_knowledge(request, principal, started, project_context)
             await manager.launch(
                 principal=principal, started=started, payload=pipeline_payload, messages=messages,
                 options=_options_from_request(pipeline_payload), routing_messages=routing_messages,
@@ -1722,6 +1771,7 @@ async def _create_private_run(request, principal, conversation, payload, manager
                 skill_instruction=tax_instruction, processing_runtime=runtime,
                 private_task_id=saved_task["id"] if saved_task is not None else None,
                 initial_sources=project_context.sources if project_context is not None else (),
+                project_context=project_context,
                 generate_title=started.user_message.sequence_no == 1,
             )
             launched = True

@@ -24,6 +24,9 @@ import {
 
 import { UploadProgress } from "./UploadProgress";
 import { TaxProjectSection } from "./TaxProjectSection";
+import { ProjectKnowledgeSection } from "./ProjectKnowledgeSection";
+import { SearchSourceViewer } from "./SearchSourceViewer";
+import { getKnowledgeSource, type KnowledgeEntry, type SearchResult, type SearchSource } from "./api";
 
 type ProjectFileKind = "all" | AudreyFile["kind"];
 
@@ -195,16 +198,43 @@ export function ProjectHome({
   const [uploadNotice, setUploadNotice] = useState("");
   const [error, setError] = useState("");
   const projectUploadRef = useRef<HTMLInputElement>(null);
+  const [knowledgeSource, setKnowledgeSource] = useState<{ result: SearchResult; load: (offset: number, signal: AbortSignal) => Promise<SearchSource> } | null>(null);
+  const sourceGeneration = useRef(0);
   const isPrivate = project.private_required === true;
 
   useEffect(() => {
-    setName(project.name);
-    setInstructions(project.instructions);
-    setEditing(false);
-    setConfirmingDelete(false);
-    setUploadNotice("");
-    setError("");
+    sourceGeneration.current += 1;
+    let current = true;
+    queueMicrotask(() => {
+      if (!current) return;
+      setKnowledgeSource(null);
+      setName(project.name);
+      setInstructions(project.instructions);
+      setEditing(false);
+      setConfirmingDelete(false);
+      setUploadNotice("");
+      setError("");
+    });
+    return () => { current = false; };
   }, [project.id, project.instructions, project.name]);
+
+  useEffect(() => () => { sourceGeneration.current += 1; }, []);
+
+  async function openKnowledgeSource(entry: KnowledgeEntry, index: number) {
+    const generation = ++sourceGeneration.current;
+    try {
+      const source = await getKnowledgeSource(project.id, entry, index);
+      if (generation !== sourceGeneration.current) return;
+      const result: SearchResult = { id: source.source_id, source_id: source.source_id,
+        kind: source.kind, revision: source.revision, title: source.title,
+        excerpt: source.text, offset: source.offset, highlights: [], updated_at: entry.updated_at,
+        project_id: project.id, private_required: source.private_required,
+        availability: source.availability, target: source.target };
+      setKnowledgeSource({ result, load: (offset, signal) => getKnowledgeSource(project.id, entry, index, offset, signal) });
+    } catch (reason) {
+      if (generation === sourceGeneration.current) setError(messageOf(reason));
+    }
+  }
 
   const hasProcessingFiles = files.some(({ status }) =>
     status === "pending" || status === "processing",
@@ -429,6 +459,8 @@ export function ProjectHome({
       {error ? <p className="project-error" role="alert">{error}</p> : null}
 
       {isPrivate ? <TaxProjectSection projectId={project.id} onConversationSelected={onConversationSelected} /> : null}
+      <ProjectKnowledgeSection project={project} onOpenSource={(_source, entry, index) => { void openKnowledgeSource(entry, index); }} />
+      {knowledgeSource ? <SearchSourceViewer result={knowledgeSource.result} loadSource={knowledgeSource.load} onClose={() => setKnowledgeSource(null)} /> : null}
 
       <div className="project-home-grid">
         <section className="project-panel" aria-labelledby="project-conversations-title">
