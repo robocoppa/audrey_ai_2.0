@@ -21,7 +21,7 @@ export function SearchSidebar({ open, modal, openRequest, onClose }: SearchSideb
 
   useEffect(() => {
     let current = true;
-    // A new header search returns to results. Collapsing also releases the source
+    // A new search request returns to results. Collapsing also releases the source
     // reader, while the search workspace keeps its query, filters and scroll.
     queueMicrotask(() => {
       if (!current) return;

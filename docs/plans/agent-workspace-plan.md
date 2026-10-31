@@ -12,9 +12,11 @@ part of the requested background execution capability.
 
 ## Current implementation slice
 
-The native app has Chat/Agents navigation and a compact top-bar Search control.
-It toggles a right sidebar with its own query, filters, results and source reader,
-while preserving the active workspace and drafts. At 1,280 pixels and above Search
+The native app has centered Chat/Agents navigation and a horizontal Search tab
+with a magnifying glass protruding from the right edge, slightly clipped on that
+side. Search is absent from the top bar. It opens a right sidebar with its own
+query, filters, results and source reader, while preserving the active workspace
+and drafts. The panel shares Chat's 17rem (272px) sidebar width. At 1,280 pixels and above Search
 is docked beside the workspace; smaller screens use an accessible overlay drawer.
 Collapse retains search state, aborts hidden reads and revalidates the saved query
 on reopening. Source text opens inside the panel with paging and Back to results;
@@ -28,7 +30,7 @@ selection stay the same. Lists return compact summaries and load the selected re
 Agents has a left sidebar for creation, history and active controls; its workflow
 and sidebar scroll independently. Small screens use a controls drawer. Terminal
 Run again and the red two-click Delete remain at the workflow card's top right.
-Top-bar hover uses the filled, soft glow of My Files; Search has a lighter filled
+Top-bar hover uses the filled, soft glow of My Files; the Search tab has a lighter filled
 glow, with distinct keyboard focus retained. Agent headings/history use a saved
 short title, and the unchanged original objective is available in an expandable
 Original prompt section.
@@ -62,7 +64,7 @@ output-limit failure; live acceptance of the larger allowance remains pending.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
 User-input requests, adaptive multi-step plans, Project/file/Private agent inputs,
-foreground-priority enhancements, agent completion/input notices, semantic search,
+foreground-priority enhancements, agent input notices, semantic search,
 owned-file watches and Project-associated watches remain implementation work. Existing Private Tax tasks keep
 their current behavior. The remaining sections specify the intended full feature.
 
@@ -99,7 +101,7 @@ later work. Local tests and mocked responsive browser checks verify mechanics;
 real deployed file/content acceptance remains manual.
 The Search sidebar's affected tests, production build and mocked browser checks at
 1,440, 1,100, 768, 390 and 320 pixels pass, including focus, independent scrolling,
-source revisions and retained drafts. This layout change needs only the UI rebuild.
+source revisions and retained drafts. The Search layout alone needs only the UI rebuild.
 
 Project Knowledge now stores user-authored Facts, Decisions, Questions and Actions
 in application schema 27, with immutable revisions, pinning, open/completed/resolved
@@ -158,9 +160,29 @@ History exposes each run's saved URL, criterion and schedule separately from the
 current definition. Significant changes and persistent failures create deduplicated in-app Activity
 notices linked to the exact saved check. Unchanged checks remain in history. There
 are no external notifications. Owned-file/Private and Project-associated watches,
-multiple-source definitions and task completion notices remain later work.
+multiple-source definitions remain later work.
 Affected hermetic checks and mocked desktop/phone browser flows pass; real public
 page changes, scheduled runtime and model-judgment acceptance remain manual.
+
+Schema 30 unifies agent completion/failure notices and existing watch alerts in
+Agents' Activity inbox. Terminal agent state and its deduplicated notice commit
+together; retries, pauses and cancellations remain silent. Notices contain a
+bounded display title and fixed status text, without copying reports or provider
+errors. Agent targets bind the task ID and current terminal revision; watch targets
+bind the owned watch and exact retained run. Resolving an item validates its target
+before marking it read and opening the existing task/check, preserving drafts.
+Run again removes the previous agent notice atomically because it replaces the saved
+report; this adds no report history or backfill for already terminal tasks.
+
+The inbox lists up to 50 current items, unread first, with a full count across both
+origins. Older unread items surface as newer ones are read. Badge polling fetches
+counts only; hidden reads abort and polling/read acknowledgments are fenced against
+stale UI updates. Owner, target, revision and deletion checks also run after awaited
+reads. Task/account deletion cascades notices; existing watch retention and legacy
+watch-only notification routes remain intact. This slice adds no model calls or
+external delivery. Affected storage/API/UI tests, lint, production build and mocked
+desktop/phone browser flows pass; deployed acceptance remains manual. Rebuild both
+backend and UI for this slice; the backend applies schema 30 automatically.
 
 ## Product outcome
 
@@ -527,7 +549,7 @@ New module and route names below are proposed, not existing interfaces.
 | Execution | Add an agent coordinator/dispatcher in Audrey's lifespan; use existing pipeline/tool execution and extend shared admission for background priority |
 | Source context | Add shared typed source/context manifests; extend `project_context.py` and source resolution without using model-generated paths |
 | Search | Add `content_search.py`, a configured rebuildable SQLite projection/indexer, owner-scoped adapters and native message-window resolution |
-| Native routes | Add `/api/agents`, `/api/search`, `/api/projects/{id}/knowledge`, `/api/watches` and `/api/notifications`; actions use expected revisions and creation idempotency keys |
+| Native routes | Add `/api/agents`, `/api/search`, `/api/projects/{id}/knowledge`, `/api/watches` and unified `/api/activity`; retain watch-only `/api/notifications` compatibility. Actions use expected revisions and creation idempotency keys |
 | Browser | Add Agents workspace and global Search navigation, task detail/input/result views, in-app notification state and Project Knowledge/agent/watch links |
 | Configuration | Add bounded agent/search/knowledge/watch settings to canonical `config.yaml`; retain existing model selection and Private policy authority |
 

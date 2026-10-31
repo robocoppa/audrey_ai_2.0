@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ApiError, actOnWatch, createWatch, deleteWatch, getWatch, getWatchRun, listWatchNotifications,
-  listWatchRuns, listWatches, readWatchNotification, updateWatch,
-  type PublicWatch, type WatchDefinition, type WatchNotification, type WatchRun, type WatchRunSummary,
+  ApiError, actOnWatch, createWatch, deleteWatch, getWatch, getWatchRun,
+  listWatchRuns, listWatches, updateWatch,
+  type PublicWatch, type WatchDefinition, type WatchRun, type WatchRunSummary,
 } from "./api";
 import { WatchForm } from "./WatchForm";
 import "./WatchesWorkspace.css";
@@ -23,17 +23,14 @@ function scheduleLabel(watch: Pick<PublicWatch, "schedule">) {
   return `${cadence} · ${schedule.timezone}`;
 }
 
-export function WatchesWorkspace({ visible, mode, timezone, navigationOpen, onNavigationOpenChange, onUnreadChange, onOpenWatch }: {
+export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigationOpenChange, openRequest }: {
   visible: boolean;
-  mode: "watches" | "activity";
   timezone?: string;
   navigationOpen?: boolean;
   onNavigationOpenChange?: (open: boolean) => void;
-  onUnreadChange: (count: number) => void;
-  onOpenWatch: () => void;
+  openRequest?: { watch: PublicWatch; run: WatchRun; serial: number };
 }) {
   const [watches, setWatches] = useState<PublicWatch[]>([]);
-  const [notifications, setNotifications] = useState<WatchNotification[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [runs, setRuns] = useState<WatchRun[]>([]);
   const [run, setRun] = useState<WatchRun | null>(null);
@@ -56,10 +53,10 @@ export function WatchesWorkspace({ visible, mode, timezone, navigationOpen, onNa
   const generation = useRef(0);
   const deleted = useRef(new Set<string>());
   const createRequest = useRef<{ key: string; id: string } | null>(null);
-  const notificationRequest = useRef<AbortController | null>(null);
+  const openedRequest = useRef<number | null>(null);
   const hasScheduled = watches.some((watch) => watch.enabled || watch.active_run_id);
   const selected = watches.find((watch) => watch.id === selectedId);
-  const sidebarOpen = visible && mode === "watches" && compact && (navigationOpen ?? drawerOpen);
+  const sidebarOpen = visible && compact && (navigationOpen ?? drawerOpen);
   const setDrawerOpen = useCallback((open: boolean) => {
     setInternalDrawerOpen(open);
     onNavigationOpenChange?.(open);
@@ -67,9 +64,8 @@ export function WatchesWorkspace({ visible, mode, timezone, navigationOpen, onNa
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; notificationRequest.current?.abort(); };
+    return () => { mounted.current = false; };
   }, []);
-  useEffect(() => () => notificationRequest.current?.abort(), [visible]);
 
   const dateFormatter = useMemo(() => {
     try { return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: timezone }); }
@@ -90,15 +86,13 @@ export function WatchesWorkspace({ visible, mode, timezone, navigationOpen, onNa
       inFlight = true;
       const started = generation.current;
       try {
-        const [catalog, activity] = await Promise.all([listWatches(controller.signal), listWatchNotifications(controller.signal)]);
+        const catalog = await listWatches(controller.signal);
         if (controller.signal.aborted || started !== generation.current || busyRef.current) return;
         const items = catalog.items.filter((watch) => !deleted.current.has(watch.id));
         setWatches((current) => items.reduce(mergeWatch, current.filter((watch) => items.some((item) => item.id === watch.id))));
         setSelectedId((current) => current && items.some((watch) => watch.id === current) ? current : items[0]?.id ?? null);
-        setNotifications(activity.items);
-        onUnreadChange(activity.unread_count);
       } catch (reason) {
-        if (!controller.signal.aborted) setError(`Could not refresh watches and activity. ${messageOf(reason)}`);
+        if (!controller.signal.aborted) setError(`Could not refresh watches. ${messageOf(reason)}`);
       } finally {
         inFlight = false;
         if (!controller.signal.aborted) setLoading(false);
@@ -115,13 +109,13 @@ export function WatchesWorkspace({ visible, mode, timezone, navigationOpen, onNa
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [visible, hasScheduled, token, onUnreadChange]);
+  }, [visible, hasScheduled, token]);
 
   const activeRunId = selected?.active_run_id;
   const latestRunId = selected?.latest_run?.id;
   const selectedRevision = selected?.revision;
   useEffect(() => {
-    if (!visible || mode !== "watches" || !selectedId || editing) return;
+    if (!visible || !selectedId || editing) return;
     const controller = new AbortController();
     let inFlight = false;
     async function refreshHistory() {
@@ -139,10 +133,10 @@ export function WatchesWorkspace({ visible, mode, timezone, navigationOpen, onNa
     void refreshHistory();
     const timer = activeRunId ? window.setInterval(() => void refreshHistory(), 3000) : undefined;
     return () => { controller.abort(); window.clearInterval(timer); };
-  }, [visible, mode, selectedId, selectedRevision, activeRunId, latestRunId, token, editing]);
+  }, [visible, selectedId, selectedRevision, activeRunId, latestRunId, token, editing]);
 
   useEffect(() => {
-    if (!visible || mode !== "watches" || !selectedId || !runId || editing) return;
+    if (!visible || !selectedId || !runId || editing) return;
     const controller = new AbortController();
     let inFlight = false;
     async function refreshRun() {
@@ -158,7 +152,7 @@ export function WatchesWorkspace({ visible, mode, timezone, navigationOpen, onNa
     void refreshRun();
     const timer = activeRunId === runId ? window.setInterval(() => void refreshRun(), 3000) : undefined;
     return () => { controller.abort(); window.clearInterval(timer); };
-  }, [visible, mode, selectedId, runId, activeRunId, selectedRevision, token, editing]);
+  }, [visible, selectedId, runId, activeRunId, selectedRevision, token, editing]);
 
   const closeSidebar = useCallback(() => {
     setDrawerOpen(false);
@@ -172,7 +166,7 @@ export function WatchesWorkspace({ visible, mode, timezone, navigationOpen, onNa
       const focusInSidebar = focused instanceof HTMLElement && sidebar.current?.contains(focused);
       setCompact(event.matches);
       // Hidden workspaces share the app drawer state with Chat and Tasks.
-      if (!visible || mode !== "watches") return;
+      if (!visible) return;
       setDrawerOpen(false);
       if (event.matches && focusInSidebar) window.requestAnimationFrame(() => sidebarButton.current?.focus());
       else if (!event.matches && focused === sidebarButton.current) {
@@ -181,7 +175,7 @@ export function WatchesWorkspace({ visible, mode, timezone, navigationOpen, onNa
     };
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
-  }, [setDrawerOpen, visible, mode]);
+  }, [setDrawerOpen, visible]);
   useEffect(() => {
     if (!sidebarOpen) return;
     sidebar.current?.querySelector<HTMLButtonElement>(".watch-sidebar-close")?.focus();
@@ -201,8 +195,22 @@ export function WatchesWorkspace({ visible, mode, timezone, navigationOpen, onNa
     setDrawerOpen(false);
     window.requestAnimationFrame(() => { if (detail.current) { detail.current.scrollTop = 0; if (compact) detail.current.focus({ preventScroll: true }); } });
   }
+
+  useEffect(() => {
+    if (!visible || !openRequest || openedRequest.current === openRequest.serial) return;
+    openedRequest.current = openRequest.serial;
+    generation.current += 1;
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      setWatches((current) => mergeWatch(current, openRequest.watch));
+      setSelectedId(openRequest.watch.id); setRunId(openRequest.run.id); setRun(openRequest.run);
+      setEditing(null); setConflict(undefined); setError(""); setNotice("");
+      window.requestAnimationFrame(() => { if (compact) detail.current?.focus({ preventScroll: true }); });
+    });
+    return () => controller.abort();
+  }, [visible, openRequest, compact]);
   function selectWatch(id: string) {
-    notificationRequest.current?.abort();
     setSelectedId(id); setRunId(null); setRun(null); setRuns([]); setEditing(null); setError(""); setNotice(""); setConflict(undefined); showDetail();
   }
   function newWatch() { setEditing("new"); setConflict(undefined); setError(""); setNotice(""); showDetail(); }
@@ -248,7 +256,6 @@ export function WatchesWorkspace({ visible, mode, timezone, navigationOpen, onNa
         await deleteWatch(watch.id, watch.revision);
         if (!mounted.current) return;
         deleted.current.add(watch.id); setWatches((current) => current.filter((item) => item.id !== watch.id)); setSelectedId(null); setRunId(null); setRun(null); setRuns([]);
-        setNotifications((current) => current.filter((item) => item.watch_id !== watch.id));
         setNotice("Watch and its saved history deleted.");
       } else {
         const updated = await actOnWatch(watch.id, action, watch.revision);
@@ -264,25 +271,8 @@ export function WatchesWorkspace({ visible, mode, timezone, navigationOpen, onNa
     } finally { busyRef.current = false; if (mounted.current) { setBusy(false); setToken((value) => value + 1); } }
   }
 
-  async function openNotification(item: WatchNotification) {
-    notificationRequest.current?.abort();
-    const controller = new AbortController(); notificationRequest.current = controller;
-    setError("");
-    try {
-      const [watch, savedRun] = await Promise.all([getWatch(item.watch_id, controller.signal), getWatchRun(item.watch_id, item.run_id, controller.signal)]);
-      if (controller.signal.aborted || !mounted.current) return;
-      setWatches((current) => mergeWatch(current, watch)); setSelectedId(watch.id); setRunId(savedRun.id); setRun(savedRun); setEditing(null); setConflict(undefined); onOpenWatch(); showDetail();
-      if (!item.read_at) {
-        await readWatchNotification(item.id);
-        if (!controller.signal.aborted && mounted.current) setToken((value) => value + 1);
-      }
-    } catch (reason) { if (!controller.signal.aborted && mounted.current) setError(messageOf(reason)); }
-  }
-
   const errors = <>{error ? <p className="agents-error" role="alert">{error}</p> : null}{notice ? <p className="agents-notice" role="status">{notice}</p> : null}</>;
-  const activity = <section className="watch-activity" hidden={mode !== "activity"} aria-labelledby="watch-activity-title"><header><h1 id="watch-activity-title">Activity</h1><p>Relevant page changes and persistent check failures. Unchanged checks remain in each watch’s history.</p><button className="agents-secondary" type="button" onClick={() => setToken((value) => value + 1)}>Refresh activity</button></header>{mode === "activity" ? errors : null}{loading ? <p role="status">Loading activity…</p> : !notifications.length ? <p className="agents-empty">No watch notifications yet.</p> : <ul>{notifications.map((item) => <li key={item.id}><button type="button" className="watch-notification" data-unread={!item.read_at} onClick={() => void openNotification(item)}><span>{item.read_at ? "Read" : "Unread"} · {item.kind === "change" ? "Relevant change" : "Check failed"}</span><strong>{item.title}</strong><p>{item.body}</p><time dateTime={item.created_at}>{timestamp(item.created_at)}</time><span>Open saved check →</span></button></li>)}</ul>}</section>;
-
-  return <>{activity}<section className="watches-workspace" hidden={mode !== "watches"} data-sidebar-open={sidebarOpen} aria-labelledby="watches-title">
+  return <section className="watches-workspace" data-sidebar-open={sidebarOpen} aria-labelledby="watches-title">
     {compact ? <div className="agents-mobile-toolbar" inert={sidebarOpen ? true : undefined}><button className="agents-secondary" type="button" ref={sidebarButton} aria-controls="watches-navigation" aria-expanded={sidebarOpen} onClick={() => setDrawerOpen(true)}>Watch controls</button><span>Page monitoring</span></div> : null}
     {sidebarOpen ? <button className="agents-sidebar-backdrop" type="button" tabIndex={-1} aria-label="Dismiss watch controls" onClick={closeSidebar} /> : null}
     <div className="watch-columns">
@@ -290,15 +280,15 @@ export function WatchesWorkspace({ visible, mode, timezone, navigationOpen, onNa
         <header className="agents-header"><div><p className="agents-eyebrow">Keep an eye on what matters</p><h1 id="watches-title">Watches</h1></div>{compact ? <button type="button" className="agents-secondary watch-sidebar-close" aria-label="Close watch controls" onClick={closeSidebar}>✕</button> : null}</header>
         <div className="watch-sidebar-scroll"><button className="agents-primary" type="button" disabled={busy} onClick={newWatch}>New watch</button><p className="watch-help">Scheduled checks continue while you’re away. Only public pages are supported.</p><button className="agents-refresh" type="button" onClick={() => setToken((value) => value + 1)}>Refresh watches</button>{loading ? <p role="status">Loading watches…</p> : !watches.length ? <p className="agents-empty">No watches yet. Create one to follow a public page.</p> : <ul className="agents-task-list">{watches.map((watch) => <li key={watch.id}><button type="button" className="agents-task-card" aria-pressed={!editing && selectedId === watch.id} onClick={() => selectWatch(watch.id)} aria-label={`Open watch: ${watch.title}`}><span className={`agents-status agents-status-${watch.enabled ? "running" : "paused"}`}>{watch.enabled ? "Scheduled" : "Paused"}</span><strong>{watch.title}</strong><span className="agents-task-stage">{watch.active_run_id ? "Check in progress" : watch.latest_run ? runLabel(watch.latest_run) : "Awaiting baseline"}</span><span className="agents-task-stage">Next: {timestamp(watch.next_run_at)}</span></button></li>)}</ul>}</div>
       </aside>
-      <section className="watch-detail-scroll" aria-label="Selected watch" tabIndex={0} ref={detail} inert={sidebarOpen ? true : undefined}>{mode === "watches" ? errors : null}<div className="watch-detail">
+      <section className="watch-detail-scroll" aria-label="Selected watch" tabIndex={0} ref={detail} inert={sidebarOpen ? true : undefined}>{errors}<div className="watch-detail">
         {editing ? <WatchForm key={editing === "new" ? "new" : editing.id} watch={editing === "new" ? undefined : editing} timezone={timezone} busy={busy} conflict={conflict} onSave={save} onCancel={() => { setEditing(null); setConflict(undefined); }} /> : selected ? <>
-          <header className="watch-detail-header"><div className="agents-detail-toolbar"><span className={`agents-status agents-status-${selected.enabled ? "running" : "paused"}`}>{selected.enabled ? "Scheduled" : "Paused"}</span><WatchControls key={`${selected.id}:${selected.revision}:${visible}:${mode}`} watch={selected} busy={busy} onAction={(action) => void act(selected, action)} onEdit={() => { setEditing(selected); setConflict(undefined); }} /></div><h2>{selected.title}</h2><a href={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a><p>{selected.criterion}</p><p>{scheduleLabel(selected)}</p><p>Next scheduled check: <strong>{timestamp(selected.next_run_at)}</strong></p>{!selected.enabled ? <p>Run now checks this page once and leaves the schedule paused.</p> : null}</header>
+          <header className="watch-detail-header"><div className="agents-detail-toolbar"><span className={`agents-status agents-status-${selected.enabled ? "running" : "paused"}`}>{selected.enabled ? "Scheduled" : "Paused"}</span><WatchControls key={`${selected.id}:${selected.revision}:${visible}`} watch={selected} busy={busy} onAction={(action) => void act(selected, action)} onEdit={() => { setEditing(selected); setConflict(undefined); }} /></div><h2>{selected.title}</h2><a href={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a><p>{selected.criterion}</p><p>{scheduleLabel(selected)}</p><p>Next scheduled check: <strong>{timestamp(selected.next_run_at)}</strong></p>{!selected.enabled ? <p>Run now checks this page once and leaves the schedule paused.</p> : null}</header>
           <section className="watch-history" aria-labelledby="watch-history-title"><h3 id="watch-history-title">Check history</h3><p className="watch-help">The first successful check saves a baseline. Later successful checks compare normalized page text; failed checks leave the baseline unchanged. Showing up to 50 recent checks.</p>{runs.length ? <ul>{runs.map((item) => <li key={item.id}><button type="button" aria-pressed={runId === item.id} onClick={() => { setRunId(item.id); setRun(null); }}><strong>{runLabel(item)}</strong><span>{item.kind === "catchup" ? "Catch-up after downtime" : item.kind === "manual" ? "Run now" : "Scheduled"}</span><time dateTime={item.scheduled_at}>{timestamp(item.scheduled_at)}</time></button></li>)}</ul> : <p className="agents-empty">No saved checks yet. Run now to establish a baseline, or wait for the first scheduled check.</p>}</section>
           {run && run.id === runId && run.watch_id === selected.id ? <WatchRunDetail run={run} timestamp={timestamp} /> : loadingRun ? <p role="status">Loading saved check…</p> : null}
         </> : <div className="agents-welcome"><span className="agents-welcome-mark" aria-hidden="true">◉</span><h2>Follow a public page</h2><p>Save a schedule and a criterion for the changes you care about. Audrey keeps check history and adds relevant changes to Activity.</p><button className="agents-primary" type="button" onClick={newWatch}>Create a watch</button></div>}
       </div></section>
     </div>
-  </section></>;
+  </section>;
 }
 
 function WatchControls({ watch, busy, onAction, onEdit }: { watch: PublicWatch; busy: boolean; onAction: (action: "pause" | "resume" | "run" | "delete") => void; onEdit: () => void }) {

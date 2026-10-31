@@ -30,6 +30,7 @@ from audrey.app_state.migrations import (
     PRIVATE_PROCESSING_GUARDS_SQL,
     PROJECT_FILE_ORIGIN_GUARD_SQL,
 )
+from audrey.app_state.notifications import NotificationsRepository
 from audrey.app_state.private_tasks import PrivateTasksRepository
 from audrey.app_state.projects import ProjectsRepository
 from audrey.app_state.records import (
@@ -124,6 +125,7 @@ class ApplicationStore:
         self.agents = AgentsRepository(self._conn, self._lock)
         self.knowledge = KnowledgeRepository(self._conn, self._lock)
         self.watches = WatchesRepository(self._conn, self._lock)
+        self.notifications = NotificationsRepository(self._conn, self._lock)
         self.responses._prune_expired_sync()
 
     def _migrate_locked(self) -> None:

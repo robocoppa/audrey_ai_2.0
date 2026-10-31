@@ -9,53 +9,40 @@
   padding-right: clamp(1.25rem, 4vw, 4rem);
 }
 
-.app-topbar-search {
+.app-search-edge-tab {
+  position: absolute;
+  top: 6rem;
+  right: -0.45rem;
+  z-index: 38;
   display: flex;
-  width: clamp(7rem, 12vw, 12rem);
-  min-width: 0;
+  min-height: 2.75rem;
   align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1.25rem 0.65rem 0.8rem;
   border: 1px solid rgb(99 181 255 / 23%);
   border-radius: 0.7rem;
-  background: rgb(52 153 250 / 5%);
-  transition: border-color 120ms ease, background 120ms ease;
-}
-
-.app-topbar-search:focus-within {
-  border-color: var(--accent);
-  background: rgb(52 153 250 / 10%);
-}
-
-.app-topbar-search button {
-  display: flex;
-  width: 100%;
-  height: 2.35rem;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.65rem;
-  padding: 0 0.75rem;
-  border: 0;
-  border-radius: 0.65rem;
   color: var(--muted);
-  background: transparent;
+  background: #0c2036;
   font: inherit;
   font-size: 0.78rem;
   cursor: pointer;
-  transition: color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease, box-shadow 120ms ease;
 }
 
-.app-topbar-search button svg { flex: none; }
-.app-topbar-search button[aria-expanded="true"] { color: var(--text); background: rgb(52 153 250 / 12%); }
+.app-search-edge-tab[hidden] { display: none; }
+.app-search-edge-tab svg { flex: none; }
+.app-search-edge-tab span { white-space: nowrap; }
 
 .app-main-with-search { position: relative; display: flex; min-width: 0; }
 .app-primary-workspaces { flex: 1 1 auto; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
 .app-primary-workspaces > .app-workspace-view { min-width: 0; }
 .app-search-backdrop { position: absolute; z-index: 39; inset: 0; padding: 0; border: 0; background: rgb(2 7 16 / 60%); cursor: default; }
 
-.topbar .app-topbar-search button:hover:not(:focus-visible) {
+.app-search-edge-tab:hover:not(:focus-visible) {
   outline: none;
   color: var(--text);
-  background: rgb(52 153 250 / 16%);
+  border-color: rgb(99 181 255 / 35%);
+  background: #143c60;
   box-shadow: 0 0 0 0.1rem rgb(70 118 242 / 8%), 0 0 0.85rem rgb(52 153 250 / 16%);
 }
 
@@ -71,34 +58,23 @@
   box-shadow: var(--focus-glow);
 }
 
-.topbar :is(.app-workspace-navigation button, .workspace-header-button, .my-files-button, .session-name, .admin-button, .logout-button, .session-retry-button, .app-topbar-search button):focus-visible {
+.topbar :is(.app-workspace-navigation button, .workspace-header-button, .my-files-button, .session-name, .admin-button, .logout-button, .session-retry-button):focus-visible,
+.app-search-edge-tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   color: var(--text);
   box-shadow: var(--focus-glow);
 }
 
-.topbar .app-topbar-search button:focus-visible {
-  outline-offset: -2px;
-  background: rgb(52 153 250 / 16%);
-}
-
 @media (1100px < width <= 1600px) {
   .app-header-tools { flex-wrap: wrap; gap: 0.35rem 0.75rem; }
-  .app-topbar-search { width: 10rem; }
   .app-header-tools > .session-controls { flex: none; }
 }
 
 @media (max-width: 1100px) {
   .app-header-tools {
-    grid-column: 2 / 4;
-    grid-row: 2;
-    justify-self: end;
-    width: clamp(6rem, calc(100vw - 14rem), 12rem);
-    padding: 0;
+    display: none;
   }
-  .app-header-tools > .session-controls { display: none; }
-  .app-topbar-search { width: 100%; }
 }
 
 @media (max-width: 600px) {
@@ -107,6 +83,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .app-topbar-search,
-  .topbar :is(.app-workspace-navigation button, .workspace-header-button, .my-files-button, .session-name, .admin-button, .logout-button, .session-retry-button, .app-topbar-search button) { transition: none; }
+  .app-search-edge-tab,
+  .topbar :is(.app-workspace-navigation button, .workspace-header-button, .my-files-button, .session-name, .admin-button, .logout-button, .session-retry-button) { transition: none; }
 }

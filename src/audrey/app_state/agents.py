@@ -16,6 +16,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from audrey.app_state.notifications import insert_agent_notice
 from audrey.app_state.titles import fallback_conversation_title, normalize_agent_title
 from audrey.app_state.transactions import write_transaction
 
@@ -324,6 +325,7 @@ class AgentsRepository:
                     record.update(status="failed", error="Agent execution allowance exhausted.")
                     self._clear_lease(record)
                     self._save(record)
+                    insert_agent_notice(self._conn, record, created_at=record["updated_at"])
                     continue
                 record.update(
                     status="running", attempts=record["attempts"] + 1, fence=record["fence"] + 1,
@@ -495,6 +497,7 @@ class AgentsRepository:
             record.update(status="completed", result=result, error="")
             self._clear_lease(record)
             self._save(record)
+            insert_agent_notice(self._conn, record, created_at=record["updated_at"])
             return self._public(record)
 
         return await asyncio.to_thread(self._transaction, work)
@@ -512,6 +515,8 @@ class AgentsRepository:
             record.update(status="queued" if retry else "failed", error=error)
             self._clear_lease(record)
             self._save(record)
+            if not retry:
+                insert_agent_notice(self._conn, record, created_at=record["updated_at"])
             return self._public(record)
 
         return await asyncio.to_thread(self._transaction, work)
@@ -561,6 +566,9 @@ class AgentsRepository:
                 record.update(result="", error="")
                 if not record["title"]:
                     record["title_attempted"] = 0
+                # Run again replaces the current report. Its former notice
+                # cannot remain a link that silently opens a different result.
+                self._conn.execute("DELETE FROM app_agent_notices WHERE task_id=?", (task_id,))
             record["status"] = {
                 "pause": "paused",
                 "resume": "queued",

@@ -287,17 +287,6 @@ export function App() {
         </nav>
         <div className="topbar-mobile-new-chat" ref={setMobileNewChatHost} />
         <div className="app-header-tools">
-          <div className="app-topbar-search">
-            <button type="button" ref={searchLauncher} aria-label={searchOpen ? "Collapse Search" : "Open Search"} aria-expanded={searchOpen} aria-controls="app-search-sidebar" title={searchOpen ? "Collapse Search" : "Search saved content"} onClick={() => {
-              if (searchOpen) { closeSearch(); return; }
-              setNavigationOpen(false);
-              setSearchOpen(true);
-              setSearchOpenRequest((previous) => ({ query: "", serial: (previous?.serial ?? 0) + 1 }));
-            }}>
-              <span>Search…</span>
-              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 4.5 4.5" /></svg>
-            </button>
-          </div>
           <SessionActions {...sessionActions} variant="header" />
         </div>
       </header>
@@ -305,6 +294,14 @@ export function App() {
       {activeWorkspace === "chat" && !navigationOpen && !filesOpen && !settingsOpen && !adminOpen && !searchOpen ? <PullToRefresh /> : null}
 
       <main className="native-main app-main-with-search">
+        <button type="button" className="app-search-edge-tab" ref={searchLauncher} hidden={searchOpen || navigationOpen} aria-label="Open Search" aria-expanded={searchOpen} aria-controls="app-search-sidebar" title="Search saved content" onClick={() => {
+          setNavigationOpen(false);
+          setSearchOpen(true);
+          setSearchOpenRequest((previous) => ({ query: "", serial: (previous?.serial ?? 0) + 1 }));
+        }}>
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 4.5 4.5" /></svg>
+          <span>Search</span>
+        </button>
         <div className="app-primary-workspaces" inert={searchOpen && compactSearch ? true : undefined}>
         <div className="app-workspace-view" hidden={activeWorkspace !== "chat"} inert={activeWorkspace !== "chat" ? true : undefined}>
           <Suspense fallback={<AudreyLoader fullscreen label="Loading Audrey workspace" />}>

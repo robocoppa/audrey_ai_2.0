@@ -1330,6 +1330,25 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON app_watch_notices(user_id,created_at DESC,notice_id DESC);
         """,
     ),
+    (
+        30,
+        """
+        CREATE TABLE IF NOT EXISTS app_agent_notices (
+          notice_id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+          task_id TEXT NOT NULL REFERENCES app_agent_tasks(task_id) ON DELETE CASCADE,
+          task_revision INTEGER NOT NULL CHECK (task_revision>=1),
+          kind TEXT NOT NULL CHECK (kind IN ('completed','failure')),
+          title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 100),
+          body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 200),
+          created_at TEXT NOT NULL,
+          read_at TEXT,
+          UNIQUE (task_id,task_revision,kind)
+        );
+        CREATE INDEX IF NOT EXISTS idx_app_agent_notices_owner
+          ON app_agent_notices(user_id,created_at DESC,notice_id DESC);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

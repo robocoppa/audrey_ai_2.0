@@ -22,6 +22,10 @@ import {
   getProjectKnowledge,
   getProjectKnowledgeHistory,
   listAgentTasks,
+  listActivity,
+  getActivityUnreadCount,
+  getActivityAgentTask,
+  readActivity,
   listProjects,
   listProjectKnowledge,
   removeProjectFile,
@@ -37,6 +41,21 @@ import {
   type SearchResult,
   type KnowledgeEntry,
 } from "./api";
+
+describe("unified Activity requests", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  it("keeps count reads separate and resolves notice-bound agent revisions with owner authentication", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({ items: [] })); vi.stubGlobal("fetch", fetchMock);
+    const signal = new AbortController().signal;
+    await getActivityUnreadCount(signal); await listActivity(signal);
+    await getActivityAgentTask("agent / notice", signal); await readActivity("agent", "agent / notice", signal); await readActivity("watch", "watch / notice", signal);
+    expect(fetchMock).toHaveBeenCalledWith("/api/activity/unread", expect.objectContaining({ signal, cache: "no-store", credentials: "same-origin" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/activity", expect.objectContaining({ signal, cache: "no-store" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/activity/agent/agent%20%2F%20notice/task", expect.objectContaining({ signal, cache: "no-store" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/activity/agent/agent%20%2F%20notice/read", expect.objectContaining({ signal, method: "POST" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/activity/watch/watch%20%2F%20notice/read", expect.objectContaining({ signal, method: "POST" }));
+  });
+});
 
 describe("project knowledge requests", () => {
   afterEach(() => { vi.unstubAllGlobals(); });

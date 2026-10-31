@@ -615,6 +615,33 @@ export interface WatchNotification {
   read_at: string | null;
 }
 
+export interface ActivityNotice {
+  id: string;
+  origin: "agent" | "watch";
+  kind: "completed" | "change" | "failure";
+  title: string;
+  body: string;
+  created_at: string;
+  read_at: string | null;
+  target: { kind: "agent"; task_id: string; revision: number } | { kind: "watch"; watch_id: string; run_id: string };
+}
+
+export function listActivity(signal?: AbortSignal): Promise<{ items: ActivityNotice[]; unread_count: number }> {
+  return apiJson("/api/activity", { signal, cache: "no-store" });
+}
+
+export function getActivityUnreadCount(signal?: AbortSignal): Promise<{ unread_count: number }> {
+  return apiJson("/api/activity/unread", { signal, cache: "no-store" });
+}
+
+export function readActivity(origin: ActivityNotice["origin"], id: string, signal?: AbortSignal): Promise<ActivityNotice> {
+  return apiJson(`/api/activity/${origin}/${encodeURIComponent(id)}/read`, { method: "POST", signal });
+}
+
+export function getActivityAgentTask(id: string, signal?: AbortSignal): Promise<AgentTask> {
+  return apiJson(`/api/activity/agent/${encodeURIComponent(id)}/task`, { signal, cache: "no-store" });
+}
+
 export function listWatches(signal?: AbortSignal): Promise<{ items: PublicWatch[] }> {
   return apiJson("/api/watches", { signal, cache: "no-store" });
 }

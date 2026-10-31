@@ -59,15 +59,17 @@
 .search-welcome h2 { margin: 0.6rem 0; font-size: 1.2rem; }
 .search-welcome p { color: var(--muted); font-size: 0.88rem; line-height: 1.8; }
 
-.search-workspace-sidebar { padding: 1rem; scrollbar-gutter: stable; }
-.search-workspace-sidebar .search-form { padding: 0.85rem; }
-.search-workspace-sidebar .search-input-row { gap: 0.5rem; }
+.search-workspace-sidebar { padding: 0.75rem; scrollbar-gutter: stable; }
+.search-workspace-sidebar .search-form { padding: 0.65rem; }
+.search-workspace-sidebar .search-input-row { flex-wrap: wrap; gap: 0.5rem; }
+.search-workspace-sidebar .search-input-row input { flex-basis: 100%; }
+.search-workspace-sidebar .search-input-row .search-primary { width: 100%; min-height: 2.75rem; }
 .search-workspace-sidebar .search-primary { padding-right: 0.8rem; padding-left: 0.8rem; }
 .search-workspace-sidebar .search-filter-bar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.85rem; padding-top: 1rem; padding-bottom: 0.85rem; }
 .search-workspace-sidebar .search-kind-filters { gap: 0.35rem; }
 .search-workspace-sidebar .search-kind-filters button { flex: 1; padding-right: 0.6rem; padding-left: 0.6rem; }
 .search-workspace-sidebar .search-select-filters,
-.search-workspace-sidebar .search-date-filters > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; }
+.search-workspace-sidebar .search-date-filters > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.65rem; }
 .search-workspace-sidebar .search-select-filters select,
 .search-workspace-sidebar .search-date-filters input { width: 100%; min-width: 0; max-width: 100%; }
 .search-workspace-sidebar .search-results h2 { font-size: 0.9rem; }

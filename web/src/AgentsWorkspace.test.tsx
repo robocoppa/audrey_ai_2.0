@@ -19,7 +19,7 @@ function task(patch: Partial<AgentTask> = {}): AgentTask {
 }
 
 beforeEach(() => {
-  vi.spyOn(api, "getWatchUnreadCount").mockResolvedValue({ unread_count: 0 });
+  vi.spyOn(api, "getActivityUnreadCount").mockResolvedValue({ unread_count: 0 });
   vi.spyOn(api, "listAgentTasks").mockResolvedValue({ items: [] });
   vi.spyOn(api, "getAgentTask").mockResolvedValue(task());
 });
@@ -32,6 +32,68 @@ afterEach(() => {
 });
 
 describe("AgentsWorkspace", () => {
+  it("opens Activity's saved agent in the existing task card and preserves the composer draft", async () => {
+    const saved = task({ status: "completed", revision: 4, result: "The saved complete report.", title: "Official public documentation comparison" });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const item: api.ActivityNotice = { id: "notice-1", origin: "agent", kind: "completed", title: saved.title!, body: "The agent completed.", target: { kind: "agent", task_id: saved.id, revision: saved.revision }, created_at: saved.updated_at, read_at: null };
+    const feed = vi.spyOn(api, "listActivity").mockResolvedValue({ items: [item], unread_count: 1 });
+    vi.spyOn(api, "getActivityAgentTask").mockResolvedValue(saved);
+    vi.spyOn(api, "readActivity").mockResolvedValue({ ...item, read_at: saved.updated_at });
+    const create = vi.spyOn(api, "createAgentTask");
+    render(<AgentsWorkspace />);
+    await screen.findByRole("heading", { name: saved.title });
+    expect(feed).not.toHaveBeenCalled(); expect(api.getActivityUnreadCount).toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "My next unsaved agent objective" } });
+    fireEvent.click(screen.getByRole("button", { name: "Activity" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Open agent result/ }));
+    expect(await screen.findByRole("heading", { name: saved.title })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("My next unsaved agent objective");
+    expect(screen.getAllByRole("button", { name: `Open agent: ${saved.title}` })).toHaveLength(1);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("does not let an older count-only request overwrite a newer Activity count", async () => {
+    let finishCount!: (value: { unread_count: number }) => void;
+    vi.mocked(api.getActivityUnreadCount).mockImplementation(() => new Promise((resolve) => { finishCount = resolve; }));
+    vi.spyOn(api, "listActivity").mockResolvedValue({ items: [], unread_count: 7 });
+    render(<AgentsWorkspace />);
+    fireEvent.click(screen.getByRole("button", { name: "Activity" }));
+    expect(await screen.findByLabelText("7 unread notifications")).toBeVisible();
+    await act(async () => finishCount({ unread_count: 1 }));
+    expect(screen.getByLabelText("7 unread notifications")).toBeVisible();
+  });
+
+  it("rejects an older Activity result when the same task already has a newer cached revision", async () => {
+    const current = task({ revision: 17, status: "completed", result: "The newer cached report." });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [current] }); vi.mocked(api.getAgentTask).mockResolvedValue(current);
+    const item: api.ActivityNotice = { id: "old-notice", origin: "agent", kind: "completed", title: "Older result", body: "The agent completed.", target: { kind: "agent", task_id: current.id, revision: 15 }, created_at: current.updated_at, read_at: null };
+    vi.spyOn(api, "listActivity").mockResolvedValue({ items: [item], unread_count: 1 });
+    vi.spyOn(api, "getActivityAgentTask").mockResolvedValue({ ...current, revision: 15, result: "The older saved report." });
+    const read = vi.spyOn(api, "readActivity"); render(<AgentsWorkspace />);
+    await screen.findByText("The newer cached report."); fireEvent.click(screen.getByRole("button", { name: "Activity" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Older result/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("refresh Activity");
+    expect(read).not.toHaveBeenCalled(); expect(screen.getByRole("heading", { name: "Activity" })).toBeVisible();
+    expect(screen.queryByText("The older saved report.")).not.toBeInTheDocument();
+  });
+
+  it("keeps a Watch creation draft and schedule preview across Activity navigation", async () => {
+    vi.spyOn(api, "listWatches").mockResolvedValue({ items: [] });
+    vi.spyOn(api, "listActivity").mockResolvedValue({ items: [], unread_count: 0 });
+    vi.spyOn(api, "previewWatchSchedule").mockResolvedValue({ occurrences: ["2026-11-01T09:00:00Z", "2026-11-02T09:00:00Z", "2026-11-03T09:00:00Z"] });
+    render(<AgentsWorkspace timezone="UTC" />);
+    fireEvent.click(screen.getByRole("button", { name: "Watches" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New watch" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Unsaved release watch" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview next checks" }));
+    await screen.findByText("Next three checks (UTC)");
+    fireEvent.click(screen.getByRole("button", { name: "Activity" }));
+    await screen.findByText("No activity yet. Agent results and watch alerts will appear here.");
+    fireEvent.click(screen.getByRole("button", { name: "Watches" }));
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Unsaved release watch");
+    expect(screen.getByText("Next three checks (UTC)")).toBeVisible();
+  });
+
   it("uses the saved model title and keeps the unchanged original prompt expandable", async () => {
     const original = "Give me an exhaustive timeline of the Crusades, including the major campaigns, their context, and the relevant sources.";
     const saved = task({ title: "Crusades Timeline and Major Campaigns", objective: original });

@@ -150,7 +150,7 @@ async def test_title_additive_migration_repairs_partial_schema_without_losing_sa
         state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=28")
     upgraded = ApplicationStore(state.store.path)
     try:
-        assert upgraded.schema_version == 29
+        assert upgraded.schema_version == 30
         current = await upgraded.agents.get(user_id=state.owner.user_id, task_id=task["id"])
         assert current["title"] == "Saved Public Research Title" and current["objective"] == task["objective"]
         assert current["steps"][0] == task["steps"][0]

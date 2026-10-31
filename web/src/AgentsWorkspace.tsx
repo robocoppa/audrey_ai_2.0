@@ -8,14 +8,17 @@ import {
   createAgentTask,
   deleteAgentTask,
   getAgentTask,
-  getWatchUnreadCount,
+  getActivityUnreadCount,
   listAgentTasks,
   type AgentTask,
   type AgentTaskStatus,
+  type PublicWatch,
+  type WatchRun,
 } from "./api";
 import "./AgentsWorkspace.css";
 import { AgentKnowledgeDialog } from "./AgentKnowledgeDialog";
 import { WatchesWorkspace } from "./WatchesWorkspace";
+import { ActivityWorkspace } from "./ActivityWorkspace";
 
 const STATUS_LABELS: Record<AgentTaskStatus, string> = {
   queued: "Queued", running: "Running", paused: "Paused", completed: "Completed",
@@ -74,6 +77,14 @@ interface AgentsWorkspaceProps {
 export function AgentsWorkspace(props: AgentsWorkspaceProps) {
   const [view, setView] = useState<"tasks" | "watches" | "activity">("tasks");
   const [watchesOpened, setWatchesOpened] = useState(false);
+  const [activityOpened, setActivityOpened] = useState(false);
+  const [agentRequest, setAgentRequest] = useState<{ task: AgentTask; serial: number }>();
+  const [watchRequest, setWatchRequest] = useState<{ watch: PublicWatch; run: WatchRun; serial: number }>();
+  const requestSerial = useRef(0);
+  const taskRevisions = useRef(new Map<string, number>());
+  const receiveTasks = useCallback((tasks: AgentTask[]) => {
+    taskRevisions.current = new Map(tasks.map((task) => [task.id, task.revision]));
+  }, []);
   const [unread, setUnread] = useState(0);
   const unreadGeneration = useRef(0);
   const visible = props.visible ?? true;
@@ -90,7 +101,7 @@ export function AgentsWorkspace(props: AgentsWorkspaceProps) {
       inFlight = true;
       const generation = unreadGeneration.current;
       try {
-        const result = await getWatchUnreadCount(controller.signal);
+        const result = await getActivityUnreadCount(controller.signal);
         if (!controller.signal.aborted && generation === unreadGeneration.current) setUnread(result.unread_count);
       } catch {
         // Retain the last known count when this small background read fails.
@@ -108,7 +119,8 @@ export function AgentsWorkspace(props: AgentsWorkspaceProps) {
     };
   }, [visible]);
   function navigate(next: typeof view) {
-    if (next !== "tasks") setWatchesOpened(true);
+    if (next === "watches") setWatchesOpened(true);
+    if (next === "activity") setActivityOpened(true);
     setView(next);
     props.onNavigationOpenChange?.(false);
   }
@@ -118,15 +130,18 @@ export function AgentsWorkspace(props: AgentsWorkspaceProps) {
       <button type="button" aria-current={view === "watches" ? "page" : undefined} onClick={() => navigate("watches")}>Watches</button>
       <button type="button" aria-current={view === "activity" ? "page" : undefined} onClick={() => navigate("activity")}>Activity{unread ? <span className="agents-active-count" aria-label={`${unread} unread notifications`}>{unread}</span> : null}</button>
     </nav>
-    <div className="agents-hub-view" hidden={view !== "tasks"}><AgentTasksWorkspace {...props} visible={(props.visible ?? true) && view === "tasks"} /></div>
-    {watchesOpened ? <div className="agents-hub-view" hidden={view === "tasks"}><WatchesWorkspace
-      visible={(props.visible ?? true) && view !== "tasks"}
-      mode={view === "activity" ? "activity" : "watches"}
+    <div className="agents-hub-view" hidden={view !== "tasks"}><AgentTasksWorkspace {...props} onTasksChange={receiveTasks} openRequest={agentRequest} visible={visible && view === "tasks"} /></div>
+    {watchesOpened ? <div className="agents-hub-view" hidden={view !== "watches"}><WatchesWorkspace
+      visible={visible && view === "watches"}
       timezone={props.timezone}
       navigationOpen={props.navigationOpen}
       onNavigationOpenChange={props.onNavigationOpenChange}
-      onUnreadChange={receiveUnread}
-      onOpenWatch={() => navigate("watches")}
+      openRequest={watchRequest}
+    /></div> : null}
+    {activityOpened ? <div className="agents-hub-view" hidden={view !== "activity"}><ActivityWorkspace visible={visible && view === "activity"} timezone={props.timezone} onUnreadChange={receiveUnread}
+      isAgentResultCurrent={(task) => (taskRevisions.current.get(task.id) ?? -1) <= task.revision}
+      onOpenAgent={(task) => { setAgentRequest({ task, serial: ++requestSerial.current }); navigate("tasks"); }}
+      onOpenWatch={(watch, run) => { setWatchRequest({ watch, run, serial: ++requestSerial.current }); navigate("watches"); }}
     /></div> : null}
   </section>;
 }
@@ -137,7 +152,9 @@ function AgentTasksWorkspace({
   onActiveCountChange,
   navigationOpen,
   onNavigationOpenChange,
-}: AgentsWorkspaceProps) {
+  openRequest,
+  onTasksChange,
+}: AgentsWorkspaceProps & { openRequest?: { task: AgentTask; serial: number }; onTasksChange: (tasks: AgentTask[]) => void }) {
   const [compactNavigation, setCompactNavigation] = useState(() =>
     window.matchMedia?.("(max-width: 760px)").matches ?? false);
   const [internalNavigationOpen, setInternalNavigationOpen] = useState(false);
@@ -163,6 +180,7 @@ function AgentTasksWorkspace({
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const createRequest = useRef<{ key: string; requestId: string } | null>(null);
   const mounted = useRef(false);
+  const openedRequest = useRef<number | null>(null);
   const activeCount = tasks.filter(isMoving).length;
   const hasActive = activeCount > 0;
   const sidebarOpen = visible && compactNavigation && (navigationOpen ?? internalNavigationOpen);
@@ -231,6 +249,24 @@ function AgentTasksWorkspace({
   }, []);
 
   useEffect(() => { onActiveCountChange?.(activeCount); }, [activeCount, onActiveCountChange]);
+  useEffect(() => { onTasksChange(tasks); }, [tasks, onTasksChange]);
+
+  useEffect(() => {
+    if (!visible || !openRequest || openedRequest.current === openRequest.serial) return;
+    openedRequest.current = openRequest.serial;
+    mutationGeneration.current += 1;
+    knownIds.current?.add(openRequest.task.id);
+    // The Activity reader has resolved the exact owned terminal revision first.
+    // Queue state updates so navigation effects can settle before focusing the result.
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      setTasks((current) => mergeTasks(current, [openRequest.task], deletedIds.current));
+      setSelectedId(openRequest.task.id); setFilter("all"); setError(""); setNotice("");
+      window.requestAnimationFrame(() => { if (compactNavigation) detailRef.current?.focus({ preventScroll: true }); });
+    });
+    return () => controller.abort();
+  }, [visible, openRequest, compactNavigation]);
 
   useEffect(() => {
     const controller = new AbortController();

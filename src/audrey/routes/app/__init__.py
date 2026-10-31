@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from audrey.routes.app.activity import router as activity_router
 from audrey.routes.app.admin import router as admin_router
 from audrey.routes.app.agents import router as agents_router
 from audrey.routes.app.capabilities import router as capabilities_router
@@ -22,6 +23,7 @@ router.include_router(me_router)
 router.include_router(capabilities_router)
 router.include_router(models_router)
 router.include_router(agents_router)
+router.include_router(activity_router)
 router.include_router(watches_router)
 router.include_router(conversations_router)
 router.include_router(projects_router)

@@ -13,7 +13,7 @@ function watch(patch: Partial<PublicWatch> = {}): PublicWatch {
 }
 const occurrences = ["2026-10-31T15:00:00Z", "2026-11-01T16:00:00Z", "2026-11-02T16:00:00Z"];
 function workspace(props: Partial<Parameters<typeof WatchesWorkspace>[0]> = {}) {
-  return render(<WatchesWorkspace visible mode="watches" timezone="America/Denver" onUnreadChange={vi.fn()} onOpenWatch={vi.fn()} {...props} />);
+  return render(<WatchesWorkspace visible timezone="America/Denver" {...props} />);
 }
 function fillNewWatch() {
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Release announcements" } });
@@ -173,22 +173,12 @@ describe("saved watch controls and history", () => {
 });
 
 describe("watch activity and visibility", () => {
-  it("opens the exact notified run and marks the durable notice read", async () => {
-    const item: api.WatchNotification = { id: "notice-1", watch_id: "watch-1", run_id: "old-run", kind: "change", title: "New release", body: "Relevant release was announced", created_at: "2026-10-30T15:01:00Z", read_at: null };
-    vi.mocked(api.listWatchNotifications).mockResolvedValue({ items: [item], unread_count: 3 });
-    vi.mocked(api.getWatchRun).mockResolvedValue(savedRun({ id: "old-run" }));
-    const read = vi.spyOn(api, "readWatchNotification").mockResolvedValue({ ...item, read_at: "2026-10-30T16:00:00Z" }); const open = vi.fn(), unread = vi.fn();
-    workspace({ mode: "activity", onOpenWatch: open, onUnreadChange: unread });
-    fireEvent.click(await screen.findByRole("button", { name: /New release/ }));
-    await waitFor(() => expect(open).toHaveBeenCalledOnce()); expect(api.getWatchRun).toHaveBeenCalledWith("watch-1", "old-run", expect.any(AbortSignal)); expect(read).toHaveBeenCalledWith("notice-1"); expect(unread).toHaveBeenCalledWith(3);
-  });
-
   it("does not fetch or poll a hidden workspace and aborts outstanding visible reads", async () => {
     const view = workspace({ visible: false }); expect(api.listWatches).not.toHaveBeenCalled();
-    view.rerender(<WatchesWorkspace visible mode="watches" onUnreadChange={vi.fn()} onOpenWatch={vi.fn()} />);
+    view.rerender(<WatchesWorkspace visible />);
     await screen.findByRole("heading", { name: "Release announcements" });
     const signal = vi.mocked(api.listWatches).mock.calls.at(-1)?.[0];
-    view.rerender(<WatchesWorkspace visible={false} mode="watches" onUnreadChange={vi.fn()} onOpenWatch={vi.fn()} />);
+    view.rerender(<WatchesWorkspace visible={false} />);
     expect(signal?.aborted).toBe(true);
   });
 

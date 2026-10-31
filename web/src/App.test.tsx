@@ -57,7 +57,7 @@ const DEFAULT_SKILLS = [
 ] as const;
 
 function collectionPayload(path: string) {
-  if (path === "/api/notifications/unread") return { unread_count: 0 };
+  if (path === "/api/activity/unread") return { unread_count: 0 };
   if (path.startsWith("/api/search?")) return { items: [], next_cursor: null, partial: false, indexing: false, warnings: [] };
   if (path === "/api/models") return { items: DEFAULT_MODELS };
   if (path === "/api/skills") {
@@ -144,12 +144,17 @@ describe("App", () => {
     const navigation = within(screen.getByRole("navigation", { name: "Workspaces" }));
     const launcher = screen.getByRole("button", { name: "Open Search" });
     expect(navigation.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
+    expect(document.querySelector(".topbar")).not.toContainElement(launcher);
+    expect(launcher).toHaveClass("app-search-edge-tab");
+    expect(launcher).toHaveTextContent("Search");
+    expect(launcher.querySelector("svg")).toBeInTheDocument();
     expect(launcher).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(launcher);
     const panel = screen.getByRole("complementary", { name: "Search" });
     expect(chat).toBeVisible();
     expect(navigation.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
     expect(launcher).toHaveAttribute("aria-expanded", "true");
+    expect(launcher).not.toBeVisible();
     expect(panel).toHaveAttribute("id", launcher.getAttribute("aria-controls"));
     await waitFor(() => expect(screen.getByRole("searchbox", { name: "Search your content" })).toHaveFocus());
     fireEvent.change(within(panel).getByRole("searchbox"), { target: { value: "heliotrope" } });
@@ -202,6 +207,7 @@ describe("App", () => {
     const launcher = screen.getByRole("button", { name: "Open Search" });
     fireEvent.click(launcher);
     const panel = screen.getByRole("dialog", { name: "Search" });
+    expect(launcher).not.toBeVisible();
     expect(panel).toHaveAttribute("aria-modal", "true");
     expect(document.querySelector(".app-primary-workspaces")).toHaveAttribute("inert");
     expect(document.querySelector(".topbar")).toHaveAttribute("inert");
