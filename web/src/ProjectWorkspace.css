@@ -1,0 +1,207 @@
+.project-home {
+  container-type: inline-size;
+}
+
+.project-home.project-home {
+  padding: 1rem 1.2rem;
+}
+
+.project-home .project-home-header {
+  gap: 0.85rem;
+  padding-bottom: 0.8rem;
+}
+
+.project-home-header > div:first-child {
+  min-width: 0;
+}
+
+.project-home .project-home-header h1 {
+  font-size: clamp(1.25rem, 2vw, 1.65rem);
+  overflow-wrap: anywhere;
+}
+
+.project-home .project-home-header p {
+  max-height: 3rem;
+  overflow-y: auto;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.project-home .project-home-actions {
+  max-width: 52%;
+  gap: 0.4rem;
+}
+
+.project-home .project-management-actions {
+  gap: 0.4rem;
+}
+
+.project-home .project-home-actions button {
+  min-height: 2.2rem;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.75rem;
+}
+
+.project-home .project-management-actions button {
+  min-width: 6.3rem;
+}
+
+.project-home .project-home-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.project-home-overview > .project-panel {
+  display: flex;
+  max-height: 16rem;
+  flex-direction: column;
+}
+
+.project-home-overview > .project-panel > :is(header, .project-panel-copy, .project-file-actions, .project-upload-notice, .upload-status) {
+  flex-shrink: 0;
+}
+
+.project-home .project-panel {
+  padding: 0.8rem;
+  border-radius: 0.75rem;
+}
+
+.project-home .project-panel > header {
+  gap: 0.55rem;
+  padding-bottom: 0.55rem;
+}
+
+.project-home .project-panel h2 {
+  font-size: 0.95rem;
+}
+
+.project-home .project-panel-copy,
+.project-home .project-empty {
+  margin: 0.55rem 0;
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.project-home .project-home-conversations,
+.project-home .project-file-summary {
+  max-height: 9rem;
+  min-height: 0;
+  overflow-y: auto;
+  margin-top: 0.55rem;
+  margin-bottom: 0;
+  scrollbar-width: thin;
+}
+
+.project-home .project-home-conversation {
+  padding-block: 0.45rem;
+}
+
+.project-home .project-file-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.project-home .project-file-actions button {
+  min-height: 2.2rem;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.75rem;
+}
+
+.project-home .project-file-summary li {
+  gap: 0.4rem;
+  padding: 0.4rem 0.5rem;
+}
+
+.project-home-details > .project-panel {
+  max-height: clamp(12rem, 28vh, 20rem);
+  overflow-y: auto;
+  margin-top: 0;
+  scrollbar-width: thin;
+}
+
+.project-home-details > .project-panel:only-child {
+  grid-column: 1 / -1;
+}
+
+.project-home-details .knowledge-filters {
+  gap: 0.45rem;
+  margin: 0.65rem 0;
+}
+
+.project-home-details .knowledge-filters label {
+  min-width: 0;
+  flex: 1 1 7rem;
+}
+
+.project-home-details .knowledge-filters select {
+  width: 100%;
+  padding: 0.45rem;
+}
+
+.project-home-details .knowledge-card,
+.project-home-details .knowledge-create {
+  padding: 0.7rem;
+}
+
+.project-home-details .knowledge-entries {
+  gap: 0.6rem;
+}
+
+.project-home-details .knowledge-text {
+  margin: 0.65rem 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.project-home-details .project-agents > header > button,
+.project-home-details .project-agents > button {
+  min-height: 2.2rem;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.75rem;
+}
+
+.project-home-details .project-agents > button {
+  margin-top: 0.6rem;
+}
+
+@container (max-width: 42rem) {
+  .project-home .project-home-header {
+    flex-wrap: wrap;
+  }
+
+  .project-home .project-home-actions {
+    width: 100%;
+    max-width: none;
+    justify-content: flex-start;
+  }
+
+  .project-home .project-home-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .project-home-overview > .project-panel {
+    max-height: none;
+  }
+
+  .project-home-details > .project-panel {
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
+@media (max-width: 560px) {
+  .project-home.project-home {
+    padding: 0.8rem;
+  }
+
+  .project-home .project-file-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .project-home .project-management-actions button {
+    min-width: 0;
+  }
+}

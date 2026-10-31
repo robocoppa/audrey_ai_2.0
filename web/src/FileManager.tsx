@@ -40,7 +40,11 @@ const FILE_FOLDERS: ReadonlyArray<{
   { kind: "video", label: "Videos", symbol: "▶" },
 ];
 
-export function FileManager({ onClose }: { onClose: () => void }) {
+export function FileManager({ onClose, initialFileId, initialArtifact }: {
+  onClose: () => void;
+  initialFileId?: string;
+  initialArtifact?: "text" | AudreyFileArtifactKind;
+}) {
   const [listing, setListing] = useState<AudreyFileList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -55,7 +59,8 @@ export function FileManager({ onClose }: { onClose: () => void }) {
   const [progress, setProgress] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(initialFileId ?? null);
+  const [initialSelection, setInitialSelection] = useState(Boolean(initialFileId));
   const [previewSelectedFile, setPreviewSelectedFile] = useState(false);
   const [fileSearch, setFileSearch] = useState("");
   const [kindFilter, setKindFilter] = useState<FileKindFilter>("all");
@@ -78,7 +83,12 @@ export function FileManager({ onClose }: { onClose: () => void }) {
     let active = true;
     listFiles()
       .then((next) => {
-        if (active) setListing(next);
+        if (active) {
+          setListing(next);
+          if (initialFileId && !next.items.some(({ id }) => id === initialFileId)) {
+            setError("This file is no longer available. Search again before opening it.");
+          }
+        }
       })
       .catch((reason: unknown) => {
         if (active) setError(messageOf(reason));
@@ -89,7 +99,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
     return () => {
       active = false;
     };
-  }, [refresh]);
+  }, [refresh, initialFileId]);
 
   const hasMovingFiles = listing?.items.some((file) =>
     ["fetch_pending", "fetching", "pending", "processing"].includes(file.status),
@@ -211,6 +221,9 @@ export function FileManager({ onClose }: { onClose: () => void }) {
   const accept = listing?.limits.allowed_extensions.join(",") ?? undefined;
   const fetchHosts = listing?.limits.fetch_hosts ?? [];
   const selectedFile = listing?.items.find((file) => file.id === selectedFileId) ?? null;
+  const selectedArtifact = initialSelection && selectedFileId === initialFileId ? initialArtifact : undefined;
+  const initialDocumentView = selectedArtifact === "text" || selectedArtifact === "transcript" ? "transcript"
+    : selectedArtifact === "summary" ? "summary" : undefined;
   const visibleFiles = useMemo(() => {
     const search = fileSearch.trim().toLocaleLowerCase();
     return (listing?.items ?? [])
@@ -238,6 +251,11 @@ export function FileManager({ onClose }: { onClose: () => void }) {
   }, [fileSearch, fileSort, kindFilter, listing, statusFilter]);
   const browseChanged = fileSearch.trim() !== "" || kindFilter !== "all"
     || statusFilter !== "all" || fileSort !== "newest";
+
+  function backToFiles() {
+    setSelectedFileId(null);
+    setInitialSelection(false);
+  }
 
   return (
     <div className="file-manager-backdrop" role="presentation" onMouseDown={(event) => {
@@ -284,18 +302,19 @@ export function FileManager({ onClose }: { onClose: () => void }) {
               key={selectedFile.id}
               file={selectedFile}
               initialPreview={previewSelectedFile}
-              onBack={() => setSelectedFileId(null)}
+              initialArtifact={selectedArtifact === "text" ? "transcript" : selectedArtifact}
+              onBack={backToFiles}
             />
           ) : selectedFile.kind === "image" ? (
             <ImagePreviewViewer
               key={selectedFile.id}
               file={selectedFile}
-              onBack={() => setSelectedFileId(null)}
+              onBack={backToFiles}
             />
           ) : selectedFile.origin === "generated" ? (
             <div className="file-artifact-viewer">
               <div className="file-artifact-heading">
-                <button type="button" onClick={() => setSelectedFileId(null)}>← All files</button>
+                <button type="button" onClick={backToFiles}>← All files</button>
                 <div><h3>{selectedFile.filename}</h3><small>Created by Audrey · {formatBytes(selectedFile.bytes)}</small></div>
                 <a className="file-artifact-download" href={getFileDownloadUrl(selectedFile.id)} download={selectedFile.filename}>Download</a>
               </div>
@@ -305,8 +324,8 @@ export function FileManager({ onClose }: { onClose: () => void }) {
             <DocumentTextViewer
               key={selectedFile.id}
               file={selectedFile}
-              initialView={previewSelectedFile ? (selectedFile.mime === "application/pdf" && !selectedFile.source_freed_at ? "pdf" : "transcript") : "summary"}
-              onBack={() => setSelectedFileId(null)}
+              initialView={initialDocumentView ?? (previewSelectedFile ? (selectedFile.mime === "application/pdf" && !selectedFile.source_freed_at ? "pdf" : "transcript") : "summary")}
+              onBack={backToFiles}
             />
           )
         ) : (
@@ -679,11 +698,11 @@ function ImagePreviewViewer({ file, onBack }: { file: AudreyFile; onBack: () => 
   );
 }
 
-function MediaArtifactViewer({ file, onBack, initialPreview = false }: {
-  file: AudreyFile; onBack: () => void; initialPreview?: boolean;
+function MediaArtifactViewer({ file, onBack, initialPreview = false, initialArtifact }: {
+  file: AudreyFile; onBack: () => void; initialPreview?: boolean; initialArtifact?: AudreyFileArtifactKind;
 }) {
   const [artifact, setArtifact] = useState<AudreyFileArtifactKind | "player">(
-    initialPreview ? "player" : "summary",
+    initialArtifact ?? (initialPreview ? "player" : "summary"),
   );
   const availableKinds = file.kind === "audio"
     ? artifactKinds.filter((kind) => kind !== "visual")

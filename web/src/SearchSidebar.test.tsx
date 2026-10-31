@@ -32,6 +32,44 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("SearchSidebar", () => {
+  it("forwards canonical workspace navigation and aborts it on collapse", async () => {
+    let finish!: () => void;
+    const openWorkspace = vi.fn().mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
+    const close = vi.fn();
+    const { rerender } = render(<SearchSidebar open modal={false} onClose={close} onOpenWorkspace={openWorkspace} />);
+    submit();
+    fireEvent.click(await screen.findByRole("button", { name: `Open chat: ${item.title}` }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open conversation" }));
+    expect(openWorkspace).toHaveBeenCalledExactlyOnceWith(item, expect.any(AbortSignal));
+    expect(screen.getByRole("button", { name: "Opening…" })).toBeDisabled();
+    const signal = openWorkspace.mock.calls[0][1] as AbortSignal;
+    rerender(<SearchSidebar open={false} modal={false} onClose={close} onOpenWorkspace={openWorkspace} />);
+    expect(signal.aborted).toBe(true);
+    await act(async () => finish());
+    expect(close).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Opening…" })).not.toBeInTheDocument();
+  });
+
+  it("aborts workspace navigation when returning to results or replacing the search request", async () => {
+    const openWorkspace = vi.fn().mockReturnValue(new Promise<void>(() => {}));
+    const close = vi.fn();
+    const { rerender } = render(<SearchSidebar open modal={false} openRequest={{ query: "", serial: 1 }} onClose={close} onOpenWorkspace={openWorkspace} />);
+    await act(async () => {});
+    submit();
+    fireEvent.click(await screen.findByRole("button", { name: `Open chat: ${item.title}` }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open conversation" }));
+    const firstSignal = openWorkspace.mock.calls[0][1] as AbortSignal;
+    fireEvent.keyDown(screen.getByRole("button", { name: "Back to search results" }), { key: "Escape" });
+    expect(firstSignal.aborted).toBe(true);
+    fireEvent.click(await screen.findByRole("button", { name: `Open chat: ${item.title}` }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open conversation" }));
+    const secondSignal = openWorkspace.mock.calls[1][1] as AbortSignal;
+    rerender(<SearchSidebar open modal={false} openRequest={{ query: "different", serial: 2 }} onClose={close} onOpenWorkspace={openWorkspace} />);
+    await waitFor(() => expect(secondSignal.aborted).toBe(true));
+    expect(screen.queryByRole("button", { name: "Back to search results" })).not.toBeInTheDocument();
+    expect(close).not.toHaveBeenCalled();
+  });
+
   it("preserves the query, filters and results when collapsed and revalidates on reopening", async () => {
     const onClose = vi.fn();
     const { rerender } = render(<SearchSidebar open modal={false} openRequest={{ query: "", serial: 1 }} onClose={onClose} />);

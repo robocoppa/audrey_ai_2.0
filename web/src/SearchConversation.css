@@ -1,0 +1,19 @@
+.message.search-message-target {
+  outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: .35rem;
+  border-radius: .65rem;
+  background: color-mix(in srgb, var(--surface-active) 45%, transparent);
+  scroll-margin-block: 2rem;
+}
+
+.conversation-drafts {
+  min-width: 0;
+  margin-block: .6rem;
+}
+
+.conversation-drafts h2 {
+  margin: 0 0 .3rem;
+  color: var(--muted);
+  font-size: .7rem;
+  font-weight: 650;
+}

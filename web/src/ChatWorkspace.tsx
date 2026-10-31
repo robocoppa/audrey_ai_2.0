@@ -95,6 +95,7 @@ import {
 import { latestActionFetch } from "./agentTransport";
 import { upsertConversation } from "./conversationHistory";
 import { NewProjectDialog, ProjectHome } from "./ProjectWorkspace";
+import "./SearchConversation.css";
 
 const PRIVATE_MODEL: AudreyModel = {
   id: "private", label: "Private", description: "Local models and tools for private conversations.",
@@ -200,6 +201,8 @@ const SavedSourcesContext = createContext<ReadonlyMap<string, MessageSource[]>>(
 const SavedModelsContext = createContext<ReadonlyMap<string, MessageModelUsage[]>>(new Map());
 const SavedToolsContext = createContext<ReadonlyMap<string, RunTool[]>>(new Map());
 const WorkspaceVisibleContext = createContext(true);
+type ConversationMessageRequest = { messageId: string; serial: number };
+const SearchMessageRequestContext = createContext<ConversationMessageRequest | undefined>(undefined);
 
 type ComposerDraft = { text: string; notice: string };
 
@@ -231,6 +234,7 @@ export function ChatWorkspace({
   menuActions,
   menuFooter,
   projectOpenRequest,
+  conversationOpenRequest,
   onNewProjectAgent,
   onOpenProjectAgent,
 }: {
@@ -246,6 +250,7 @@ export function ChatWorkspace({
   models: AudreyModel[];
   skills: SkillSummary[];
   projectOpenRequest?: { project: AudreyProject; serial: number };
+  conversationOpenRequest?: { conversation: Conversation; messageId: string; serial: number };
   onNewProjectAgent?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
   onOpenProjectAgent?: (task: AgentTask, signal?: AbortSignal) => void | Promise<void>;
 }) {
@@ -366,6 +371,9 @@ export function ChatWorkspace({
   const selectedIdRef = useRef<string | null>(null);
   const selectedProjectIdRef = useRef<string | null>(null);
   const openedProjectRequest = useRef<number | null>(null);
+  const openedConversationRequest = useRef<number | null>(null);
+  const externalConversationId = useRef<string | null>(null);
+  const [messageOpenRequest, setMessageOpenRequest] = useState<(ConversationMessageRequest & { conversationId: string }) | undefined>();
   const defaultModelId = models.find(({ id }) => id === "auto")?.id ?? models[0]?.id ?? null;
   const catalogUnavailable = defaultModelId === null;
   const canBrowseDirectModels = models.some((model) =>
@@ -381,6 +389,7 @@ export function ChatWorkspace({
   });
 
   function selectConversation(conversation: Conversation | null) {
+    externalConversationId.current = null;
     navigationRevisionRef.current += 1;
     setComposerFocusId((current) => current === conversation?.id ? current : null);
     const previousId = selectedIdRef.current;
@@ -440,6 +449,7 @@ export function ChatWorkspace({
     queueMicrotask(() => {
       if (!current) return;
       const project = projectOpenRequest.project;
+      externalConversationId.current = null;
       setProjects((items) => [project, ...items.filter(({ id }) => id !== project.id)]);
       selectedProjectIdRef.current = project.id;
       setSelectedProjectId(project.id); setExpandedProjectId(project.id);
@@ -450,6 +460,32 @@ export function ChatWorkspace({
     });
     return () => { current = false; };
   }, [visible, projectOpenRequest, setNavigationOpen]);
+
+  useEffect(() => {
+    if (!visible || !conversationOpenRequest
+      || openedConversationRequest.current === conversationOpenRequest.serial) return;
+    let current = true;
+    queueMicrotask(() => {
+      if (!current) return;
+      const { conversation, messageId, serial } = conversationOpenRequest;
+      openedConversationRequest.current = serial;
+      navigationRevisionRef.current += 1;
+      externalConversationId.current = conversation.id;
+      // Leave every existing thread mounted, including unsent drafts and active runs.
+      setOpenedConversations((items) => upsertConversation(items, conversation));
+      selectedIdRef.current = conversation.id;
+      setSelectedId(conversation.id);
+      selectedProjectIdRef.current = conversation.project_id ?? null;
+      setSelectedProjectId(selectedProjectIdRef.current);
+      setExpandedProjectId(selectedProjectIdRef.current);
+      setView(conversation.archived_at !== null ? "archived" : "active");
+      setSearchInput(""); setSearchQuery("");
+      setComposerFocusId(null);
+      setMessageOpenRequest({ conversationId: conversation.id, messageId, serial });
+      setNavigationOpen(false);
+    });
+    return () => { current = false; };
+  }, [visible, conversationOpenRequest, setNavigationOpen]);
 
   useEffect(() => {
     let active = true;
@@ -506,11 +542,18 @@ export function ChatWorkspace({
   useEffect(() => {
     if (!defaultModelId) return;
     let active = true;
+    const navigationRevision = navigationRevisionRef.current;
     const requestKey = `${view}\n${searchQuery}`;
     listKeyRef.current = requestKey;
     listConversations({ archived: view === "archived", search: searchQuery })
       .then(async ({ items, next_cursor }) => {
         if (!active) return;
+        setConversations(items);
+        setNextCursor(next_cursor);
+        // A Search link can target an archived, Project, or later-page conversation.
+        // Its canonical selection must survive a list response that omits that row.
+        if (navigationRevision !== navigationRevisionRef.current
+          || (selectedIdRef.current !== null && externalConversationId.current === selectedIdRef.current)) return;
         const ordinaryItems = items.filter(({ project_id }) => !project_id);
         if (
           view === "active"
@@ -520,6 +563,10 @@ export function ChatWorkspace({
         ) {
           const conversation = await createConversation(defaultModelId);
           if (!active) return;
+          if (navigationRevision !== navigationRevisionRef.current) {
+            void discardEmptyConversation(conversation.id).catch(() => {});
+            return;
+          }
           setConversations([conversation, ...items]);
           setNextCursor(next_cursor);
           selectConversation(conversation);
@@ -559,6 +606,11 @@ export function ChatWorkspace({
   );
   const projectHistoryConversations = projectConversations.filter(
     ({ last_message_at }) => last_message_at !== null,
+  );
+  const retainedDraftConversations = openedConversations.filter((conversation) =>
+    conversation.last_message_at === null && conversation.id !== selectedId
+    && !historyConversations.some(({ id }) => id === conversation.id)
+    && !projectConversations.some(({ id }) => id === conversation.id),
   );
   const renderedConversations = selected
     && !openedConversations.some(({ id }) => id === selected.id)
@@ -1064,6 +1116,27 @@ export function ChatWorkspace({
 
           {!compactNavigation ? projectNavigation : null}
 
+          {retainedDraftConversations.length > 0 ? (
+            <nav className="conversation-drafts" aria-label="Draft conversations">
+              <h2>Draft conversations</h2>
+              <div className="conversation-list">
+                {retainedDraftConversations.map((conversation) => (
+                  <button
+                    className="conversation"
+                    key={conversation.id}
+                    aria-label={`Open draft conversation ${conversation.title || "New conversation"}`}
+                    data-private={conversation.private_required === true || conversation.default_model_id === "private" ? "true" : undefined}
+                    type="button"
+                    onClick={() => openConversation(conversation)}
+                  >
+                    <span>{conversation.title || "New conversation"}</span>
+                    <small>{modelLabel(models, conversation)}</small>
+                  </button>
+                ))}
+              </div>
+            </nav>
+          ) : null}
+
           <label className="conversation-search">
             <input
               type="search"
@@ -1217,11 +1290,18 @@ export function ChatWorkspace({
             className="conversation-thread-slot"
             hidden={opened.id !== selectedId}
             key={opened.id}
+            onFocusCapture={(event) => {
+              if (messageOpenRequest?.conversationId === opened.id
+                && event.target instanceof Element && event.target.closest(".composer")) setMessageOpenRequest(undefined);
+            }}
           >
             <ConversationThread
               conversation={opened}
               isSelected={opened.id === selectedId}
               focusComposer={composerFocusId === opened.id && opened.id === selectedId && !navigationOpen}
+              messageOpenRequest={visible && opened.id === selectedId && messageOpenRequest?.conversationId === opened.id
+                ? messageOpenRequest : undefined}
+              onMessageNavigationFinished={() => setMessageOpenRequest((request) => request?.conversationId === opened.id ? undefined : request)}
               onComposerFocused={composerFocused}
               compactNavigation={compactNavigation}
               models={models}
@@ -1262,6 +1342,8 @@ function ConversationThread({
   conversation,
   isSelected,
   focusComposer,
+  messageOpenRequest,
+  onMessageNavigationFinished,
   onComposerFocused,
   compactNavigation,
   models,
@@ -1280,6 +1362,8 @@ function ConversationThread({
   conversation: Conversation;
   isSelected: boolean;
   focusComposer: boolean;
+  messageOpenRequest?: ConversationMessageRequest;
+  onMessageNavigationFinished: () => void;
   onComposerFocused: (conversationId: string) => void;
   compactNavigation: boolean;
   models: AudreyModel[];
@@ -1707,6 +1791,7 @@ function ConversationThread({
           key={threadRevision}
           conversationId={conversation.id}
           focusComposer={focusComposer}
+          messageOpenRequest={messageOpenRequest}
           onComposerFocused={onComposerFocused}
           projectPicker={projectPicker}
           projectId={conversation.project_id ?? null}
@@ -1733,6 +1818,7 @@ function ConversationThread({
           onModelChange={changeModel}
           onRunActiveChange={setRunActive}
           onRunStarted={() => {
+            onMessageNavigationFinished();
             setAcceptedMessage(true);
             void refreshAutomaticTitle();
           }}
@@ -1750,6 +1836,7 @@ function AudreyThread({
   privateRequired,
   conversationId,
   focusComposer,
+  messageOpenRequest,
   onComposerFocused,
   projectPicker,
   projectId,
@@ -1777,6 +1864,7 @@ function AudreyThread({
   privateRequired: boolean;
   conversationId: string;
   focusComposer: boolean;
+  messageOpenRequest?: ConversationMessageRequest;
   onComposerFocused: (conversationId: string) => void;
   projectPicker: ReactNode;
   projectId: string | null;
@@ -2625,13 +2713,17 @@ function AudreyThread({
         content={toolboxContent}
       >
       <ThreadPrimitive.Root className="thread-root">
-        <ThreadPrimitive.Viewport className="thread-viewport">
+        <ThreadPrimitive.Viewport className="thread-viewport"
+          autoScroll={messageOpenRequest ? false : undefined}
+          scrollToBottomOnInitialize={!messageOpenRequest}>
+          <SearchMessageRequestContext.Provider value={messageOpenRequest}>
           <ThreadPrimitive.Messages
             components={{
               UserMessage,
               AssistantMessage,
             }}
           />
+          </SearchMessageRequestContext.Provider>
           <ThreadPrimitive.If empty={false}>
             <div className="thread-message-spacer" aria-hidden="true" />
           </ThreadPrimitive.If>
@@ -3225,8 +3317,11 @@ function safeSourceUrl(raw: string): string {
 }
 
 function UserMessage() {
+  const messageId = useAuiState((state) => state.message.id);
+  const { ref, selected } = useSearchMessageFocus(messageId);
   return (
-    <MessagePrimitive.Root className="message message-user">
+    <MessagePrimitive.Root ref={ref} data-message-id={messageId} tabIndex={-1}
+      className={`message message-user${selected ? " search-message-target" : ""}`}>
       <div className="message-label">You</div>
       <MessagePrimitive.Parts components={{ Text: MarkdownText }} />
       <MessagePrimitive.Attachments>
@@ -3277,11 +3372,13 @@ function ChatAttachment({ attachment }: { attachment: CompleteAttachment }) {
 
 function AssistantMessage() {
   const messageId = useAuiState((state) => state.message.id);
+  const { ref, selected } = useSearchMessageFocus(messageId);
   const sources = useContext(SavedSourcesContext).get(messageId) ?? [];
   const models = useContext(SavedModelsContext).get(messageId) ?? [];
   const tools = useContext(SavedToolsContext).get(messageId) ?? [];
   return (
-    <MessagePrimitive.Root className="message message-assistant">
+    <MessagePrimitive.Root ref={ref} data-message-id={messageId} tabIndex={-1}
+      className={`message message-assistant${selected ? " search-message-target" : ""}`}>
       <div className="message-label">Audrey</div>
       <MessagePrimitive.Parts
         components={{ Text: MarkdownText, tools: { Fallback: HiddenToolActivity } }}
@@ -3313,6 +3410,25 @@ function AssistantMessage() {
       <AnswerCopyAction />
     </MessagePrimitive.Root>
   );
+}
+
+function useSearchMessageFocus(messageId: string) {
+  const request = useContext(SearchMessageRequestContext);
+  const ref = useRef<HTMLDivElement>(null);
+  const focusedSerial = useRef<number | null>(null);
+  const selected = request?.messageId === messageId;
+  useEffect(() => {
+    if (!request || !selected || focusedSerial.current === request.serial) return;
+    const frame = window.requestAnimationFrame(() => {
+      const message = ref.current;
+      if (!message) return;
+      focusedSerial.current = request.serial;
+      message.focus({ preventScroll: true });
+      message.scrollIntoView?.({ block: "center", behavior: "instant" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [request, selected]);
+  return { ref, selected };
 }
 
 function AnswerCopyAction() {

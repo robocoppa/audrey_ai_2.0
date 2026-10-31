@@ -1224,7 +1224,7 @@ export function getConversation(
 ): Promise<Conversation> {
   return apiJson<Conversation>(
     `/api/conversations/${encodeURIComponent(conversationId)}`,
-    { signal },
+    { signal, cache: "no-store" },
   );
 }
 
@@ -1337,8 +1337,8 @@ export function listFiles(): Promise<AudreyFileList> {
   return apiJson<AudreyFileList>("/api/files");
 }
 
-export function getFile(fileId: string): Promise<AudreyFile> {
-  return apiJson<AudreyFile>(`/api/files/${encodeURIComponent(fileId)}`);
+export function getFile(fileId: string, signal?: AbortSignal): Promise<AudreyFile> {
+  return apiJson<AudreyFile>(`/api/files/${encodeURIComponent(fileId)}`, { signal, cache: "no-store" });
 }
 
 export function getFileArtifact(

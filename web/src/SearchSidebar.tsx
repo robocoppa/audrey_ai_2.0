@@ -11,9 +11,10 @@ interface SearchSidebarProps {
   modal: boolean;
   openRequest?: { query: string; serial: number };
   onClose: () => void;
+  onOpenWorkspace?: (result: SearchResult, signal?: AbortSignal) => void | Promise<void>;
 }
 
-export function SearchSidebar({ open, modal, openRequest, onClose }: SearchSidebarProps) {
+export function SearchSidebar({ open, modal, openRequest, onClose, onOpenWorkspace }: SearchSidebarProps) {
   const [selected, setSelected] = useState<SearchResult | null>(null);
   const panel = useRef<HTMLElement>(null);
   const resultTrigger = useRef<HTMLElement | null>(null);
@@ -105,7 +106,7 @@ export function SearchSidebar({ open, modal, openRequest, onClose }: SearchSideb
           }}
         />
       </div>
-      {open && selected ? <SearchSourceViewer presentation="inline" result={selected} onClose={backToResults} /> : null}
+      {open && selected ? <SearchSourceViewer presentation="inline" result={selected} onClose={backToResults} onOpenWorkspace={onOpenWorkspace} /> : null}
     </aside>
   );
 }

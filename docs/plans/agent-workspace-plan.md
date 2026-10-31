@@ -96,8 +96,9 @@ per source, 5,000 sources/10 million source characters per owner, and the first
 200 matching source candidates per query. File input/expanded parsing is bounded
 to 8 MiB; existing cached text can cover larger originals. Approved Project notes
 are now searchable, with source-review labels when references become stale. Semantic
-candidates and navigation into the full chat/file workspace remain
-later work. Local tests and mocked responsive browser checks verify mechanics;
+candidates remain later work. Canonical source previews now link into their owned
+conversation, file, agent or Project workspace, as described below.
+Local tests and mocked responsive browser checks verify mechanics;
 real deployed file/content acceptance remains manual.
 The Search sidebar's affected tests, production build and mocked browser checks at
 1,440, 1,100, 768, 390 and 320 pixels pass, including focus, independent scrolling,
@@ -241,6 +242,31 @@ storage/runtime/API/UI checks, lint, TypeScript, build and mocked desktop/phone 
 pass; real model and deployed acceptance remain manual. Rebuild backend and UI;
 schema 32 applies automatically with no configuration change or required upload.
 
+Project home now puts conversations and files in the first row, with Knowledge and
+Agents side by side below. Scoped spacing, smaller controls and bounded scrolling
+keep all four panels within the checked laptop viewports. The available pane width
+controls stacking on narrow screens. Full instructions and long lists remain scrollable;
+Knowledge editing and the existing Private Tax section remain available.
+
+Search's saved-source reader now offers explicit Open conversation/file/agent/Project
+actions after a successful canonical read. Navigation reads the owned target and then
+rechecks the original source revision and exact target identity. Deleted, detached or
+replaced sources clear the displayed source and leave the reader open with an error.
+Transient navigation failures retain the source for retry. Collapse, Back, owner reset and
+superseding navigation abort pending links and ignore late replies.
+
+Conversation links select and focus the matching saved message, including archived
+Private conversations, while preserving mounted drafts and running threads. Retained empty
+conversation drafts remain reachable from a compact Draft conversations list. Agent links
+open the existing task without creating or rerunning it. File links select the current
+owned file and supported matching text/artifact tab in My Files. Image OCR and retained
+document text remain readable in Search when their native preview/original is unavailable;
+this slice does not add missing bytes or expand file-reading endpoints. Knowledge links
+open their owned Project. Search queries/filters and agent objectives survive navigation.
+Local UI tests, lint, TypeScript/build and mocked laptop/phone browser checks pass;
+deployed acceptance remains manual. This slice needs only an audrey-ui rebuild, with
+no schema/configuration change or upload.
+
 ## Product outcome
 
 A user can give Audrey an objective, choose its Project and sources, start an
@@ -262,8 +288,8 @@ decision; then schedule a weekly check of a selected public release page.
 | --- | --- | --- |
 | Native runs | Saved agent objectives, three-stage plans/checkpoints, planning questions, leases and restart dispatch | Adaptive steps and finer-grained within-step recovery |
 | Private tasks | Leases, revisions, source/model pins, budgets and committed-result delivery for Private tax reviews | General agent contracts and adapters; existing Private recovery currently pauses work |
-| Search | Local lexical API/sidebar, canonical reader, bounded projection, approved notes and Project report filters | Semantic candidates and full chat/file workspace navigation |
-| Projects | Approved knowledge in native chat and ordinary agents; fixed agent context, Project links and saved-work lists | Source-backed note and file/Private agent context, automatic proposals |
+| Search | Local lexical API/sidebar, canonical reader and workspace links, exact message focus, bounded projection, approved notes and Project report filters | Semantic candidates and expanded native previews for retained text |
+| Projects | Compact overview with Knowledge/Agents below; approved knowledge in native chat and ordinary agents; fixed agent context, Project links and saved-work lists | Source-backed note and file/Private agent context, automatic proposals |
 | Scheduling | Explicit public-page schedules, snapshots/diffs, baselines and Activity alerts | Owned-file/Private, Project-associated and multiple-source watches |
 
 Code anchors:

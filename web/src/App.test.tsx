@@ -4,6 +4,7 @@ import type { ComponentProps } from "react";
 
 import { App } from "./App";
 import { latestActionFetch } from "./agentTransport";
+import type { SearchTarget } from "./api";
 
 const workspaceMock = vi.hoisted(() => ({ enabled: false, projectBridge: false }));
 
@@ -14,6 +15,7 @@ vi.mock("./ChatWorkspace", async (importOriginal) => {
     ChatWorkspace: (props: ComponentProps<typeof actual.ChatWorkspace>) => workspaceMock.enabled ? (
       <>
         <span>Workspace ready</span>
+        {props.conversationOpenRequest ? <span>Opened conversation {props.conversationOpenRequest.conversation.id} at {props.conversationOpenRequest.messageId}</span> : null}
         {workspaceMock.projectBridge ? <>
           <button onClick={() => void props.onNewProjectAgent?.(BRIDGE_PROJECT)}>Prefill Project agent</button>
           <button onClick={() => void props.onOpenProjectAgent?.(BRIDGE_AGENT)}>Open saved Project agent</button>
@@ -139,6 +141,51 @@ describe("App", () => {
     expect(navigation.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
     expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue("");
+  });
+
+  it.each(["message", "file", "agent", "knowledge"] as const)("follows a Search %s into its existing workspace after revalidating the source", async (kind) => {
+    workspaceMock.enabled = workspaceMock.projectBridge = true;
+    const base = mockCapabilitySession("degraded").getMockImplementation()!;
+    const target: SearchTarget = kind === "message" ? { kind, conversation_id: "saved-chat", message_id: "saved-message", sequence: 2 }
+      : kind === "file" ? { kind, file_id: "saved-file", artifact: "text" }
+      : kind === "agent" ? { kind, task_id: BRIDGE_AGENT.id, step_id: "review" }
+      : { kind, project_id: BRIDGE_PROJECT.id, entry_id: "note" };
+    const result = { id: "match", source_id: "source", kind, revision: "saved", title: "Matching work", excerpt: "local text", highlights: [], offset: 0,
+      updated_at: BRIDGE_PROJECT.updated_at, project_id: null, private_required: false, availability: "available", target };
+    const file = { id: "saved-file", filename: "Linked file.txt", kind: "text", mime: "text/plain", bytes: 12,
+      uploaded_at: BRIDGE_PROJECT.created_at, chunks: 1, status: "ready", failure_reason: "", duration_s: 0, summary: "", source_freed_at: "", leased_at: "", source_url: "", transcript_source: "", fetch_downloaded_bytes: 0, fetch_total_bytes: 0 };
+    const source = { ...result, text: "Canonical local text", total_chars: 20, next_offset: null };
+    const fetchMock = vi.fn<(path: string, options?: RequestInit) => Promise<Response>>((path) => {
+      const payload = path.startsWith("/api/search/source?") ? source
+        : path.startsWith("/api/search?") ? { items: [result], next_cursor: null, warnings: [], partial: false, indexing: false }
+        : path === "/api/conversations/saved-chat" ? { id: "saved-chat", title: "Saved chat", default_model_id: "auto", default_mode: "auto", project_id: null, private_required: false, archived_at: null }
+        : path === `/api/agents/${BRIDGE_AGENT.id}` ? BRIDGE_AGENT
+        : path === `/api/projects/${BRIDGE_PROJECT.id}` ? BRIDGE_PROJECT
+        : path === "/api/files/saved-file" ? file
+        : path === "/api/files" ? { items: [file], total_bytes: 12, limits: { max_user_bytes: 1000, allowed_extensions: [".txt"], fetch_hosts: [] } }
+        : path.startsWith("/api/files/saved-file/text") ? { id: file.id, text: "Linked file text", offset: 0, next_offset: null, total_chars: 16 }
+        : null;
+      return payload ? Promise.resolve(new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } })) : base(path);
+    });
+    vi.stubGlobal("fetch", fetchMock); render(<App />);
+    await screen.findByText("Workspace ready");
+    fireEvent.click(screen.getByRole("button", { name: "Open Search" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search your content" }), { target: { value: "local" } });
+    fireEvent.submit(screen.getByRole("search"));
+    fireEvent.click(await screen.findByRole("button", { name: `Open ${kind === "message" ? "chat" : kind}: Matching work` }));
+    const label = kind === "message" ? "Open conversation" : kind === "knowledge" ? "Open Project" : `Open ${kind}`;
+    fireEvent.click(await screen.findByRole("button", { name: label }));
+    if (kind === "message") expect(await screen.findByText("Opened conversation saved-chat at saved-message")).toBeVisible();
+    if (kind === "knowledge") expect(await screen.findByText(`Opened Project ${BRIDGE_PROJECT.name}`)).toBeVisible();
+    if (kind === "agent") expect(await screen.findByRole("heading", { name: BRIDGE_AGENT.title })).toBeVisible();
+    if (kind === "file") {
+      expect(await screen.findByRole("heading", { name: file.filename })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Transcript" })).toHaveAttribute("aria-pressed", "true");
+      expect(await screen.findByText("Linked file text")).toBeVisible();
+    }
+    expect(screen.queryByRole("complementary", { name: "Search" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([path]) => path.startsWith("/api/search/source?"))).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false);
   });
 
   it("opens Agents as a primary workspace while preserving Chat and the research draft", async () => {

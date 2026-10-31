@@ -30,6 +30,7 @@ import { ProjectKnowledgeSection } from "./ProjectKnowledgeSection";
 import { SearchSourceViewer } from "./SearchSourceViewer";
 import { getKnowledgeSource, type KnowledgeEntry, type SearchResult, type SearchSource } from "./api";
 import "./ProjectAgents.css";
+import "./ProjectWorkspace.css";
 
 type ProjectFileKind = "all" | AudreyFile["kind"];
 
@@ -467,14 +468,7 @@ export function ProjectHome({
 
       {error ? <p className="project-error" role="alert">{error}</p> : null}
 
-      {isPrivate ? <TaxProjectSection projectId={project.id} onConversationSelected={onConversationSelected} /> : null}
-      <ProjectKnowledgeSection project={project} onOpenSource={(_source, entry, index) => { void openKnowledgeSource(entry, index); }} />
-      {knowledgeSource ? <SearchSourceViewer result={knowledgeSource.result} loadSource={knowledgeSource.load} onClose={() => setKnowledgeSource(null)} /> : null}
-      {!isPrivate && (onNewProjectAgent || onOpenProjectAgent) ? <ProjectAgents
-        key={project.id} project={project} visible={visible}
-        onNew={onNewProjectAgent} onOpen={onOpenProjectAgent} /> : null}
-
-      <div className="project-home-grid">
+      <div className="project-home-grid project-home-overview">
         <section className="project-panel" aria-labelledby="project-conversations-title">
           <header>
             <div>
@@ -574,6 +568,15 @@ export function ProjectHome({
           ) : null}
         </section>
       </div>
+
+      <div className="project-home-grid project-home-details">
+        <ProjectKnowledgeSection project={project} onOpenSource={(_source, entry, index) => { void openKnowledgeSource(entry, index); }} />
+        {!isPrivate && (onNewProjectAgent || onOpenProjectAgent) ? <ProjectAgents
+          key={project.id} project={project} visible={visible}
+          onNew={onNewProjectAgent} onOpen={onOpenProjectAgent} /> : null}
+      </div>
+      {isPrivate ? <TaxProjectSection projectId={project.id} onConversationSelected={onConversationSelected} /> : null}
+      {knowledgeSource ? <SearchSourceViewer result={knowledgeSource.result} loadSource={knowledgeSource.load} onClose={() => setKnowledgeSource(null)} /> : null}
 
       {filesOpen ? (
         <ProjectFilePicker

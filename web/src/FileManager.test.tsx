@@ -387,6 +387,89 @@ function listPreviewFiles(files: api.AudreyFile[]) {
   });
 }
 
+it.each(["text", "transcript", "summary"] as const)("opens a searched document directly to its %s content", async (artifact) => {
+  const file = previewFile({ filename: "inspection.pdf", mime: "application/pdf" });
+  listPreviewFiles([file]);
+  vi.spyOn(api, "getFileText").mockResolvedValue({ id: file.id, text: "The matched document text.", offset: 0, next_offset: null, total_chars: 26 });
+  vi.spyOn(api, "getFileArtifact").mockResolvedValue({ id: file.id, artifact: "summary", text: file.summary, offset: 0, next_offset: null, total_chars: file.summary.length });
+  render(<FileManager onClose={() => undefined} initialFileId={file.id} initialArtifact={artifact} />);
+  expect(await screen.findByText(artifact === "summary" ? file.summary : "The matched document text.")).toBeVisible();
+  expect(screen.getByRole("button", { name: artifact === "summary" ? "Summary" : "Transcript" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.queryByAltText("inspection.pdf — page 1 of 2")).not.toBeInTheDocument();
+  if (artifact === "summary") expect(api.getFileText).not.toHaveBeenCalled();
+  else {
+    expect(api.getFileText).toHaveBeenCalledExactlyOnceWith(file.id);
+    expect(api.getFileArtifact).not.toHaveBeenCalled();
+  }
+});
+
+it.each([
+  { kind: "video", artifact: "text", expected: "transcript", label: "Transcript" },
+  { kind: "video", artifact: "transcript", expected: "transcript", label: "Transcript" },
+  { kind: "video", artifact: "summary", expected: "summary", label: "Summary" },
+  { kind: "video", artifact: "visual", expected: "visual", label: "Visual notes" },
+  { kind: "audio", artifact: "transcript", expected: "transcript", label: "Transcript" },
+] satisfies Array<{ kind: "video" | "audio"; artifact: "text" | api.AudreyFileArtifactKind; expected: api.AudreyFileArtifactKind; label: string }>) ("opens searched $kind $artifact in the matching artifact tab", async ({ kind, artifact, expected, label }) => {
+  const file = previewFile({ kind, filename: kind === "video" ? "walk.mp4" : "interview.mp3", mime: kind === "video" ? "video/mp4" : "audio/mpeg" });
+  listPreviewFiles([file]);
+  vi.spyOn(api, "getFileArtifact").mockResolvedValue({ id: file.id, artifact: expected, text: "The matched media artifact.", offset: 0, next_offset: null, total_chars: 26 });
+  render(<FileManager onClose={() => undefined} initialFileId={file.id} initialArtifact={artifact} />);
+  expect(await screen.findByText("The matched media artifact.")).toBeVisible();
+  expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-pressed", "true");
+  expect(api.getFileArtifact).toHaveBeenCalledExactlyOnceWith(file.id, expected);
+  expect(screen.queryByLabelText(/player for/u)).not.toBeInTheDocument();
+});
+
+it("opens searched images in the supported native preview without requesting image text", async () => {
+  const file = previewFile({ kind: "image", filename: "photo.png", mime: "image/png" });
+  listPreviewFiles([file]);
+  vi.spyOn(api, "getFileText");
+  render(<FileManager onClose={() => undefined} initialFileId={file.id} initialArtifact="text" />);
+  expect(await screen.findByAltText("Preview of photo.png")).toHaveAttribute("src", "/api/files/preview_file/image");
+  expect(screen.queryByRole("button", { name: "Saved text" })).not.toBeInTheDocument();
+  expect(api.getFileText).not.toHaveBeenCalled();
+});
+
+it("does not carry a searched artifact preference into subsequent library selections", async () => {
+  const first = previewFile({ kind: "video", filename: "first.mp4", mime: "video/mp4" });
+  const second = previewFile({ id: "second_file", filename: "other.txt" });
+  listPreviewFiles([first, second]);
+  vi.spyOn(api, "getFileArtifact").mockImplementation(async (id, artifact) => ({ id, artifact, text: id === first.id && artifact === "visual" ? "Matched visual notes." : "The file summary.", offset: 0, next_offset: null, total_chars: 21 }));
+  render(<FileManager onClose={() => undefined} initialFileId={first.id} initialArtifact="visual" />);
+  expect(await screen.findByText("Matched visual notes.")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "← All files" }));
+  fireEvent.click(await screen.findByRole("button", { name: "View document text for other.txt" }));
+  expect(await screen.findByText("The file summary.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Summary" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "← All files" }));
+  fireEvent.click(await screen.findByRole("button", { name: "View video text for first.mp4" }));
+  expect(await screen.findByText("The file summary.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Summary" })).toHaveAttribute("aria-pressed", "true");
+});
+
+it("does not read an artifact for a searched file missing from the canonical listing", async () => {
+  listPreviewFiles([]);
+  vi.spyOn(api, "getFileArtifact");
+  vi.spyOn(api, "getFileText");
+  render(<FileManager onClose={() => undefined} initialFileId="deleted_file" initialArtifact="transcript" />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("This file is no longer available. Search again");
+  expect(api.getFileArtifact).not.toHaveBeenCalled();
+  expect(api.getFileText).not.toHaveBeenCalled();
+});
+
+it("shows the native document text failure honestly when its original was reclaimed", async () => {
+  const file = previewFile({ filename: "old.pdf", mime: "application/pdf", source_freed_at: "2026-10-27" });
+  listPreviewFiles([file]);
+  vi.spyOn(api, "getFileText").mockRejectedValue(new api.ApiError(410, "The original document is no longer available."));
+  vi.spyOn(api, "getFileArtifact");
+  render(<FileManager onClose={() => undefined} initialFileId={file.id} initialArtifact="text" />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("The original document is no longer available.");
+  expect(screen.getByRole("button", { name: "Transcript" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.queryByRole("button", { name: "Original PDF" })).not.toBeInTheDocument();
+  expect(screen.queryByText(file.summary)).not.toBeInTheDocument();
+  expect(api.getFileArtifact).not.toHaveBeenCalled();
+});
+
 it("opens the actual PDF directly from its filename while Open keeps the summary default", async () => {
   const file = previewFile({ filename: "inspection.pdf", mime: "application/pdf" });
   listPreviewFiles([file]);

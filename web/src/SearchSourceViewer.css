@@ -10,6 +10,9 @@
 .search-source-dialog > header > button { flex: none; width: 2.4rem; padding: 0; color: var(--muted); font-size: 1.4rem; }
 .search-source-body { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; padding: 1rem 1.3rem; overflow: auto; }
 .search-source-status { margin: 1rem 0; color: var(--muted); font-size: 0.85rem; }
+.search-source-workspace { margin-bottom: 0.85rem; }
+.search-source-workspace > button:hover:not(:disabled) { background: var(--surface-active, rgb(36 57 80 / 85%)); box-shadow: 0 0 0.85rem rgb(52 153 250 / 12%); }
+.search-source-workspace > p { margin: 0.65rem 0 0; color: #f5a3aa; font-size: 0.78rem; line-height: 1.6; }
 .search-source-metadata { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; color: var(--muted); font-size: 0.72rem; }
 .search-source-text { min-height: 5rem; margin-top: 1rem; padding: 0.2rem; overflow-y: auto; color: var(--text-soft, var(--text)); font-size: 0.88rem; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; }
 .search-source-text mark { padding: 0.08rem 0; border-radius: 0.15rem; background: rgb(74 158 235 / 30%); color: #e0f0ff; }

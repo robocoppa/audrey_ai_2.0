@@ -8,6 +8,7 @@ import { AccountSettings } from "./AccountSettings";
 import { FileManager } from "./FileManager";
 import { AgentsWorkspace } from "./AgentsWorkspace";
 import { SearchSidebar } from "./SearchSidebar";
+import { resolveSearchWorkspace } from "./searchNavigation";
 import "./App.css";
 import {
   ApiError,
@@ -21,6 +22,8 @@ import {
   type AudreyModel,
   type AudreyProject,
   type AgentTask,
+  type Conversation,
+  type SearchResult,
   type CapabilityHealth,
   type CurrentUser,
   type SkillSummary,
@@ -103,6 +106,8 @@ export function App() {
   const [composerProjectRequest, setComposerProjectRequest] = useState<{ project: AudreyProject; serial: number; owner: string }>();
   const [externalAgentRequest, setExternalAgentRequest] = useState<{ task: AgentTask; serial: number; owner: string }>();
   const [projectOpenRequest, setProjectOpenRequest] = useState<{ project: AudreyProject; serial: number; owner: string }>();
+  const [conversationOpenRequest, setConversationOpenRequest] = useState<{ conversation: Conversation; messageId: string; serial: number; owner: string }>();
+  const [fileOpenRequest, setFileOpenRequest] = useState<{ fileId: string; artifact: Extract<SearchResult["target"], { kind: "file" }>["artifact"]; owner: string }>();
   const projectNavigation = useRef<{ serial: number; controller: AbortController | null }>({ serial: 0, controller: null });
   const workspaceOwner = session.status === "ready" ? `${session.user.id}:${workspaceRevision}` : "";
   const cancelProjectNavigation = useCallback(() => {
@@ -168,6 +173,43 @@ export function App() {
       setProjectOpenRequest({ project, serial, owner: workspaceOwner });
       setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("chat");
     });
+  }
+
+  async function openSearchWorkspace(result: SearchResult, signal?: AbortSignal) {
+    cancelProjectNavigation();
+    const controller = new AbortController();
+    const serial = projectNavigation.current.serial;
+    projectNavigation.current.controller = controller;
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) controller.abort();
+    try {
+      if (controller.signal.aborted) return;
+      const target = await resolveSearchWorkspace(result, controller.signal);
+      if (controller.signal.aborted || projectNavigation.current.serial !== serial) return;
+      switch (target.kind) {
+        case "message":
+          setConversationOpenRequest({ conversation: target.conversation, messageId: target.messageId, serial, owner: workspaceOwner });
+          setActiveWorkspace("chat");
+          break;
+        case "file":
+          setFileOpenRequest({ fileId: target.file.id, artifact: target.artifact, owner: workspaceOwner });
+          setFilesOpen(true);
+          break;
+        case "agent":
+          setExternalAgentRequest({ task: target.task, serial, owner: workspaceOwner });
+          setActiveWorkspace("agents");
+          break;
+        case "knowledge":
+          setProjectOpenRequest({ project: target.project, serial, owner: workspaceOwner });
+          setActiveWorkspace("chat");
+          break;
+      }
+      setSearchOpen(false); setNavigationOpen(false);
+    } finally {
+      signal?.removeEventListener("abort", abort);
+      if (projectNavigation.current.controller === controller) projectNavigation.current.controller = null;
+    }
   }
 
   useEffect(() => {
@@ -316,6 +358,7 @@ export function App() {
     onOpenFiles: () => {
       setNavigationOpen(false);
       setSearchOpen(false);
+      setFileOpenRequest(undefined);
       setFilesOpen(true);
     },
     onOpenSettings: () => {
@@ -392,6 +435,7 @@ export function App() {
               menuActions={<SessionActions {...sessionActions} variant="drawer" />}
               menuFooter={<SessionActions {...sessionActions} variant="footer" />}
               projectOpenRequest={projectOpenRequest?.owner === workspaceOwner ? projectOpenRequest : undefined}
+              conversationOpenRequest={conversationOpenRequest?.owner === workspaceOwner ? conversationOpenRequest : undefined}
               onNewProjectAgent={newProjectAgent}
               onOpenProjectAgent={openProjectAgent}
             />
@@ -405,10 +449,12 @@ export function App() {
         </div>
         </div>
         {searchOpen && compactSearch ? <button type="button" className="app-search-backdrop" tabIndex={-1} aria-label="Dismiss Search" onClick={closeSearch} /> : null}
-        <SearchSidebar key={`${session.user.id}:${workspaceRevision}`} open={searchOpen} modal={compactSearch} openRequest={searchOpenRequest} onClose={closeSearch} />
+        <SearchSidebar key={`${session.user.id}:${workspaceRevision}`} open={searchOpen} modal={compactSearch} openRequest={searchOpenRequest} onClose={closeSearch} onOpenWorkspace={openSearchWorkspace} />
       </main>
       {filesOpen ? (
-        <FileManager onClose={() => {
+        <FileManager key={`${workspaceOwner}:${fileOpenRequest?.owner === workspaceOwner ? `${fileOpenRequest.fileId}:${fileOpenRequest.artifact}` : "library"}`}
+          initialFileId={fileOpenRequest?.owner === workspaceOwner ? fileOpenRequest.fileId : undefined}
+          initialArtifact={fileOpenRequest?.owner === workspaceOwner ? fileOpenRequest.artifact : undefined} onClose={() => {
           setFilesOpen(false);
           restoreHeaderActionFocus("app-my-files-action");
         }} />
