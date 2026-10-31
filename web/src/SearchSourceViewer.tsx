@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { ApiError, getSearchSource, type SearchResult, type SearchSource } from "./api";
@@ -7,13 +7,13 @@ import "./SearchSourceViewer.css";
 
 const PAGE_SIZE = 4000;
 
-type ViewerProps = { result: SearchResult; onClose: () => void; loadSource?: (offset: number, signal: AbortSignal) => Promise<SearchSource> };
+type ViewerProps = { result: SearchResult; onClose: () => void; loadSource?: (offset: number, signal: AbortSignal) => Promise<SearchSource>; presentation?: "modal" | "inline" };
 
 export function SearchSourceViewer(props: ViewerProps) {
   return <SourceViewer key={`${props.result.id}:${props.result.revision}`} {...props} />;
 }
 
-function SourceViewer({ result, onClose, loadSource }: ViewerProps) {
+function SourceViewer({ result, onClose, loadSource, presentation = "modal" }: ViewerProps) {
   const [request, setRequest] = useState({ offset: result.offset, serial: 0 });
   const [source, setSource] = useState<SearchSource | null>(null);
   const [loading, setLoading] = useState(true);
@@ -22,10 +22,16 @@ function SourceViewer({ result, onClose, loadSource }: ViewerProps) {
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const close = useRef(onClose);
+  const titleId = useId();
+  const inline = presentation === "inline";
 
   useEffect(() => { close.current = onClose; }, [onClose]);
 
   useEffect(() => {
+    if (inline) {
+      closeRef.current?.focus();
+      return;
+    }
     const previousFocus = document.activeElement;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -53,7 +59,7 @@ function SourceViewer({ result, onClose, loadSource }: ViewerProps) {
       document.body.style.overflow = previousOverflow;
       if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
     };
-  }, []);
+  }, [inline]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -69,7 +75,7 @@ function SourceViewer({ result, onClose, loadSource }: ViewerProps) {
         setError("");
       } catch (reason) {
         if (!current || controller.signal.aborted) return;
-        if (reason instanceof ApiError && reason.status === 404) {
+        if (reason instanceof ApiError && (reason.status === 403 || reason.status === 404)) {
           setError(`This source was deleted or is no longer available to you. Close this view and ${loadSource ? "refresh Project knowledge" : "search again"}.`);
           setRetryable(false);
         } else if (reason instanceof ApiError && reason.status === 409) {
@@ -95,15 +101,14 @@ function SourceViewer({ result, onClose, loadSource }: ViewerProps) {
     setRequest((saved) => ({ offset, serial: saved.serial + 1 }));
   }
 
-  return createPortal(
-    <div className="search-source-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
-      <section className="search-source-dialog" role="dialog" aria-modal="true" aria-labelledby="search-source-title" ref={dialogRef}>
+  const viewer = (
+      <section className={`search-source-dialog${inline ? " search-source-inline" : ""}`} role={inline ? undefined : "dialog"} aria-modal={inline ? undefined : true} aria-labelledby={titleId} ref={dialogRef}>
         <header>
           <div>
             <span>Saved source · {result.kind === "message" ? "Chat message" : result.kind === "file" ? "File text" : result.kind === "knowledge" ? "Project knowledge" : "Agent work"}</span>
-            <h2 id="search-source-title">{source?.title || result.title || "Untitled"}</h2>
+            <h2 id={titleId}>{source?.title || result.title || "Untitled"}</h2>
           </div>
-          <button type="button" ref={closeRef} onClick={onClose} aria-label="Close saved source">×</button>
+          <button type="button" ref={closeRef} onClick={onClose} aria-label={inline ? "Back to search results" : "Close saved source"}>{inline ? "←" : "×"}</button>
         </header>
         <div className="search-source-body" aria-busy={loading}>
           {loading ? <p className="search-source-status" role="status">Loading the saved source…</p> : null}
@@ -127,6 +132,13 @@ function SourceViewer({ result, onClose, loadSource }: ViewerProps) {
           </> : null}
         </div>
       </section>
+  );
+
+  if (inline) return viewer;
+
+  return createPortal(
+    <div className="search-source-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
+      {viewer}
     </div>,
     document.body,
   );

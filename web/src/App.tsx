@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { AudreyLoader } from "./AudreyLoader";
 import { PullToRefresh } from "./PullToRefresh";
@@ -7,8 +7,7 @@ import builtryteWordmark from "./assets/brand/builtryte-wordmark.png";
 import { AccountSettings } from "./AccountSettings";
 import { FileManager } from "./FileManager";
 import { AgentsWorkspace } from "./AgentsWorkspace";
-import { SearchWorkspace } from "./SearchWorkspace";
-import { SearchSourceViewer } from "./SearchSourceViewer";
+import { SearchSidebar } from "./SearchSidebar";
 import "./App.css";
 import {
   ApiError,
@@ -22,7 +21,6 @@ import {
   type CurrentUser,
   type SkillSummary,
   type UserPreferences,
-  type SearchResult,
 } from "./api";
 
 const ChatWorkspace = lazy(() =>
@@ -88,14 +86,33 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
-  const [activeWorkspace, setActiveWorkspace] = useState<"chat" | "agents" | "search">("chat");
-  const [searchSource, setSearchSource] = useState<SearchResult | null>(null);
-  const [headerSearchQuery, setHeaderSearchQuery] = useState("");
+  const [activeWorkspace, setActiveWorkspace] = useState<"chat" | "agents">("chat");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [compactSearch, setCompactSearch] = useState(() => window.matchMedia?.("(max-width: 1279px)").matches ?? false);
+  const searchLauncher = useRef<HTMLButtonElement>(null);
   const [searchOpenRequest, setSearchOpenRequest] = useState<{ query: string; serial: number }>();
   const [activeAgentCount, setActiveAgentCount] = useState(0);
   const [mobileMenuHost, setMobileMenuHost] = useState<HTMLDivElement | null>(null);
   const [mobileNewChatHost, setMobileNewChatHost] = useState<HTMLDivElement | null>(null);
   const [showAccessHandoff, setShowAccessHandoff] = useState(true);
+
+  useEffect(() => {
+    const viewport = window.matchMedia?.("(max-width: 1279px)");
+    if (!viewport) return;
+    const update = (event: MediaQueryListEvent) => setCompactSearch(event.matches);
+    viewport.addEventListener("change", update);
+    return () => viewport.removeEventListener("change", update);
+  }, []);
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    window.requestAnimationFrame(() => searchLauncher.current?.focus({ preventScroll: true }));
+  }, []);
+
+  const changeNavigation = useCallback((open: boolean) => {
+    setNavigationOpen(open);
+    if (open) setSearchOpen(false);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -224,14 +241,17 @@ export function App() {
     healthUnavailable,
     onOpenFiles: () => {
       setNavigationOpen(false);
+      setSearchOpen(false);
       setFilesOpen(true);
     },
     onOpenSettings: () => {
       setNavigationOpen(false);
+      setSearchOpen(false);
       setSettingsOpen(true);
     },
     onOpenAdministration: () => {
       setNavigationOpen(false);
+      setSearchOpen(false);
       setAdminOpen(true);
     },
     onNavigate: () => setNavigationOpen(false),
@@ -247,7 +267,7 @@ export function App() {
           />
         </filter>
       </svg>
-      <header className="topbar" inert={navigationOpen ? true : undefined}>
+      <header className="topbar" inert={navigationOpen || searchOpen && compactSearch ? true : undefined}>
         <div className="topbar-mobile-menu" ref={setMobileMenuHost}>
           {activeWorkspace !== "chat" ? <button className="workspace-header-button" type="button" onClick={() => setActiveWorkspace("chat")} aria-label="Back to Chat">←</button> : null}
         </div>
@@ -267,35 +287,36 @@ export function App() {
         </nav>
         <div className="topbar-mobile-new-chat" ref={setMobileNewChatHost} />
         <div className="app-header-tools">
-          <form className="app-topbar-search" role="search" aria-label="Search saved content" onSubmit={(event) => {
-            event.preventDefault();
-            setNavigationOpen(false);
-            setActiveWorkspace("search");
-            setSearchOpenRequest((previous) => ({ query: headerSearchQuery.trim(), serial: (previous?.serial ?? 0) + 1 }));
-          }}>
-            <input type="search" aria-label="Search saved content" placeholder="Search…" autoComplete="off" maxLength={256} value={headerSearchQuery} onChange={(event) => setHeaderSearchQuery(event.target.value)} />
-            <button type="submit" aria-label="Open Search" title="Search saved content">
+          <div className="app-topbar-search">
+            <button type="button" ref={searchLauncher} aria-label={searchOpen ? "Collapse Search" : "Open Search"} aria-expanded={searchOpen} aria-controls="app-search-sidebar" title={searchOpen ? "Collapse Search" : "Search saved content"} onClick={() => {
+              if (searchOpen) { closeSearch(); return; }
+              setNavigationOpen(false);
+              setSearchOpen(true);
+              setSearchOpenRequest((previous) => ({ query: "", serial: (previous?.serial ?? 0) + 1 }));
+            }}>
+              <span>Search…</span>
               <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 4.5 4.5" /></svg>
             </button>
-          </form>
+          </div>
           <SessionActions {...sessionActions} variant="header" />
         </div>
       </header>
 
-      {activeWorkspace === "chat" && !navigationOpen && !filesOpen && !settingsOpen && !adminOpen ? <PullToRefresh /> : null}
+      {activeWorkspace === "chat" && !navigationOpen && !filesOpen && !settingsOpen && !adminOpen && !searchOpen ? <PullToRefresh /> : null}
 
-      <main className="native-main">
+      <main className="native-main app-main-with-search">
+        <div className="app-primary-workspaces" inert={searchOpen && compactSearch ? true : undefined}>
         <div className="app-workspace-view" hidden={activeWorkspace !== "chat"} inert={activeWorkspace !== "chat" ? true : undefined}>
           <Suspense fallback={<AudreyLoader fullscreen label="Loading Audrey workspace" />}>
             <ChatWorkspace
               key={`${session.user.id}:${workspaceRevision}`}
-              visible={activeWorkspace === "chat"}
+              visible={activeWorkspace === "chat" && !(searchOpen && compactSearch)}
               user={session.user}
               preferences={session.preferences}
               models={session.models}
               skills={session.skills}
               navigationOpen={navigationOpen}
-              onNavigationOpenChange={setNavigationOpen}
+              onNavigationOpenChange={changeNavigation}
               mobileMenuHost={activeWorkspace === "chat" ? mobileMenuHost : null}
               mobileNewChatHost={activeWorkspace === "chat" ? mobileNewChatHost : null}
               menuActions={<SessionActions {...sessionActions} variant="drawer" />}
@@ -304,13 +325,12 @@ export function App() {
           </Suspense>
         </div>
         <div className="app-workspace-view" hidden={activeWorkspace !== "agents"} inert={activeWorkspace !== "agents" ? true : undefined}>
-          <AgentsWorkspace key={`${session.user.id}:${workspaceRevision}`} visible={activeWorkspace === "agents"} timezone={session.preferences.timezone} onActiveCountChange={setActiveAgentCount} navigationOpen={navigationOpen} onNavigationOpenChange={setNavigationOpen} />
+          <AgentsWorkspace key={`${session.user.id}:${workspaceRevision}`} visible={activeWorkspace === "agents" && !(searchOpen && compactSearch)} timezone={session.preferences.timezone} onActiveCountChange={setActiveAgentCount} navigationOpen={navigationOpen} onNavigationOpenChange={changeNavigation} />
         </div>
-        <div className="app-workspace-view" hidden={activeWorkspace !== "search"} inert={activeWorkspace !== "search" ? true : undefined}>
-          <SearchWorkspace key={`${session.user.id}:${workspaceRevision}`} visible={activeWorkspace === "search"} onOpenResult={setSearchSource} openRequest={searchOpenRequest} />
         </div>
+        {searchOpen && compactSearch ? <button type="button" className="app-search-backdrop" tabIndex={-1} aria-label="Dismiss Search" onClick={closeSearch} /> : null}
+        <SearchSidebar key={`${session.user.id}:${workspaceRevision}`} open={searchOpen} modal={compactSearch} openRequest={searchOpenRequest} onClose={closeSearch} />
       </main>
-      {searchSource ? <SearchSourceViewer result={searchSource} onClose={() => setSearchSource(null)} /> : null}
       {filesOpen ? (
         <FileManager onClose={() => {
           setFilesOpen(false);
@@ -332,8 +352,7 @@ export function App() {
             );
           }}
           onDataPurgeAttempted={() => {
-            setSearchSource(null);
-            setHeaderSearchQuery("");
+            setSearchOpen(false);
             setSearchOpenRequest(undefined);
             setWorkspaceRevision((current) => current + 1);
             void Promise.all([

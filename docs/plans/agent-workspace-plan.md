@@ -12,8 +12,14 @@ part of the requested background execution capability.
 
 ## Current implementation slice
 
-The native app has Chat/Agents navigation and a compact top-bar search field with
-a magnifying-glass action that opens Search and submits its text. It has a saved public-source
+The native app has Chat/Agents navigation and a compact top-bar Search control.
+It toggles a right sidebar with its own query, filters, results and source reader,
+while preserving the active workspace and drafts. At 1,280 pixels and above Search
+is docked beside the workspace; smaller screens use an accessible overlay drawer.
+Collapse retains search state, aborts hidden reads and revalidates the saved query
+on reopening. Source text opens inside the panel with paging and Back to results;
+Project Knowledge's separate source previews retain their modal behavior.
+It has a saved public-source
 research workflow: Plan, Research and Review. Users can create tasks, inspect
 saved step results/reports, pause/resume/cancel, rerun the same agent and delete
 terminal history. Run again preserves completed checkpoints on unfinished tasks;
@@ -91,6 +97,9 @@ are now searchable, with source-review labels when references become stale. Sema
 candidates and navigation into the full chat/file workspace remain
 later work. Local tests and mocked responsive browser checks verify mechanics;
 real deployed file/content acceptance remains manual.
+The Search sidebar's affected tests, production build and mocked browser checks at
+1,440, 1,100, 768, 390 and 320 pixels pass, including focus, independent scrolling,
+source revisions and retained drafts. This layout change needs only the UI rebuild.
 
 Project Knowledge now stores user-authored Facts, Decisions, Questions and Actions
 in application schema 27, with immutable revisions, pinning, open/completed/resolved

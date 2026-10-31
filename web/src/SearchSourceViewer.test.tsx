@@ -33,6 +33,76 @@ beforeEach(() => { vi.spyOn(api, "getSearchSource").mockResolvedValue(source());
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("SearchSourceViewer", () => {
+  it("embeds canonical text without a portal, modal controls, body lock, or global keyboard handling", async () => {
+    const close = vi.fn();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "auto";
+    const { container, unmount } = render(<SearchSourceViewer presentation="inline" result={result()} onClose={close} />);
+    const back = screen.getByRole("button", { name: "Back to search results" });
+    expect(back).toHaveFocus();
+    expect(await screen.findByLabelText("Saved source text")).toHaveTextContent("🗂 local option");
+    expect(container.querySelector(".search-source-inline")).toBe(screen.getByRole("region", { name: "Design choices" }));
+    expect(container.querySelector("mark")).toHaveTextContent("local");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.querySelector(".search-source-backdrop, [aria-modal]")).toBeNull();
+    expect(document.body.style.overflow).toBe("auto");
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    document.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(false);
+    expect(close).not.toHaveBeenCalled();
+    const tab = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(false);
+    fireEvent.click(back);
+    expect(close).toHaveBeenCalledOnce();
+    unmount();
+    expect(document.body.style.overflow).toBe("auto");
+    document.body.style.overflow = previousOverflow;
+  });
+
+  it("keeps inline paging inside the source region and returns focus to its back control", async () => {
+    const item = result();
+    const nextPage = deferred<SearchSource>();
+    vi.mocked(api.getSearchSource).mockResolvedValueOnce(source({ next_offset: 4100, total_chars: 5000 }))
+      .mockReturnValueOnce(nextPage.promise);
+    render(<SearchSourceViewer presentation="inline" result={item} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Next text" }));
+    expect(screen.getByRole("button", { name: "Back to search results" })).toHaveFocus();
+    expect(screen.queryByLabelText("Saved source text")).not.toBeInTheDocument();
+    expect(api.getSearchSource).toHaveBeenLastCalledWith(item, 4100, expect.any(AbortSignal));
+    await act(async () => nextPage.resolve(source({ offset: 4100, text: "Later canonical text", total_chars: 5000 })));
+    expect(await screen.findByLabelText("Saved source text")).toHaveTextContent("Later canonical text");
+    expect(screen.getByRole("button", { name: "Back to search results" })).toHaveFocus();
+    expect(document.querySelector(".search-source-backdrop")).toBeNull();
+  });
+
+  it.each([403, 404, 409])("clears inline source text when paging crosses a %i access or revision boundary", async (status) => {
+    vi.mocked(api.getSearchSource).mockResolvedValueOnce(source({ next_offset: 4100, total_chars: 5000 }))
+      .mockRejectedValueOnce(new api.ApiError(status, "Unavailable"));
+    render(<SearchSourceViewer presentation="inline" result={result()} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Next text" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(status === 409 ? "This source changed" : "deleted or is no longer available");
+    expect(screen.queryByLabelText("Saved source text")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Back to search results" })).toBeVisible();
+  });
+
+  it("aborts an inline canonical read on collapse without moving focus owned by its parent", async () => {
+    const pending = deferred<SearchSource>();
+    vi.mocked(api.getSearchSource).mockReturnValue(pending.promise);
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    const { unmount } = render(<SearchSourceViewer presentation="inline" result={result()} onClose={vi.fn()} />);
+    const signal = vi.mocked(api.getSearchSource).mock.calls[0][2];
+    outside.focus();
+    unmount();
+    expect(signal?.aborted).toBe(true);
+    expect(outside).toHaveFocus();
+    await act(async () => pending.resolve(source()));
+    expect(screen.queryByLabelText("Saved source text")).not.toBeInTheDocument();
+    outside.remove();
+  });
+
   it("keeps Project provenance paging within its scoped loader and fences detached sources", async () => {
     const load = vi.fn().mockResolvedValueOnce(source({ next_offset: 4100, total_chars: 5000 }))
       .mockRejectedValueOnce(new api.ApiError(409, "Detached"));

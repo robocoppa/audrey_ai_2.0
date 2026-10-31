@@ -116,7 +116,7 @@ describe("App", () => {
     expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("Keep this research draft");
   });
 
-  it("opens local Search in the top bar and reads the matching canonical source", async () => {
+  it("opens a Search sidebar beside Chat and reads the matching source inside it", async () => {
     workspaceMock.enabled = true;
     const baseFetch = mockCapabilitySession("degraded");
     const result = {
@@ -142,26 +142,34 @@ describe("App", () => {
     render(<App />);
     const chat = await screen.findByText("Workspace ready", {}, { timeout: 5000 });
     const navigation = within(screen.getByRole("navigation", { name: "Workspaces" }));
-    const headerSearch = within(screen.getByRole("search", { name: "Search saved content" }));
+    const launcher = screen.getByRole("button", { name: "Open Search" });
     expect(navigation.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
-    fireEvent.click(headerSearch.getByRole("button", { name: "Open Search" }));
-    expect(chat).not.toBeVisible();
-    await waitFor(() => expect(screen.getByRole("searchbox", { name: "Search your content" })).toHaveFocus());
-    fireEvent.change(headerSearch.getByRole("searchbox"), { target: { value: "heliotrope" } });
-    fireEvent.submit(screen.getByRole("search", { name: "Search saved content" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Open chat: Saved decision" }));
-    const dialog = await screen.findByRole("dialog", { name: "Saved decision" });
-    await waitFor(() => expect(within(dialog).getByLabelText("Saved source text")).toHaveTextContent("Here is the saved source context."));
-    expect(dialog.querySelector("mark")).toHaveTextContent("heliotrope");
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("dialog", { name: "Saved decision" })).not.toBeInTheDocument();
-    fireEvent.click(navigation.getByRole("button", { name: "Chat" }));
+    expect(launcher).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(launcher);
+    const panel = screen.getByRole("complementary", { name: "Search" });
     expect(chat).toBeVisible();
-    fireEvent.click(headerSearch.getByRole("button", { name: "Open Search" }));
+    expect(navigation.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
+    expect(launcher).toHaveAttribute("aria-expanded", "true");
+    expect(panel).toHaveAttribute("id", launcher.getAttribute("aria-controls"));
+    await waitFor(() => expect(screen.getByRole("searchbox", { name: "Search your content" })).toHaveFocus());
+    fireEvent.change(within(panel).getByRole("searchbox"), { target: { value: "heliotrope" } });
+    fireEvent.submit(within(panel).getByRole("search"));
+    fireEvent.click(await screen.findByRole("button", { name: "Open chat: Saved decision" }));
+    const source = await within(panel).findByRole("region", { name: "Saved decision" });
+    await waitFor(() => expect(within(source).getByLabelText("Saved source text")).toHaveTextContent("Here is the saved source context."));
+    expect(source.querySelector("mark")).toHaveTextContent("heliotrope");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.keyDown(within(source).getByRole("button", { name: "Back to search results" }), { key: "Escape" });
+    expect(source).not.toBeInTheDocument();
+    fireEvent.keyDown(within(panel).getByRole("searchbox"), { key: "Escape" });
+    expect(panel).not.toBeVisible();
+    await waitFor(() => expect(launcher).toHaveFocus());
+    expect(chat).toBeVisible();
+    fireEvent.click(launcher);
     expect(screen.getByRole("searchbox", { name: "Search your content" })).toHaveValue("heliotrope");
   });
 
-  it("submits the header search from Agents without losing the agent draft", async () => {
+  it("searches beside Agents without losing its current workspace or draft", async () => {
     workspaceMock.enabled = true;
     const fetchMock = mockCapabilitySession("degraded");
     render(<App />);
@@ -169,14 +177,41 @@ describe("App", () => {
     const navigation = within(screen.getByRole("navigation", { name: "Workspaces" }));
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "Keep this agent draft" } });
-    const headerSearch = screen.getByRole("search", { name: "Search saved content" });
-    fireEvent.change(within(headerSearch).getByRole("searchbox"), { target: { value: "  trees in Minecraft  " } });
-    fireEvent.submit(headerSearch);
+    fireEvent.click(screen.getByRole("button", { name: "Open Search" }));
+    const panel = screen.getByRole("complementary", { name: "Search" });
+    fireEvent.change(within(panel).getByRole("searchbox"), { target: { value: "  trees in Minecraft  " } });
+    fireEvent.submit(within(panel).getByRole("search"));
     expect(await screen.findByRole("heading", { name: "Results for “trees in Minecraft”" })).toBeVisible();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("q=trees+in+Minecraft"), expect.anything()));
-    expect(screen.getByRole("searchbox", { name: "Search your content" })).toHaveValue("trees in Minecraft");
-    fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
+    expect(screen.getByRole("searchbox", { name: "Search your content" })).toHaveValue("  trees in Minecraft  ");
+    expect(navigation.getByRole("button", { name: "Agents" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("Keep this agent draft");
+    fireEvent.click(within(panel).getByRole("button", { name: "Collapse Search" }));
+    expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("Keep this agent draft");
+  });
+
+  it("uses a modal Search drawer on narrow screens and restores launcher focus after dismissal", async () => {
+    workspaceMock.enabled = true;
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query.includes("1279"), media: query, onchange: null,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    })));
+    mockCapabilitySession("degraded");
+    render(<App />);
+    const chat = await screen.findByText("Workspace ready", {}, { timeout: 5000 });
+    const launcher = screen.getByRole("button", { name: "Open Search" });
+    fireEvent.click(launcher);
+    const panel = screen.getByRole("dialog", { name: "Search" });
+    expect(panel).toHaveAttribute("aria-modal", "true");
+    expect(document.querySelector(".app-primary-workspaces")).toHaveAttribute("inert");
+    expect(document.querySelector(".topbar")).toHaveAttribute("inert");
+    await waitFor(() => expect(within(panel).getByRole("searchbox")).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss Search" }));
+    expect(panel).not.toBeVisible();
+    expect(document.querySelector(".app-primary-workspaces")).not.toHaveAttribute("inert");
+    expect(document.querySelector(".topbar")).not.toHaveAttribute("inert");
+    await waitFor(() => expect(launcher).toHaveFocus());
+    expect(chat).toBeVisible();
   });
 
   it("closes portalled Chat pickers and releases Escape when Agents opens", async () => {

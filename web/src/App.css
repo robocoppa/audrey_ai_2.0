@@ -25,32 +25,32 @@
   background: rgb(52 153 250 / 10%);
 }
 
-.app-topbar-search input {
-  width: 100%;
-  min-width: 0;
-  padding: 0.55rem 0 0.55rem 0.75rem;
-  border: 0;
-  outline: none;
-  color: var(--text);
-  background: transparent;
-  font-size: 0.78rem;
-}
-
-.app-topbar-search input::placeholder { color: var(--muted); }
-.app-topbar-search input::-webkit-search-cancel-button { display: none; }
-
 .app-topbar-search button {
-  display: grid;
-  width: 2.35rem;
+  display: flex;
+  width: 100%;
   height: 2.35rem;
-  flex: none;
-  place-items: center;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0 0.75rem;
   border: 0;
   border-radius: 0.65rem;
   color: var(--muted);
   background: transparent;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
   transition: color 120ms ease, background 120ms ease, box-shadow 120ms ease;
 }
+
+.app-topbar-search button svg { flex: none; }
+.app-topbar-search button[aria-expanded="true"] { color: var(--text); background: rgb(52 153 250 / 12%); }
+
+.app-main-with-search { position: relative; display: flex; min-width: 0; }
+.app-primary-workspaces { flex: 1 1 auto; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
+.app-primary-workspaces > .app-workspace-view { min-width: 0; }
+.app-search-backdrop { position: absolute; z-index: 39; inset: 0; padding: 0; border: 0; background: rgb(2 7 16 / 60%); cursor: default; }
 
 .topbar .app-topbar-search button:hover:not(:focus-visible) {
   outline: none;

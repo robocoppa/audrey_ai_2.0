@@ -29,8 +29,9 @@ interface SearchRequest {
   serial: number;
 }
 
-export function SearchWorkspace({ visible = true, openRequest, onOpenResult }: {
+export function SearchWorkspace({ visible = true, presentation = "page", openRequest, onOpenResult }: {
   visible?: boolean;
+  presentation?: "page" | "sidebar";
   openRequest?: { query: string; serial: number };
   onOpenResult: (result: SearchResult) => void;
 }) {
@@ -85,6 +86,7 @@ export function SearchWorkspace({ visible = true, openRequest, onOpenResult }: {
     let current = true;
     const controller = new AbortController();
     requestController.current = controller;
+    queueMicrotask(() => { if (current) setLoading(true); });
     async function search() {
       try {
         const next = await searchContent(request!.query, request!.options, controller.signal);
@@ -170,12 +172,12 @@ export function SearchWorkspace({ visible = true, openRequest, onOpenResult }: {
   if (response?.partial && !response.indexing && !coverageWarnings.length) coverageWarnings.push("Some saved content is not included in these results.");
 
   return (
-    <section className="search-workspace" aria-labelledby="search-title">
-      <header className="search-header">
+    <section className={`search-workspace${presentation === "sidebar" ? " search-workspace-sidebar" : ""}`} aria-labelledby={presentation === "page" ? "search-title" : undefined} aria-label={presentation === "sidebar" ? "Search your saved work" : undefined}>
+      {presentation === "page" ? <header className="search-header">
         <p className="search-eyebrow">Find your saved work</p>
         <h1 id="search-title">Search</h1>
         <p>Find words in your chats, files, and saved agent work. Search stays local.</p>
-      </header>
+      </header> : null}
 
       <form className="search-form" role="search" onSubmit={submit}>
         <label htmlFor="content-search-query">Search your content</label>
