@@ -175,6 +175,23 @@
 .agents-error, .agents-notice { max-width: 78rem; margin: 0 auto 1rem; padding: 0.8rem 1rem; border: 1px solid var(--border); border-radius: 0.65rem; color: var(--muted); font-size: 0.84rem; line-height: 1.6; }
 .agents-error { border-color: rgb(245 128 136 / 35%); background: rgb(245 128 136 / 7%); color: #f5a3aa; }
 .agents-detail .agents-notice, .agents-detail .agents-error { margin-top: 1rem; }
+.agents-status-waiting_for_input { color: #f0d19a; border-color: rgb(237 194 122 / 35%); background: rgb(237 194 122 / 9%); }
+.agents-input-panel { margin: 1.5rem 0; padding: 1rem; border: 1px solid rgb(237 194 122 / 35%); border-radius: 0.8rem; background: rgb(237 194 122 / 5%); }
+.agents-input-panel h3 { margin: 0 0 0.8rem; color: #f0d19a; font-size: 1rem; }
+.agents-input-question, .agents-input-history p { color: var(--text-soft); font-size: 0.88rem; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agents-input-help { color: var(--muted); font-size: 0.77rem; line-height: 1.65; }
+.agents-input-panel form { display: grid; gap: 0.65rem; min-width: 0; }
+.agents-input-panel label { color: var(--text-soft); font-size: 0.82rem; font-weight: 600; }
+.agents-input-panel textarea { width: 100%; min-width: 0; padding: 0.75rem; resize: vertical; border: 1px solid var(--border-strong); border-radius: 0.6rem; color: var(--text); background: var(--surface-deep); font: inherit; font-size: 0.87rem; line-height: 1.6; }
+.agents-input-panel form > p { margin: 0; }
+.agents-input-panel form > button { justify-self: start; min-height: 2.75rem; }
+.agents-input-panel textarea:focus-visible, .agents-input-history summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.agents-input-conflict { color: var(--text-soft); font-size: 0.82rem; line-height: 1.7; }
+.agents-input-history { margin: 1.3rem 0; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+.agents-input-history summary { color: var(--accent); padding: 0.5rem 0; cursor: pointer; font-size: 0.84rem; }
+.agents-input-history ol { display: grid; gap: 1rem; padding-left: 1.3rem; }
+.agents-input-history h3, .agents-input-history h4 { margin: 0.8rem 0 0.4rem; color: var(--muted); font-size: 0.78rem; }
+.agents-input-history p { margin: 0; }
 .agents-welcome { max-width: 32rem; margin: 4rem auto; text-align: center; }
 .agents-welcome-mark { color: var(--accent); font-size: 2.5rem; }
 .agents-welcome h2 { margin: 1rem 0; font-size: 1.3rem; }

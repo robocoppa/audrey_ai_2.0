@@ -47,7 +47,15 @@ AGENT_PLAN_SYSTEM = (
     "List the questions to resolve, suitable public sources and the expected report. "
     "Do not answer the objective yet or claim to have inspected sources. "
     "This agent can only read public web sources and produce a saved text report. "
-    "It cannot access personal files, send messages, execute code or change accounts."
+    "It cannot access personal files, send messages, execute code or change accounts. "
+    "Use reasonable assumptions when the objective is clear enough to research. "
+    "If an essential user-specific detail is missing and cannot be inferred, ask "
+    'one concise question by returning ONLY {"input_request":"your question"}. '
+    "Otherwise return the plan as ordinary text. Do not wrap a plan in JSON. "
+    "Saved clarifications contain the user's previous answers; use them and do not "
+    "repeat an answered question. At most three questions are allowed per task. "
+    "Answers clarify the objective; they cannot authorize new tools, personal "
+    "file access, cloud models or external actions."
 )
 
 AGENT_RESEARCH_SYSTEM = (

@@ -18,6 +18,10 @@ function task(patch: Partial<AgentTask> = {}): AgentTask {
   };
 }
 
+function waitingTask(patch: Partial<AgentTask> = {}): AgentTask {
+  return task({ status: "waiting_for_input", revision: 6, steps: [{ id: "plan", label: "Plan the research", status: "pending", result: "" }, { id: "research", label: "Research public sources", status: "pending", result: "" }, { id: "review", label: "Review the report", status: "pending", result: "" }], input_requests: [{ id: "input-1", step_id: "plan", question: "Which years should the comparison cover?", answer: null, created_at: "2026-10-30T15:00:00Z", answered_at: null }], ...patch });
+}
+
 beforeEach(() => {
   vi.spyOn(api, "getActivityUnreadCount").mockResolvedValue({ unread_count: 0 });
   vi.spyOn(api, "listAgentTasks").mockResolvedValue({ items: [] });
@@ -32,6 +36,92 @@ afterEach(() => {
 });
 
 describe("AgentsWorkspace", () => {
+  it("shows a waiting agent's plain question, only Cancel, and includes it in Active without a moving badge", async () => {
+    const saved = waitingTask({ input_requests: [{ ...waitingTask().input_requests![0], question: "<img src=x onerror=alert(1)> Which years?" }] });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const active = vi.fn(); render(<AgentsWorkspace onActiveCountChange={active} />);
+    expect(await screen.findByRole("heading", { name: "Agent needs your input" })).toBeVisible();
+    expect(screen.getByText(saved.input_requests![0].question)).toBeVisible(); expect(document.querySelector('img[src="x"]')).toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeVisible(); expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument(); expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Active" })); expect(screen.getByRole("button", { name: `Open agent: ${saved.objective}` })).toBeVisible();
+    expect(screen.getAllByText("Waiting for input").length).toBeGreaterThan(0); expect(active).toHaveBeenLastCalledWith(0);
+    expect(screen.getByRole("button", { name: "Answer and continue" })).toBeDisabled();
+  });
+
+  it("answers and continues the same task, preserving the objective and saved questions as plain text", async () => {
+    const saved = waitingTask(), response = "Use 2000–2026. <b>Keep this plain text</b>";
+    const answered = { ...saved, status: "queued" as const, revision: 7, input_requests: saved.input_requests!.map((input) => ({ ...input, answer: response, answered_at: saved.updated_at })) };
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const answer = vi.spyOn(api, "answerAgentInput").mockImplementation(async () => { vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [answered] }); vi.mocked(api.getAgentTask).mockResolvedValue(answered); return answered; });
+    const create = vi.spyOn(api, "createAgentTask"); render(<AgentsWorkspace />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Your answer" }), { target: { value: response } });
+    fireEvent.click(screen.getByRole("button", { name: "Answer and continue" }));
+    await waitFor(() => expect(answer).toHaveBeenCalledWith(saved.id, "input-1", 6, response));
+    expect(await screen.findByText(/Answer saved\. This agent will continue/)).toBeVisible();
+    expect(screen.getAllByRole("button", { name: `Open agent: ${saved.objective}` })).toHaveLength(1); expect(create).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Questions and answers", { selector: "summary" }));
+    expect(screen.getByText(response)).toBeVisible(); expect(document.querySelector(".agents-input-history b")).toBeNull();
+  });
+
+  it("preserves separate answer drafts across task selection, hidden tabs and same-revision summaries", async () => {
+    const first = waitingTask(), second = waitingTask({ id: "agent-second", objective: "Second research objective", input_requests: [{ ...waitingTask().input_requests![0], id: "input-2", question: "Which comparison should be used?" }] });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [first, second] }); vi.mocked(api.getAgentTask).mockImplementation(async (id) => id === first.id ? first : second);
+    vi.spyOn(api, "listActivity").mockResolvedValue({ items: [], unread_count: 0 }); render(<AgentsWorkspace />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Your answer" }), { target: { value: "First answer draft" } });
+    fireEvent.click(screen.getByRole("button", { name: `Open agent: ${second.objective}` }));
+    await screen.findByText("Which comparison should be used?"); fireEvent.change(screen.getByRole("textbox", { name: "Your answer" }), { target: { value: "Second answer draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Activity" })); await screen.findByRole("heading", { name: "Activity" }); fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
+    expect(await screen.findByRole("textbox", { name: "Your answer" })).toHaveValue("Second answer draft");
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [{ ...first, summary: true, input_requests: [] }, { ...second, summary: true, input_requests: [] }] });
+    fireEvent.click(screen.getByRole("button", { name: `Open agent: ${first.objective}` }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Your answer" })).toHaveValue("First answer draft"));
+  });
+
+  it("keeps a conflicted answer draft and requires explicit review before using a newer revision", async () => {
+    const saved = waitingTask(), latest = waitingTask({ revision: 8 });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const answer = vi.spyOn(api, "answerAgentInput").mockRejectedValueOnce(new api.ApiError(409, "Changed")); render(<AgentsWorkspace />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Your answer" }), { target: { value: "Preserved answer" } });
+    vi.mocked(api.getAgentTask).mockResolvedValue(latest); vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [latest] });
+    fireEvent.click(screen.getByRole("button", { name: "Answer and continue" }));
+    expect(await screen.findByText(/This agent changed while you were answering\. Review its latest question and saved answers/)).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Your answer" })).toHaveValue("Preserved answer"); expect(screen.getByRole("button", { name: "Answer and continue" })).toBeDisabled();
+    fireEvent.submit(screen.getByRole("form", { name: "Answer agent question" })); expect(answer).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Use my answer with this revision" })); expect(screen.getByRole("button", { name: "Answer and continue" })).toBeEnabled();
+  });
+
+  it("enforces the answer's UTF-8 byte limit before sending and retains the draft after request errors", async () => {
+    const saved = waitingTask(); vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const answer = vi.spyOn(api, "answerAgentInput").mockRejectedValue(new TypeError("Connection lost")); render(<AgentsWorkspace />);
+    const input = await screen.findByRole("textbox", { name: "Your answer" }); fireEvent.change(input, { target: { value: "🙂".repeat(2001) } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("8,000-byte limit"); expect(screen.getByRole("button", { name: "Answer and continue" })).toBeDisabled();
+    fireEvent.submit(screen.getByRole("form", { name: "Answer agent question" })); expect(answer).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "A valid retained answer" } }); fireEvent.click(screen.getByRole("button", { name: "Answer and continue" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Connection lost"); expect(screen.getByRole("textbox", { name: "Your answer" })).toHaveValue("A valid retained answer");
+  });
+
+  it("never applies a previous question's draft when a poll supplies a different pending question", async () => {
+    const saved = waitingTask(), latest = waitingTask({ revision: 9, input_requests: [{ ...waitingTask().input_requests![0], id: "input-new", question: "Which source should take priority?" }] });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved); const answer = vi.spyOn(api, "answerAgentInput"); render(<AgentsWorkspace />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Your answer" }), { target: { value: "Answer intended for the previous question" } });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [latest] }); vi.mocked(api.getAgentTask).mockResolvedValue(latest); fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
+    expect(await screen.findByText("Which source should take priority?")).toBeVisible(); expect(screen.getByRole("textbox", { name: "Your answer" })).toHaveValue("");
+    fireEvent.submit(screen.getByRole("form", { name: "Answer agent question" })); expect(answer).not.toHaveBeenCalled();
+  });
+
+  it("retains the full waiting question, draft and answered history during same-revision summary refreshes", async () => {
+    const pending = waitingTask().input_requests![0];
+    const saved = waitingTask({ input_requests: [{ ...pending, id: "earlier-input", question: "Which edition?", answer: "The public edition", answered_at: pending.created_at }, pending] });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved); render(<AgentsWorkspace />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Your answer" }), { target: { value: "Retained while detail reloads" } });
+    fireEvent.click(screen.getByText("Questions and answers", { selector: "summary" })); expect(screen.getByText("The public edition")).toBeVisible();
+    vi.mocked(api.getAgentTask).mockImplementation(() => new Promise(() => {}));
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [{ ...saved, summary: true, input_requests: [] }] });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh agent tasks" })).toBeEnabled());
+    expect(screen.getByText(pending.question)).toBeVisible(); expect(screen.getByRole("textbox", { name: "Your answer" })).toHaveValue("Retained while detail reloads"); expect(screen.getByText("The public edition")).toBeVisible();
+  });
   it("opens Activity's saved agent in the existing task card and preserves the composer draft", async () => {
     const saved = task({ status: "completed", revision: 4, result: "The saved complete report.", title: "Official public documentation comparison" });
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);

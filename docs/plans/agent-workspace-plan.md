@@ -1,6 +1,6 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, October 30, 2026. Public-research Agents, unified lexical
+**Status:** In progress, October 31, 2026. Public-research Agents, unified lexical
 Search, Project Knowledge and the first public-page Watch slice are implemented locally. The owner confirms Search
 returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
 
@@ -12,13 +12,13 @@ part of the requested background execution capability.
 
 ## Current implementation slice
 
-The native app has centered Chat/Agents navigation and a horizontal Search tab
-with a magnifying glass protruding from the right edge, slightly clipped on that
-side. Search is absent from the top bar. It opens a right sidebar with its own
+The native app has centered Chat, Agents and text-only Search buttons in the top
+bar. Search toggles a right sidebar with its own
 query, filters, results and source reader, while preserving the active workspace
 and drafts. The panel shares Chat's 17rem (272px) sidebar width. At 1,280 pixels and above Search
 is docked beside the workspace; smaller screens use an accessible overlay drawer.
-Collapse retains search state, aborts hidden reads and revalidates the saved query
+Two small right-pointing chevrons collapse the panel. Collapse retains search
+state, aborts hidden reads and revalidates the saved query
 on reopening. Source text opens inside the panel with paging and Back to results;
 Project Knowledge's separate source previews retain their modal behavior.
 It has a saved public-source
@@ -30,8 +30,8 @@ selection stay the same. Lists return compact summaries and load the selected re
 Agents has a left sidebar for creation, history and active controls; its workflow
 and sidebar scroll independently. Small screens use a controls drawer. Terminal
 Run again and the red two-click Delete remain at the workflow card's top right.
-Top-bar hover uses the filled, soft glow of My Files; the Search tab has a lighter filled
-glow, with distinct keyboard focus retained. Agent headings/history use a saved
+Top-bar hover uses the filled, soft glow of My Files, with distinct keyboard focus
+retained. Agent headings/history use a saved
 short title, and the unchanged original objective is available in an expandable
 Original prompt section.
 
@@ -63,8 +63,8 @@ This raises the original 2,048-token report allowance after a reported Research
 output-limit failure; live acceptance of the larger allowance remains pending.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
-User-input requests, adaptive multi-step plans, Project/file/Private agent inputs,
-foreground-priority enhancements, agent input notices, semantic search,
+Adaptive multi-step plans, Project/file/Private agent inputs,
+foreground-priority enhancements, semantic search,
 owned-file watches and Project-associated watches remain implementation work. Existing Private Tax tasks keep
 their current behavior. The remaining sections specify the intended full feature.
 
@@ -183,6 +183,33 @@ watch-only notification routes remain intact. This slice adds no model calls or
 external delivery. Affected storage/API/UI tests, lint, production build and mocked
 desktop/phone browser flows pass; deployed acceptance remains manual. Rebuild both
 backend and UI for this slice; the backend applies schema 30 automatically.
+
+Schema 31 adds durable planning questions. The same verified local planning call
+can return one bounded question when an essential detail cannot reasonably be
+inferred. A complete, validated request saves the question, releases the lease and
+compute, and exposes Waiting for input plus a deduplicated Activity notice. No
+Research or Review starts while it waits. The stored task remains paused internally;
+the public waiting state comes from its pending question, avoiding a task-table
+rewrite. Waiting time does not consume active execution allowance.
+
+The owner answers inside the existing agent card. The answer transaction checks
+question identity, current task revision, owner access, remaining cumulative limits
+and queue capacity before queuing that same task. Dispatch revalidates model/tool
+authority. Questions and answers survive restart, are supplied to subsequent steps,
+and remain visible as saved history. Summary polls omit their bodies while retaining
+the waiting state; the selected task loads them separately. Drafts survive tab/task
+changes, and a changed revision requires review before using a retained draft.
+Activity opens the exact waiting task and cannot reopen an answered/cancelled request.
+
+This slice supports planning questions only, with at most three per task lifetime,
+2,000 UTF-8 bytes per question and 8,000 per answer. It preserves original objectives,
+completed Plans and all operation/attempt/time usage. Pending questions require an
+answer or Cancel; generic Resume cannot bypass them. Run again after cancellation
+dismisses an unanswered question and retains answered history. Task/account deletion
+erases these records. Strict output/answer validation, idempotent queued-answer retries,
+post-await ownership/deletion/revision fences and plain-text rendering cover stale or
+invalid requests. No extra classifier, cloud model, external delivery or additional
+tool authority was added. Rebuild backend and UI; schema 31 applies automatically.
 
 ## Product outcome
 

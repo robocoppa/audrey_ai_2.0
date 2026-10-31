@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   actOnAgentTask,
+  answerAgentInput,
   addProjectFile,
   createConversation,
   createAgentTask,
@@ -54,6 +55,21 @@ describe("unified Activity requests", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/activity/agent/agent%20%2F%20notice/task", expect.objectContaining({ signal, cache: "no-store" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/activity/agent/agent%20%2F%20notice/read", expect.objectContaining({ signal, method: "POST" }));
     expect(fetchMock).toHaveBeenCalledWith("/api/activity/watch/watch%20%2F%20notice/read", expect.objectContaining({ signal, method: "POST" }));
+  });
+});
+
+describe("agent clarification answers", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  it("binds a trimmed answer to the exact task, question and expected revision", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: "agent / one", status: "queued" })); vi.stubGlobal("fetch", fetchMock);
+    await answerAgentInput("agent / one", "question / two", 7, "  Use 2000–2026.  ");
+    expect(fetchMock).toHaveBeenCalledWith("/api/agents/agent%20%2F%20one/inputs/question%20%2F%20two/answer", expect.objectContaining({ method: "POST", credentials: "same-origin", body: JSON.stringify({ expected_revision: 7, answer: "Use 2000–2026." }) }));
+  });
+  it("rejects empty or oversized UTF-8 answers before dispatch", async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    await expect(answerAgentInput("agent", "question", 7, " \n ")).rejects.toThrow("8,000 UTF-8 bytes");
+    await expect(answerAgentInput("agent", "question", 7, "🙂".repeat(2001))).rejects.toThrow("8,000 UTF-8 bytes");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

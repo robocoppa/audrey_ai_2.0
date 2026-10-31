@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 
 import {
   actOnAgentTask,
+  answerAgentInput,
   ApiError,
   createAgentTask,
   deleteAgentTask,
@@ -12,6 +13,7 @@ import {
   listAgentTasks,
   type AgentTask,
   type AgentTaskStatus,
+  type AgentInputRequest,
   type PublicWatch,
   type WatchRun,
 } from "./api";
@@ -22,7 +24,7 @@ import { ActivityWorkspace } from "./ActivityWorkspace";
 
 const STATUS_LABELS: Record<AgentTaskStatus, string> = {
   queued: "Queued", running: "Running", paused: "Paused", completed: "Completed",
-  cancelled: "Cancelled", failed: "Failed",
+  cancelled: "Cancelled", failed: "Failed", waiting_for_input: "Waiting for input",
 };
 
 function isMoving(task: AgentTask) {
@@ -48,6 +50,7 @@ function mergeTasks(current: AgentTask[], incoming: AgentTask[], deleted: Readon
       tasks.set(task.id, {
         ...task,
         result: saved.result,
+        input_requests: task.revision === saved.revision ? saved.input_requests : task.input_requests,
         steps: task.steps.map((step) => ({ ...step, result: saved.steps.find(({ id }) => id === step.id)?.result ?? "" })),
         summary: task.revision === saved.revision ? saved.summary : true,
       });
@@ -73,6 +76,9 @@ interface AgentsWorkspaceProps {
   navigationOpen?: boolean;
   onNavigationOpenChange?: (open: boolean) => void;
 }
+
+interface AnswerDraft { text: string; revision: number }
+function inputDraftKey(taskId: string, requestId: string) { return JSON.stringify([taskId, requestId]); }
 
 export function AgentsWorkspace(props: AgentsWorkspaceProps) {
   const [view, setView] = useState<"tasks" | "watches" | "activity">("tasks");
@@ -169,6 +175,7 @@ function AgentTasksWorkspace({
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [knowledgeTask, setKnowledgeTask] = useState<AgentTask | null>(null);
+  const [answerDrafts, setAnswerDrafts] = useState<Record<string, AnswerDraft>>({});
   const [filter, setFilter] = useState<"all" | "active" | "finished">("all");
   const deletedIds = useRef(new Set<string>());
   const knownIds = useRef<Set<string> | null>(null);
@@ -256,7 +263,7 @@ function AgentTasksWorkspace({
     openedRequest.current = openRequest.serial;
     mutationGeneration.current += 1;
     knownIds.current?.add(openRequest.task.id);
-    // The Activity reader has resolved the exact owned terminal revision first.
+    // The Activity reader has resolved the exact owned saved revision first.
     // Queue state updates so navigation effects can settle before focusing the result.
     const controller = new AbortController();
     queueMicrotask(() => {
@@ -440,6 +447,7 @@ function AgentTasksWorkspace({
       knownIds.current?.delete(task.id);
       setTasks((current) => current.filter((item) => item.id !== task.id));
       setSelectedId((current) => current === task.id ? null : current);
+      setAnswerDrafts((current) => Object.fromEntries(Object.entries(current).filter(([key]) => JSON.parse(key)[0] !== task.id)));
     } catch (reason) {
       if (!mounted.current) return;
       if (reason instanceof ApiError && reason.status === 409) {
@@ -459,7 +467,39 @@ function AgentTasksWorkspace({
     }
   }
 
+  async function answerInput(task: AgentTask, request: AgentInputRequest, draft: AnswerDraft) {
+    if (busyRef.current || task.status !== "waiting_for_input" || draft.revision !== task.revision
+      || request.answer !== null || task.input_requests?.find((item) => item.answer === null)?.id !== request.id) return;
+    busyRef.current = true; mutationGeneration.current += 1;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const saved = await answerAgentInput(task.id, request.id, draft.revision, draft.text);
+      if (!mounted.current) return;
+      setTasks((current) => mergeTasks(current, [saved], deletedIds.current));
+      setAnswerDrafts((current) => {
+        const next = { ...current }; delete next[inputDraftKey(task.id, request.id)]; return next;
+      });
+      setNotice("Answer saved. This agent will continue planning with your answer.");
+    } catch (reason) {
+      if (!mounted.current) return;
+      if (reason instanceof ApiError && reason.status === 409) {
+        try {
+          const latest = await getAgentTask(task.id);
+          if (!mounted.current) return;
+          setTasks((current) => mergeTasks(current, [latest], deletedIds.current));
+          setNotice("This agent changed while you were answering. Review its latest question and saved answers before continuing.");
+        } catch (reloadError) { if (mounted.current) setError(messageOf(reloadError)); }
+      } else setError(messageOf(reason));
+    } finally {
+      busyRef.current = false;
+      if (mounted.current) { setBusy(false); setRefreshToken((value) => value + 1); }
+    }
+  }
+
   const selected = tasks.find((task) => task.id === selectedId);
+  const selectedInput = selected?.input_requests?.find((request) => request.answer === null);
+  const selectedInputKey = selected && selectedInput ? inputDraftKey(selected.id, selectedInput.id) : "";
+  const selectedInputDraft = selected ? answerDrafts[selectedInputKey] ?? { text: "", revision: selected.revision } : undefined;
   const shownTasks = tasks.filter((task) => filter === "all"
     || (filter === "finished" ? isFinished(task) : !isFinished(task)));
 
@@ -553,7 +593,7 @@ function AgentTasksWorkspace({
                     <button type="button" className="agents-task-card" aria-pressed={selectedId === task.id} aria-label={`Open agent: ${agentTitle(task)}`} onClick={() => selectTask(task.id)}>
                       <span className={`agents-status agents-status-${task.status}`}>{STATUS_LABELS[task.status]}</span>
                       <strong>{agentTitle(task)}</strong>
-                      <span className="agents-task-stage">{task.steps.find((step) => step.status === "running")?.label ?? (task.status === "paused" ? "Completed steps saved" : task.status === "queued" ? "Waiting to start" : "Saved progress")}</span>
+                      <span className="agents-task-stage">{task.status === "waiting_for_input" ? "Your answer is needed to continue" : task.steps.find((step) => step.status === "running")?.label ?? (task.status === "paused" ? "Completed steps saved" : task.status === "queued" ? "Waiting to start" : "Saved progress")}</span>
                       <time dateTime={task.updated_at}>Last activity {timestamp(task.updated_at)}</time>
                     </button>
                   </li>
@@ -586,6 +626,12 @@ function AgentTasksWorkspace({
                 </header>
                 {selected.status === "paused" ? <p className="agents-notice">Completed steps are saved. Resume to continue from the next unfinished step.</p> : null}
                 {selected.error ? <p className="agents-error" role="alert">{selected.error}</p> : null}
+                {selected.status === "waiting_for_input" ? selectedInput && selectedInputDraft ? <AgentInputPanel request={selectedInput} revision={selected.revision} draft={selectedInputDraft} busy={busy}
+                  onChange={(text) => setAnswerDrafts((current) => ({ ...current, [selectedInputKey]: { text, revision: current[selectedInputKey]?.revision ?? selected.revision } }))}
+                  onUseLatest={() => setAnswerDrafts((current) => ({ ...current, [selectedInputKey]: { text: current[selectedInputKey]?.text ?? "", revision: selected.revision } }))}
+                  onAnswer={() => void answerInput(selected, selectedInput, selectedInputDraft)} />
+                  : <p className="agents-notice" role="status">{selected.summary ? "Loading the saved question…" : "The saved question is unavailable. Refresh this agent before answering."}</p> : null}
+                {selected.input_requests?.some((request) => request.answer !== null) ? <details className="agents-input-history"><summary>Questions and answers</summary><ol>{selected.input_requests.filter((request) => request.answer !== null).map((request) => <li key={request.id}><h3>Planning question</h3><p>{request.question}</p><h4>Your answer</h4><p>{request.answer}</p></li>)}</ol></details> : null}
                 <section className="agents-plan" aria-labelledby="agent-plan-title">
                   <h3 id="agent-plan-title">Plan and progress</h3>
                   <ol>
@@ -621,6 +667,32 @@ function AgentTasksWorkspace({
       {knowledgeTask && visible ? <AgentKnowledgeDialog task={knowledgeTask} onClose={() => setKnowledgeTask(null)} /> : null}
     </section>
   );
+}
+
+function AgentInputPanel({ request, revision, draft, busy, onChange, onUseLatest, onAnswer }: {
+  request: AgentInputRequest;
+  revision: number;
+  draft: AnswerDraft;
+  busy: boolean;
+  onChange: (text: string) => void;
+  onUseLatest: () => void;
+  onAnswer: () => void;
+}) {
+  const bytes = new TextEncoder().encode(draft.text.trim()).byteLength;
+  const changed = draft.revision !== revision;
+  return <section className="agents-input-panel" aria-labelledby="agent-input-title">
+    <h3 id="agent-input-title">Agent needs your input</h3>
+    <p className="agents-input-question" id="agent-input-question">{request.question}</p>
+    <p className="agents-input-help">This agent is waiting. Answer the planning question to continue the same saved task.</p>
+    <form aria-label="Answer agent question" onSubmit={(event) => { event.preventDefault(); if (!busy && !changed && bytes > 0 && bytes <= 8000) onAnswer(); }}>
+      <label htmlFor="agent-input-answer">Your answer</label>
+      <textarea id="agent-input-answer" rows={4} maxLength={8000} aria-describedby="agent-input-question agent-input-size" value={draft.text} disabled={busy} onChange={(event) => onChange(event.target.value)} />
+      <p id="agent-input-size" className="agents-input-help">{bytes.toLocaleString()} / 8,000 UTF-8 bytes</p>
+      {bytes > 8000 ? <p className="agents-error" role="alert">Your answer exceeds the 8,000-byte limit. Shorten it before continuing.</p> : null}
+      {changed ? <div className="agents-input-conflict"><p>This agent changed while you were answering. Review the current question before using your saved draft.</p><button className="agents-secondary" type="button" disabled={busy} onClick={onUseLatest}>Use my answer with this revision</button></div> : null}
+      <button className="agents-primary" type="submit" disabled={busy || changed || bytes === 0 || bytes > 8000}>{busy ? "Saving answer…" : "Answer and continue"}</button>
+    </form>
+  </section>;
 }
 
 function AgentTaskControls({ task, busy, onAction, onDelete }: {

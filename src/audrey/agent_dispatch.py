@@ -12,6 +12,13 @@ class AgentDispatchStoppedError(RuntimeError):
     """The saved attempt no longer authorizes content dispatch."""
 
 
+@dataclass(frozen=True)
+class AgentInputRequest:
+    """A planning result that needs a saved user answer before execution."""
+
+    question: str
+
+
 @dataclass
 class _Scope:
     check: Callable[[str], Awaitable[None]]

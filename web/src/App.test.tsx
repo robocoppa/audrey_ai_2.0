@@ -143,18 +143,18 @@ describe("App", () => {
     const chat = await screen.findByText("Workspace ready", {}, { timeout: 5000 });
     const navigation = within(screen.getByRole("navigation", { name: "Workspaces" }));
     const launcher = screen.getByRole("button", { name: "Open Search" });
-    expect(navigation.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
-    expect(document.querySelector(".topbar")).not.toContainElement(launcher);
-    expect(launcher).toHaveClass("app-search-edge-tab");
+    expect(navigation.getByRole("button", { name: "Open Search" })).toBe(launcher);
+    expect(document.querySelector(".topbar")).toContainElement(launcher);
+    expect(document.querySelector(".app-search-edge-tab")).not.toBeInTheDocument();
     expect(launcher).toHaveTextContent("Search");
-    expect(launcher.querySelector("svg")).toBeInTheDocument();
+    expect(launcher.querySelector("svg")).not.toBeInTheDocument();
     expect(launcher).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(launcher);
     const panel = screen.getByRole("complementary", { name: "Search" });
     expect(chat).toBeVisible();
     expect(navigation.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
     expect(launcher).toHaveAttribute("aria-expanded", "true");
-    expect(launcher).not.toBeVisible();
+    expect(launcher).toBeVisible();
     expect(panel).toHaveAttribute("id", launcher.getAttribute("aria-controls"));
     await waitFor(() => expect(screen.getByRole("searchbox", { name: "Search your content" })).toHaveFocus());
     fireEvent.change(within(panel).getByRole("searchbox"), { target: { value: "heliotrope" } });
@@ -172,6 +172,8 @@ describe("App", () => {
     expect(chat).toBeVisible();
     fireEvent.click(launcher);
     expect(screen.getByRole("searchbox", { name: "Search your content" })).toHaveValue("heliotrope");
+    fireEvent.click(launcher);
+    expect(panel).not.toBeVisible();
   });
 
   it("searches beside Agents without losing its current workspace or draft", async () => {
@@ -207,7 +209,7 @@ describe("App", () => {
     const launcher = screen.getByRole("button", { name: "Open Search" });
     fireEvent.click(launcher);
     const panel = screen.getByRole("dialog", { name: "Search" });
-    expect(launcher).not.toBeVisible();
+    expect(launcher).toBeVisible();
     expect(panel).toHaveAttribute("aria-modal", "true");
     expect(document.querySelector(".app-primary-workspaces")).toHaveAttribute("inert");
     expect(document.querySelector(".topbar")).toHaveAttribute("inert");

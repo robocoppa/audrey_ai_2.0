@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from audrey.agent_dispatch import AgentDispatchStoppedError, agent_dispatch_scope
+from audrey.agent_dispatch import AgentDispatchStoppedError, AgentInputRequest, agent_dispatch_scope
 from audrey.app_state.titles import normalize_agent_title
 from audrey.model_catalog import resolve_model
 from audrey.models.ollama import OllamaClient, OllamaError, generation_budget
@@ -46,6 +46,32 @@ def _require_complete_text(
     if not result.strip():
         detail = " after reasoning" if thinking else ""
         raise AgentDispatchStoppedError(f"{label} returned no report text{detail}.")
+
+
+def _plan_result(result: str, task: dict) -> str | AgentInputRequest:
+    """Recognize only the planner's complete, bounded clarification envelope."""
+    text = result.strip()
+    candidate = text
+    if candidate.startswith("```") and candidate.endswith("```"):
+        opening, separator, body = candidate.partition("\n")
+        if separator and opening in {"```", "```json"}:
+            candidate = body[:-3].strip()
+    if not candidate.startswith("{"):
+        if '"input_request"' in text:
+            raise AgentDispatchStoppedError("Plan returned an invalid input request.")
+        return text
+    try:
+        payload = json.loads(candidate)
+        if not isinstance(payload, dict) or set(payload) != {"input_request"}:
+            raise ValueError
+        question = payload["input_request"]
+        if not isinstance(question, str) or not question.strip() or len(question.strip().encode("utf-8")) > 2000:
+            raise ValueError
+    except (ValueError, UnicodeEncodeError, RecursionError):
+        raise AgentDispatchStoppedError("Plan returned an invalid input request.") from None
+    if len(task.get("input_requests", [])) >= 3:
+        raise AgentDispatchStoppedError("The agent reached its three-question clarification limit.")
+    return AgentInputRequest(question.strip())
 
 
 class AgentSettings(BaseModel):
@@ -272,6 +298,15 @@ class ResearchAgentExecutor:
                 ),
             },
         ]
+        clarifications = [
+            {"question": item["question"], "answer": item["answer"]}
+            for item in task.get("input_requests", []) if item["answer"] is not None
+        ]
+        if clarifications:
+            messages[1]["content"] = json.dumps(
+                {"objective": task["objective"], "saved_work": previous, "clarifications": clarifications},
+                ensure_ascii=False,
+            )
         endpoint = self.app.state.cfg.env.ollama_host
         client = self.client_factory(endpoint, trust_env=False)
         try:
@@ -354,6 +389,8 @@ class ResearchAgentExecutor:
             _require_complete_text(step_id, result, reason)
             if len(result.encode("utf-8")) > 60000:
                 raise AgentDispatchStoppedError("The report exceeded its saved-output limit.")
+            if step_id == "plan":
+                return _plan_result(result, task)
             if step_id == "research":
                 urls, size = [], 0
                 for source in retrieved:

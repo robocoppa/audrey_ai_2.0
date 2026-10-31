@@ -16,7 +16,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from audrey.app_state.notifications import insert_agent_notice
+from audrey.app_state.notifications import _agent_notice_title, insert_agent_notice
 from audrey.app_state.titles import fallback_conversation_title, normalize_agent_title
 from audrey.app_state.transactions import write_transaction
 
@@ -107,11 +107,19 @@ class AgentsRepository:
         if row is None:
             raise AgentTaskAccessError("Agent task is unavailable.")
 
-    @staticmethod
-    def _record(row: sqlite3.Row) -> dict:
+    def _input_requests(self, task_id: str) -> list[dict]:
+        return [{"id": row["request_id"], **{key: row[key] for key in (
+            "step_id", "question", "answer", "created_at", "answered_at",
+        )}} for row in self._conn.execute(
+            "SELECT * FROM app_agent_input_requests WHERE task_id=? AND dismissed_at IS NULL "
+            "ORDER BY sequence_no", (task_id,),
+        ).fetchall()]
+
+    def _record(self, row: sqlite3.Row) -> dict:
         record = dict(row)
         record["steps"] = json.loads(record.pop("steps_json"))
         record["limits"] = json.loads(record.pop("limits_json"))
+        record["input_requests"] = self._input_requests(record["task_id"])
         return record
 
     @staticmethod
@@ -120,7 +128,11 @@ class AgentsRepository:
             "id": record["task_id"],
             **{key: record[key] for key in _PUBLIC_FIELDS},
             "title": record["title"] or fallback_conversation_title(record["objective"]),
+            "status": "waiting_for_input" if record["status"] == "paused" and any(
+                item["answer"] is None for item in record["input_requests"]
+            ) else record["status"],
             "steps": [dict(step) for step in record["steps"]],
+            "input_requests": [dict(item) for item in record["input_requests"]],
         }
 
     def _internal(self, record: dict) -> dict:
@@ -193,11 +205,12 @@ class AgentsRepository:
         if record["active_seconds"] >= record["limits"]["max_active_seconds"]:
             raise AgentTaskError("Agent active execution allowance exhausted.")
 
-    def _queue_capacity(self, user_id: str, limits: dict) -> None:
+    def _queue_capacity(self, user_id: str, limits: dict, *, exclude_task_id: str | None = None) -> None:
         queued = self._conn.execute(
             "SELECT COUNT(*) AS total,COALESCE(SUM(user_id=?),0) AS owned "
-            "FROM app_agent_tasks WHERE status IN ('queued','running','paused')",
-            (user_id,),
+            "FROM app_agent_tasks WHERE status IN ('queued','running','paused') "
+            "AND (? IS NULL OR task_id!=?)",
+            (user_id, exclude_task_id, exclude_task_id),
         ).fetchone()
         if (
             queued["owned"] >= limits["max_queued_per_user"]
@@ -256,7 +269,9 @@ class AgentsRepository:
                         "'' AS result,error,attempts,"
                         "json_extract(steps_json,'$[0].status') AS plan_status,"
                         "json_extract(steps_json,'$[1].status') AS research_status,"
-                        "json_extract(steps_json,'$[2].status') AS review_status "
+                        "json_extract(steps_json,'$[2].status') AS review_status,"
+                        "EXISTS(SELECT 1 FROM app_agent_input_requests q WHERE q.task_id=app_agent_tasks.task_id "
+                        "AND q.answer IS NULL AND q.dismissed_at IS NULL) AS has_pending_input "
                         "FROM app_agent_tasks WHERE user_id=? "
                         "ORDER BY created_at DESC,task_id DESC LIMIT ?", (user_id, limit),
                     ).fetchall()
@@ -264,7 +279,9 @@ class AgentsRepository:
                         "id": row["task_id"],
                         **{key: row[key] for key in _PUBLIC_FIELDS},
                         "title": row["title"] or fallback_conversation_title(row["objective"]),
+                        "status": "waiting_for_input" if row["status"] == "paused" and row["has_pending_input"] else row["status"],
                         "summary": True,
+                        "input_requests": [],
                         "steps": [{
                             "id": key, "label": label, "status": row[f"{key}_status"], "result": "",
                         } for key, label in _STEP_LABELS],
@@ -282,6 +299,26 @@ class AgentsRepository:
                 return self._public(self._load(task_id, user_id))
 
         return await asyncio.to_thread(work)
+
+    def fence_response(self, *, user_id: str, tasks: list[dict] | tuple = ()) -> None:
+        """Reject erased/revised task bodies synchronously after a route's last await."""
+        if len(tasks) > 200:
+            raise AgentTaskError("Agent response exceeds its allowance.")
+        with self._lock:
+            self._owner(user_id)
+            for payload in tasks:
+                row = self._conn.execute(
+                    "SELECT revision,status,EXISTS(SELECT 1 FROM app_agent_input_requests q "
+                    "WHERE q.task_id=t.task_id AND q.answer IS NULL AND q.dismissed_at IS NULL) AS waiting "
+                    "FROM app_agent_tasks t WHERE task_id=? AND user_id=?", (payload["id"], user_id),
+                ).fetchone()
+                if row is None:
+                    raise AgentTaskAccessError("Agent task is unavailable.")
+                status = "waiting_for_input" if row["status"] == "paused" and row["waiting"] else row["status"]
+                if row["revision"] != payload["revision"] or status != payload["status"] or (
+                    payload.get("input_requests") and self._input_requests(payload["id"]) != payload["input_requests"]
+                ):
+                    raise AgentTaskConflictError("Agent task changed. Refresh before trying again.")
 
     async def delete(self, *, user_id: str, task_id: str, expected_revision: int) -> bool:
         """Erase terminal history and its receipts; cancel running work first."""
@@ -485,6 +522,89 @@ class AgentsRepository:
             return record["title"]
         return await asyncio.to_thread(self._transaction, work)
 
+    async def request_input(
+        self, *, task_id: str, lease_token: str, fence: int, question: str, step_id: str = "plan",
+    ) -> dict:
+        question = _text(question, maximum=2000, name="agent question")
+        if step_id != "plan":
+            raise AgentTaskError("Agent clarification is supported during Plan only.")
+
+        def work() -> dict:
+            record = self._lease(task_id, lease_token, fence)
+            self._account(record)
+            self._budget(record)
+            if self._internal(record)["current_step"] != "plan":
+                raise AgentTaskConflictError("The agent has already completed its Plan.")
+            count = self._conn.execute(
+                "SELECT COUNT(*) FROM app_agent_input_requests WHERE task_id=?", (task_id,),
+            ).fetchone()[0]
+            if count >= 3:
+                raise AgentTaskError("Agent clarification allowance exhausted.")
+            now, request_id = _stamp(self._clock()), str(uuid.uuid4())
+            # The model's question is a durable result of its reserved work. It
+            # consumes its existing reservation and never resets cumulative use.
+            self._conn.execute(
+                "UPDATE app_agent_operations SET status='committed',committed_at=? "
+                "WHERE task_id=? AND fence=? AND step_id='plan' AND status='reserved'",
+                (now, task_id, fence),
+            )
+            record.update(status="paused", error="", fence=record["fence"] + 1)
+            self._clear_lease(record)
+            self._save(record)
+            self._conn.execute(
+                "INSERT INTO app_agent_input_requests (request_id,user_id,task_id,task_revision,"
+                "sequence_no,step_id,question,created_at,notice_title) VALUES (?,?,?,?,?,'plan',?,?,?)",
+                (request_id, record["user_id"], task_id, record["revision"], count + 1, question, now,
+                 _agent_notice_title(record)),
+            )
+            return self._public(self._load(task_id, record["user_id"]))
+
+        return await asyncio.to_thread(self._transaction, work)
+
+    async def answer_input(
+        self, *, user_id: str, task_id: str, request_id: str, expected_revision: int,
+        answer: str, max_attempts: int = 6, admission_limits: dict | None = None,
+    ) -> dict:
+        answer = _text(answer, maximum=8000, name="agent answer")
+        request_id = _text(request_id, maximum=200, name="agent question identity")
+        _integer(expected_revision, 1, 2**63 - 1)
+        _integer(max_attempts, 1, 100)
+        queue_limits = _limits(admission_limits) if admission_limits is not None else None
+
+        def work() -> dict:
+            record = self._load(task_id, user_id)
+            request = self._conn.execute(
+                "SELECT * FROM app_agent_input_requests WHERE request_id=? AND task_id=? AND user_id=?",
+                (request_id, task_id, user_id),
+            ).fetchone()
+            if request is None or request["dismissed_at"] is not None:
+                raise AgentTaskConflictError("This agent question is no longer pending. Refresh before trying again.")
+            if request["answer"] is not None:
+                if (request["answer"] == answer and record["status"] == "queued"
+                        and record["revision"] == request["answer_revision"]
+                        and expected_revision in {request["task_revision"], request["answer_revision"]}):
+                    return self._public(record)
+                raise AgentTaskConflictError("This agent question was already answered. Refresh before trying again.")
+            if record["revision"] != expected_revision or record["status"] != "paused":
+                raise AgentTaskConflictError("Agent task changed. Refresh before trying again.")
+            self._queue_capacity(user_id, queue_limits or record["limits"], exclude_task_id=task_id)
+            self._budget(record)
+            if record["attempts"] >= max_attempts:
+                raise AgentTaskError("Agent attempt allowance exhausted.")
+            if record["operations"] >= record["limits"]["max_operations"]:
+                raise AgentTaskError("Agent operation allowance exhausted.")
+            now = _stamp(self._clock())
+            self._conn.execute(
+                "UPDATE app_agent_input_requests SET answer=?,answered_at=?,answer_revision=? "
+                "WHERE request_id=?", (answer, now, record["revision"] + 1, request_id),
+            )
+            record.update(status="queued", error="", fence=record["fence"] + 1)
+            self._clear_lease(record)
+            self._save(record)
+            return self._public(self._load(task_id, user_id))
+
+        return await asyncio.to_thread(self._transaction, work)
+
     async def complete(self, *, task_id: str, lease_token: str, fence: int, result: str) -> dict:
         result = _text(result, maximum=64000, name="task result")
 
@@ -549,6 +669,8 @@ class AgentsRepository:
             }
             if record["status"] not in allowed[action]:
                 raise AgentTaskConflictError("Agent task cannot perform that action.")
+            if action == "resume" and any(item["answer"] is None for item in record["input_requests"]):
+                raise AgentTaskConflictError("Answer the agent's pending question before continuing.")
             self._account(record)
             if action == "rerun":
                 self._queue_capacity(user_id, queue_limits or record["limits"])
@@ -569,6 +691,12 @@ class AgentsRepository:
                 # Run again replaces the current report. Its former notice
                 # cannot remain a link that silently opens a different result.
                 self._conn.execute("DELETE FROM app_agent_notices WHERE task_id=?", (task_id,))
+                self._conn.execute(
+                    "UPDATE app_agent_input_requests SET dismissed_at=? "
+                    "WHERE task_id=? AND answer IS NULL AND dismissed_at IS NULL",
+                    (_stamp(self._clock()), task_id),
+                )
+                record["input_requests"] = self._input_requests(task_id)
             record["status"] = {
                 "pause": "paused",
                 "resume": "queued",

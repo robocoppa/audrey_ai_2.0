@@ -496,7 +496,16 @@ export function getSearchSource(result: SearchResult, offset = result.offset, si
   return apiJson<SearchSource>(`/api/search/source?${params}`, { signal, cache: "no-store" });
 }
 
-export type AgentTaskStatus = "queued" | "running" | "paused" | "completed" | "cancelled" | "failed";
+export type AgentTaskStatus = "queued" | "running" | "paused" | "waiting_for_input" | "completed" | "cancelled" | "failed";
+
+export interface AgentInputRequest {
+  id: string;
+  step_id: "plan";
+  question: string;
+  answer: string | null;
+  created_at: string;
+  answered_at: string | null;
+}
 
 export interface AgentTask {
   title?: string;
@@ -516,6 +525,7 @@ export interface AgentTask {
   result: string;
   error: string;
   attempts: number;
+  input_requests?: AgentInputRequest[];
 }
 
 export function listAgentTasks(signal?: AbortSignal): Promise<{ items: AgentTask[] }> {
@@ -531,6 +541,16 @@ export function createAgentTask(objective: string, requestId: string): Promise<A
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ objective, request_id: requestId }),
+  });
+}
+
+export function answerAgentInput(taskId: string, requestId: string, expectedRevision: number, answer: string): Promise<AgentTask> {
+  const text = answer.trim();
+  if (!text || new TextEncoder().encode(text).byteLength > 8000) {
+    return Promise.reject(new ApiError(422, "Enter an answer of up to 8,000 UTF-8 bytes."));
+  }
+  return apiJson(`/api/agents/${encodeURIComponent(taskId)}/inputs/${encodeURIComponent(requestId)}/answer`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision: expectedRevision, answer: text }),
   });
 }
 
@@ -618,7 +638,7 @@ export interface WatchNotification {
 export interface ActivityNotice {
   id: string;
   origin: "agent" | "watch";
-  kind: "completed" | "change" | "failure";
+  kind: "completed" | "change" | "failure" | "input_required";
   title: string;
   body: string;
   created_at: string;

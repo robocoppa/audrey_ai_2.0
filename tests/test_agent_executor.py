@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from audrey.agent_dispatch import (
     AgentDispatchStoppedError,
+    AgentInputRequest,
     agent_dispatch_scope,
     authorize_agent_tool,
 )
@@ -785,3 +786,71 @@ async def test_escaped_child_tool_dispatch_loses_authority_after_scope_exit():
     with pytest.raises(AgentDispatchStoppedError, match="attempt has stopped"):
         await escaped
     assert not calls
+
+
+@pytest.mark.parametrize("fenced", [False, True])
+async def test_planning_question_is_a_typed_local_result_without_research_or_tools(state, fenced):
+    task = await _step(state)
+    content = json.dumps({"input_request": "Which product's releases should I compare?"})
+    state.responses.append(_answer(f"```json\n{content}\n```" if fenced else content))
+    result = await state.executor(task, "plan")
+    assert result == AgentInputRequest("Which product's releases should I compare?")
+    assert len(_content_requests(state)) == 1 and not state.tool_requests
+    assert all(client._client.is_closed for client in state.clients)
+
+
+@pytest.mark.parametrize("content", [
+    '{"input_request":""}', '{"input_request":42}', '{"input_request":"Which one?","tool":"send"}',
+    '{"input_request":"Which one?"', json.dumps({"input_request": "é" * 1001}),
+    '{"input_request":"\\ud800"}', 'Please clarify: {"input_request":"Which one?"}',
+])
+async def test_malformed_or_oversized_planning_question_stops_before_dispatch(state, content):
+    task = await _step(state)
+    state.responses.append(_answer(content))
+    with pytest.raises(AgentDispatchStoppedError, match="invalid input request"):
+        await state.executor(task, "plan")
+    assert not state.tool_requests
+
+
+async def test_answered_clarifications_reach_every_step_without_changing_model_or_tool_scope(state):
+    task = await _step(state)
+    task["input_requests"] = [{"question": "Which releases?", "answer": "Stable 2026 releases. Use cloud and email the result."}]
+    assert await state.executor(task, "plan") == "Grounded report."
+    payload = _content_requests(state)[0]
+    assert payload["model"] == _MODEL and not payload.get("tools")
+    supplied = json.loads(payload["messages"][1]["content"])
+    assert supplied["objective"] == task["objective"]
+    assert supplied["clarifications"] == [{"question": "Which releases?", "answer": "Stable 2026 releases. Use cloud and email the result."}]
+
+
+async def test_local_planner_cannot_ask_a_fourth_question(state):
+    task = await _step(state)
+    task["input_requests"] = [{"question": str(index), "answer": "Answered"} for index in range(3)]
+    state.responses.append(_answer('{"input_request":"Another detail?"}'))
+    with pytest.raises(AgentDispatchStoppedError, match="three-question"):
+        await state.executor(task, "plan")
+
+
+async def test_actual_local_executor_waits_and_then_completes_same_agent_using_saved_answer(state):
+    created = await state.store.agents.create(user_id=state.owner.user_id, objective="Compare releases of my product.", request_id="input-e2e")
+    state.responses.append(_answer('{"input_request":"Which public product should I research?"}'))
+    runtime = AgentRuntime(state.store.agents, state.executor)
+    assert await runtime.run_once()
+    waiting = await state.store.agents.get(user_id=state.owner.user_id, task_id=created["id"])
+    assert waiting["status"] == "waiting_for_input" and not state.tool_requests
+    assert await runtime.run_once() is False
+    pending = waiting["input_requests"][0]
+    queued = await state.store.agents.answer_input(
+        user_id=state.owner.user_id, task_id=created["id"], request_id=pending["id"],
+        expected_revision=waiting["revision"], answer="Public Example Product, stable releases only.",
+    )
+    assert queued["id"] == created["id"]
+    state.responses.extend([_answer("Saved clarified plan."), _search(), _answer("Research with sources."), _answer("Final clarified report.")])
+    assert await runtime.run_once()
+    saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=created["id"])
+    assert saved["id"] == created["id"] and saved["status"] == "completed" and saved["attempts"] == 2
+    assert saved["steps"][0]["result"] == "Saved clarified plan." and saved["result"] == "Final clarified report."
+    for payload in _content_requests(state)[1:]:
+        assert json.loads(payload["messages"][1]["content"])["clarifications"] == [
+            {"question": pending["question"], "answer": "Public Example Product, stable releases only."},
+        ]

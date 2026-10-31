@@ -37,6 +37,9 @@ describe("SearchSidebar", () => {
     const { rerender } = render(<SearchSidebar open modal={false} openRequest={{ query: "", serial: 1 }} onClose={onClose} />);
     expect(screen.getByRole("complementary", { name: "Search" })).toHaveAttribute("id", "app-search-sidebar");
     expect(screen.getAllByRole("heading", { name: "Search" })).toHaveLength(1);
+    const collapse = screen.getByRole("button", { name: "Collapse Search" });
+    expect(collapse.querySelectorAll("svg path")).toHaveLength(2);
+    expect(collapse).not.toHaveTextContent("×");
     await waitFor(() => expect(screen.getByRole("searchbox")).toHaveFocus());
     fireEvent.click(screen.getByRole("button", { name: "Files" }));
     fireEvent.change(screen.getByLabelText("Updated from"), { target: { value: "2026-10-01" } });

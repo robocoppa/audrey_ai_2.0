@@ -1349,6 +1349,34 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON app_agent_notices(user_id,created_at DESC,notice_id DESC);
         """,
     ),
+    (
+        31,
+        """
+        CREATE TABLE IF NOT EXISTS app_agent_input_requests (
+          request_id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+          task_id TEXT NOT NULL REFERENCES app_agent_tasks(task_id) ON DELETE CASCADE,
+          task_revision INTEGER NOT NULL CHECK (task_revision>=1),
+          sequence_no INTEGER NOT NULL CHECK (sequence_no BETWEEN 1 AND 3),
+          step_id TEXT NOT NULL CHECK (step_id='plan'),
+          question TEXT NOT NULL CHECK (length(CAST(question AS BLOB)) BETWEEN 1 AND 2000),
+          answer TEXT CHECK (length(CAST(answer AS BLOB)) BETWEEN 1 AND 8000),
+          created_at TEXT NOT NULL,
+          answered_at TEXT,
+          answer_revision INTEGER CHECK (answer_revision>=1),
+          dismissed_at TEXT,
+          notice_title TEXT NOT NULL CHECK (length(notice_title) BETWEEN 1 AND 100),
+          read_at TEXT,
+          UNIQUE (task_id,sequence_no),
+          CHECK ((answer IS NULL AND answered_at IS NULL AND answer_revision IS NULL)
+            OR (answer IS NOT NULL AND answered_at IS NOT NULL AND answer_revision IS NOT NULL))
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_app_agent_input_pending
+          ON app_agent_input_requests(task_id) WHERE answer IS NULL AND dismissed_at IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_app_agent_input_owner_task
+          ON app_agent_input_requests(user_id,task_id,created_at,request_id);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

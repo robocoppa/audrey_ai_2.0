@@ -90,7 +90,9 @@ export function SearchSidebar({ open, modal, openRequest, onClose }: SearchSideb
     >
       <header className="app-search-sidebar-header">
         <div><h2 id="app-search-sidebar-title">Search</h2><p>Find your saved work. Search stays local.</p></div>
-        <button type="button" aria-label="Collapse Search" onClick={onClose}><span aria-hidden="true">×</span></button>
+        <button type="button" aria-label="Collapse Search" onClick={onClose}>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 7 5 5-5 5" /><path d="m12 7 5 5-5 5" /></svg>
+        </button>
       </header>
       <div className="app-search-sidebar-results" hidden={selected !== null} inert={selected !== null}>
         <SearchWorkspace

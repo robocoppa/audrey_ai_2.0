@@ -11,6 +11,3 @@
 .activity-notice > p { margin: 0; font-size: 0.85rem; line-height: 1.7; white-space: pre-wrap; }
 .activity-workspace button:hover:not(:disabled) { box-shadow: 0 0 1rem rgb(52 153 250 / 10%); background-color: rgb(52 153 250 / 18%); }
 .activity-workspace button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-@media (max-width: 600px) {
-  .activity-workspace > header::before { content: ""; float: right; width: 6rem; height: 5rem; }
-}

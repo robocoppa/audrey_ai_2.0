@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import sqlite3
+from dataclasses import replace
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from fastapi import FastAPI
 
-from audrey.agent_dispatch import AgentDispatchStoppedError
+from audrey.agent_dispatch import AgentDispatchStoppedError, AgentInputRequest
 from audrey.agent_runtime import AgentRuntime
 from audrey.app_state import ApplicationStore
 from audrey.auth import require_principal
@@ -315,3 +317,98 @@ async def test_native_agents_require_authentication():
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         assert (await client.get("/api/agents")).status_code == 401
         assert (await client.post("/api/agents", json={"objective": "Test", "request_id": "x"})).status_code == 401
+        assert (await client.post("/api/agents/task/inputs/question/answer", json={"expected_revision": 1, "answer": "Example"})).status_code == 401
+
+
+async def _waiting_task(state):
+    created = (await _create(state)).json()
+
+    async def execute(_task, _step):
+        return AgentInputRequest("Which public product should I research?")
+
+    assert await AgentRuntime(state.store.agents, execute).run_once()
+    return (await state.client.get(f"/api/agents/{created['id']}")).json()
+
+
+def _answer_path(task, request_id=None):
+    return f"/api/agents/{task['id']}/inputs/{request_id or task['input_requests'][0]['id']}/answer"
+
+
+async def test_native_input_wait_and_answer_resume_same_agent_and_invalidate_activity(agents):
+    waiting = await _waiting_task(agents)
+    assert waiting["status"] == "waiting_for_input" and waiting["steps"][0]["status"] == "pending"
+    listing = (await agents.client.get("/api/agents")).json()["items"]
+    assert listing[0]["status"] == "waiting_for_input" and listing[0]["input_requests"] == []
+    notice = (await agents.client.get("/api/activity")).json()["items"][0]
+    assert notice["kind"] == "input_required" and notice["target"]["revision"] == waiting["revision"]
+    assert (await agents.client.get(f"/api/activity/agent/{notice['id']}/task")).json() == waiting
+    body = {"expected_revision": waiting["revision"], "answer": "Stable public Example releases"}
+    wakes = len(agents.wakes)
+    response = await agents.client.post(_answer_path(waiting), json=body)
+    assert response.status_code == 200, response.text
+    queued = response.json()
+    assert response.headers["cache-control"] == "private, no-store"
+    assert queued["id"] == waiting["id"] and queued["status"] == "queued"
+    assert queued["input_requests"][0]["answer"] == body["answer"]
+    assert queued["steps"] == waiting["steps"] and queued["attempts"] == waiting["attempts"]
+    assert len(agents.wakes) == wakes + 1
+    assert (await agents.client.get(f"/api/activity/agent/{notice['id']}/task")).status_code == 404
+    assert (await agents.client.get("/api/activity/unread")).json() == {"unread_count": 0}
+    assert (await agents.client.post(_answer_path(waiting), json=body)).json() == queued
+    different = {**body, "answer": "A different product"}
+    assert (await agents.client.post(_answer_path(waiting), json=different)).status_code == 409
+
+
+@pytest.mark.parametrize("kind", ["foreign", "stale", "wrong_request", "revoked", "scope"])
+async def test_input_answers_reject_foreign_stale_or_revoked_work(agents, kind):
+    waiting = await _waiting_task(agents)
+    body = {"expected_revision": waiting["revision"], "answer": "Example"}
+    path = _answer_path(waiting)
+    if kind == "foreign":
+        agents.current[0] = agents.owners[1]
+    elif kind == "stale":
+        body["expected_revision"] -= 1
+    elif kind == "wrong_request":
+        path = _answer_path(waiting, "missing")
+    elif kind == "scope":
+        agents.current[0] = replace(agents.owners[0], auth_method="personal_token", scopes=frozenset({"models:read"}))
+    else:
+        agents.app.state.cfg.raw["agent_tasks"] = {"enabled": False}
+    response = await agents.client.post(path, json=body)
+    assert response.status_code == {"foreign": 404, "stale": 409, "wrong_request": 409, "revoked": 503, "scope": 403}[kind], response.text
+    assert (await agents.store.agents.get(user_id=agents.owners[0].user_id, task_id=waiting["id"])) == waiting
+
+
+@pytest.mark.parametrize("answer", ["", " ", "x" * 8001, "é" * 4001, {"text": "Example"}])
+async def test_input_answer_bounds_are_enforced_without_losing_question(agents, answer):
+    waiting = await _waiting_task(agents)
+    response = await agents.client.post(_answer_path(waiting), json={"expected_revision": waiting["revision"], "answer": answer})
+    assert response.status_code == 422
+    assert (await agents.client.get(f"/api/agents/{waiting['id']}")).json() == waiting
+
+
+@pytest.mark.parametrize("operation", ["get", "list", "answer_input"])
+async def test_input_bodies_are_fenced_when_task_is_erased_after_await(agents, monkeypatch, operation):
+    waiting = await _waiting_task(agents)
+    original = getattr(agents.store.agents, operation)
+
+    async def erased_after_read(**kwargs):
+        result = await original(**kwargs)
+        with agents.store._lock, agents.store._conn:
+            agents.store._conn.execute("DELETE FROM app_agent_tasks WHERE task_id=?", (waiting["id"],))
+        return result
+
+    monkeypatch.setattr(agents.store.agents, operation, erased_after_read)
+    response = await agents.client.post(_answer_path(waiting), json={"expected_revision": waiting["revision"], "answer": "Example"}) if operation == "answer_input" else await agents.client.get("/api/agents" if operation == "list" else f"/api/agents/{waiting['id']}")
+    assert response.status_code == 404 and "Which public product" not in response.text and "Example" not in response.text
+
+
+async def test_input_storage_failure_is_safe_and_leaves_question_available(agents, monkeypatch):
+    waiting = await _waiting_task(agents)
+
+    async def unavailable(**_):
+        raise sqlite3.OperationalError("private storage location")
+
+    monkeypatch.setattr(agents.store.agents, "answer_input", unavailable)
+    response = await agents.client.post(_answer_path(waiting), json={"expected_revision": waiting["revision"], "answer": "Example"})
+    assert response.status_code == 503 and "private storage location" not in response.text

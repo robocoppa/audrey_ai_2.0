@@ -14,12 +14,12 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from typing import Any
 
-from audrey.agent_dispatch import AgentDispatchStoppedError
+from audrey.agent_dispatch import AgentDispatchStoppedError, AgentInputRequest
 from audrey.app_state.agents import AgentTaskError
 
 logger = logging.getLogger(__name__)
 
-AgentExecutor = Callable[[dict[str, Any], str], Awaitable[str]]
+AgentExecutor = Callable[[dict[str, Any], str], Awaitable[str | AgentInputRequest]]
 _STEP_IDS = ("plan", "research", "review")
 
 
@@ -175,6 +175,11 @@ class AgentRuntime:
                     result = await self.executor(execution_task, step_id)
             except TimeoutError:
                 raise _RejectedStepError("Agent step exceeded its time limit.") from None
+            if isinstance(result, AgentInputRequest):
+                if step_id != "plan":
+                    raise _RejectedStepError("Only planning can request user input.")
+                await self.repository.request_input(**lease, step_id=step_id, question=result.question)
+                return
             if not isinstance(result, str) or not result.strip():
                 raise _RejectedStepError("Agent step did not produce a usable result.")
             if len(result) > self.max_output_chars or len(result.encode("utf-8")) > 64000:

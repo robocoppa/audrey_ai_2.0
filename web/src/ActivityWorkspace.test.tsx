@@ -51,6 +51,27 @@ describe("unified Activity", () => {
     expect(unread).toHaveBeenLastCalledWith(2);
   });
 
+  it("labels input-required notices and opens the exact waiting task after resolving its question", async () => {
+    const item = notice({ kind: "input_required", body: "Your agent needs an answer before it can continue." });
+    const waiting = task({ status: "waiting_for_input", result: "", input_requests: [{ id: "input-1", step_id: "plan", question: "Which dates?", answer: null, created_at: item.created_at, answered_at: null }] });
+    vi.mocked(api.listActivity).mockResolvedValue({ items: [item], unread_count: 1 }); vi.mocked(api.getActivityAgentTask).mockResolvedValue(waiting);
+    vi.mocked(api.readActivity).mockResolvedValue({ ...item, read_at: item.created_at }); const open = vi.fn(); workspace({ onOpenAgent: open });
+    expect(await screen.findByText("Unread · Agent needs input")).toBeVisible(); fireEvent.click(screen.getByRole("button", { name: /Open agent question/ }));
+    await waitFor(() => expect(open).toHaveBeenCalledWith(waiting)); expect(api.readActivity).toHaveBeenCalledWith("agent", item.id, expect.any(AbortSignal));
+  });
+
+  it.each([404, 409])("keeps an answered or cancelled question unread after HTTP %s", async (status) => {
+    vi.mocked(api.listActivity).mockResolvedValue({ items: [notice({ kind: "input_required" })], unread_count: 1 }); vi.mocked(api.getActivityAgentTask).mockRejectedValue(new api.ApiError(status, "Question changed"));
+    const open = vi.fn(); workspace({ onOpenAgent: open }); fireEvent.click(await screen.findByRole("button", { name: /Open agent question/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("answered or cancelled; refresh Activity"); expect(api.readActivity).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
+  });
+
+  it("rejects an input-required notice whose task has already continued", async () => {
+    vi.mocked(api.listActivity).mockResolvedValue({ items: [notice({ kind: "input_required" })], unread_count: 1 });
+    const open = vi.fn(); workspace({ onOpenAgent: open }); fireEvent.click(await screen.findByRole("button", { name: /Open agent question/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("refresh Activity"); expect(api.readActivity).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
+  });
+
   it.each([404, 409])("keeps an unavailable or rerun agent unread after HTTP %s", async (status) => {
     vi.mocked(api.getActivityAgentTask).mockRejectedValue(new api.ApiError(status, "Gone")); const open = vi.fn();
     workspace({ onOpenAgent: open }); fireEvent.click(await screen.findByRole("button", { name: /Public documentation comparison/ }));

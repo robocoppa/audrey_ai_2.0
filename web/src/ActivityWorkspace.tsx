@@ -6,7 +6,7 @@ import {
 import "./ActivityWorkspace.css";
 
 function label(item: ActivityNotice) {
-  if (item.origin === "agent") return item.kind === "completed" ? "Agent completed" : "Agent failed";
+  if (item.origin === "agent") return item.kind === "input_required" ? "Agent needs input" : item.kind === "completed" ? "Agent completed" : "Agent failed";
   return item.kind === "change" ? "Relevant change" : "Watch failed";
 }
 
@@ -76,7 +76,8 @@ export function ActivityWorkspace({ visible, timezone, onUnreadChange, onOpenAge
       if (item.origin === "agent" && item.target.kind === "agent") {
         const task = await getActivityAgentTask(item.id, controller.signal);
         if (!isCurrent()) return;
-        if (task.id !== item.target.task_id || task.revision !== item.target.revision || !["completed", "failed"].includes(task.status)) {
+        const expectedStatus = item.kind === "input_required" ? "waiting_for_input" : item.kind === "completed" ? "completed" : "failed";
+        if (task.id !== item.target.task_id || task.revision !== item.target.revision || task.status !== expectedStatus) {
           throw new ApiError(409, "Agent has been run again; refresh Activity.");
         }
         if (isAgentResultCurrent && !isAgentResultCurrent(task)) throw new ApiError(409, "Agent has been run again; refresh Activity.");
@@ -105,7 +106,7 @@ export function ActivityWorkspace({ visible, timezone, onUnreadChange, onOpenAge
     } catch (reason) {
       if (!isCurrent()) return;
       if (reason instanceof ApiError && (reason.status === 404 || reason.status === 409)) {
-        setError(item.origin === "agent" ? "This agent result is no longer current. It may have been run again or deleted; refresh Activity." : "This watch or saved check is no longer available. Refresh Activity.");
+        setError(item.origin === "agent" ? item.kind === "input_required" ? "This agent question is no longer current. It may have been answered or cancelled; refresh Activity." : "This agent result is no longer current. It may have been run again or deleted; refresh Activity." : "This watch or saved check is no longer available. Refresh Activity.");
       } else setError(reason instanceof Error ? reason.message : "Could not open this saved activity.");
     } finally { if (targetRequest.current === controller) { targetRequest.current = null; setOpening(null); } }
   }
@@ -117,13 +118,13 @@ export function ActivityWorkspace({ visible, timezone, onUnreadChange, onOpenAge
   }, []);
 
   return <section className="activity-workspace" aria-labelledby="activity-title">
-    <header><h1 id="activity-title">Activity</h1><p>Completed agents, agent failures, relevant page changes and persistent watch failures. Open an item to view its saved result.</p><p>Unread activity appears first. Showing up to 50 current items.</p><button className="agents-secondary" type="button" onClick={() => { setError(""); setToken((value) => value + 1); }}>Refresh activity</button></header>
+    <header><h1 id="activity-title">Activity</h1><p>Agent questions, completed agents, agent failures, relevant page changes and persistent watch failures. Open an item to view its saved work.</p><p>Unread activity appears first. Showing up to 50 current items.</p><button className="agents-secondary" type="button" onClick={() => { setError(""); setToken((value) => value + 1); }}>Refresh activity</button></header>
     {error ? <p className="agents-error" role="alert">{error}</p> : null}
     {loading ? <p role="status">Loading activity…</p> : !items.length ? <p className="agents-empty">No activity yet. Agent results and watch alerts will appear here.</p> : <ul>{items.map((item) => {
       const key = `${item.origin}:${item.id}`;
       const date = new Date(item.created_at);
       return <li key={key}><button type="button" className="activity-notice" data-unread={!item.read_at} disabled={opening === key} onClick={() => void open(item)}>
-        <span>{item.read_at ? "Read" : "Unread"} · {label(item)}</span><strong>{item.title}</strong><p>{item.body}</p><time dateTime={item.created_at}>{Number.isNaN(date.getTime()) ? "Time unavailable" : formatter.format(date)}</time><span>{opening === key ? "Opening saved result…" : item.origin === "agent" ? "Open agent result →" : "Open saved check →"}</span>
+        <span>{item.read_at ? "Read" : "Unread"} · {label(item)}</span><strong>{item.title}</strong><p>{item.body}</p><time dateTime={item.created_at}>{Number.isNaN(date.getTime()) ? "Time unavailable" : formatter.format(date)}</time><span>{opening === key ? "Opening saved work…" : item.kind === "input_required" ? "Open agent question →" : item.origin === "agent" ? "Open agent result →" : "Open saved check →"}</span>
       </button></li>;
     })}</ul>}
   </section>;

@@ -39,7 +39,7 @@ class WatchActivityTarget(BaseModel):
 class ActivityResponse(BaseModel):
     id: str
     origin: Literal["agent", "watch"]
-    kind: Literal["completed", "failure", "change"]
+    kind: Literal["completed", "failure", "change", "input_required"]
     title: str
     body: str
     created_at: str
@@ -113,6 +113,7 @@ async def activity_agent_task(notice_id: str, request: Request, response: Respon
         if task["id"] != target["task_id"] or task["revision"] != target["revision"]:
             raise NotificationConflictError("This agent changed. Refresh Activity before opening it.")
         repository.fence_response(user_id=principal.user_id, notices=[notice])
+        request.app.state.application_store.agents.fence_response(user_id=principal.user_id, tasks=[task])
         return task
     except (NotificationError, AgentTaskError) as error:
         raise _error(error) from None

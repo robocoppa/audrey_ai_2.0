@@ -40,6 +40,13 @@ WITH valid_notices AS (
   JOIN app_watch_runs r ON r.run_id=n.run_id AND r.watch_id=n.watch_id
                        AND r.user_id=n.user_id
   WHERE n.user_id=?
+  UNION ALL
+  SELECT q.request_id,'agent' AS origin,'input_required' AS kind,q.notice_title AS title,
+         'The agent needs your answer before it can continue.' AS body,q.created_at,q.read_at,
+         q.task_id AS target_id,NULL AS run_id,q.task_revision AS task_revision
+  FROM app_agent_input_requests q JOIN app_agent_tasks t
+    ON t.task_id=q.task_id AND t.user_id=q.user_id AND t.revision=q.task_revision
+  WHERE q.user_id=? AND q.answer IS NULL AND q.dismissed_at IS NULL AND t.status='paused'
 )
 """
 _GET_SQL = "\n".join((_VALID_NOTICES,
@@ -57,6 +64,7 @@ _COUNT_SQL = "\n".join((_VALID_NOTICES,
 _ACKNOWLEDGE_SQL = {
     "agent": "UPDATE app_agent_notices SET read_at=COALESCE(read_at,?) WHERE notice_id=? AND user_id=?",
     "watch": "UPDATE app_watch_notices SET read_at=COALESCE(read_at,?) WHERE notice_id=? AND user_id=?",
+    "input_required": "UPDATE app_agent_input_requests SET read_at=COALESCE(read_at,?) WHERE request_id=? AND user_id=?",
 }
 
 
@@ -141,7 +149,7 @@ class NotificationsRepository:
     def _get(self, user_id: str, origin: str, notice_id: str) -> dict:
         row = self._conn.execute(
             _GET_SQL,
-            (user_id, user_id, origin, notice_id),
+            (user_id, user_id, user_id, origin, notice_id),
         ).fetchone()
         if row is None:
             raise NotificationAccessError("Activity is unavailable.")
@@ -156,7 +164,7 @@ class NotificationsRepository:
                 self._owner(user_id)
                 rows = self._conn.execute(
                     _FEED_SQL,
-                    (user_id, user_id, limit),
+                    (user_id, user_id, user_id, limit),
                 ).fetchall()
                 return {
                     "items": [self._public(row) for row in rows if row["notice_id"] is not None],
@@ -171,7 +179,7 @@ class NotificationsRepository:
                 self._owner(user_id)
                 return int(self._conn.execute(
                     _COUNT_SQL,
-                    (user_id, user_id),
+                    (user_id, user_id, user_id),
                 ).fetchone()[0])
 
         return await asyncio.to_thread(work)
@@ -193,9 +201,9 @@ class NotificationsRepository:
 
         def work() -> dict:
             self._owner(user_id)
-            self._get(user_id, origin, notice_id)
+            notice = self._get(user_id, origin, notice_id)
             self._conn.execute(
-                _ACKNOWLEDGE_SQL[origin],
+                _ACKNOWLEDGE_SQL["input_required" if notice["kind"] == "input_required" else origin],
                 (self._clock().astimezone(dt.UTC).isoformat(), notice_id, user_id),
             )
             return self._get(user_id, origin, notice_id)

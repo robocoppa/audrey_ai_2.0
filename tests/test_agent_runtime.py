@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from audrey.agent_dispatch import AgentDispatchStoppedError
+from audrey.agent_dispatch import AgentDispatchStoppedError, AgentInputRequest
 from audrey.agent_runtime import AgentRuntime
 from audrey.app_state import ApplicationStore
 
@@ -72,6 +72,76 @@ def _lease(task):
 
 def _runtime(state, executor, **kwargs):
     return AgentRuntime(state.store.agents, executor, poll_seconds=0.01, **kwargs)
+
+
+async def test_waiting_for_input_survives_restart_and_releases_compute_until_answer(state):
+    task = await _create(state)
+    seen = []
+
+    async def execute(current, step_id):
+        seen.append((current["id"], step_id))
+        if not current.get("input_requests"):
+            state.clock.advance(2)
+            return AgentInputRequest("Which public product should I research?")
+        assert current["input_requests"][0]["answer"] == "Public Example Product"
+        return f"Saved {step_id}"
+
+    assert await _runtime(state, execute).run_once()
+    waiting = await _get(state, task)
+    assert waiting["status"] == "waiting_for_input" and all(step["status"] == "pending" for step in waiting["steps"])
+    before = state.store._conn.execute("SELECT active_seconds,operations FROM app_agent_tasks").fetchone()
+    assert before["active_seconds"] == 2
+    state.store.close()
+    state.clock.advance(86400)
+    state.store = ApplicationStore(state.path)
+    state.store.agents._clock = state.clock
+    runtime = _runtime(state, execute)
+    assert await runtime.run_once() is False
+    assert await _get(state, task) == waiting
+    pending = waiting["input_requests"][0]
+    await state.store.agents.answer_input(
+        user_id=state.owner.user_id, task_id=task["id"], request_id=pending["id"],
+        expected_revision=waiting["revision"], answer="Public Example Product",
+    )
+    assert await runtime.run_once()
+    saved = await _get(state, task)
+    assert saved["id"] == task["id"] and saved["status"] == "completed"
+    assert seen == [(task["id"], step) for step in ("plan", "plan", "research", "review")]
+    after = state.store._conn.execute("SELECT active_seconds,operations FROM app_agent_tasks").fetchone()
+    assert after["active_seconds"] == before["active_seconds"] and after["operations"] > before["operations"]
+
+
+async def test_lost_question_acknowledgement_does_not_repeat_or_fail_the_waiting_task(state, monkeypatch):
+    task = await _create(state)
+    request_input = state.store.agents.request_input
+
+    async def committed_then_disconnected(**kwargs):
+        await request_input(**kwargs)
+        raise RuntimeError("Simulated lost question acknowledgement")
+
+    async def execute(_task, _step):
+        return AgentInputRequest("Which public product?")
+
+    monkeypatch.setattr(state.store.agents, "request_input", committed_then_disconnected)
+    runtime = _runtime(state, execute)
+    assert await runtime.run_once()
+    assert await runtime.run_once() is False
+    waiting = await _get(state, task)
+    assert waiting["status"] == "waiting_for_input" and len(waiting["input_requests"]) == 1
+    feed = await state.store.notifications.feed(user_id=state.owner.user_id)
+    assert [item["kind"] for item in feed["items"]] == ["input_required"]
+
+
+async def test_nonplanning_executor_cannot_create_an_input_wait(state):
+    task = await _create(state)
+
+    async def execute(_task, step):
+        return "Saved plan" if step == "plan" else AgentInputRequest("A late question?")
+
+    assert await _runtime(state, execute).run_once()
+    saved = await _get(state, task)
+    assert saved["status"] == "failed" and saved["error"] == "Only planning can request user input."
+    assert not saved["input_requests"] and saved["steps"][0]["status"] == "completed"
 
 
 async def test_commits_the_plan_research_and_review_as_one_saved_result(state):
