@@ -22,7 +22,11 @@ function waitingTask(patch: Partial<AgentTask> = {}): AgentTask {
   return task({ status: "waiting_for_input", revision: 6, steps: [{ id: "plan", label: "Plan the research", status: "pending", result: "" }, { id: "research", label: "Research public sources", status: "pending", result: "" }, { id: "review", label: "Review the report", status: "pending", result: "" }], input_requests: [{ id: "input-1", step_id: "plan", question: "Which years should the comparison cover?", answer: null, created_at: "2026-10-30T15:00:00Z", answered_at: null }], ...patch });
 }
 
+const project = { id: "project-research", name: "Public release work", instructions: "Stable releases only.", created_at: "2026-10-31T10:00:00Z", updated_at: "2026-10-31T10:00:00Z" };
+const projectContext = { project_id: project.id, project_name: project.name, available: true, current: true, instructions_included: true, knowledge: [{ id: "note-one", revision: 1 }] };
+
 beforeEach(() => {
+  vi.spyOn(api, "listProjects").mockResolvedValue({ items: [], next_cursor: null, limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
   vi.spyOn(api, "getActivityUnreadCount").mockResolvedValue({ unread_count: 0 });
   vi.spyOn(api, "listAgentTasks").mockResolvedValue({ items: [] });
   vi.spyOn(api, "getAgentTask").mockResolvedValue(task());
@@ -36,6 +40,60 @@ afterEach(() => {
 });
 
 describe("AgentsWorkspace", () => {
+  it("creates an explicitly selected ordinary Project agent and excludes Private choices", async () => {
+    vi.mocked(api.listProjects).mockResolvedValue({ items: [project, { ...project, id: "protected", name: "Private work", private_required: true }], next_cursor: null, limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
+    vi.spyOn(api, "getProject").mockResolvedValue(project);
+    const create = vi.spyOn(api, "createAgentTask").mockResolvedValue(task({ project_context: projectContext }));
+    render(<AgentsWorkspace />);
+    await screen.findByRole("option", { name: project.name });
+    expect(screen.queryByRole("option", { name: "Private work" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Project" }), { target: { value: project.id } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "Compare public releases" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    await waitFor(() => expect(create).toHaveBeenCalledWith("Compare public releases", expect.any(String), project.id));
+  });
+
+  it("prefills a Project without starting, preserving the objective across navigation", async () => {
+    const create = vi.spyOn(api, "createAgentTask");
+    const { rerender } = render(<AgentsWorkspace />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "An unsent objective" } });
+    rerender(<AgentsWorkspace composerProjectRequest={{ project, serial: 1 }} />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(project.id));
+    expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("An unsent objective");
+    rerender(<AgentsWorkspace visible={false} composerProjectRequest={{ project, serial: 1 }} />);
+    rerender(<AgentsWorkspace visible composerProjectRequest={{ project, serial: 1 }} />);
+    expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(project.id);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("keeps unavailable Project selection explicit and never retries as an unscoped task", async () => {
+    vi.spyOn(api, "getProject").mockRejectedValue(new api.ApiError(404, "Unavailable"));
+    const create = vi.spyOn(api, "createAgentTask");
+    render(<AgentsWorkspace composerProjectRequest={{ project, serial: 1 }} />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(project.id));
+    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "A selected objective" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The selected Project is unavailable");
+    expect(screen.getByRole("button", { name: "Start agent" })).toBeDisabled(); expect(create).not.toHaveBeenCalled();
+  });
+
+  it("opens a linked agent's Project and blocks rerun after its context changes", async () => {
+    const saved = task({ status: "completed", result: "Saved report", project_context: { ...projectContext, current: false } });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const open = vi.fn(), control = vi.spyOn(api, "actOnAgentTask"); render(<AgentsWorkspace onOpenProject={open} />);
+    fireEvent.click(await screen.findByText("Project context changed", { selector: "summary" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Project" })); expect(open).toHaveBeenCalledWith(project.id);
+    expect(screen.getByRole("button", { name: "Run again" })).toBeDisabled(); expect(control).not.toHaveBeenCalled();
+  });
+
+  it("opens a Project's existing agent without creating another task", async () => {
+    const saved = task({ project_context: projectContext });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const create = vi.spyOn(api, "createAgentTask"); render(<AgentsWorkspace externalAgentRequest={{ task: saved, serial: 1 }} />);
+    expect(await screen.findByRole("heading", { name: saved.objective })).toBeVisible();
+    expect(screen.getAllByRole("button", { name: `Open agent: ${saved.objective}` })).toHaveLength(1); expect(create).not.toHaveBeenCalled();
+  });
+
   it("shows a waiting agent's plain question, only Cancel, and includes it in Active without a moving badge", async () => {
     const saved = waitingTask({ input_requests: [{ ...waitingTask().input_requests![0], question: "<img src=x onerror=alert(1)> Which years?" }] });
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);

@@ -151,10 +151,10 @@ async def test_controls_require_current_revision_and_allow_terminal_history_remo
 
 @pytest.mark.parametrize("extra", [
     {"user_id": "bob"}, {"limits": {"max_operations": 999}},
-    {"private_required": True}, {"project_id": "foreign"}, {"file_ids": ["foreign"]},
+    {"private_required": True}, {"file_ids": ["foreign"]},
     {"model": "kimi-k3:cloud"},
 ])
-async def test_first_slice_rejects_unimplemented_scope_and_client_resource_overrides(agents, extra):
+async def test_agents_reject_unsupported_scope_and_client_resource_overrides(agents, extra):
     assert (await _create(agents, **extra)).status_code == 422
     assert (await agents.client.get("/api/agents")).json() == {"items": []}
 
@@ -412,3 +412,90 @@ async def test_input_storage_failure_is_safe_and_leaves_question_available(agent
     monkeypatch.setattr(agents.store.agents, "answer_input", unavailable)
     response = await agents.client.post(_answer_path(waiting), json={"expected_revision": waiting["revision"], "answer": "Example"})
     assert response.status_code == 503 and "private storage location" not in response.text
+
+
+async def test_project_agents_save_canonical_context_and_filter_without_exposing_input_bodies(agents):
+    project = await agents.store.projects.create(user_id=agents.owners[0].user_id, name="Release comparison", instructions="Use stable releases only.")
+    note = await agents.store.knowledge.create(user_id=agents.owners[0].user_id, project_id=project.project_id,
+        kind="decision", text="Only releases from the public mainline count.", pinned=True)
+    response = await _create(agents, project_id=project.project_id)
+    assert response.status_code == 201, response.text
+    task = response.json()
+    assert task["project_context"] == {
+        "project_id": project.project_id, "project_name": project.name, "available": True,
+        "current": True, "instructions_included": True, "knowledge": [{"id": note["id"], "revision": note["revision"]}],
+    }
+    assert note["text"] not in response.text and project.instructions not in response.text
+    listing = await agents.client.get("/api/agents", params={"project_id": project.project_id})
+    assert listing.status_code == 200 and listing.json()["items"][0]["project_context"] == task["project_context"]
+    assert (await _create(agents, request_id="unscoped")).status_code == 201
+    assert len((await agents.client.get("/api/agents", params={"project_id": project.project_id})).json()["items"]) == 1
+    assert (await _create(agents, project_id=project.project_id)).json()["id"] == task["id"]
+    assert (await _create(agents, project_id=None)).status_code == 409
+
+
+@pytest.mark.parametrize("kind", ["missing", "foreign", "private"])
+async def test_project_agent_creation_and_filters_reject_unavailable_projects(agents, kind):
+    project_id = "missing"
+    if kind != "missing":
+        project = await agents.store.projects.create(user_id=agents.owners[kind == "foreign"].user_id,
+            name="Unavailable", private_required=kind == "private")
+        project_id = project.project_id
+    for response in (
+        await _create(agents, project_id=project_id),
+        await agents.client.get("/api/agents", params={"project_id": project_id}),
+    ):
+        assert response.status_code == 404, response.text
+    assert (await agents.client.get("/api/agents")).json() == {"items": []}
+
+
+async def test_project_change_stops_queued_work_but_keeps_its_saved_report_and_plan(agents):
+    project = await agents.store.projects.create(user_id=agents.owners[0].user_id, name="Versions", instructions="Compare 2026.")
+    created = (await _create(agents, project_id=project.project_id)).json()
+
+    async def execute(_task, step):
+        return f"Saved {step} from the selected Project."
+
+    assert await AgentRuntime(agents.store.agents, execute).run_once()
+    saved = (await agents.client.get(f"/api/agents/{created['id']}")).json()
+    assert saved["status"] == "completed"
+    await agents.store.projects.update(user_id=agents.owners[0].user_id, project_id=project.project_id, instructions="Compare 2025 instead.")
+    current = (await agents.client.get(f"/api/agents/{created['id']}")).json()
+    assert not current["project_context"]["current"] and current["result"] == saved["result"]
+    assert (await _rerun(agents, current)).status_code == 409
+    assert (await agents.client.get(f"/api/agents/{created['id']}")).json()["steps"] == saved["steps"]
+    await agents.store.projects.delete(user_id=agents.owners[0].user_id, project_id=project.project_id)
+    retained = await agents.client.get(f"/api/agents/{created['id']}")
+    assert retained.status_code == 200 and retained.json()["result"] == saved["result"]
+    assert retained.json()["project_context"]["project_name"] is None and not retained.json()["project_context"]["available"]
+
+
+async def test_answer_cannot_continue_an_agent_after_its_project_context_changes(agents):
+    project = await agents.store.projects.create(user_id=agents.owners[0].user_id, name="Release scope")
+    task = (await _create(agents, project_id=project.project_id)).json()
+
+    async def execute(_task, _step):
+        return AgentInputRequest("Which public product?")
+
+    assert await AgentRuntime(agents.store.agents, execute).run_once()
+    waiting = (await agents.client.get(f"/api/agents/{task['id']}")).json()
+    await agents.store.projects.update(user_id=agents.owners[0].user_id, project_id=project.project_id, instructions="A changed scope.")
+    response = await agents.client.post(_answer_path(waiting), json={"expected_revision": waiting["revision"], "answer": "Example"})
+    assert response.status_code == 409 and "Project context changed" in response.text
+    current = (await agents.client.get(f"/api/agents/{task['id']}")).json()
+    assert current["status"] == "waiting_for_input" and current["input_requests"][0]["answer"] is None
+
+
+async def test_project_metadata_is_fenced_if_project_is_deleted_after_task_read(agents, monkeypatch):
+    project = await agents.store.projects.create(user_id=agents.owners[0].user_id, name="Project metadata")
+    task = (await _create(agents, project_id=project.project_id)).json()
+    original = agents.store.agents.get
+
+    async def removed_after_read(**kwargs):
+        saved = await original(**kwargs)
+        await agents.store.projects.delete(user_id=agents.owners[0].user_id, project_id=project.project_id)
+        return saved
+
+    monkeypatch.setattr(agents.store.agents, "get", removed_after_read)
+    response = await agents.client.get(f"/api/agents/{task['id']}")
+    assert response.status_code == 409 and project.name not in response.text

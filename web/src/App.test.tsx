@@ -5,7 +5,7 @@ import type { ComponentProps } from "react";
 import { App } from "./App";
 import { latestActionFetch } from "./agentTransport";
 
-const workspaceMock = vi.hoisted(() => ({ enabled: false }));
+const workspaceMock = vi.hoisted(() => ({ enabled: false, projectBridge: false }));
 
 vi.mock("./ChatWorkspace", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./ChatWorkspace")>();
@@ -14,6 +14,11 @@ vi.mock("./ChatWorkspace", async (importOriginal) => {
     ChatWorkspace: (props: ComponentProps<typeof actual.ChatWorkspace>) => workspaceMock.enabled ? (
       <>
         <span>Workspace ready</span>
+        {workspaceMock.projectBridge ? <>
+          <button onClick={() => void props.onNewProjectAgent?.(BRIDGE_PROJECT)}>Prefill Project agent</button>
+          <button onClick={() => void props.onOpenProjectAgent?.(BRIDGE_AGENT)}>Open saved Project agent</button>
+          {props.projectOpenRequest ? <span>Opened Project {props.projectOpenRequest.project.name}</span> : null}
+        </> : null}
         {props.menuActions}
         {props.menuFooter}
       </>
@@ -30,6 +35,9 @@ const DEFAULT_PREFERENCES = {
   created_at: "2026-09-01T00:00:00+00:00",
   updated_at: "2026-09-01T00:00:00+00:00",
 } as const;
+
+const BRIDGE_PROJECT = { id: "project-bridge", name: "Public releases", instructions: "Stable only.", created_at: "2026-10-31T10:00:00Z", updated_at: "2026-10-31T10:00:00Z" };
+const BRIDGE_AGENT = { id: "agent-bridge", objective: "Compare public releases", title: "Release comparison", status: "completed" as const, revision: 8, created_at: BRIDGE_PROJECT.created_at, updated_at: BRIDGE_PROJECT.updated_at, steps: [], result: "A saved report.", error: "", attempts: 1, project_context: { project_id: BRIDGE_PROJECT.id, project_name: BRIDGE_PROJECT.name, available: true, current: true, instructions_included: true, knowledge: [] } };
 
 const DEFAULT_MODELS = [
   {
@@ -92,9 +100,45 @@ describe("App", () => {
   afterEach(() => {
     cleanup();
     workspaceMock.enabled = false;
+    workspaceMock.projectBridge = false;
     vi.useRealTimers();
     vi.unstubAllGlobals();
     window.history.replaceState({}, "", "/");
+  });
+
+  it("prefills a canonical Project without creating and opens the existing agent and Project", async () => {
+    workspaceMock.enabled = workspaceMock.projectBridge = true;
+    const base = mockCapabilitySession("degraded").getMockImplementation()!;
+    const fetchMock = vi.fn<(path: string, options?: RequestInit) => Promise<Response>>((path: string) => {
+      const payload = path === `/api/projects/${BRIDGE_PROJECT.id}` ? BRIDGE_PROJECT
+        : path === `/api/agents/${BRIDGE_AGENT.id}` ? BRIDGE_AGENT : path === "/api/agents" ? { items: [BRIDGE_AGENT] } : null;
+      return payload ? Promise.resolve(new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } })) : base(path);
+    }); vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Prefill Project agent" }, { timeout: 5000 }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(BRIDGE_PROJECT.id));
+    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "Preserved Project draft" } });
+    const navigation = within(screen.getByRole("navigation", { name: "Workspaces" })); fireEvent.click(navigation.getByRole("button", { name: "Chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open saved Project agent" }));
+    expect(await screen.findByRole("heading", { name: BRIDGE_AGENT.title })).toBeVisible();
+    fireEvent.click(screen.getByText(`Project: ${BRIDGE_PROJECT.name}`, { selector: "summary" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Project" }));
+    expect(await screen.findByText(`Opened Project ${BRIDGE_PROJECT.name}`)).toBeVisible();
+    fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
+    expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("Preserved Project draft");
+    expect(fetchMock.mock.calls.some(([, options]) => (options as RequestInit | undefined)?.method === "POST")).toBe(false);
+  });
+
+  it("ignores late Project links after the user navigates elsewhere", async () => {
+    workspaceMock.enabled = workspaceMock.projectBridge = true;
+    let resolve!: (response: Response) => void;
+    const base = mockCapabilitySession("degraded").getMockImplementation()!;
+    vi.stubGlobal("fetch", vi.fn((path: string) => path === `/api/projects/${BRIDGE_PROJECT.id}` ? new Promise<Response>((done) => { resolve = done; }) : base(path)));
+    render(<App />); fireEvent.click(await screen.findByRole("button", { name: "Prefill Project agent" }));
+    const navigation = within(screen.getByRole("navigation", { name: "Workspaces" })); fireEvent.click(navigation.getByRole("button", { name: "Agents" })); fireEvent.click(navigation.getByRole("button", { name: "Chat" }));
+    await act(async () => resolve(new Response(JSON.stringify(BRIDGE_PROJECT), { headers: { "Content-Type": "application/json" } })));
+    expect(navigation.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
+    expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue("");
   });
 
   it("opens Agents as a primary workspace while preserving Chat and the research draft", async () => {

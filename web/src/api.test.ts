@@ -18,6 +18,7 @@ import {
   getFileArtifactDownloadUrl,
   getFileDownloadUrl,
   getAgentTask,
+  getProject,
   getSearchSource,
   getKnowledgeSource,
   getProjectKnowledge,
@@ -42,6 +43,21 @@ import {
   type SearchResult,
   type KnowledgeEntry,
 } from "./api";
+
+describe("Project agent requests", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  it("binds Project creation and filtered reads while keeping legacy creation compatible", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({ items: [] })); vi.stubGlobal("fetch", fetchMock);
+    const signal = new AbortController().signal;
+    await createAgentTask("Research", "key", "project / one");
+    await listAgentTasks(signal, "project / one"); await getProject("project / one", signal); await listProjects("cursor", signal);
+    expect(fetchMock).toHaveBeenCalledWith("/api/agents", expect.objectContaining({ body: JSON.stringify({ objective: "Research", request_id: "key", project_id: "project / one" }) }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/agents?project_id=project+%2F+one", expect.objectContaining({ signal, cache: "no-store" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/projects/project%20%2F%20one", expect.objectContaining({ signal, cache: "no-store" }));
+    await createAgentTask("Legacy", "old-key");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/agents", expect.objectContaining({ body: JSON.stringify({ objective: "Legacy", request_id: "old-key" }) }));
+  });
+});
 
 describe("unified Activity requests", () => {
   afterEach(() => { vi.unstubAllGlobals(); });

@@ -14,9 +14,13 @@ import {
   getCapabilities,
   getCurrentUser,
   getCurrentUserPreferences,
+  getAgentTask,
+  getProject,
   listModels,
   listSkills,
   type AudreyModel,
+  type AudreyProject,
+  type AgentTask,
   type CapabilityHealth,
   type CurrentUser,
   type SkillSummary,
@@ -95,6 +99,76 @@ export function App() {
   const [mobileMenuHost, setMobileMenuHost] = useState<HTMLDivElement | null>(null);
   const [mobileNewChatHost, setMobileNewChatHost] = useState<HTMLDivElement | null>(null);
   const [showAccessHandoff, setShowAccessHandoff] = useState(true);
+  const [projectLinkError, setProjectLinkError] = useState("");
+  const [composerProjectRequest, setComposerProjectRequest] = useState<{ project: AudreyProject; serial: number; owner: string }>();
+  const [externalAgentRequest, setExternalAgentRequest] = useState<{ task: AgentTask; serial: number; owner: string }>();
+  const [projectOpenRequest, setProjectOpenRequest] = useState<{ project: AudreyProject; serial: number; owner: string }>();
+  const projectNavigation = useRef<{ serial: number; controller: AbortController | null }>({ serial: 0, controller: null });
+  const workspaceOwner = session.status === "ready" ? `${session.user.id}:${workspaceRevision}` : "";
+  const cancelProjectNavigation = useCallback(() => {
+    projectNavigation.current.controller?.abort();
+    projectNavigation.current.controller = null;
+    projectNavigation.current.serial += 1;
+  }, []);
+  useEffect(() => () => cancelProjectNavigation(), [workspaceOwner, cancelProjectNavigation]);
+
+  async function readProjectLink(
+    read: (signal: AbortSignal, serial: number) => Promise<void>,
+    signal?: AbortSignal,
+  ) {
+    cancelProjectNavigation();
+    const controller = new AbortController();
+    const serial = projectNavigation.current.serial;
+    projectNavigation.current.controller = controller;
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) controller.abort();
+    setProjectLinkError("");
+    try {
+      if (!controller.signal.aborted) await read(controller.signal, serial);
+    } catch (reason) {
+      if (!controller.signal.aborted && projectNavigation.current.serial === serial) {
+        setProjectLinkError(reason instanceof Error ? reason.message : "This Project link is unavailable. Refresh before trying again.");
+      }
+    } finally {
+      signal?.removeEventListener("abort", abort);
+      if (projectNavigation.current.controller === controller) projectNavigation.current.controller = null;
+    }
+  }
+
+  async function newProjectAgent(project: AudreyProject, signal?: AbortSignal) {
+    await readProjectLink(async (currentSignal, serial) => {
+      const current = await getProject(project.id, currentSignal);
+      if (currentSignal.aborted || projectNavigation.current.serial !== serial) return;
+      if (current.id !== project.id || current.private_required) throw new Error("Public research agents are unavailable for this Project.");
+      setComposerProjectRequest({ project: current, serial, owner: workspaceOwner });
+      setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("agents");
+    }, signal);
+  }
+
+  async function openProjectAgent(task: AgentTask, signal?: AbortSignal) {
+    await readProjectLink(async (currentSignal, serial) => {
+      const projectId = task.project_context?.project_id;
+      if (!projectId) throw new Error("This saved agent is no longer linked to this Project.");
+      const current = await getAgentTask(task.id, currentSignal);
+      if (currentSignal.aborted || projectNavigation.current.serial !== serial) return;
+      if (current.id !== task.id || current.project_context?.project_id !== projectId || !current.project_context.available) {
+        throw new Error("This saved agent is no longer available in this Project. Refresh before trying again.");
+      }
+      setExternalAgentRequest({ task: current, serial, owner: workspaceOwner });
+      setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("agents");
+    }, signal);
+  }
+
+  async function openAgentProject(projectId: string) {
+    await readProjectLink(async (signal, serial) => {
+      const project = await getProject(projectId, signal);
+      if (signal.aborted || projectNavigation.current.serial !== serial) return;
+      if (project.id !== projectId || project.private_required) throw new Error("This agent's Project is unavailable.");
+      setProjectOpenRequest({ project, serial, owner: workspaceOwner });
+      setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("chat");
+    });
+  }
 
   useEffect(() => {
     const viewport = window.matchMedia?.("(max-width: 1279px)");
@@ -258,7 +332,7 @@ export function App() {
   };
 
   return (
-    <div className="app-shell app-shell-ready">
+    <div className="app-shell app-shell-ready" onClickCapture={cancelProjectNavigation}>
       <svg className="brand-filter" aria-hidden="true">
         <filter id="light-wordmark-on-dark" colorInterpolationFilters="sRGB">
           <feColorMatrix
@@ -300,6 +374,7 @@ export function App() {
       {activeWorkspace === "chat" && !navigationOpen && !filesOpen && !settingsOpen && !adminOpen && !searchOpen ? <PullToRefresh /> : null}
 
       <main className="native-main app-main-with-search">
+        {projectLinkError ? <div className="app-project-link-error" role="alert"><p>{projectLinkError}</p><button type="button" aria-label="Dismiss Project link error" onClick={() => setProjectLinkError("")}>×</button></div> : null}
         <div className="app-primary-workspaces" inert={searchOpen && compactSearch ? true : undefined}>
         <div className="app-workspace-view" hidden={activeWorkspace !== "chat"} inert={activeWorkspace !== "chat" ? true : undefined}>
           <Suspense fallback={<AudreyLoader fullscreen label="Loading Audrey workspace" />}>
@@ -316,11 +391,17 @@ export function App() {
               mobileNewChatHost={activeWorkspace === "chat" ? mobileNewChatHost : null}
               menuActions={<SessionActions {...sessionActions} variant="drawer" />}
               menuFooter={<SessionActions {...sessionActions} variant="footer" />}
+              projectOpenRequest={projectOpenRequest?.owner === workspaceOwner ? projectOpenRequest : undefined}
+              onNewProjectAgent={newProjectAgent}
+              onOpenProjectAgent={openProjectAgent}
             />
           </Suspense>
         </div>
         <div className="app-workspace-view" hidden={activeWorkspace !== "agents"} inert={activeWorkspace !== "agents" ? true : undefined}>
-          <AgentsWorkspace key={`${session.user.id}:${workspaceRevision}`} visible={activeWorkspace === "agents" && !(searchOpen && compactSearch)} timezone={session.preferences.timezone} onActiveCountChange={setActiveAgentCount} navigationOpen={navigationOpen} onNavigationOpenChange={changeNavigation} />
+          <AgentsWorkspace key={`${session.user.id}:${workspaceRevision}`} visible={activeWorkspace === "agents" && !(searchOpen && compactSearch)} timezone={session.preferences.timezone} onActiveCountChange={setActiveAgentCount} navigationOpen={navigationOpen} onNavigationOpenChange={changeNavigation}
+            composerProjectRequest={composerProjectRequest?.owner === workspaceOwner ? composerProjectRequest : undefined}
+            externalAgentRequest={externalAgentRequest?.owner === workspaceOwner ? externalAgentRequest : undefined}
+            onOpenProject={(projectId) => void openAgentProject(projectId)} />
         </div>
         </div>
         {searchOpen && compactSearch ? <button type="button" className="app-search-backdrop" tabIndex={-1} aria-label="Dismiss Search" onClick={closeSearch} /> : null}
@@ -347,6 +428,7 @@ export function App() {
             );
           }}
           onDataPurgeAttempted={() => {
+            cancelProjectNavigation();
             setSearchOpen(false);
             setSearchOpenRequest(undefined);
             setWorkspaceRevision((current) => current + 1);

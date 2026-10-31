@@ -8,6 +8,7 @@ import {
   createProjectConversation,
   deleteProject,
   listFiles,
+  listAgentTasks,
   listProjectFiles,
   removeProjectFile,
   updateProject,
@@ -16,6 +17,7 @@ import {
   PRIVATE_DOCUMENT_EXTENSIONS,
   uploadPrecheck,
   type AudreyFile,
+  type AgentTask,
   type AudreyProject,
   type AudreyProjectFile,
   type Conversation,
@@ -27,6 +29,7 @@ import { TaxProjectSection } from "./TaxProjectSection";
 import { ProjectKnowledgeSection } from "./ProjectKnowledgeSection";
 import { SearchSourceViewer } from "./SearchSourceViewer";
 import { getKnowledgeSource, type KnowledgeEntry, type SearchResult, type SearchSource } from "./api";
+import "./ProjectAgents.css";
 
 type ProjectFileKind = "all" | AudreyFile["kind"];
 
@@ -159,6 +162,7 @@ export function NewProjectDialog({
 }
 
 export function ProjectHome({
+  visible = true,
   project,
   conversations,
   files,
@@ -170,7 +174,10 @@ export function ProjectHome({
   onConversationCreated,
   onConversationSelected,
   onFilesChange,
+  onNewProjectAgent,
+  onOpenProjectAgent,
 }: {
+  visible?: boolean;
   project: AudreyProject;
   conversations: Conversation[];
   files: AudreyProjectFile[];
@@ -182,6 +189,8 @@ export function ProjectHome({
   onConversationCreated: (conversation: Conversation) => void;
   onConversationSelected: (conversation: Conversation) => void;
   onFilesChange: (files: AudreyProjectFile[]) => void;
+  onNewProjectAgent?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
+  onOpenProjectAgent?: (task: AgentTask, signal?: AbortSignal) => void | Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(project.name);
@@ -461,6 +470,9 @@ export function ProjectHome({
       {isPrivate ? <TaxProjectSection projectId={project.id} onConversationSelected={onConversationSelected} /> : null}
       <ProjectKnowledgeSection project={project} onOpenSource={(_source, entry, index) => { void openKnowledgeSource(entry, index); }} />
       {knowledgeSource ? <SearchSourceViewer result={knowledgeSource.result} loadSource={knowledgeSource.load} onClose={() => setKnowledgeSource(null)} /> : null}
+      {!isPrivate && (onNewProjectAgent || onOpenProjectAgent) ? <ProjectAgents
+        key={project.id} project={project} visible={visible}
+        onNew={onNewProjectAgent} onOpen={onOpenProjectAgent} /> : null}
 
       <div className="project-home-grid">
         <section className="project-panel" aria-labelledby="project-conversations-title">
@@ -574,6 +586,54 @@ export function ProjectHome({
       ) : null}
     </div>
   );
+}
+
+function ProjectAgents({ project, visible, onNew, onOpen }: {
+  project: AudreyProject;
+  visible: boolean;
+  onNew?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
+  onOpen?: (task: AgentTask, signal?: AbortSignal) => void | Promise<void>;
+}) {
+  const [items, setItems] = useState<AgentTask[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
+  const link = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (!visible) return;
+    const controller = new AbortController();
+    queueMicrotask(() => { if (!controller.signal.aborted) { setLoading(true); setOpening(false); setError(""); } });
+    void listAgentTasks(controller.signal, project.id).then(({ items }) => {
+      if (!controller.signal.aborted) setItems(items.filter((task) => task.project_context?.project_id === project.id));
+    }).catch((reason: unknown) => { if (!controller.signal.aborted) setError(messageOf(reason)); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => { controller.abort(); link.current?.abort(); };
+  }, [visible, project.id, refresh]);
+
+  async function follow(task?: AgentTask) {
+    if (!visible) return;
+    if (task && (task.project_context?.project_id !== project.id || !task.project_context.available)) {
+      setError("This saved agent is unavailable in this Project. Refresh before trying again."); return;
+    }
+    link.current?.abort();
+    const controller = new AbortController(); link.current = controller;
+    setOpening(true); setError("");
+    try { if (task) await onOpen?.(task, controller.signal); else await onNew?.(project, controller.signal); }
+    catch (reason) { if (!controller.signal.aborted) setError(messageOf(reason)); }
+    finally { if (link.current === controller) { link.current = null; if (!controller.signal.aborted) setOpening(false); } }
+  }
+
+  return <section className="project-panel project-agents" aria-labelledby="project-agents-title">
+    <header><div><span>Background research</span><h2 id="project-agents-title">Project agents</h2></div>
+      {onNew ? <button className="project-primary-button" type="button" disabled={opening} onClick={() => void follow()}>New agent in Project</button> : null}
+    </header>
+    {error ? <p className="project-error" role="alert">{error}</p> : null}
+    {loading ? <p role="status">Loading Project agents…</p> : items.length ? <ul className="project-home-conversations">{items.map((task) => <li key={task.id} className="conversation-row">
+      <button className="conversation project-home-conversation" type="button" disabled={opening || !onOpen} onClick={() => void follow(task)}><span>{task.title || task.objective}</span><small>{task.status.replaceAll("_", " ")}</small></button>
+    </li>)}</ul> : <p className="project-empty">No agents in this Project yet. Start one to research with its instructions and approved working notes.</p>}
+    <button type="button" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>Refresh Project agents</button>
+  </section>;
 }
 
 function ProjectFilePicker({

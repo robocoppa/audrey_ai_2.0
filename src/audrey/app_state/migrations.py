@@ -1377,6 +1377,21 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON app_agent_input_requests(user_id,task_id,created_at,request_id);
         """,
     ),
+    (
+        32,
+        """
+        CREATE TABLE IF NOT EXISTS app_agent_project_contexts (
+          task_id TEXT PRIMARY KEY REFERENCES app_agent_tasks(task_id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL CHECK (length(project_id) BETWEEN 1 AND 300),
+          instructions_sha256 TEXT NOT NULL CHECK (length(instructions_sha256)=64),
+          instructions_chars INTEGER NOT NULL CHECK (instructions_chars BETWEEN 0 AND 20000),
+          knowledge_json TEXT NOT NULL CHECK (length(knowledge_json)<=4000)
+        );
+        CREATE INDEX IF NOT EXISTS idx_app_agent_projects_owner
+          ON app_agent_project_contexts(user_id,project_id,task_id);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

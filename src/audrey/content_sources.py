@@ -215,8 +215,11 @@ class ContentSourceReader:
                 ).fetchone()
             else:
                 row = self.store._conn.execute(
-                    "SELECT task_id,objective,title,revision,updated_at FROM app_agent_tasks "
-                    "WHERE user_id=? AND task_id=?",
+                    "SELECT t.task_id,t.objective,t.title,t.revision,t.updated_at,p.project_id "
+                    "FROM app_agent_tasks t LEFT JOIN app_agent_project_contexts x "
+                    "ON x.task_id=t.task_id AND x.user_id=t.user_id "
+                    "LEFT JOIN app_projects p ON p.project_id=x.project_id AND p.user_id=t.user_id "
+                    "AND p.private_required=0 WHERE t.user_id=? AND t.task_id=?",
                     (document.owner_id, expected["task_id"]),
                 ).fetchone()
             return row is not None and dict(row) == expected
@@ -263,9 +266,12 @@ class ContentSourceReader:
                 ).fetchall()
             else:
                 rows = self.store._conn.execute(
-                    "SELECT task_id,objective,title,result,revision,updated_at FROM app_agent_tasks "
-                    "WHERE user_id=? AND result!='' AND task_id>? "
-                    "AND (? IS NULL OR task_id=?) ORDER BY task_id LIMIT ?",
+                    "SELECT t.task_id,t.objective,t.title,t.result,t.revision,t.updated_at,p.project_id "
+                    "FROM app_agent_tasks t LEFT JOIN app_agent_project_contexts x "
+                    "ON x.task_id=t.task_id AND x.user_id=t.user_id "
+                    "LEFT JOIN app_projects p ON p.project_id=x.project_id AND p.user_id=t.user_id "
+                    "AND p.private_required=0 WHERE t.user_id=? AND t.result!='' AND t.task_id>? "
+                    "AND (? IS NULL OR t.task_id=?) ORDER BY t.task_id LIMIT ?",
                     (owner_id, after, source_id, source_id, limit),
                 ).fetchall()
             return [dict(row) for row in rows]
@@ -310,6 +316,7 @@ class ContentSourceReader:
             title=row["title"] or fallback_conversation_title(row["objective"]),
             text=row["result"],
             updated_at=row["updated_at"],
+            project_id=row["project_id"],
             target={"kind": kind, "task_id": row["task_id"], "origin": "generated"},
         )
         return self._remember(
@@ -494,6 +501,7 @@ class ContentSourceReader:
                         kind="agent",
                         reason="size_limit",
                         updated_at=row["updated_at"],
+                        project_ids=(row["project_id"],) if row["project_id"] else (),
                     ))
             key = "message_id" if kind == "message" else "task_id"
             return documents, rows[-1][key] if len(rows) == limit else None, warnings

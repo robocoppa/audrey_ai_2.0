@@ -63,7 +63,7 @@ This raises the original 2,048-token report allowance after a reported Research
 output-limit failure; live acceptance of the larger allowance remains pending.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
-Adaptive multi-step plans, Project/file/Private agent inputs,
+Adaptive multi-step plans, source-backed Project notes, file/Private agent inputs,
 foreground-priority enhancements, semantic search,
 owned-file watches and Project-associated watches remain implementation work. Existing Private Tax tasks keep
 their current behavior. The remaining sections specify the intended full feature.
@@ -119,7 +119,7 @@ pending, rejected, superseded and stale-source entries cannot ground a new run.
 Each native run saves only its selected entry IDs/revisions; generation rechecks the
 frozen knowledge/source proofs and fails if they change. Private Project chat stays
 inside its existing verified local policy. Public background Agents still have no
-Project inputs, and saved Private Tax tasks keep their established context/admission.
+file or Private inputs, and saved Private Tax tasks keep their established context/admission.
 
 Source references contain canonical IDs/revisions only, with Project-scoped source
 previews and local ownership/deletion/detachment checks. Explicit user notes and
@@ -211,6 +211,36 @@ post-await ownership/deletion/revision fences and plain-text rendering cover sta
 invalid requests. No extra classifier, cloud model, external delivery or additional
 tool authority was added. Rebuild backend and UI; schema 31 applies automatically.
 
+Schema 32 links public-research agents to ordinary Projects. The composer offers
+an optional Project, and Project home lists its saved agents plus an explicit
+New agent in Project action. Prefill preserves the objective and requires Start
+agent. Saved task and Project links resolve current owned targets before navigating;
+hidden or superseded reads abort, while mounted conversation and agent drafts stay intact.
+
+Creation freezes up to 2,000 tokens of Project instructions and 1,000 text tokens
+across at most 12 approved notes without source references. Selection prioritizes
+pinned, relevant and open work; newly added notes are not silently adopted. Source-backed
+notes, file contents and Private Projects remain outside this public workflow.
+Every step receives the selected context as quoted working data under platform
+guidance. Approved notes do not verify truth or authorize new tools or actions.
+All model calls remain verified local Qwen; only Research has the existing public tools.
+
+The additive manifest stores instruction hashes and note IDs/revisions/prefix lengths,
+without copying input bodies or Project names. Canonical rows supply text afresh.
+Ownership, context and deletion fences cover claims, dispatch, saved steps, questions,
+completion, answers, Resume and Run again. Changed selected instructions/notes block
+further work and require a new explicit agent; they cannot silently replace inputs or
+replan the existing agent. A rename or unrelated file/note addition does not invalidate
+the task. Cancel, deletion and saved-report access remain available.
+
+Project deletion removes canonical context and leaves saved reports with an unavailable
+Project label; task/account deletion removes the manifest. Agent reports participate
+in the existing Search Project filter, with canonical revision fences when their
+Project disappears. Existing agents remain unscoped after migration. Affected local
+storage/runtime/API/UI checks, lint, TypeScript, build and mocked desktop/phone flows
+pass; real model and deployed acceptance remain manual. Rebuild backend and UI;
+schema 32 applies automatically with no configuration change or required upload.
+
 ## Product outcome
 
 A user can give Audrey an objective, choose its Project and sources, start an
@@ -230,11 +260,11 @@ decision; then schedule a weekly check of a selected public release page.
 
 | Area | Already present | Work required |
 | --- | --- | --- |
-| Native runs | Browser-independent execution, saved messages, model/tool activity and reconnect events | Durable objectives, plans, checkpoints, user-input waits and restart dispatch |
+| Native runs | Saved agent objectives, three-stage plans/checkpoints, planning questions, leases and restart dispatch | Adaptive steps and finer-grained within-step recovery |
 | Private tasks | Leases, revisions, source/model pins, budgets and committed-result delivery for Private tax reviews | General agent contracts and adapters; existing Private recovery currently pauses work |
-| Search | Native local lexical API/UI, canonical source text viewer, bounded projection, snippets and filters | Semantic candidates, approved knowledge and full chat/file workspace navigation |
-| Projects | Instructions, conversation grouping, selected files and per-run context snapshots | Attributable working knowledge reused across conversations and agent tasks |
-| Scheduling | Lifecycle workers and polling patterns for existing maintenance | User-owned schedules, occurrences, baselines, comparisons and notifications |
+| Search | Local lexical API/sidebar, canonical reader, bounded projection, approved notes and Project report filters | Semantic candidates and full chat/file workspace navigation |
+| Projects | Approved knowledge in native chat and ordinary agents; fixed agent context, Project links and saved-work lists | Source-backed note and file/Private agent context, automatic proposals |
+| Scheduling | Explicit public-page schedules, snapshots/diffs, baselines and Activity alerts | Owned-file/Private, Project-associated and multiple-source watches |
 
 Code anchors:
 

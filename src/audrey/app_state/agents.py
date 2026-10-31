@@ -16,6 +16,12 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from audrey.app_state.agent_projects import (
+    CONTEXT_CHANGED,
+    AgentProjectAccessError,
+    AgentProjectChangedError,
+    AgentProjectContexts,
+)
 from audrey.app_state.notifications import _agent_notice_title, insert_agent_notice
 from audrey.app_state.titles import fallback_conversation_title, normalize_agent_title
 from audrey.app_state.transactions import write_transaction
@@ -52,6 +58,10 @@ class AgentTaskConflictError(AgentTaskError):
 
 class AgentTaskAccessError(AgentTaskError):
     """A task does not exist for an active owner."""
+
+
+class AgentTaskContextError(AgentTaskConflictError):
+    """A frozen Project input changed; cleanup and saved-report reads remain valid."""
 
 
 def _text(value: str, *, maximum: int, name: str, empty: bool = False) -> str:
@@ -92,6 +102,7 @@ class AgentsRepository:
 
     def __init__(self, connection: sqlite3.Connection, lock: threading.RLock) -> None:
         self._conn, self._lock = connection, lock
+        self._project_contexts = AgentProjectContexts(connection)
         self._clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.UTC)
 
     def _transaction(self, work: Callable[[], Any]) -> Any:
@@ -120,6 +131,7 @@ class AgentsRepository:
         record["steps"] = json.loads(record.pop("steps_json"))
         record["limits"] = json.loads(record.pop("limits_json"))
         record["input_requests"] = self._input_requests(record["task_id"])
+        record["project_context"] = self._project_contexts.public(task_id=record["task_id"], user_id=record["user_id"])
         return record
 
     @staticmethod
@@ -133,6 +145,7 @@ class AgentsRepository:
             ) else record["status"],
             "steps": [dict(step) for step in record["steps"]],
             "input_requests": [dict(item) for item in record["input_requests"]],
+            "project_context": record["project_context"],
         }
 
     def _internal(self, record: dict) -> dict:
@@ -205,6 +218,29 @@ class AgentsRepository:
         if record["active_seconds"] >= record["limits"]["max_active_seconds"]:
             raise AgentTaskError("Agent active execution allowance exhausted.")
 
+    def _context(self, record: dict) -> dict | None:
+        try:
+            return self._project_contexts.resolve(task_id=record["task_id"], user_id=record["user_id"])
+        except AgentProjectChangedError:
+            raise AgentTaskContextError(CONTEXT_CHANGED) from None
+
+    def fence_execution(self, *, task_id: str, lease_token: str, fence: int) -> None:
+        """Check live owner, lease, inputs and cumulative time after the final await."""
+        with self._lock:
+            record = self._lease(task_id, lease_token, fence)
+            self._account(record)
+            self._budget(record)
+            self._context(record)
+
+    async def resolve_project_context(self, *, task_id: str, lease_token: str, fence: int) -> dict | None:
+        def work() -> dict | None:
+            with self._lock:
+                record = self._lease(task_id, lease_token, fence)
+                self._account(record)
+                self._budget(record)
+                return self._context(record)
+        return await asyncio.to_thread(work)
+
     def _queue_capacity(self, user_id: str, limits: dict, *, exclude_task_id: str | None = None) -> None:
         queued = self._conn.execute(
             "SELECT COUNT(*) AS total,COALESCE(SUM(user_id=?),0) AS owned "
@@ -220,10 +256,13 @@ class AgentsRepository:
 
     async def create(
         self, *, user_id: str, objective: str, request_id: str, limits: dict | None = None,
+        project_id: str | None = None,
     ) -> dict:
         objective = _text(objective, maximum=8000, name="objective")
         request_id = _text(request_id, maximum=200, name="request identity")
         limits = _limits(limits)
+        if project_id is not None:
+            project_id = _text(project_id, maximum=300, name="Project identity")
 
         def work() -> dict:
             self._owner(user_id)
@@ -233,8 +272,9 @@ class AgentsRepository:
             ).fetchone()
             if existing is not None:
                 record = self._record(existing)
-                if record["objective"] != objective:
-                    raise AgentTaskConflictError("Request identity already used for another objective.")
+                saved_project = record["project_context"]["project_id"] if record["project_context"] else None
+                if record["objective"] != objective or saved_project != project_id:
+                    raise AgentTaskConflictError("Request identity already used for another objective or Project.")
                 return self._public(record)
             self._queue_capacity(user_id, limits)
             saved = self._conn.execute(
@@ -251,18 +291,30 @@ class AgentsRepository:
                 "limits_json,steps_json,created_at,updated_at) VALUES (?,?,?,?,'queued',?,?,?,?)",
                 (task_id, user_id, request_id, objective, json.dumps(limits), json.dumps(steps), now, now),
             )
+            if project_id is not None:
+                try:
+                    self._project_contexts.capture(task_id=task_id, user_id=user_id, project_id=project_id, objective=objective)
+                except AgentProjectAccessError:
+                    raise AgentTaskAccessError("Project research context is unavailable.") from None
             return self._public(self._load(task_id, user_id))
 
         return await asyncio.to_thread(self._transaction, work)
 
-    async def list(self, *, user_id: str, limit: int = 50, summary: bool = False) -> list[dict]:
+    async def list(self, *, user_id: str, limit: int = 50, summary: bool = False, project_id: str | None = None) -> list[dict]:
         _integer(limit, 1, 200)
         if type(summary) is not bool:
             raise AgentTaskError("Invalid task summary option.")
+        if project_id is not None:
+            project_id = _text(project_id, maximum=300, name="Project identity")
 
         def work() -> list[dict]:
             with self._lock:
                 self._owner(user_id)
+                if project_id is not None:
+                    try:
+                        self._project_contexts.require_project(user_id, project_id)
+                    except AgentProjectAccessError:
+                        raise AgentTaskAccessError("Project research context is unavailable.") from None
                 if summary:
                     rows = self._conn.execute(
                         "SELECT task_id,objective,title,status,revision,created_at,updated_at,"
@@ -272,8 +324,9 @@ class AgentsRepository:
                         "json_extract(steps_json,'$[2].status') AS review_status,"
                         "EXISTS(SELECT 1 FROM app_agent_input_requests q WHERE q.task_id=app_agent_tasks.task_id "
                         "AND q.answer IS NULL AND q.dismissed_at IS NULL) AS has_pending_input "
-                        "FROM app_agent_tasks WHERE user_id=? "
-                        "ORDER BY created_at DESC,task_id DESC LIMIT ?", (user_id, limit),
+                        "FROM app_agent_tasks WHERE user_id=? AND (? IS NULL OR EXISTS "
+                        "(SELECT 1 FROM app_agent_project_contexts c WHERE c.task_id=app_agent_tasks.task_id AND c.project_id=?)) "
+                        "ORDER BY created_at DESC,task_id DESC LIMIT ?", (user_id, project_id, project_id, limit),
                     ).fetchall()
                     return [{
                         "id": row["task_id"],
@@ -282,13 +335,15 @@ class AgentsRepository:
                         "status": "waiting_for_input" if row["status"] == "paused" and row["has_pending_input"] else row["status"],
                         "summary": True,
                         "input_requests": [],
+                        "project_context": self._project_contexts.public(task_id=row["task_id"], user_id=user_id),
                         "steps": [{
                             "id": key, "label": label, "status": row[f"{key}_status"], "result": "",
                         } for key, label in _STEP_LABELS],
                     } for row in rows]
                 return [self._public(self._record(row)) for row in self._conn.execute(
-                    "SELECT * FROM app_agent_tasks WHERE user_id=? "
-                    "ORDER BY created_at DESC,task_id DESC LIMIT ?", (user_id, limit),
+                    "SELECT * FROM app_agent_tasks WHERE user_id=? AND (? IS NULL OR EXISTS "
+                    "(SELECT 1 FROM app_agent_project_contexts c WHERE c.task_id=app_agent_tasks.task_id AND c.project_id=?)) "
+                    "ORDER BY created_at DESC,task_id DESC LIMIT ?", (user_id, project_id, project_id, limit),
                 ).fetchall()]
 
         return await asyncio.to_thread(work)
@@ -317,6 +372,8 @@ class AgentsRepository:
                 status = "waiting_for_input" if row["status"] == "paused" and row["waiting"] else row["status"]
                 if row["revision"] != payload["revision"] or status != payload["status"] or (
                     payload.get("input_requests") and self._input_requests(payload["id"]) != payload["input_requests"]
+                ) or (
+                    self._project_contexts.public(task_id=payload["id"], user_id=user_id) != payload.get("project_context")
                 ):
                     raise AgentTaskConflictError("Agent task changed. Refresh before trying again.")
 
@@ -355,6 +412,14 @@ class AgentsRepository:
             for row in rows:
                 record = self._record(row)
                 self._account(record)
+                try:
+                    self._context(record)
+                except AgentTaskContextError:
+                    record.update(status="failed", error=CONTEXT_CHANGED)
+                    self._clear_lease(record)
+                    self._save(record)
+                    insert_agent_notice(self._conn, record, created_at=record["updated_at"])
+                    continue
                 if (
                     record["attempts"] >= max_attempts
                     or record["active_seconds"] >= record["limits"]["max_active_seconds"]
@@ -386,6 +451,7 @@ class AgentsRepository:
         def work() -> bool:
             with self._lock:
                 record = self._lease(task_id, lease_token, fence)
+                self._context(record)
                 self._account(record)
                 self._budget(record)
                 return True
@@ -399,6 +465,7 @@ class AgentsRepository:
 
         def work() -> dict:
             record = self._lease(task_id, lease_token, fence)
+            self._context(record)
             self._account(record)
             self._budget(record)
             record["lease_expires_at"] = _stamp(max(
@@ -415,6 +482,7 @@ class AgentsRepository:
     ) -> str:
         def work() -> str:
             record = self._lease(task_id, lease_token, fence)
+            self._context(record)
             self._account(record)
             self._budget(record)
             if step_id not in {key for key, _ in _STEP_LABELS} or self._internal(record)["current_step"] != step_id:
@@ -440,6 +508,7 @@ class AgentsRepository:
 
         def work() -> dict:
             record = self._lease(task_id, lease_token, fence)
+            self._context(record)
             self._account(record)
             self._budget(record)
             step = next((item for item in record["steps"] if item["id"] == step_id), None)
@@ -472,6 +541,7 @@ class AgentsRepository:
         """Charge at most one title attempt, preserving room for useful model work."""
         def work() -> str | None:
             record = self._lease(task_id, lease_token, fence)
+            self._context(record)
             self._account(record)
             self._budget(record)
             if self._internal(record)["current_step"] != step_id:
@@ -503,6 +573,7 @@ class AgentsRepository:
 
         def work() -> str:
             record = self._lease(task_id, lease_token, fence)
+            self._context(record)
             self._account(record)
             self._budget(record)
             operation = self._conn.execute(
@@ -531,6 +602,7 @@ class AgentsRepository:
 
         def work() -> dict:
             record = self._lease(task_id, lease_token, fence)
+            self._context(record)
             self._account(record)
             self._budget(record)
             if self._internal(record)["current_step"] != "plan":
@@ -573,6 +645,7 @@ class AgentsRepository:
 
         def work() -> dict:
             record = self._load(task_id, user_id)
+            self._context(record)
             request = self._conn.execute(
                 "SELECT * FROM app_agent_input_requests WHERE request_id=? AND task_id=? AND user_id=?",
                 (request_id, task_id, user_id),
@@ -610,6 +683,7 @@ class AgentsRepository:
 
         def work() -> dict:
             record = self._lease(task_id, lease_token, fence)
+            self._context(record)
             self._account(record)
             self._budget(record)
             if any(step["status"] != "completed" for step in record["steps"]):
@@ -671,6 +745,8 @@ class AgentsRepository:
                 raise AgentTaskConflictError("Agent task cannot perform that action.")
             if action == "resume" and any(item["answer"] is None for item in record["input_requests"]):
                 raise AgentTaskConflictError("Answer the agent's pending question before continuing.")
+            if action in {"resume", "rerun"}:
+                self._context(record)
             self._account(record)
             if action == "rerun":
                 self._queue_capacity(user_id, queue_limits or record["limits"])

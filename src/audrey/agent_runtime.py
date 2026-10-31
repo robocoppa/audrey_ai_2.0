@@ -15,7 +15,7 @@ from contextlib import suppress
 from typing import Any
 
 from audrey.agent_dispatch import AgentDispatchStoppedError, AgentInputRequest
-from audrey.app_state.agents import AgentTaskError
+from audrey.app_state.agents import AgentTaskContextError, AgentTaskError
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +198,8 @@ class AgentRuntime:
             return "Agent execution time limit reached.", False
         if isinstance(error, AgentDispatchStoppedError):
             # This type carries only trusted, server-defined stop descriptions.
+            return str(error), False
+        if isinstance(error, AgentTaskContextError):
             return str(error), False
         if isinstance(error, AgentTaskError):
             return "Agent access, inputs or execution limits changed.", False

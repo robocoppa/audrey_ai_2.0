@@ -19,6 +19,12 @@
 .app-primary-workspaces { flex: 1 1 auto; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
 .app-primary-workspaces > .app-workspace-view { min-width: 0; }
 .app-search-backdrop { position: absolute; z-index: 39; inset: 0; padding: 0; border: 0; background: rgb(2 7 16 / 60%); cursor: default; }
+.app-project-link-error { position: absolute; z-index: 45; top: 0.6rem; left: 1rem; right: 1rem; display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 0.7rem 1rem; border: 1px solid rgb(245 128 136 / 35%); border-radius: 0.65rem; color: #f5a3aa; background: var(--surface-raised); font-size: 0.85rem; overflow-wrap: anywhere; }
+.app-project-link-error p { margin: 0; }
+.app-project-link-error button { flex: none; }
+.app-project-link-error { position: absolute; z-index: 38; top: 0.75rem; right: 1rem; left: 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 1rem; border: 1px solid var(--danger); border-radius: 0.65rem; background: var(--surface); color: var(--danger); font-size: 0.82rem; }
+.app-project-link-error p { margin: 0; }
+.app-project-link-error button { flex: none; min-width: 2.75rem; min-height: 2.75rem; border: 1px solid var(--border); border-radius: 0.5rem; background: transparent; color: var(--text); cursor: pointer; }
 
 .topbar :is(.app-workspace-navigation button, .workspace-header-button, .my-files-button, .session-name, .admin-button, .logout-button, .session-retry-button) {
   transition: border-color 120ms ease, color 120ms ease, background 120ms ease, box-shadow 120ms ease;

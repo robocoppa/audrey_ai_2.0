@@ -73,7 +73,7 @@ async def test_create_idempotent_and_public_records_have_no_worker_credentials(s
     assert first == second
     assert set(first) == {
         "id", "objective", "title", "status", "revision", "created_at", "updated_at", "steps",
-        "result", "error", "attempts", "input_requests",
+        "result", "error", "attempts", "input_requests", "project_context",
     }
     assert [step["id"] for step in first["steps"]] == ["plan", "research", "review"]
     assert all(step["status"] == "pending" for step in first["steps"])
@@ -150,7 +150,7 @@ async def test_title_additive_migration_repairs_partial_schema_without_losing_sa
         state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=28")
     upgraded = ApplicationStore(state.store.path)
     try:
-        assert upgraded.schema_version == 31
+        assert upgraded.schema_version == 32
         current = await upgraded.agents.get(user_id=state.owner.user_id, task_id=task["id"])
         assert current["title"] == "Saved Public Research Title" and current["objective"] == task["objective"]
         assert current["steps"][0] == task["steps"][0]

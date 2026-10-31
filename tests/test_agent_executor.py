@@ -165,12 +165,13 @@ async def state(tmp_path, monkeypatch):
     store.close()
 
 
-async def _step(state, step_id="plan", *, max_operations=96, generated_title=True):
+async def _step(state, step_id="plan", *, max_operations=96, generated_title=True, project_id=None):
     task = await state.store.agents.create(
         user_id=state.owner.user_id,
         objective="Compare the public release notes.",
         request_id=f"request-{step_id}",
         limits={"max_operations": max_operations},
+        project_id=project_id,
     )
     claimed = await state.store.agents.claim()
     assert claimed["id"] == task["id"]
@@ -854,3 +855,42 @@ async def test_actual_local_executor_waits_and_then_completes_same_agent_using_s
         assert json.loads(payload["messages"][1]["content"])["clarifications"] == [
             {"question": pending["question"], "answer": "Public Example Product, stable releases only."},
         ]
+
+
+@pytest.mark.parametrize("step_id", ["plan", "research", "review"])
+async def test_project_context_reaches_each_local_step_as_quoted_bounded_working_data(state, step_id):
+    project = await state.store.projects.create(user_id=state.owner.user_id, name="Public release scope", instructions="Compare stable releases only.")
+    note = await state.store.knowledge.create(user_id=state.owner.user_id, project_id=project.project_id, kind="action", text="Review the stable release policy.")
+    linked = await state.store.knowledge.create(user_id=state.owner.user_id, project_id=project.project_id, kind="fact", text="Linked file text is excluded.", sources=[{"source_id": "file:missing:text", "revision": "1"}])
+    task = await _step(state, step_id, project_id=project.project_id)
+    if step_id == "research":
+        state.responses.extend([_search(), _answer()])
+    await state.executor(task, step_id)
+    payload = _content_requests(state)[0]
+    context = next(message for message in payload["messages"] if "Authenticated user's selected Project context" in message["content"])
+    assert context["role"] == "system" and project.instructions in context["content"]
+    assert note["text"] in context["content"] and linked["text"] not in context["content"]
+    assert "not independently verified evidence" in context["content"] and "No Project files" in context["content"]
+    assert payload["model"] == _MODEL
+    offered = {tool["function"]["name"] for tool in payload.get("tools", [])}
+    assert offered == ({"web_search", "web_fetch"} if step_id == "research" else set())
+
+
+@pytest.mark.parametrize("timing", ["metadata", "response"])
+async def test_project_changes_during_transport_prevent_dispatch_or_checkpoint(state, timing):
+    project = await state.store.projects.create(user_id=state.owner.user_id, name="Frozen instructions", instructions="Original scope.")
+    task = await _step(state, project_id=project.project_id)
+
+    async def change():
+        await state.store.projects.update(user_id=state.owner.user_id, project_id=project.project_id, instructions="New scope must require a new agent.")
+
+    if timing == "metadata":
+        state.on_show = change
+    else:
+        state.on_chat = change
+    with pytest.raises(AgentTaskError, match="Project context changed"):
+        await state.executor(task, "plan")
+    assert len(_content_requests(state)) == (timing == "response")
+    assert not state.tool_requests and all(client._client.is_closed for client in state.clients)
+    saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert not saved["steps"][0]["result"] and not saved["project_context"]["current"]

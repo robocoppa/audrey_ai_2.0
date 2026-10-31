@@ -507,6 +507,15 @@ export interface AgentInputRequest {
   answered_at: string | null;
 }
 
+export interface AgentProjectContext {
+  project_id: string;
+  project_name: string | null;
+  available: boolean;
+  current: boolean;
+  instructions_included: boolean;
+  knowledge: Array<{ id: string; revision: number }>;
+}
+
 export interface AgentTask {
   title?: string;
   summary?: boolean;
@@ -526,21 +535,23 @@ export interface AgentTask {
   error: string;
   attempts: number;
   input_requests?: AgentInputRequest[];
+  project_context?: AgentProjectContext | null;
 }
 
-export function listAgentTasks(signal?: AbortSignal): Promise<{ items: AgentTask[] }> {
-  return apiJson<{ items: AgentTask[] }>("/api/agents", { signal, cache: "no-store" });
+export function listAgentTasks(signal?: AbortSignal, projectId?: string): Promise<{ items: AgentTask[] }> {
+  const query = projectId ? `?${new URLSearchParams({ project_id: projectId })}` : "";
+  return apiJson<{ items: AgentTask[] }>(`/api/agents${query}`, { signal, cache: "no-store" });
 }
 
 export function getAgentTask(taskId: string, signal?: AbortSignal): Promise<AgentTask> {
   return apiJson<AgentTask>(`/api/agents/${encodeURIComponent(taskId)}`, { signal, cache: "no-store" });
 }
 
-export function createAgentTask(objective: string, requestId: string): Promise<AgentTask> {
+export function createAgentTask(objective: string, requestId: string, projectId?: string | null): Promise<AgentTask> {
   return apiJson<AgentTask>("/api/agents", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ objective, request_id: requestId }),
+    body: JSON.stringify({ objective, request_id: requestId, ...(projectId !== undefined ? { project_id: projectId } : {}) }),
   });
 }
 
@@ -1053,14 +1064,14 @@ export function createConversation(modelId: string): Promise<Conversation> {
   });
 }
 
-export function listProjects(cursor?: string): Promise<AudreyProjectList> {
+export function listProjects(cursor?: string, signal?: AbortSignal): Promise<AudreyProjectList> {
   const params = new URLSearchParams({ limit: "100" });
   if (cursor) params.set("cursor", cursor);
-  return apiJson<AudreyProjectList>(`/api/projects?${params}`);
+  return apiJson<AudreyProjectList>(`/api/projects?${params}`, { signal, cache: "no-store" });
 }
 
-export function getProject(projectId: string): Promise<AudreyProject> {
-  return apiJson<AudreyProject>(`/api/projects/${encodeURIComponent(projectId)}`);
+export function getProject(projectId: string, signal?: AbortSignal): Promise<AudreyProject> {
+  return apiJson<AudreyProject>(`/api/projects/${encodeURIComponent(projectId)}`, { signal, cache: "no-store" });
 }
 
 export function createProject(

@@ -36,6 +36,20 @@ class AgentInputResponse(BaseModel):
     answered_at: str | None
 
 
+class AgentKnowledgePinResponse(BaseModel):
+    id: str
+    revision: int
+
+
+class AgentProjectContextResponse(BaseModel):
+    project_id: str
+    project_name: str | None
+    available: bool
+    current: bool
+    instructions_included: bool
+    knowledge: list[AgentKnowledgePinResponse]
+
+
 class AgentTaskResponse(BaseModel):
     id: str
     objective: str
@@ -49,6 +63,7 @@ class AgentTaskResponse(BaseModel):
     error: str
     attempts: int
     input_requests: list[AgentInputResponse] = Field(default_factory=list)
+    project_context: AgentProjectContextResponse | None = None
 
 
 class AgentTaskSummaryResponse(AgentTaskResponse):
@@ -63,6 +78,7 @@ class AgentCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     objective: str = Field(min_length=1, max_length=8000)
     request_id: str = Field(min_length=1, max_length=200)
+    project_id: str | None = Field(default=None, min_length=1, max_length=300)
 
 
 class AgentActionRequest(BaseModel):
@@ -99,11 +115,12 @@ def _wake(request: Request) -> None:
 
 @router.get("/agents", response_model=AgentListResponse)
 async def list_agents(request: Request, response: Response,
+                      project_id: str | None = Query(default=None, min_length=1, max_length=300),
                       principal: Principal = Depends(_agents_access)):
     response.headers["Cache-Control"] = "private, no-store"
     try:
         repository = _repository(request)
-        tasks = await repository.list(user_id=principal.user_id, limit=200, summary=True)
+        tasks = await repository.list(user_id=principal.user_id, limit=200, summary=True, project_id=project_id)
         repository.fence_response(user_id=principal.user_id, tasks=tasks)
         return {"items": tasks}
     except AgentTaskError as error:
@@ -119,7 +136,7 @@ async def create_agent(body: AgentCreateRequest, request: Request, response: Res
         await research_authority(request.app, principal.user_id)
         settings = agent_settings(request.app)
         task = await repository.create(user_id=principal.user_id, objective=body.objective,
-                                       request_id=body.request_id, limits=settings.task_limits())
+                                       request_id=body.request_id, limits=settings.task_limits(), project_id=body.project_id)
         repository.fence_response(user_id=principal.user_id, tasks=[task])
     except AgentDispatchStoppedError as error:
         raise HTTPException(status_code=503, detail=str(error)) from None

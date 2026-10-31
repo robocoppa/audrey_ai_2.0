@@ -81,6 +81,7 @@ import {
   type AudreyModel,
   type AudreyProject,
   type AudreyProjectFile,
+  type AgentTask,
   type Conversation,
   type ConversationMessage,
   type MessageAttachment,
@@ -229,6 +230,9 @@ export function ChatWorkspace({
   mobileNewChatHost,
   menuActions,
   menuFooter,
+  projectOpenRequest,
+  onNewProjectAgent,
+  onOpenProjectAgent,
 }: {
   visible?: boolean;
   navigationOpen: boolean;
@@ -241,6 +245,9 @@ export function ChatWorkspace({
   preferences: UserPreferences;
   models: AudreyModel[];
   skills: SkillSummary[];
+  projectOpenRequest?: { project: AudreyProject; serial: number };
+  onNewProjectAgent?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
+  onOpenProjectAgent?: (task: AgentTask, signal?: AbortSignal) => void | Promise<void>;
 }) {
   const [compactNavigation, setCompactNavigation] = useState(() =>
     window.matchMedia?.("(max-width: 1100px)").matches ?? false);
@@ -358,6 +365,7 @@ export function ChatWorkspace({
   const listKeyRef = useRef("");
   const selectedIdRef = useRef<string | null>(null);
   const selectedProjectIdRef = useRef<string | null>(null);
+  const openedProjectRequest = useRef<number | null>(null);
   const defaultModelId = models.find(({ id }) => id === "auto")?.id ?? models[0]?.id ?? null;
   const catalogUnavailable = defaultModelId === null;
   const canBrowseDirectModels = models.some((model) =>
@@ -405,12 +413,14 @@ export function ChatWorkspace({
 
   useEffect(() => {
     let active = true;
-    setProjectsLoading(true);
-    setProjectsError("");
+    queueMicrotask(() => { if (active) { setProjectsLoading(true); setProjectsError(""); } });
     listProjects()
       .then(({ items, next_cursor, limits }) => {
         if (!active) return;
-        setProjects(items);
+        setProjects((current) => {
+          const selected = current.find(({ id }) => id === selectedProjectIdRef.current);
+          return selected && !items.some(({ id }) => id === selected.id) ? [...items, selected] : items;
+        });
         setProjectsNextCursor(next_cursor);
         if (limits) setProjectLimits(limits);
       })
@@ -424,20 +434,36 @@ export function ChatWorkspace({
   }, []);
 
   useEffect(() => {
-    if (!selectedProjectId) {
+    if (!visible || !projectOpenRequest || openedProjectRequest.current === projectOpenRequest.serial) return;
+    openedProjectRequest.current = projectOpenRequest.serial;
+    let current = true;
+    queueMicrotask(() => {
+      if (!current) return;
+      const project = projectOpenRequest.project;
+      setProjects((items) => [project, ...items.filter(({ id }) => id !== project.id)]);
+      selectedProjectIdRef.current = project.id;
+      setSelectedProjectId(project.id); setExpandedProjectId(project.id);
+      // Keep mounted conversation drafts when following an Agent's Project link.
+      navigationRevisionRef.current += 1;
+      selectedIdRef.current = null; setSelectedId(null); setComposerFocusId(null);
+      setNavigationOpen(false);
+    });
+    return () => { current = false; };
+  }, [visible, projectOpenRequest, setNavigationOpen]);
+
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
       setProjectConversations([]);
       setProjectConversationsNextCursor(null);
       setProjectFiles([]);
       setProjectError("");
-      return;
+      if (selectedProjectId) { setProjectConversationsLoading(true); setProjectFilesLoading(true); }
+    });
+    if (!selectedProjectId) {
+      return () => { active = false; };
     }
-    let active = true;
-    setProjectConversations([]);
-    setProjectConversationsNextCursor(null);
-    setProjectFiles([]);
-    setProjectConversationsLoading(true);
-    setProjectFilesLoading(true);
-    setProjectError("");
     Promise.all([
       listProjectConversations(selectedProjectId, {
         archived: view === "archived",
@@ -1167,6 +1193,7 @@ export function ChatWorkspace({
         ) : null}
         {!catalogUnavailable && selectedProject && !selected ? (
           <ProjectHome
+            visible={visible}
             project={selectedProject}
             conversations={projectConversations}
             files={projectFiles}
@@ -1178,6 +1205,8 @@ export function ChatWorkspace({
             onConversationCreated={projectConversationCreated}
             onConversationSelected={openConversation}
             onFilesChange={setProjectFiles}
+            onNewProjectAgent={onNewProjectAgent}
+            onOpenProjectAgent={onOpenProjectAgent}
           />
         ) : null}
         {!catalogUnavailable && projectError && selectedProject && !selected ? (
@@ -1912,6 +1941,7 @@ function AudreyThread({
   }, [taxCase?.project_id, projectId, onTaxProjectAssociated]);
   const supportsFiles = selectedModel.capabilities.includes("files");
   useEffect(() => {
+    let current = true;
     if (!skillId) return;
     if (isPrivate && skillId === "tax-review") return;
     const selectedSkill = skills.find((skill) => skill.id === skillId);
@@ -1923,8 +1953,9 @@ function AudreyThread({
       || selectedSkillMode === null
       || !selectedSkill.supported_modes.includes(selectedSkillMode)
     ) {
-      setSkillId("");
+      queueMicrotask(() => { if (current) setSkillId(""); });
     }
+    return () => { current = false; };
   }, [isPrivate, selectedSkillMode, skillId, skills]);
   const attachmentIds = useMemo(
     () => selectedAttachments.map(({ id }) => id),
