@@ -1,6 +1,6 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, October 31, 2026. Public-research Agents, unified lexical
+**Status:** In progress, November 1, 2026. Public-research Agents, unified lexical
 Search, Project Knowledge and the first public-page Watch slice are implemented locally. The owner confirms Search
 returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
 
@@ -294,6 +294,16 @@ Affected hermetic transport, queue, cancellation, lifecycle/configuration and
 readiness checks pass; live concurrent-chat/model acceptance remains manual.
 Rebuild and recreate audrey for the configuration addition. No schema migration
 or upload is required.
+
+The admission slice now has a short reusable installed-backend smoke. The Tower
+wrapper streams it into the running container, imports the installed scheduling
+code and reads the bound configuration. Five isolated cases check configured
+capacity, cap-one chat priority, synthetic GPU-age promotion, running-call completion
+and cancellation cleanup, with bounded waits and explicit exit codes. It needs no
+credentials, accounts, model calls or network access. The runner and negative
+failure detection pass locally; the deployed invocation is documented in
+[live testing](../reference/live-smoke-testing.md#installed-admission-smoke).
+Tower smoke execution and real GPU/HTTP contention acceptance remain unrun here.
 
 ## Product outcome
 

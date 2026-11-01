@@ -13,6 +13,7 @@ English user input only; closed checks do not need another run.
 | Files/upload/chat acceptance | Browser → `https://ai.builtryte.xyz`; use a real file |
 | Docker-only Ollama probe | Tower → `scripts/probes/probe-onbox.sh` |
 | Native UI/proxy protocol smoke | Tower → `tests/smoke/smoke-native-onbox.sh` |
+| Installed backend admission smoke, no models | Tower → `tests/smoke/smoke-agent-admission-onbox.sh` |
 
 Laptop checkout: `/home/bart/Documents/github/audrey/audrey_ai_2.0`.
 Tower checkout: `/mnt/user/appdata/audrey_ai_2.0`.
@@ -47,6 +48,9 @@ Test the changed feature and its direct failure boundary. Inspect the real
 script's environment names and arguments before handing off a command.
 Prefer one targeted protocol case over a broad suite. Native upload/Files/chat
 flows use manual browser acceptance; say whether an upload is required.
+Create a focused reusable smoke when changed concurrency, deployment, restart or
+service integration behavior benefits from it. Verify the runner locally, supply
+its exact deployed command, and distinguish isolated checks from live-model evidence.
 
 Every handoff states where commands run, what must rebuild/restart after pull,
 and the visible pass condition. Stop at a failed step before a dependent one.
@@ -62,6 +66,42 @@ it. See [evals](../../evals/README.md) only for an actual evaluation task.
 
 Delete temporary handoffs after acceptance. Keep a brief phase status and
 regression code; retain model evaluation artifacts needed for decisions.
+
+## Installed admission smoke
+
+After deploying the interactive/background admission slice, run this on Tower:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+tests/smoke/smoke-agent-admission-onbox.sh
+```
+
+The wrapper streams the smoke into the running `audrey` container using its
+installed package and `/opt/venv/bin/python`, and reads `/app/config.yaml`.
+These smoke-only additions do not need an image rebuild. An older image without
+admission support reports setup error 2; deploy the backend code/configuration
+first using the service rebuild guidance below. No credentials, `.env.smoke.local`,
+upload, model generation, network request or production account data is needed.
+
+Expect five `PASS` lines and `PASS admission smoke (exit 0)`. Configured GPU/user
+capacities and aging are printed separately from the deliberate cap-one fixture.
+The checks cover configured capacity/cancel cleanup, chat passing queued background
+work, GPU aging, running-call non-preemption and cancellation during a handoff.
+Unaged-priority/handoff fixtures use a separately reported aging threshold of at
+least 60 seconds so very short supported settings cannot age them prematurely.
+The GPU-aging case uses the configured threshold and a backdated monotonic timestamp.
+All overrides belong to isolated test queues; the running server's config is not changed.
+The smoke normally takes a few seconds, with a ten-second deadline per check.
+Short results return directly in the launching shell; no report transfer or
+notifications are required. `--json` produces a compact machine-readable receipt.
+
+This verifies installed scheduler/configuration behavior with isolated queues.
+It does not inspect the server process's active queues, generate an answer, or
+measure live GPU latency or HTTP wiring. Live contention acceptance remains separate.
+Exit codes: 0 pass, 1 finding/timeout, 2 setup failure, 3 unexpected crash, 130 interrupted.
+For a different checkout/container use `AUDREY_SMOKE_APPDATA` (or `APPDATA`) and
+`AUDREY_SMOKE_CONTAINER`; forwarded Python options include `--config`, `--json`
+and `--timeout-seconds` (positive, at most ten seconds).
 
 ## Service rebuilds
 
