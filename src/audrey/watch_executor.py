@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from audrey.agent_dispatch import AgentDispatchStoppedError
 from audrey.agent_executor import _verify_local, agent_settings
+from audrey.background_admission import BackgroundGenerationGate
 from audrey.model_catalog import resolve_model
 from audrey.models.ollama import OllamaClient, generation_budget
 from audrey.net.public_fetch import (
@@ -258,25 +259,25 @@ class WatchExecutor:
             async def record_generation(_count):
                 await authorize()
 
+            generation_gate = BackgroundGenerationGate(self.app.state.gate, self.app.state.inflight)
             async with asyncio.timeout(settings.model_timeout_seconds):
                 with generation_budget(check_generation, record_generation):
-                    async with self.app.state.inflight.slot(principal.storage_namespace):
-                        async with self.app.state.gate.acquire(
-                            model, location="local", user_id=principal.storage_namespace,
-                        ):
-                            response = await client.chat(
-                                model=model,
-                                messages=[
-                                    {"role": "system", "content": _SYSTEM},
-                                    {"role": "user", "content": json.dumps(
-                                        {"criterion": run["criterion"], "evidence": json.loads(diff)},
-                                        ensure_ascii=False,
-                                    )},
-                                ],
-                                options={"temperature": 0, "num_predict": settings.max_tokens_per_call},
-                                think=False, format=_JUDGMENT_SCHEMA,
-                                timeout_s=settings.model_timeout_seconds,
-                            )
+                    async with generation_gate.acquire(
+                        model, location="local", user_id=principal.storage_namespace,
+                    ):
+                        response = await client.chat(
+                            model=model,
+                            messages=[
+                                {"role": "system", "content": _SYSTEM},
+                                {"role": "user", "content": json.dumps(
+                                    {"criterion": run["criterion"], "evidence": json.loads(diff)},
+                                    ensure_ascii=False,
+                                )},
+                            ],
+                            options={"temperature": 0, "num_predict": settings.max_tokens_per_call},
+                            think=False, format=_JUDGMENT_SCHEMA,
+                            timeout_s=settings.model_timeout_seconds,
+                        )
             await authorize()
             message = response.get("message")
             if (

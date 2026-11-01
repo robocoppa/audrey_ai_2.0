@@ -13,6 +13,7 @@ from audrey.config import _validate_readiness
 from audrey.kb.uploads_db import UploadsDB
 from audrey.metrics import (
     readiness_component_available,
+    readiness_pressure,
     readiness_queue_depth,
     readiness_skills,
     readiness_state,
@@ -170,6 +171,20 @@ async def test_ready_snapshot_covers_tools_queues_workers_and_pressure():
     assert result.pressure.gpu_gate.waiting == 2
     assert result.pressure.user_inflight.saturated_users == 1
     assert "example.com" not in result.model_dump_json()
+
+
+async def test_gpu_workload_pressure_survives_readiness_and_metric_projection():
+    app = _app()
+    app.state.gate.pressure_snapshot = lambda: {
+        "capacity": 1, "in_use": 1, "waiting": 3, "waiting_users": 2,
+        "waiting_interactive": 1, "waiting_background": 2, "aged_background": 1,
+    }
+    result = await ReadinessCollector(app, cache_ttl_s=0).collect(force=True)
+    assert result.pressure.gpu_gate.waiting_interactive == 1
+    assert result.pressure.gpu_gate.waiting_background == 2
+    assert result.pressure.gpu_gate.aged_background == 1
+    for kind, expected in (("waiting_interactive", 1), ("waiting_background", 2), ("aged_background", 1)):
+        assert readiness_pressure.labels(scheduler="gpu_gate", kind=kind)._value.get() == expected
 
 
 @pytest.mark.asyncio

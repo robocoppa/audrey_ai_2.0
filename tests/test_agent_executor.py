@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import httpx
@@ -26,6 +27,7 @@ from audrey.models.ollama import GenerationUsageError, OllamaClient
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.react import ReactResult
 from audrey.routes.inflight import UserInflightRegistry
+from audrey.scheduling import current_local_workload
 from audrey.tools.discovery import ToolRegistry, ToolSpec
 
 _MODEL = "qwen3.8:latest"
@@ -103,6 +105,9 @@ async def state(tmp_path, monkeypatch):
         on_tags=None,
         on_show=None,
         on_chat=None,
+        on_tool=None,
+        model_admissions=[],
+        tool_admissions=[],
         installed=[{"name": _MODEL, "model": _MODEL, "digest": "a" * 64}],
         metadata={
             "details": {"format": "gguf"},
@@ -126,6 +131,11 @@ async def state(tmp_path, monkeypatch):
                 await value.on_show()
             return httpx.Response(200, json=value.metadata)
         assert request.url.path == "/api/chat"
+        value.model_admissions.append((
+            current_local_workload(),
+            app.state.inflight.snapshot(),
+            app.state.gate.pressure_snapshot(),
+        ))
         if value.on_chat:
             await value.on_chat()
         payload = json.loads(request.content)
@@ -135,8 +145,15 @@ async def state(tmp_path, monkeypatch):
             return httpx.Response(200, json=value.title_responses.pop(0) if value.title_responses else _answer("Public Release Notes Research"))
         return httpx.Response(200, json=value.responses.pop(0) if value.responses else _answer())
 
-    def tool(request):
+    async def tool(request):
         value.tool_requests.append(request)
+        value.tool_admissions.append((
+            current_local_workload(),
+            app.state.inflight.snapshot(),
+            app.state.gate.pressure_snapshot(),
+        ))
+        if value.on_tool:
+            await value.on_tool()
         return httpx.Response(
             200, json={"results": [{"url": _PUBLIC_URL, "text": "Release notes"}]}
         )
@@ -204,6 +221,153 @@ def _content_requests(state, *, include_titles=False):
         if request.url.path == "/api/chat"
         and (include_titles or not json.loads(request.content)["messages"][0]["content"].startswith("You create concise agent titles."))
     ]
+
+
+@pytest.mark.parametrize("step_id", ["plan", "research", "review"])
+async def test_titles_and_every_research_round_enter_background_admission_at_transport(state, step_id):
+    task = await _step(state, step_id, generated_title=False)
+    if step_id == "research":
+        state.responses.extend([_search(), _search("web_fetch"), _answer()])
+
+    await state.executor(task, step_id)
+
+    # The optional title and every real model dispatch use the same admission
+    # policy. Inspect the HTTP boundary rather than a caller-supplied argument.
+    assert len(state.model_admissions) == (4 if step_id == "research" else 2)
+    for workload, inflight, gpu in state.model_admissions:
+        assert workload == "background"
+        assert inflight.get(state.owner.storage_namespace) == 1
+        assert gpu["in_use"] == 1
+    assert len(state.tool_admissions) == (2 if step_id == "research" else 0)
+    for workload, inflight, gpu in state.tool_admissions:
+        assert workload == "interactive"
+        assert not inflight.get(state.owner.storage_namespace)
+        assert gpu["in_use"] == 0
+    assert current_local_workload() == "interactive"
+    assert not state.app.state.inflight.pressure_snapshot()["in_use"]
+    assert not state.app.state.gate.pressure_snapshot()["in_use"]
+
+
+async def test_blocked_public_research_releases_same_user_admission_for_foreground_chat(state):
+    state.app.state.inflight = UserInflightRegistry(max_inflight_per_user=1)
+    task = await _step(state, "research")
+    state.responses.extend([_search(), _answer()])
+    tool_entered, release_tool = asyncio.Event(), asyncio.Event()
+
+    async def blocked_public_tool():
+        tool_entered.set()
+        await release_tool.wait()
+
+    state.on_tool = blocked_public_tool
+    executing = asyncio.create_task(state.executor(task, "research"))
+    foreground_calls = []
+
+    def foreground_transport(request):
+        foreground_calls.append(json.loads(request.content))
+        assert current_local_workload() == "interactive"
+        assert state.app.state.inflight.snapshot()[state.owner.storage_namespace] == 1
+        assert state.app.state.gate.pressure_snapshot()["in_use"] == 1
+        return httpx.Response(200, json=_answer("Foreground answer."))
+
+    foreground = OllamaClient("http://ollama.test", transport=httpx.MockTransport(foreground_transport))
+    try:
+        await asyncio.wait_for(tool_entered.wait(), 2)
+        assert not executing.done()
+        assert state.tool_admissions[0][1].get(state.owner.storage_namespace, 0) == 0
+        assert state.tool_admissions[0][2]["in_use"] == 0
+        async with asyncio.timeout(2):
+            async with state.app.state.inflight.slot(state.owner.storage_namespace):
+                async with state.app.state.gate.acquire(
+                    _MODEL, location="local", user_id=state.owner.storage_namespace,
+                ):
+                    response = await foreground.chat(
+                        model=_MODEL, messages=[{"role": "user", "content": "A foreground question."}],
+                    )
+        assert response["message"]["content"] == "Foreground answer."
+        assert len(foreground_calls) == 1 and not executing.done()
+        release_tool.set()
+        assert _PUBLIC_URL in await asyncio.wait_for(executing, 2)
+    finally:
+        release_tool.set()
+        if not executing.done():
+            executing.cancel()
+        await asyncio.gather(executing, return_exceptions=True)
+        await foreground.aclose()
+    assert len(_content_requests(state)) == 2
+    assert not state.app.state.inflight.pressure_snapshot()["in_use"]
+    assert not state.app.state.gate.pressure_snapshot()["in_use"]
+
+
+@pytest.mark.parametrize("queued_on", ["inflight", "gpu"])
+@pytest.mark.parametrize("generated_title", [True, False])
+@pytest.mark.parametrize("revocation", ["cancel", "model", "project"])
+async def test_queued_background_work_rechecks_authority_without_charging_model_work(
+    state, monkeypatch, queued_on, generated_title, revocation,
+):
+    project = await state.store.projects.create(
+        user_id=state.owner.user_id, name="Fixed research scope", instructions="Original scope.",
+    )
+    task = await _step(state, generated_title=generated_title, project_id=project.project_id)
+    operations = state.store._conn.execute(
+        "SELECT operations FROM app_agent_tasks WHERE task_id=?", (task["id"],),
+    ).fetchone()[0]
+    state.app.state.inflight = UserInflightRegistry(max_inflight_per_user=1)
+    if queued_on == "inflight":
+        registry, method_name = state.app.state.inflight, "slot"
+        hold = registry.slot(state.owner.storage_namespace)
+    else:
+        registry, method_name = state.app.state.gate, "acquire"
+        hold = registry.acquire(_MODEL, location="local", user_id="foreground-owner")
+    queued = asyncio.Event()
+    original_admit = getattr(registry, method_name)
+
+    @asynccontextmanager
+    async def observe_queue(*args, **kwargs):
+        queued.set()
+        async with original_admit(*args, **kwargs) as permit:
+            yield permit
+
+    monkeypatch.setattr(registry, method_name, observe_queue)
+    executing = None
+    try:
+        async with hold:
+            executing = asyncio.create_task(state.executor(task, "plan"))
+            await asyncio.wait_for(queued.wait(), 2)
+            assert registry.pressure_snapshot()["waiting"] == 1
+            assert not _content_requests(state, include_titles=True)
+            if revocation == "cancel":
+                current = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+                await state.store.agents.control(
+                    user_id=state.owner.user_id, task_id=task["id"],
+                    expected_revision=current["revision"], action="cancel",
+                )
+            elif revocation == "model":
+                await _revoke(state, task, "model")
+            else:
+                await state.store.projects.update(
+                    user_id=state.owner.user_id, project_id=project.project_id,
+                    instructions="Changed scope requires new consent.",
+                )
+        with pytest.raises((AgentDispatchStoppedError, AgentTaskError)):
+            await asyncio.wait_for(executing, 2)
+    finally:
+        if executing is not None:
+            if not executing.done():
+                executing.cancel()
+            await asyncio.gather(executing, return_exceptions=True)
+    assert not _content_requests(state, include_titles=True) and not state.tool_requests
+    assert state.store._conn.execute(
+        "SELECT operations FROM app_agent_tasks WHERE task_id=?", (task["id"],),
+    ).fetchone()[0] == operations
+    saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert not saved["steps"][0]["result"]
+    if not generated_title:
+        title = state.store._conn.execute(
+            "SELECT title,title_attempted FROM app_agent_tasks WHERE task_id=?", (task["id"],),
+        ).fetchone()
+        assert tuple(title) == ("", 0)
+    assert not state.app.state.inflight.pressure_snapshot()["in_use"]
+    assert not state.app.state.gate.pressure_snapshot()["in_use"]
 
 
 @pytest.mark.parametrize("step_id", ["plan", "research", "review"])

@@ -64,6 +64,7 @@ from audrey.routes.openai import router as openai_router
 from audrey.routes.references import router as references_router
 from audrey.routes.tool_history import router as tool_history_router
 from audrey.routes.user_data import router as user_data_router
+from audrey.scheduling import LocalSchedulingSettings
 from audrey.skills import SkillRegistry
 from audrey.tax_exports import TaxReviewExports
 from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, discover_all
@@ -136,11 +137,13 @@ async def lifespan(app: FastAPI):
     registry = ModelRegistry(cfg)
     health = HealthTracker()
     gpu_concurrency = int(cfg.raw.get("gpu", {}).get("concurrency", 1))
-    gate = FairLocalGate(concurrency=gpu_concurrency)
     fairness_cfg = cfg.raw.get("fairness", {}) or {}
+    scheduling = LocalSchedulingSettings.model_validate(fairness_cfg)
+    gate = FairLocalGate(concurrency=gpu_concurrency, background_aging_seconds=scheduling.background_aging_seconds)
     inflight = UserInflightRegistry(
         max_inflight_per_user=int(fairness_cfg.get("max_inflight_per_user", 3)),
         max_tracked_users=int(fairness_cfg.get("max_tracked_users", 1024)),
+        background_aging_seconds=scheduling.background_aging_seconds,
     )
 
     tool_servers: list[str] = list(cfg.tools.get("servers", []) or [])

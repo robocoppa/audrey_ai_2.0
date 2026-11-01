@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import socket
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -20,6 +22,7 @@ from audrey.net.public_fetch import PublicAsset
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.processing_policy import ProcessingPolicy, processing_scope
 from audrey.routes.inflight import UserInflightRegistry
+from audrey.scheduling import current_local_workload
 from audrey.watch_executor import (
     EXTRACTION_VERSION,
     WatchCheckError,
@@ -66,6 +69,7 @@ async def state(tmp_path):
     value = SimpleNamespace(
         store=store, owner=owner, app=app, repository=repository, calls=[], clients=[],
         fetches=[], resolved=[], client_options=[], on_chat=None, on_tags=None,
+        model_admissions=[], fetch_admissions=[],
         asset=PublicAsset(b"Release 2 is available.", "text/plain", _URL),
         installed=[{"name": _MODEL, "model": _MODEL, "digest": "a" * 64}],
         metadata={"details": {"format": "gguf"}, "model_info": {
@@ -83,6 +87,9 @@ async def state(tmp_path):
         if request.url.path == "/api/show":
             return httpx.Response(200, json=value.metadata)
         assert request.url.path == "/api/chat"
+        value.model_admissions.append((
+            current_local_workload(), app.state.inflight.snapshot(), app.state.gate.pressure_snapshot(),
+        ))
         value.calls.append(json.loads(request.content))
         if value.on_chat:
             await value.on_chat()
@@ -105,6 +112,9 @@ async def state(tmp_path):
         assert kwargs["no_query"] is True and kwargs["strict_length"] is True
         await kwargs["authorize"]()
         value.fetches.append(url)
+        value.fetch_admissions.append((
+            current_local_workload(), app.state.inflight.snapshot(), app.state.gate.pressure_snapshot(),
+        ))
         return value.asset
 
     value.executor = WatchExecutor(app, client_factory=client_factory, resolver=resolve, fetcher=fetch)
@@ -187,6 +197,69 @@ async def test_observed_change_and_local_judgment_are_distinct_with_exact_eviden
     assert state.client_options == [("http://ollama.test", {"trust_env": False})]
     assert state.repository.operations == ["fetch", "model"]
     assert all(client._client.is_closed for client in state.clients)
+
+
+async def test_public_watch_fetch_does_not_hold_compute_but_significance_is_background(state):
+    await state.executor(_run(state))
+    assert len(state.fetch_admissions) == len(state.model_admissions) == 1
+    workload, inflight, gpu = state.fetch_admissions[0]
+    assert workload == "interactive" and not inflight.get(state.owner.storage_namespace)
+    assert gpu["in_use"] == 0
+    workload, inflight, gpu = state.model_admissions[0]
+    assert workload == "background" and inflight[state.owner.storage_namespace] == 1
+    assert gpu["in_use"] == 1
+    assert current_local_workload() == "interactive"
+    assert not state.app.state.inflight.pressure_snapshot()["in_use"]
+    assert not state.app.state.gate.pressure_snapshot()["in_use"]
+
+
+@pytest.mark.parametrize("queued_on", ["inflight", "gpu"])
+@pytest.mark.parametrize("revocation", ["lease", "model", "bots"])
+async def test_queued_watch_rechecks_authority_before_model_charge_or_socket(state, monkeypatch, queued_on, revocation):
+    state.app.state.inflight = UserInflightRegistry(max_inflight_per_user=1)
+    if queued_on == "inflight":
+        registry, method_name = state.app.state.inflight, "slot"
+        hold = registry.slot(state.owner.storage_namespace)
+    else:
+        registry, method_name = state.app.state.gate, "acquire"
+        hold = registry.acquire(_MODEL, location="local", user_id="foreground-owner")
+    queued = asyncio.Event()
+    original_admit = getattr(registry, method_name)
+
+    @asynccontextmanager
+    async def observe_queue(*args, **kwargs):
+        queued.set()
+        async with original_admit(*args, **kwargs) as permit:
+            yield permit
+
+    monkeypatch.setattr(registry, method_name, observe_queue)
+    executing = None
+    try:
+        async with hold:
+            executing = asyncio.create_task(state.executor(_run(state)))
+            await asyncio.wait_for(queued.wait(), 2)
+            assert registry.pressure_snapshot()["waiting"] == 1
+            assert state.fetches == [_URL] and not state.calls
+            assert state.repository.operations == ["fetch"]
+            if revocation == "lease":
+                state.repository.revoked = True
+            elif revocation == "model":
+                await state.store.set_model_access_policy(
+                    actor_user_id=state.owner.user_id, model_id="local", enabled=False, audience="users",
+                )
+            else:
+                await _add_owner_to_bots(state)
+        with pytest.raises(AgentDispatchStoppedError):
+            await asyncio.wait_for(executing, 2)
+    finally:
+        if executing is not None:
+            if not executing.done():
+                executing.cancel()
+            await asyncio.gather(executing, return_exceptions=True)
+    assert not state.calls and state.repository.operations == ["fetch"]
+    assert all(client._client.is_closed for client in state.clients)
+    assert not state.app.state.inflight.pressure_snapshot()["in_use"]
+    assert not state.app.state.gate.pressure_snapshot()["in_use"]
 
 
 @pytest.mark.parametrize("failure", ["length", "incomplete", "tools", "malformed", "string_bool", "empty", "extra", "usage"])

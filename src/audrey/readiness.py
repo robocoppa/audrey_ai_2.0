@@ -83,6 +83,9 @@ class GatePressure(BaseModel):
     in_use: int
     waiting: int
     waiting_users: int
+    waiting_interactive: int = 0
+    waiting_background: int = 0
+    aged_background: int = 0
 
 
 class InflightPressure(BaseModel):

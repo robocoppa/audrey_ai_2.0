@@ -131,6 +131,13 @@ gpu_gate_wait_seconds = Histogram(
     buckets=_GATE_BUCKETS,
 )
 
+local_admission_wait_seconds = Histogram(
+    "audrey_local_admission_wait_seconds",
+    "Admission wait for an admitted local workload, by queue and workload class.",
+    labelnames=("stage", "workload"),
+    buckets=(*_GATE_BUCKETS, 60.0, 120.0, 300.0),
+)
+
 # ─── KB search ────────────────────────────────────────────────────────
 
 _KB_BUCKETS = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0)
@@ -486,6 +493,7 @@ __all__ = [
     "model_tokens_total",
     "model_usage_observations_total",
     "gpu_gate_wait_seconds",
+    "local_admission_wait_seconds",
     "kb_search_seconds",
     "kb_search_hits",
     "video_describe_seconds",

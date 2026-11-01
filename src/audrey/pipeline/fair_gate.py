@@ -1,86 +1,58 @@
-"""Per-user fair local-GPU gate.
+"""Local generations favor interactive work while preserving per-user fairness.
 
-Serializes local Ollama generations against the PSU/VRAM budget. Instead
-of strict FIFO across all callers, this round-robins across users so a
-new arrival's first request slips ahead of an existing user's backlog —
-fairness rather than first-come-first-served.
+Running generations finish normally. At the next free slot, interactive
+waiters pass unaged background work, including their own user's backlog.
+Background work waiting long enough joins the interactive priority tier;
+round-robin users and FIFO eligible requests then prevent starvation.
 
-Design:
-
-- One `concurrency` slot total (default 1).
-- Per-user FIFO of waiters. When the slot frees, we pick the next user
-  in round-robin order, then dequeue their head waiter.
-- Cloud calls (location != "local") bypass entirely.
-- Anonymous / no-user-id requests share a synthetic `__anon__` bucket.
-  They round-robin against authed users like everyone else.
-
-Round-robin pointer logic uses an `OrderedDict[str, deque[Future]]` plus
-a `_last_granted` bucket name:
-- A user joining the queue is appended.
-- On release, we walk the OrderedDict from the head looking for the next
-  bucket to grant. We *skip* the most-recently-granted bucket if any
-  other bucket has waiters — this is the "round-robin to a different
-  user" behavior. If the last-granted bucket is the only one with
-  waiters (or no other has waiters), we grant to it again.
-- After each grant, the granted user is moved to the back of the order
-  if they still have queued waiters; if their deque is empty, the user
-  entry is removed entirely.
-
-Why the explicit `_last_granted` is needed: with only OrderedDict
-ordering, a single user with many queued waiters stays at the head
-indefinitely (their deque never goes empty so we never `pop` them and
-never reinsert them at the tail in a way that lets a new arrival
-overtake). A new bucket arriving mid-queue gets appended to the tail
-and would only be granted after the head user's queue drained — that's
-FIFO-by-bucket, not round-robin. Tracking the last granted bucket and
-skipping it on the next pick gives true alternation.
-
-Cancellation safety: when a waiter's coroutine is cancelled (e.g. client
-disconnected), their Future is marked cancelled. There is an unavoidable
-window between cancellation marking the future done and the except
-handler in `acquire` removing it from the deque — during that window a
-release could otherwise pick a dead future and try to set_result on it
-(raising InvalidStateError). `_release` therefore sweeps done futures
-off the head of each deque before picking. That sweep is load-bearing,
-not belt-and-suspenders.
-
-Surface:
-    gate = FairLocalGate(concurrency=cfg.gpu_concurrency)
-    async with gate.acquire(model, location="local", user_id="alice"):
-        await ollama.chat(...)
+Admission and enqueue share one lock so a release cannot strand a waiter
+between checking availability and entering the queue. Cancelled waiters
+are swept before dispatch; cancellation after a grant transfers that slot
+again even if the context body never starts. Cloud calls bypass the gate.
 """
 
 from __future__ import annotations
 
 import asyncio
-import logging
+import math
 import time
 from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import Literal
 
-from audrey.metrics import gpu_gate_wait_seconds
-from audrey.scheduling import ANON_USER_BUCKET
+from audrey.metrics import gpu_gate_wait_seconds, local_admission_wait_seconds
+from audrey.scheduling import (
+    ANON_USER_BUCKET,
+    current_background_queued_at,
+    current_local_workload,
+)
 
-log = logging.getLogger(__name__)
+
+@dataclass(eq=False, slots=True)
+class _Waiter:
+    future: asyncio.Future[None]
+    workload: Literal["interactive", "background"]
+    enqueued_at: float
 
 
 class FairLocalGate:
-    """Per-user fair gate around the local GPU slot."""
+    """Per-user fair gate around local GPU slots with background aging."""
 
-    def __init__(self, *, concurrency: int = 1) -> None:
+    def __init__(
+        self, *, concurrency: int = 1, background_aging_seconds: float = 30.0,
+    ) -> None:
         if concurrency < 1:
             concurrency = 1
+        if not math.isfinite(background_aging_seconds) or background_aging_seconds < 0:
+            raise ValueError("background_aging_seconds must be finite and nonnegative")
         self._concurrency = concurrency
         self._available = concurrency
-        # OrderedDict iteration order = round-robin order. The head of the
-        # dict is "next user in line"; after a grant we pop that user's
-        # head waiter and either remove the user (deque empty) or move
-        # them to the tail.
-        self._waiters: OrderedDict[str, deque[asyncio.Future[None]]] = OrderedDict()
-        # Bucket name of the most recently granted slot. Used in `_release`
-        # to skip back-to-back grants to the same user when another user
-        # has waiters queued.
-        self._last_granted: str | None = None
+        self._background_aging_seconds = background_aging_seconds
+        self._waiters: OrderedDict[str, deque[_Waiter]] = OrderedDict()
+        # Separate pointers preserve round-robin order within each eligible
+        # tier, including user buckets joining after an earlier grant.
+        self._last_granted: dict[str, str] = {}
         self._lock = asyncio.Lock()
 
     @property
@@ -95,133 +67,137 @@ class FairLocalGate:
             return
 
         bucket = (user_id or "").strip() or ANON_USER_BUCKET
+        workload = current_local_workload()
         t0 = time.perf_counter()
-        granted_directly = False
+        waiter: _Waiter | None = None
 
-        # Fast path: a slot is free *and* nobody else is queued. Take it
-        # without parking a Future.
+        # Availability and enqueue must be one transition: the holder could
+        # otherwise release between two separately locked operations.
         async with self._lock:
             if self._available > 0 and not self._waiters:
                 self._available -= 1
-                self._last_granted = bucket
-                granted_directly = True
-
-        if not granted_directly:
-            # Slow path: park a waiter under our user bucket.
-            fut: asyncio.Future[None] = asyncio.get_running_loop().create_future()
-            async with self._lock:
+                self._last_granted[workload] = bucket
+            else:
+                queued_at = current_background_queued_at() if workload == "background" else None
+                waiter = _Waiter(
+                    asyncio.get_running_loop().create_future(), workload,
+                    time.monotonic() if queued_at is None else queued_at,
+                )
                 dq = self._waiters.get(bucket)
                 if dq is None:
                     dq = deque()
                     self._waiters[bucket] = dq
-                dq.append(fut)
+                dq.append(waiter)
+
+        if waiter is not None:
+            fut = waiter.future
             try:
                 await fut
                 await self._after_waiter_granted()
             except asyncio.CancelledError:
-                # A cancelled await cancels its Future when the waiter was
-                # still queued. A Future completed with a result means
-                # _release already transferred the slot to us, so the context
-                # body will never run and we must transfer it again ourselves.
-                was_granted = fut.done() and not fut.cancelled()
+                # Cancellation of the queued await cancels its Future. If
+                # dispatch already set a result, we own a slot and must
+                # transfer it even though the context body never started.
                 async with self._lock:
+                    was_granted = fut.done() and not fut.cancelled()
                     dq = self._waiters.get(bucket)
                     if dq is not None:
                         try:
-                            dq.remove(fut)
+                            dq.remove(waiter)
                         except ValueError:
                             pass
                         if not dq:
                             self._waiters.pop(bucket, None)
                 if was_granted:
-                    # Keep the state transition under the lock in _release,
-                    # but never recursively acquire that lock from above.
                     await self._release()
                 raise
 
-        gpu_gate_wait_seconds.observe(time.perf_counter() - t0)
+        waited = time.perf_counter() - t0
+        gpu_gate_wait_seconds.observe(waited)
+        local_admission_wait_seconds.labels(stage="gpu", workload=workload).observe(waited)
         try:
             yield
         finally:
             await self._release()
 
     async def _after_waiter_granted(self) -> None:
-        """Test seam for the granted-before-resume cancellation window.
-
-        The production implementation deliberately does not suspend. Tests
-        replace it with an event-controlled pause immediately after the queued
-        Future resolves and before the context body begins.
-        """
+        """Non-suspending production seam for grant-before-resume cancellation tests."""
 
     async def _release(self) -> None:
-        """Free one slot and grant it to the next round-robin waiter.
-
-        Skips the bucket that just released (`self._last_granted`) when
-        any other bucket has waiters, so the slot alternates across users
-        instead of letting one user's backlog hog the head of the dict.
-        Falls back to re-granting the last bucket only when it's the
-        sole queued user.
-        """
+        """Transfer one released slot to the next eligible round-robin user."""
         async with self._lock:
-            # First sweep: garbage-collect cancelled/dead futures off the
-            # head of every deque, and drop empty buckets. Load-bearing
-            # against the cancel/release race documented in the module
-            # docstring — without this, `set_result` on the picked future
-            # could raise InvalidStateError.
-            for bucket in list(self._waiters.keys()):
-                dq = self._waiters[bucket]
-                while dq and dq[0].done():
-                    dq.popleft()
+            # Selection can reach past a queue's head; sweep all cancelled
+            # Futures before choosing either workload class.
+            for bucket, queued in list(self._waiters.items()):
+                dq = deque(waiter for waiter in queued if not waiter.future.done())
                 if not dq:
                     self._waiters.pop(bucket, None)
+                else:
+                    self._waiters[bucket] = dq
 
             if not self._waiters:
                 self._available += 1
                 return
 
-            # Pick: prefer any bucket *other* than the one we just granted.
-            # Fall back to the last-granted bucket only if it's the only
-            # one with waiters.
-            pick: str | None = None
-            for bucket in self._waiters:
-                if bucket != self._last_granted:
-                    pick = bucket
-                    break
-            if pick is None:
-                # All remaining waiters are from the last-granted bucket.
-                pick = next(iter(self._waiters))
+            now = time.monotonic()
+            # First eligible request per user preserves FIFO within each
+            # workload and among promoted/interactive requests.
+            eligible = {
+                bucket: next(
+                    (waiter for waiter in dq if self._is_interactive_priority(waiter, now)),
+                    None,
+                )
+                for bucket, dq in self._waiters.items()
+            }
+            priority = "interactive"
+            eligible = {bucket: waiter for bucket, waiter in eligible.items() if waiter is not None}
+            if not eligible:
+                priority = "background"
+                eligible = {bucket: dq[0] for bucket, dq in self._waiters.items()}
 
+            pick = next(
+                (bucket for bucket in eligible if bucket != self._last_granted.get(priority)),
+                next(iter(eligible)),
+            )
             dq = self._waiters[pick]
-            fut = dq.popleft()
+            waiter = eligible[pick]
+            assert waiter is not None
+            dq.remove(waiter)
             if dq:
-                # User still has queued waiters — demote them so the next
-                # release prefers a different bucket if one exists.
                 self._waiters.move_to_end(pick)
             else:
                 self._waiters.pop(pick, None)
-            self._last_granted = pick
-            fut.set_result(None)
+            self._last_granted[priority] = pick
+            waiter.future.set_result(None)
 
-    # ── Introspection (used by metrics endpoint, smoke tests) ─────────
+    def _is_interactive_priority(self, waiter: _Waiter, now: float) -> bool:
+        return (
+            waiter.workload == "interactive"
+            or now - waiter.enqueued_at >= self._background_aging_seconds
+        )
 
     def snapshot(self) -> dict[str, int]:
-        """Best-effort snapshot of current queue depth per user.
-
-        Reads the waiters dict outside the lock; values may shift
-        mid-iteration. Intended for debugging logs, not anything that
-        requires consistency. Materializes into a list first to avoid
-        "dictionary changed size during iteration" under load.
-        """
+        """Best-effort queued counts per user; diagnostics only, never public labels."""
         return {bucket: len(dq) for bucket, dq in list(self._waiters.items())}
 
     def pressure_snapshot(self) -> dict[str, int]:
         """Aggregate gate pressure without exposing queue bucket identities."""
         waiters = list(self._waiters.values())
+        live = [waiter for queue in waiters for waiter in queue if not waiter.future.done()]
+        now = time.monotonic()
         return {
             "capacity": self._concurrency,
             "in_use": max(0, self._concurrency - self._available),
-            "waiting": sum(len(queue) for queue in waiters),
-            "waiting_users": sum(bool(queue) for queue in waiters),
+            "waiting": len(live),
+            "waiting_users": sum(
+                any(not waiter.future.done() for waiter in queue) for queue in waiters
+            ),
+            "waiting_interactive": sum(waiter.workload == "interactive" for waiter in live),
+            "waiting_background": sum(waiter.workload == "background" for waiter in live),
+            "aged_background": sum(
+                waiter.workload == "background" and self._is_interactive_priority(waiter, now)
+                for waiter in live
+            ),
         }
 
 

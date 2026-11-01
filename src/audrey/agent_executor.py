@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from audrey.agent_dispatch import AgentDispatchStoppedError, AgentInputRequest, agent_dispatch_scope
 from audrey.app_state.titles import normalize_agent_title
+from audrey.background_admission import BackgroundGenerationGate
 from audrey.model_catalog import resolve_model
 from audrey.models.ollama import OllamaClient, OllamaError, generation_budget
 from audrey.pipeline.prompts import AGENT_PLAN_SYSTEM, AGENT_RESEARCH_SYSTEM, AGENT_REVIEW_SYSTEM
@@ -240,9 +241,6 @@ class ResearchAgentExecutor:
             return
         repository = self.app.state.application_store.agents
         await authorize()
-        operation_id = await repository.reserve_title_operation(**lease, step_id=step_id)
-        if operation_id is None:
-            return
 
         async def check_title():
             await _verify_local(client, settings.model, self.app.state.cfg.env.ollama_host, policy)
@@ -253,22 +251,26 @@ class ResearchAgentExecutor:
             await authorize()
 
         local = _LocalOnlyClient(client, settings.model, task_id=task["id"], step_id="title")
+        generation_gate = BackgroundGenerationGate(self.app.state.gate, self.app.state.inflight)
         try:
             async with asyncio.timeout(_TITLE_TIMEOUT_SECONDS):
                 with generation_budget(check_title, record_title):
-                    async with self.app.state.inflight.slot(principal.storage_namespace):
-                        async with self.app.state.gate.acquire(
-                            settings.model, location="local", user_id=principal.storage_namespace,
-                        ):
-                            response = await local.chat(
-                                model=settings.model,
-                                messages=[
-                                    {"role": "system", "content": _TITLE_SYSTEM},
-                                    {"role": "user", "content": task["objective"]},
-                                ],
-                                options={"temperature": 0, "num_predict": _TITLE_MAX_TOKENS},
-                                think=False, timeout_s=_TITLE_TIMEOUT_SECONDS,
-                            )
+                    async with generation_gate.acquire(
+                        settings.model, location="local", user_id=principal.storage_namespace,
+                    ):
+                        await authorize()
+                        operation_id = await repository.reserve_title_operation(**lease, step_id=step_id)
+                        if operation_id is None:
+                            return
+                        response = await local.chat(
+                            model=settings.model,
+                            messages=[
+                                {"role": "system", "content": _TITLE_SYSTEM},
+                                {"role": "user", "content": task["objective"]},
+                            ],
+                            options={"temperature": 0, "num_predict": _TITLE_MAX_TOKENS},
+                            think=False, timeout_s=_TITLE_TIMEOUT_SECONDS,
+                        )
             message = response.get("message")
             raw_title = message.get("content", "") if isinstance(message, dict) else ""
             title = normalize_agent_title(raw_title)
@@ -363,48 +365,48 @@ class ResearchAgentExecutor:
                 await repository.reserve_operation(**lease, step_id=step_id)
 
             options = {"num_predict": max_tokens}
+            generation_gate = BackgroundGenerationGate(self.app.state.gate, self.app.state.inflight)
             retrieved = []
             with (
                 agent_dispatch_scope(check_tool),
                 generation_budget(check_generation, record_generation),
             ):
-                async with self.app.state.inflight.slot(principal.storage_namespace):
-                    if step_id == "research":
-                        report = await (self.react_runner or run_react)(
-                            local,
-                            self.app.state.health,
-                            tools,
+                if step_id == "research":
+                    report = await (self.react_runner or run_react)(
+                        local,
+                        self.app.state.health,
+                        tools,
+                        model=settings.model,
+                        messages=messages,
+                        options=options,
+                        timeout_s=settings.step_timeout_seconds,
+                        max_rounds=settings.max_tool_rounds,
+                        compress_after_round=settings.max_tool_rounds + 1,
+                        compress_keep_last=20,
+                        max_tool_result_chars=6000,
+                        tool_dispatch_timeout_s=30,
+                            user_id=principal.storage_namespace,
+                        gate=generation_gate,
+                        location="local",
+                        max_web_searches=4,
+                    )
+                    result, reason, retrieved = (
+                        report.content,
+                        report.done_reason,
+                        report.retrieved,
+                    )
+                else:
+                    async with generation_gate.acquire(
+                        settings.model, location="local", user_id=principal.storage_namespace
+                    ):
+                        response = await local.chat(
                             model=settings.model,
                             messages=messages,
                             options=options,
                             timeout_s=settings.step_timeout_seconds,
-                            max_rounds=settings.max_tool_rounds,
-                            compress_after_round=settings.max_tool_rounds + 1,
-                            compress_keep_last=20,
-                            max_tool_result_chars=6000,
-                            tool_dispatch_timeout_s=30,
-                            user_id=principal.storage_namespace,
-                            gate=self.app.state.gate,
-                            location="local",
-                            max_web_searches=4,
                         )
-                        result, reason, retrieved = (
-                            report.content,
-                            report.done_reason,
-                            report.retrieved,
-                        )
-                    else:
-                        async with self.app.state.gate.acquire(
-                            settings.model, location="local", user_id=principal.storage_namespace
-                        ):
-                            response = await local.chat(
-                                model=settings.model,
-                                messages=messages,
-                                options=options,
-                                timeout_s=settings.step_timeout_seconds,
-                            )
-                        result = (response.get("message") or {}).get("content") or ""
-                        reason = response.get("done_reason", "")
+                    result = (response.get("message") or {}).get("content") or ""
+                    reason = response.get("done_reason", "")
             await authorize()
             _require_complete_text(step_id, result, reason)
             if len(result.encode("utf-8")) > 60000:

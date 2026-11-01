@@ -64,7 +64,7 @@ output-limit failure; live acceptance of the larger allowance remains pending.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
 Adaptive multi-step plans, source-backed Project notes, file/Private agent inputs,
-foreground-priority enhancements, semantic search,
+semantic search,
 owned-file watches and Project-associated watches remain implementation work. Existing Private Tax tasks keep
 their current behavior. The remaining sections specify the intended full feature.
 
@@ -267,6 +267,34 @@ Local UI tests, lint, TypeScript/build and mocked laptop/phone browser checks pa
 deployed acceptance remains manual. This slice needs only an audrey-ui rebuild, with
 no schema/configuration change or upload.
 
+Shared local-model admission now distinguishes interactive work from Agent/Watch
+generations. Interactive requests precede unaged background work in both the
+per-user cap and GPU queue. Eligible GPU waiters retain per-user round robin;
+older background work joins the interactive tier after the configured aging
+threshold. Running generations finish without interruption, and cloud GPU bypass
+and existing total concurrency caps remain unchanged.
+
+Agent titles, Plan, each Research model call, Review and Watch significance checks
+use the background path. Public tool reads hold neither queue. A background call
+waiting for GPU can give its per-user permit back to later chat, including when
+the per-user cap is one. Handoffs retain the original queue age, preventing chat
+traffic from continually restarting the aging clock. Admission remains per-user
+then GPU; cancellation returns queued or just-granted resources, and provider work
+and its authority/usage scope stay in the original task. Title operations are
+reserved after admission, avoiding charges for titles cancelled while queued.
+
+The shared `fairness.background_aging_seconds` setting defaults to 30 seconds and
+accepts positive finite numbers up to 300. It is a priority threshold, not a
+completion deadline: occupied generations and earlier eligible work still finish.
+Workload/stage wait histograms and aggregate GPU workload/aging counts expose
+queue pressure without owner IDs or content in metric labels. Dispatch still
+revalidates account/model/Project/lease authority after waiting; only verified
+local Qwen is available to agents, with no new model or cloud fallback.
+Affected hermetic transport, queue, cancellation, lifecycle/configuration and
+readiness checks pass; live concurrent-chat/model acceptance remains manual.
+Rebuild and recreate audrey for the configuration addition. No schema migration
+or upload is required.
+
 ## Product outcome
 
 A user can give Audrey an objective, choose its Project and sources, start an
@@ -287,6 +315,7 @@ decision; then schedule a weekly check of a selected public release page.
 | Area | Already present | Work required |
 | --- | --- | --- |
 | Native runs | Saved agent objectives, three-stage plans/checkpoints, planning questions, leases and restart dispatch | Adaptive steps and finer-grained within-step recovery |
+| Resource admission | Interactive preference, aged background fairness, cooperative queued handoffs and generation-boundary release | Live concurrent-chat/model acceptance and broader checkpoint-age monitoring |
 | Private tasks | Leases, revisions, source/model pins, budgets and committed-result delivery for Private tax reviews | General agent contracts and adapters; existing Private recovery currently pauses work |
 | Search | Local lexical API/sidebar, canonical reader and workspace links, exact message focus, bounded projection, approved notes and Project report filters | Semantic candidates and expanded native previews for retained text |
 | Projects | Compact overview with Knowledge/Agents below; approved knowledge in native chat and ordinary agents; fixed agent context, Project links and saved-work lists | Source-backed note and file/Private agent context, automatic proposals |
