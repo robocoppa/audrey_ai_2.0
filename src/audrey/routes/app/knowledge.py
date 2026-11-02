@@ -350,6 +350,7 @@ async def propose_knowledge(
             pinned=body.pinned,
             origin="agent_report",
             source_task_id=body.task_id,
+            source_task_revision=body.task_revision,
             sources=[{"source_id": document.source_id, "revision": str(document.revision)}],
             replaces_id=body.replaces_id,
             base_revision=body.base_revision,

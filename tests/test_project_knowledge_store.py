@@ -262,6 +262,25 @@ async def test_create_request_is_idempotent_but_conflicting_payload_fails(state)
         await _create(state, request_id="same-request", text="Other text.")
 
 
+@pytest.mark.parametrize("revision", [True, False, 0, -1, "1", 1.0, 2**63])
+async def test_internal_report_revision_pin_requires_a_strict_positive_integer(state, revision):
+    task = await _report(state)
+    with pytest.raises(KnowledgeError, match="source task revision"):
+        await _create(state, origin="agent_report", source_task_id=task["id"], source_task_revision=revision)
+
+
+async def test_internal_report_revision_pin_is_checked_in_transaction_and_not_saved_as_a_body_copy(state):
+    task = await _report(state)
+    with pytest.raises(KnowledgeConflictError, match="report changed"):
+        await _create(state, origin="agent_report", source_task_id=task["id"],
+                      source_task_revision=task["revision"] + 1)
+    accepted = await _create(state, origin="agent_report", source_task_id=task["id"],
+                             source_task_revision=task["revision"])
+    assert accepted["approval_state"] == "proposed" and "source_task_revision" not in accepted
+    assert len(await state.store.knowledge.list(user_id=state.owner.user_id,
+                                                 project_id=state.project.project_id)) == 1
+
+
 async def test_entry_revision_and_listing_limits(state):
     entry = await _create(state)
     for revision in range(2, 101):

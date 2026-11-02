@@ -255,6 +255,8 @@ function AgentTasksWorkspace({
   const projectsRequest = useRef<AbortController | null>(null);
   const activeCount = tasks.filter(isMoving).length;
   const hasActive = activeCount > 0;
+  const proposalTask = knowledgeTask ? tasks.find((task) => task.id === knowledgeTask.id) : undefined;
+  const proposalReportCurrent = proposalTask?.status === "completed" && proposalTask.revision === knowledgeTask?.revision;
   const sidebarOpen = visible && compactNavigation && (navigationOpen ?? internalNavigationOpen);
 
   const setSidebarOpen = useCallback((open: boolean) => {
@@ -801,7 +803,7 @@ function AgentTasksWorkspace({
           </div>
         </section>
       </div>
-      {knowledgeTask && visible ? <AgentKnowledgeDialog task={knowledgeTask} onClose={() => setKnowledgeTask(null)} /> : null}
+      {knowledgeTask && proposalReportCurrent && visible ? <AgentKnowledgeDialog task={knowledgeTask} onClose={() => setKnowledgeTask(null)} /> : null}
     </section>
   );
 }

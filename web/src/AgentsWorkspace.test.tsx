@@ -40,6 +40,27 @@ afterEach(() => {
 });
 
 describe("AgentsWorkspace", () => {
+  it.each(["rerun", "delete"])("discards report suggestions when a catalog refresh observes %s", async (change) => {
+    const saved = task({ status: "completed", result: "Completed source report.", revision: 8 });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
+    vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    let finish!: (value: api.AgentKnowledgeDrafts) => void;
+    const generate = vi.spyOn(api, "generateAgentKnowledgeDrafts").mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<AgentsWorkspace />);
+    fireEvent.click(await screen.findByRole("button", { name: "Propose Project knowledge" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate suggestions" }));
+    await waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+    const signal = generate.mock.calls[0][2];
+    const updated = { ...saved, revision: 9, status: "queued" as const, result: "" };
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: change === "delete" ? [] : [updated] });
+    vi.mocked(api.getAgentTask).mockResolvedValue(updated);
+    fireEvent(window, new Event("focus"));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Propose from this report" })).not.toBeInTheDocument());
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { finish({ task_id: saved.id, task_revision: 8, suggestions: [{ kind: "fact", text: "Late generated suggestion." }] }); });
+    expect(screen.queryByText("Late generated suggestion.")).not.toBeInTheDocument();
+  });
+
   it("creates an explicitly selected ordinary Project agent and excludes Private choices", async () => {
     vi.mocked(api.listProjects).mockResolvedValue({ items: [project, { ...project, id: "protected", name: "Private work", private_required: true }], next_cursor: null, limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
     vi.spyOn(api, "getProject").mockResolvedValue(project);

@@ -314,6 +314,43 @@ async def test_missing_and_stale_report_requests_cannot_create_proposals(state):
     assert (await state.client.post(foreign_path, json=payload)).status_code == 404
 
 
+async def test_report_rerun_and_recompletion_before_proposal_transaction_cannot_save_stale_reference(state, monkeypatch):
+    task, payload = await _report(state)
+    original = state.store.knowledge.create
+
+    async def changed_report_before_transaction(**values):
+        await state.store.agents.control(user_id=state.owners[0].user_id, task_id=task["id"],
+                                          expected_revision=task["revision"], action="rerun")
+        claimed = await state.store.agents.claim()
+        lease = {"task_id": claimed["id"], "lease_token": claimed["lease_token"], "fence": claimed["fence"]}
+        # Run again retains the saved Plan and refreshes Research/Review.
+        for step in ("research", "review"):
+            await state.store.agents.reserve_operation(**lease, step_id=step)
+            await state.store.agents.checkpoint(**lease, step_id=step, result="New checkpoint.")
+        refreshed = await state.store.agents.complete(**lease, result="A newer report about gates.")
+        assert refreshed["revision"] != task["revision"] and refreshed["status"] == "completed"
+        return await original(**values)
+
+    monkeypatch.setattr(state.store.knowledge, "create", changed_report_before_transaction)
+    response = await state.client.post(f"{state.path}/proposals", json=payload)
+    assert response.status_code == 409, response.text
+    assert await state.store.knowledge.list(user_id=state.owners[0].user_id,
+                                            project_id=state.projects[0].project_id) == []
+    with state.store._lock:
+        assert state.store._conn.execute("SELECT COUNT(*) FROM app_project_knowledge_revisions").fetchone()[0] == 0
+
+
+async def test_report_proposal_request_replay_returns_same_pending_entry(state):
+    _task, payload = await _report(state)
+    first = await state.client.post(f"{state.path}/proposals", json=payload)
+    second = await state.client.post(f"{state.path}/proposals", json=payload)
+    assert first.status_code == second.status_code == 201
+    assert first.json() == second.json() and first.json()["approval_state"] == "proposed"
+    entries = await state.store.knowledge.list(user_id=state.owners[0].user_id,
+                                               project_id=state.projects[0].project_id)
+    assert len(entries) == 1
+
+
 async def test_stale_proposal_cannot_be_approved_but_can_be_rejected(state):
     _task, payload = await _report(state)
     proposal = (await state.client.post(f"{state.path}/proposals", json=payload)).json()

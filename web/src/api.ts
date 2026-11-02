@@ -529,6 +529,35 @@ export interface AgentProjectContext {
   knowledge: Array<{ id: string; revision: number }>;
 }
 
+export interface AgentKnowledgeSuggestion {
+  kind: KnowledgeKind;
+  text: string;
+}
+
+export interface AgentKnowledgeDrafts {
+  task_id: string;
+  task_revision: number;
+  suggestions: AgentKnowledgeSuggestion[];
+}
+
+export async function generateAgentKnowledgeDrafts(taskId: string, expectedRevision: number, signal?: AbortSignal): Promise<AgentKnowledgeDrafts> {
+  const result = await apiJson<AgentKnowledgeDrafts>(`/api/agents/${encodeURIComponent(taskId)}/knowledge-drafts`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expected_revision: expectedRevision }), signal, cache: "no-store",
+  });
+  if (!result || typeof result !== "object" || result.task_id !== taskId || result.task_revision !== expectedRevision) {
+    throw new ApiError(409, "The saved report changed. Reopen it before generating suggestions.");
+  }
+  if (!Array.isArray(result.suggestions) || result.suggestions.length > 3 || result.suggestions.some((suggestion) => (
+    !suggestion || typeof suggestion !== "object" || !["fact", "decision", "question", "action"].includes(suggestion.kind)
+    || typeof suggestion.text !== "string" || !suggestion.text.trim() || Array.from(suggestion.text).length > 1200
+  ))) {
+    throw new ApiError(502, "The generated suggestions could not be read. Try again.");
+  }
+  return { task_id: result.task_id, task_revision: result.task_revision,
+    suggestions: result.suggestions.map(({ kind, text }) => ({ kind, text })) };
+}
+
 export interface AgentTask {
   title?: string;
   summary?: boolean;

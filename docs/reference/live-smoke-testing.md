@@ -15,6 +15,7 @@ English user input only; closed checks do not need another run.
 | Native UI/proxy protocol smoke | Tower → `tests/smoke/smoke-native-onbox.sh` |
 | Installed backend admission smoke, no models | Tower → `tests/smoke/smoke-agent-admission-onbox.sh` |
 | Installed Knowledge source API smoke, isolated data | Tower → `tests/smoke/smoke-knowledge-sources-onbox.sh` |
+| Installed report suggestion smoke, mocked model transport | Tower → `tests/smoke/smoke-agent-knowledge-drafts-onbox.sh` |
 
 Laptop checkout: `/home/bart/Documents/github/audrey/audrey_ai_2.0`.
 Tower checkout: `/mnt/user/appdata/audrey_ai_2.0`.
@@ -171,6 +172,41 @@ Results print in the launching shell; no notifications or report transfer is nee
 checkout/container. Real-file browser acceptance remains manual: use an owned
 Project's existing file/message, preview and attach it to a note, then explicitly
 review/replace a changed reference. A new upload is optional.
+
+## Installed report suggestion smoke
+
+After pulling the report suggestion helper, run on Tower:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+tests/smoke/smoke-agent-knowledge-drafts-onbox.sh
+```
+
+No schema/configuration change, credentials, `.env.smoke.local` or upload is needed.
+The wrapper streams the checked-out probe into the running backend's installed
+Python package. A separate ASGI application uses temporary canonical accounts,
+Projects, notes and completed Agent reports, plus the real local-model client
+with an in-memory mocked provider. It never opens production databases, contacts
+a model/network or uses a live account. Missing installed helper support exits 2.
+
+Expect six `PASS` checks and `PASS Report suggestion smoke passed` with `(exit 0)`.
+The checks verify local metadata verification and report-only structured requests,
+unchanged task/operation/notice/Knowledge state on generation, owner/report revision
+and completion fences, invalid/truncated replies, an explicit pending proposal save,
+discarding late output after rerun, and isolated cleanup. Authentication is overridden
+inside the fixture application; this does not test live Cloudflare/proxy wiring,
+real Qwen output quality, or the running server process's admission queues.
+
+The smoke normally takes seconds, with a ten-second deadline per case. `--json`
+prints a compact receipt; `--timeout-seconds` can lower the per-case deadline.
+Exit codes: 0 pass, 1 finding/timeout, 2 setup failure, 3 harness crash, 130 interrupted.
+Results print in the launching shell, with no notifications/report transfer.
+`AUDREY_SMOKE_APPDATA` (or `APPDATA`) and `AUDREY_SMOKE_CONTAINER` override the
+checkout/container. Real-model browser acceptance uses an existing completed report:
+Propose Project knowledge → Generate suggestions → Use suggestion → review/edit →
+Save proposal. Verify it remains pending until separately approved in Project
+Knowledge. Oversized reports are refused without truncation; manual proposals remain available.
 
 ## Service rebuilds
 

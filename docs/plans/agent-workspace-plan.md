@@ -1,6 +1,6 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, November 1, 2026. Public-research Agents, unified lexical
+**Status:** In progress, November 2, 2026. Public-research Agents, unified lexical
 Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner confirms Search
 returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
 
@@ -108,8 +108,9 @@ Project Knowledge now stores user-authored Facts, Decisions, Questions and Actio
 in application schema 27, with immutable revisions, pinning, open/completed/resolved
 states and optimistic concurrency. Project home supports editing, history, explicit
 approval/rejection and deletion. A completed Agent report can open a proposal editor:
-the user chooses the statement and Project; saving creates a pending report-linked
-proposal. It does not generate statements or approve them automatically. Replacement
+the user writes a statement or explicitly generates local-model suggestions, then
+chooses the statement and Project; saving creates a pending report-linked proposal.
+Neither generation nor saving approves a proposal automatically. Replacement
 approval checks the original revision and supersedes it atomically. Approval records
 what the user accepts, rather than independent verification.
 
@@ -130,8 +131,9 @@ source-derived notes, public-source snapshot references and automatic agent prop
 are later work. The source-reference editor is described below. Entry/Project deletion and account
 purge erase the new rows/history/manifests and invalidate/remove search copies.
 Limits are 200 entries per Project, 8,000 characters per entry, eight references and
-100 revisions per entry. No knowledge model calls, global-memory writes or cloud
-summaries were added. Local tests and mocked browser flows pass; real-model reuse
+100 revisions per entry. Context selection, source browsing and approval use no
+models; the explicit report helper is described below. There are no global-memory writes or cloud
+summaries. Local tests and mocked browser flows pass; real-model reuse
 and deployed acceptance remain manual.
 
 Public-page Watches now appear beside Tasks and Activity inside Agents. Creating a
@@ -365,9 +367,48 @@ its deletion/ownership boundaries. The reusable installed-backend
 [source smoke](../reference/live-smoke-testing.md#installed-knowledge-source-smoke)
 uses separate temporary SQLite/upload fixtures and an isolated ASGI application;
 it needs no credentials, network, model or production-account writes. The local
-smoke and its failure-detection harness pass. Its Tower
-run and native-browser acceptance with real sources remain pending. Deploy with
+smoke and its failure-detection harness pass. The owner reported all five installed
+Tower checks passing with exit 0, including isolated fixture cleanup. Native-browser
+acceptance with real sources remains pending. Deploy with
 backend/UI rebuilds; no schema or configuration change is required.
+
+### On-demand report suggestions
+
+The report proposal dialog offers Generate suggestions for a completed owned
+Agent report. One verified local `qwen3.8:latest` call returns up to three typed
+suggestions, with no tools, classifier, cloud fallback or automatic retry. The
+helper reads only that saved report; it does not send Project instructions,
+notes, files or the browser's proposed text to the model. Report text is quoted
+untrusted input, and suggestions preserve the report's uncertainty.
+
+Suggestions are transient: generating them does not save Knowledge, change an
+Agent/Plan/checkpoint, charge the completed task's saved allowance or create a
+job. Use suggestion fills the editable proposal; replacing existing text requires
+an explicit Replace draft action. Save proposal uses the existing report-revision
+and idempotency guards, creates a pending entry, and still requires separate
+approval before reuse. Generation and saving never start or complete an action.
+
+The helper admits one request per account through shared background per-user/GPU
+queues, with a 60-second total deadline. A complete prompt including schema must
+fit 6,000 tokens; oversized reports remain available for manual proposals rather
+than being silently truncated. Output is capped at 1,024 tokens (or the smaller
+configured Agent call limit), three suggestions and 1,200 characters per statement.
+Invalid, duplicate, incomplete, truncated or tool-bearing responses fail as a whole.
+
+Live owner/model access and the exact completed report revision are checked after
+waiting, before generation and before returning suggestions, including the route's
+final synchronous response fence. Browser cancellation/disconnection releases
+queued resources and closes the model client. Reopening or observing a report
+rerun/deletion discards old suggestions. A deleted Project does not remove its
+separately retained report or authorize new Project reads.
+
+Hermetic transport/API/UI checks and mocked responsive browser acceptance verify
+this slice. Its installed-backend [draft smoke](../reference/live-smoke-testing.md#installed-report-suggestion-smoke)
+uses temporary canonical data and a mocked local provider, with no production
+accounts, network or real model generation. The local six-case smoke and its
+negative/cancellation harness pass. Tower smoke and real local-Qwen
+suggestion quality remain pending. Deploy with backend/UI rebuilds; no schema
+or configuration change is required.
 
 ## Product outcome
 

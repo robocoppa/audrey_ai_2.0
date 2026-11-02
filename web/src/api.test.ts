@@ -15,6 +15,7 @@ import {
   deleteProjectKnowledge,
   decideProjectKnowledge,
   fetchVideoFromUrl,
+  generateAgentKnowledgeDrafts,
   getFileArtifactDownloadUrl,
   getFileDownloadUrl,
   getAgentTask,
@@ -151,6 +152,47 @@ describe("project knowledge requests", () => {
       { expected_revision: 1, sources: [] },
       { expected_revision: 2, text: "Reworded" },
     ]);
+  });
+});
+
+describe("transient agent knowledge suggestions", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("sends only the pinned report revision with cancellation and accepts bounded suggestions", async () => {
+    const response = { task_id: "task / owned", task_revision: 8, suggestions: [{ kind: "decision", text: "Review the source dates." }] };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(response));
+    vi.stubGlobal("fetch", fetchMock);
+    const signal = new AbortController().signal;
+    expect(await generateAgentKnowledgeDrafts("task / owned", 8, signal)).toEqual(response);
+    expect(fetchMock).toHaveBeenCalledWith("/api/agents/task%20%2F%20owned/knowledge-drafts", expect.objectContaining({ method: "POST", signal, cache: "no-store", credentials: "same-origin", body: JSON.stringify({ expected_revision: 8 }) }));
+  });
+
+  it("accepts an explicit empty result and counts Unicode characters consistently", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({ task_id: "task", task_revision: 8, suggestions: [] }))
+      .mockResolvedValueOnce(jsonResponse({ task_id: "task", task_revision: 8, suggestions: [{ kind: "fact", text: "🙂".repeat(1200) }] })));
+    expect((await generateAgentKnowledgeDrafts("task", 8)).suggestions).toEqual([]);
+    expect((await generateAgentKnowledgeDrafts("task", 8)).suggestions[0].text).toHaveLength(2400);
+  });
+
+  it.each([
+    { task_id: "foreign", task_revision: 8, suggestions: [] },
+    { task_id: "task", task_revision: 9, suggestions: [] },
+  ])("rejects suggestions for a different report snapshot", async (response) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(response)));
+    await expect(generateAgentKnowledgeDrafts("task", 8)).rejects.toThrow("The saved report changed.");
+  });
+
+  it.each([
+    null,
+    [{ kind: "fact", text: "A fact" }, { kind: "fact", text: "B fact" }, { kind: "fact", text: "C fact" }, { kind: "fact", text: "D fact" }],
+    [{ kind: "unknown", text: "Unexpected kind" }],
+    [{ kind: "fact", text: " " }],
+    [{ kind: "fact", text: "x".repeat(1201) }],
+    [{ kind: "fact", text: 2 }],
+    [null],
+  ].map((suggestions) => ({ suggestions })))("rejects malformed or oversized suggestions without returning partial drafts", async ({ suggestions }) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ task_id: "task", task_revision: 8, suggestions })));
+    await expect(generateAgentKnowledgeDrafts("task", 8)).rejects.toThrow("The generated suggestions could not be read.");
   });
 });
 

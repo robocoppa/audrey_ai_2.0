@@ -171,7 +171,8 @@ class KnowledgeRepository:
     async def create(
         self, *, user_id: str, project_id: str, kind: str, text: str,
         pinned: bool = False, sources: Sequence[dict] = (), origin: str = "user",
-        source_task_id: str | None = None, replaces_id: str | None = None,
+        source_task_id: str | None = None, source_task_revision: int | None = None,
+        replaces_id: str | None = None,
         base_revision: int | None = None, request_id: str | None = None,
     ) -> dict:
         kind, text, sources = _kind(kind), _text(text), _sources(sources)
@@ -187,6 +188,10 @@ class KnowledgeRepository:
             request_id = _identifier(request_id, "request id")
         if source_task_id is not None:
             source_task_id = _identifier(source_task_id, "task id")
+        if source_task_revision is not None:
+            _integer(source_task_revision, 1, 2**63 - 1, "source task revision")
+            if source_task_id is None:
+                raise KnowledgeError("A source task revision requires its saved task.")
         if replaces_id is not None:
             replaces_id = _identifier(replaces_id, "replacement entry id")
             _integer(base_revision, 1, MAX_ENTRY_REVISIONS, "base revision")
@@ -208,10 +213,16 @@ class KnowledgeRepository:
                     return self._record(previous)
             if source_task_id is not None:
                 task = self._conn.execute(
-                    "SELECT 1 FROM app_agent_tasks WHERE user_id=? AND task_id=? "
-                    "AND status='completed' AND result!=''", (user_id, source_task_id),
+                    "SELECT revision,status,result!='' AS has_result FROM app_agent_tasks "
+                    "WHERE user_id=? AND task_id=?", (user_id, source_task_id),
                 ).fetchone()
                 if task is None:
+                    raise KnowledgeAccessError("The saved agent report is unavailable.")
+                # A report can rerun and complete again after the route reads
+                # its source. Pin that read inside this write transaction.
+                if source_task_revision is not None and task["revision"] != source_task_revision:
+                    raise KnowledgeConflictError("The saved agent report changed. Refresh before saving a proposal.")
+                if task["status"] != "completed" or not task["has_result"]:
                     raise KnowledgeAccessError("The saved agent report is unavailable.")
             if replaces_id is not None:
                 target = self._load(user_id, project_id, replaces_id)

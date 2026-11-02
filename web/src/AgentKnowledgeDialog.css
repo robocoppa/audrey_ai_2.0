@@ -25,4 +25,13 @@
 .agent-knowledge-replacement blockquote small { display: block; margin-top: 0.5rem; font-size: 0.7rem; }
 .agent-knowledge-saved { display: grid; gap: 1rem; margin-top: 1rem; }
 .agent-knowledge-saved button { justify-self: end; }
+.agent-knowledge-generation { display: grid; gap: 0.7rem; min-width: 0; padding: 0.8rem; border: 1px solid var(--border); border-radius: 0.65rem; background: rgb(22 45 72 / 20%); }
+.agent-knowledge-generation-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.agent-knowledge-suggestions { display: grid; gap: 0.7rem; min-width: 0; }
+.agent-knowledge-suggestions ul { list-style: none; display: grid; gap: 0.75rem; margin: 0; padding: 0; }
+.agent-knowledge-suggestions li { min-width: 0; padding: 0.7rem; border: 1px solid var(--border); border-radius: 0.55rem; }
+.agent-knowledge-suggestions strong { font-size: 0.75rem; }
+.agent-knowledge-suggestions li p { margin: 0.45rem 0 0.7rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-knowledge-draft-confirm { min-width: 0; margin-top: 0.75rem; padding: 0.75rem; border: 1px solid rgb(197 183 140 / 35%); border-radius: 0.55rem; }
+.agent-knowledge-draft-confirm .agent-knowledge-generation-actions { margin-top: 0.6rem; }
 @media (max-width: 500px) { .agent-knowledge-dialog { padding: 1rem; } .agent-knowledge-actions button { flex: 1; } }

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3
+from collections.abc import Coroutine
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -11,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from audrey.agent_dispatch import AgentDispatchStoppedError
 from audrey.agent_executor import agent_settings, research_authority
+from audrey.agent_knowledge_drafts import DraftError, ReportKnowledgeDrafts
 from audrey.app_state.agents import AgentTaskAccessError, AgentTaskConflictError, AgentTaskError
 from audrey.auth import require_scope
 from audrey.identity import Principal
@@ -93,6 +96,23 @@ class AgentInputAnswerRequest(BaseModel):
     answer: str = Field(min_length=1, max_length=8000)
 
 
+class AgentKnowledgeDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1, strict=True)
+
+
+class AgentKnowledgeSuggestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["fact", "decision", "question", "action"]
+    text: str = Field(min_length=1, max_length=1200)
+
+
+class AgentKnowledgeDraftResponse(BaseModel):
+    task_id: str
+    task_revision: int
+    suggestions: list[AgentKnowledgeSuggestion] = Field(max_length=3)
+
+
 def _repository(request: Request):
     store = getattr(request.app.state, "application_store", None)
     if store is None or not hasattr(store, "agents"):
@@ -144,6 +164,65 @@ async def create_agent(body: AgentCreateRequest, request: Request, response: Res
         raise _error(error) from None
     _wake(request)
     return task
+
+
+async def _knowledge_drafts_while_connected(request: Request, operation: Coroutine) -> dict:
+    """Cancel a bounded, unsaved helper when its requesting browser goes away."""
+    stop_watching = asyncio.Event()
+
+    async def disconnected():
+        while not stop_watching.is_set():
+            if await request.is_disconnected():
+                return
+            try:
+                await asyncio.wait_for(stop_watching.wait(), timeout=0.1)
+            except TimeoutError:
+                pass
+
+    work = asyncio.create_task(operation)
+    watcher = asyncio.create_task(disconnected())
+    try:
+        done, _pending = await asyncio.wait((work, watcher), return_when=asyncio.FIRST_COMPLETED)
+        if watcher in done:
+            await watcher
+            raise HTTPException(499, "Suggestion generation was cancelled.")
+        return await work
+    finally:
+        # Starlette's nonblocking disconnect probe uses a cancelled AnyIO
+        # scope, which can swallow an external task cancellation. End the
+        # watcher cooperatively so even an immediate worker error cleans up.
+        stop_watching.set()
+        if not work.done():
+            work.cancel()
+        await asyncio.gather(work, watcher, return_exceptions=True)
+
+
+@router.post("/agents/{task_id}/knowledge-drafts", response_model=AgentKnowledgeDraftResponse)
+async def generate_agent_knowledge_drafts(
+    task_id: str,
+    body: AgentKnowledgeDraftRequest,
+    request: Request,
+    response: Response,
+    principal: Principal = Depends(_agents_access),
+):
+    response.headers["Cache-Control"] = "private, no-store"
+    _repository(request)
+    service = getattr(request.app.state, "agent_knowledge_drafts", None)
+    if service is None:
+        service = ReportKnowledgeDrafts(request.app)
+        request.app.state.agent_knowledge_drafts = service
+    scope = {"user_id": principal.user_id, "task_id": task_id, "expected_revision": body.expected_revision}
+    try:
+        result = await _knowledge_drafts_while_connected(request, service.generate(**scope))
+        # The generation coroutine can finish before this route resumes. Recheck
+        # the canonical report and current authority after that last await.
+        service.fence_response(**scope)
+        return result
+    except DraftError as error:
+        raise HTTPException(error.status_code, str(error)) from None
+    except (sqlite3.Error, OSError) as error:
+        logger.warning("Knowledge suggestion storage unavailable (%s)", type(error).__name__)
+        raise HTTPException(503, "Knowledge suggestions are temporarily unavailable.") from None
 
 
 @router.delete("/agents/{task_id}")
