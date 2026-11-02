@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { WatchesWorkspace } from "./WatchesWorkspace";
 import { WatchForm } from "./WatchForm";
-import type { PublicWatch, WatchRun } from "./api";
+import type { AudreyProject, PublicWatch, WatchRun } from "./api";
 
 function savedRun(patch: Partial<WatchRun> = {}): WatchRun {
   return { id: "run-1", watch_id: "watch-1", watch_revision: 1, status: "completed", outcome: "baseline", kind: "manual", scheduled_at: "2026-10-30T15:00:00Z", created_at: "2026-10-30T15:00:00Z", updated_at: "2026-10-30T15:01:00Z", completed_at: "2026-10-30T15:01:00Z", attempts: 1, report: "", diff: "", significant: null, error: "", ...patch };
@@ -12,6 +12,10 @@ function watch(patch: Partial<PublicWatch> = {}): PublicWatch {
   return { id: "watch-1", title: "Release announcements", url: "https://example.com/releases", criterion: "New stable releases", schedule: { kind: "daily", time: "09:00", timezone: "America/Denver" }, enabled: true, revision: 1, next_run_at: "2026-10-31T15:00:00Z", active_run_id: null, latest_run: savedRun(), created_at: "2026-10-30T14:00:00Z", updated_at: "2026-10-30T15:01:00Z", ...patch };
 }
 const occurrences = ["2026-10-31T15:00:00Z", "2026-11-01T16:00:00Z", "2026-11-02T16:00:00Z"];
+const projectLimits = { max_name_chars: 100, max_instructions_chars: 10000, max_files: 100 };
+function project(patch: Partial<AudreyProject> = {}): AudreyProject {
+  return { id: "project-1", name: "Release research", instructions: "Project context", created_at: "2026-10-30T14:00:00Z", updated_at: "2026-10-30T14:00:00Z", ...patch };
+}
 function workspace(props: Partial<Parameters<typeof WatchesWorkspace>[0]> = {}) {
   return render(<WatchesWorkspace visible timezone="America/Denver" {...props} />);
 }
@@ -21,6 +25,7 @@ function fillNewWatch() {
   fireEvent.change(screen.getByRole("textbox", { name: "What changes matter?" }), { target: { value: "New stable releases" } });
 }
 beforeEach(() => {
+  vi.spyOn(api, "listProjects").mockResolvedValue({ items: [], next_cursor: null, limits: projectLimits });
   vi.spyOn(api, "listWatches").mockResolvedValue({ items: [watch()] });
   vi.spyOn(api, "listWatchNotifications").mockResolvedValue({ items: [], unread_count: 0 });
   vi.spyOn(api, "listWatchRuns").mockResolvedValue({ items: [savedRun()] });
@@ -198,5 +203,114 @@ describe("watch activity and visibility", () => {
     workspace({ visible: false, navigationOpen: true, onNavigationOpenChange: change });
     await act(async () => resize({ matches: true } as MediaQueryListEvent));
     expect(change).not.toHaveBeenCalled();
+  });
+});
+
+describe("Project watch navigation and drafts", () => {
+  it("prefills a Project without creating or running, keeps the draft on another prefill and saves explicitly", async () => {
+    const create = vi.spyOn(api, "createWatch").mockResolvedValue(watch({ project: { id: "project-2", name: "Another Project", available: true } }));
+    const action = vi.spyOn(api, "actOnWatch");
+    const view = workspace({ composerProjectRequest: { project: project(), serial: 1 } });
+    const selector = await screen.findByRole("combobox", { name: "Project" });
+    await waitFor(() => expect(selector).toHaveValue("project-1"));
+    fillNewWatch();
+    fireEvent.click(screen.getByRole("button", { name: "Preview next checks" }));
+    await screen.findByText("Next three checks (UTC)");
+    view.rerender(<WatchesWorkspace visible composerProjectRequest={{ project: project({ id: "project-2", name: "Another Project" }), serial: 2 }} />);
+    await waitFor(() => expect(selector).toHaveValue("project-2"));
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Release announcements");
+    expect(screen.getByRole("textbox", { name: "What changes matter?" })).toHaveValue("New stable releases");
+    expect(create).not.toHaveBeenCalled(); expect(action).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Create watch" }));
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ project_id: "project-2", criterion: "New stable releases" }), expect.any(String)));
+    expect(action).not.toHaveBeenCalled();
+  });
+
+  it("loads ordinary Projects across pages, excludes Private choices and keeps the selected draft on read failure", async () => {
+    vi.mocked(api.listProjects).mockResolvedValueOnce({ items: [project(), project({ id: "private", name: "Private accounts", private_required: true })], next_cursor: "more", limits: projectLimits })
+      .mockRejectedValueOnce(new Error("Project list unavailable"))
+      .mockResolvedValueOnce({ items: [project()], next_cursor: "more", limits: projectLimits })
+      .mockResolvedValueOnce({ items: [project({ id: "project-2", name: "Second Project" })], next_cursor: null, limits: projectLimits });
+    workspace(); fireEvent.click(await screen.findByRole("button", { name: "New watch" }));
+    expect(await screen.findByRole("option", { name: "Release research" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Private accounts" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Project" }), { target: { value: "project-1" } });
+    fillNewWatch();
+    fireEvent.click(screen.getByRole("button", { name: "Load more Projects" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Project list unavailable");
+    expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue("project-1");
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Release announcements");
+    fireEvent.click(screen.getByRole("button", { name: "Retry Projects" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Load more Projects" }));
+    expect(await screen.findByRole("option", { name: "Second Project" })).toBeInTheDocument();
+    expect(api.listProjects).toHaveBeenLastCalledWith("more", expect.any(AbortSignal));
+  });
+
+  it("opens a freshly read existing watch and preserves the unsaved form for Resume draft", async () => {
+    const create = vi.spyOn(api, "createWatch"); const action = vi.spyOn(api, "actOnWatch");
+    const view = workspace();
+    fireEvent.click(await screen.findByRole("button", { name: "New watch" })); fillNewWatch();
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Unsent watch draft" } });
+    const external = watch({ id: "watch-2", title: "Fresh saved watch" });
+    vi.mocked(api.getWatch).mockResolvedValue(external);
+    view.rerender(<WatchesWorkspace visible externalWatchRequest={{ watch: { ...external, title: "Old watch title" }, serial: 1 }} />);
+    expect(await screen.findByRole("heading", { name: "Fresh saved watch" })).toBeVisible();
+    expect(api.getWatch).toHaveBeenCalledWith("watch-2", expect.any(AbortSignal));
+    expect(create).not.toHaveBeenCalled(); expect(action).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Resume draft" }));
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Unsent watch draft");
+    expect(screen.getByRole("textbox", { name: "What changes matter?" })).toHaveValue("New stable releases");
+  });
+
+  it("aborts a pending external watch read when hidden and ignores its late completion", async () => {
+    let finish!: (value: PublicWatch) => void;
+    vi.mocked(api.getWatch).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const request = { watch: watch({ id: "watch-2" }), serial: 1 };
+    const view = workspace({ externalWatchRequest: request });
+    await waitFor(() => expect(api.getWatch).toHaveBeenCalled());
+    const signal = vi.mocked(api.getWatch).mock.calls.at(-1)?.[1];
+    view.rerender(<WatchesWorkspace visible={false} externalWatchRequest={request} />);
+    expect(signal?.aborted).toBe(true);
+    await act(async () => finish(watch({ id: "watch-2", title: "Stale hidden watch" })));
+    expect(screen.queryByRole("heading", { name: "Stale hidden watch" })).not.toBeInTheDocument();
+  });
+
+  it("rejects a changed Project association between parent and child canonical watch reads", async () => {
+    const incoming = watch({ id: "watch-2", title: "Project-linked watch", project: { id: "project-1", name: "First Project", available: true } });
+    vi.mocked(api.getWatch).mockResolvedValue({ ...incoming, project: { id: "project-2", name: "Changed Project", available: true } });
+    workspace({ externalWatchRequest: { watch: incoming, serial: 1 } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Project changed or is unavailable");
+    expect(screen.queryByRole("heading", { name: "Project-linked watch" })).not.toBeInTheDocument();
+  });
+
+  it("keeps an unavailable Project readable and editable but blocks Run now and Resume until detached", async () => {
+    const unavailable = watch({ enabled: false, project: { id: "deleted", name: null, available: false } });
+    vi.mocked(api.listWatches).mockResolvedValue({ items: [unavailable] });
+    const update = vi.spyOn(api, "updateWatch").mockResolvedValue(watch({ project: null, revision: 2, enabled: false }));
+    const action = vi.spyOn(api, "actOnWatch"); workspace();
+    expect(await screen.findByRole("button", { name: "Run now" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Delete watch" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Project" }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview next checks" })); await screen.findByText("Next three checks (UTC)");
+    fireEvent.click(screen.getByRole("button", { name: "Save watch" }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith("watch-1", expect.objectContaining({ project_id: null, enabled: false }), 1));
+    expect(action).not.toHaveBeenCalled();
+  });
+
+  it("opens the current Project and preserves the saved check's original Project association", async () => {
+    const current = { id: "project-current", name: "Current Project", available: true };
+    const original = { id: "project-original", name: "Original Project", available: true };
+    vi.mocked(api.listWatches).mockResolvedValue({ items: [watch({ project: current })] });
+    vi.mocked(api.getWatchRun).mockResolvedValue(savedRun({ definition: { title: "Original title", url: "https://example.com/original", criterion: "Original criterion", schedule: watch().schedule, project: original } }));
+    const open = vi.fn(); workspace({ onOpenProject: open });
+    fireEvent.click(await screen.findByRole("button", { name: "Open Project" })); expect(open).toHaveBeenLastCalledWith("project-current");
+    fireEvent.click(await screen.findByText("Saved check inputs", { selector: "summary" }));
+    const saved = within(screen.getByText("Saved check inputs", { selector: "summary" }).parentElement!);
+    expect(saved.getByText("Original Project")).toBeVisible();
+    fireEvent.click(saved.getByRole("button", { name: "Open Project" })); expect(open).toHaveBeenLastCalledWith("project-original");
+    expect(screen.getByRole("button", { name: "Run now" })).toBeEnabled();
   });
 });

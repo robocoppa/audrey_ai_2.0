@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError, actOnWatch, createWatch, deleteWatch, getWatch, getWatchRun,
   listWatchRuns, listWatches, updateWatch,
-  type PublicWatch, type WatchDefinition, type WatchRun, type WatchRunSummary,
+  type AudreyProject, type PublicWatch, type WatchDefinition, type WatchProject, type WatchRun, type WatchRunSummary,
 } from "./api";
 import { WatchForm } from "./WatchForm";
 import "./WatchesWorkspace.css";
@@ -23,12 +23,15 @@ function scheduleLabel(watch: Pick<PublicWatch, "schedule">) {
   return `${cadence} · ${schedule.timezone}`;
 }
 
-export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigationOpenChange, openRequest }: {
+export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigationOpenChange, openRequest, composerProjectRequest, externalWatchRequest, onOpenProject }: {
   visible: boolean;
   timezone?: string;
   navigationOpen?: boolean;
   onNavigationOpenChange?: (open: boolean) => void;
   openRequest?: { watch: PublicWatch; run: WatchRun; serial: number };
+  composerProjectRequest?: { project: AudreyProject; serial: number };
+  externalWatchRequest?: { watch: PublicWatch; serial: number };
+  onOpenProject?: (id: string) => void;
 }) {
   const [watches, setWatches] = useState<PublicWatch[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -36,6 +39,9 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
   const [run, setRun] = useState<WatchRun | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [editing, setEditing] = useState<PublicWatch | "new" | null>(null);
+  const [formVisible, setFormVisible] = useState(false);
+  const [formKey, setFormKey] = useState(0);
+  const [formProjectRequest, setFormProjectRequest] = useState<typeof composerProjectRequest>();
   const [conflict, setConflict] = useState<PublicWatch>();
   const [loading, setLoading] = useState(true);
   const [loadingRun, setLoadingRun] = useState(false);
@@ -54,6 +60,10 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
   const deleted = useRef(new Set<string>());
   const createRequest = useRef<{ key: string; id: string } | null>(null);
   const openedRequest = useRef<number | null>(null);
+  const openedComposerRequest = useRef<number | null>(null);
+  const openedExternalRequest = useRef<number | null>(null);
+  const externalRead = useRef<AbortController | null>(null);
+  const formActive = Boolean(editing && formVisible);
   const hasScheduled = watches.some((watch) => watch.enabled || watch.active_run_id);
   const selected = watches.find((watch) => watch.id === selectedId);
   const sidebarOpen = visible && compact && (navigationOpen ?? drawerOpen);
@@ -115,7 +125,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
   const latestRunId = selected?.latest_run?.id;
   const selectedRevision = selected?.revision;
   useEffect(() => {
-    if (!visible || !selectedId || editing) return;
+    if (!visible || !selectedId || formActive) return;
     const controller = new AbortController();
     let inFlight = false;
     async function refreshHistory() {
@@ -133,10 +143,10 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
     void refreshHistory();
     const timer = activeRunId ? window.setInterval(() => void refreshHistory(), 3000) : undefined;
     return () => { controller.abort(); window.clearInterval(timer); };
-  }, [visible, selectedId, selectedRevision, activeRunId, latestRunId, token, editing]);
+  }, [visible, selectedId, selectedRevision, activeRunId, latestRunId, token, formActive]);
 
   useEffect(() => {
-    if (!visible || !selectedId || !runId || editing) return;
+    if (!visible || !selectedId || !runId || formActive) return;
     const controller = new AbortController();
     let inFlight = false;
     async function refreshRun() {
@@ -152,7 +162,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
     void refreshRun();
     const timer = activeRunId === runId ? window.setInterval(() => void refreshRun(), 3000) : undefined;
     return () => { controller.abort(); window.clearInterval(timer); };
-  }, [visible, selectedId, runId, activeRunId, selectedRevision, token, editing]);
+  }, [visible, selectedId, runId, activeRunId, selectedRevision, token, formActive]);
 
   const closeSidebar = useCallback(() => {
     setDrawerOpen(false);
@@ -199,21 +209,60 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
   useEffect(() => {
     if (!visible || !openRequest || openedRequest.current === openRequest.serial) return;
     openedRequest.current = openRequest.serial;
+    externalRead.current?.abort();
     generation.current += 1;
     const controller = new AbortController();
     queueMicrotask(() => {
       if (controller.signal.aborted) return;
       setWatches((current) => mergeWatch(current, openRequest.watch));
       setSelectedId(openRequest.watch.id); setRunId(openRequest.run.id); setRun(openRequest.run);
-      setEditing(null); setConflict(undefined); setError(""); setNotice("");
-      window.requestAnimationFrame(() => { if (compact) detail.current?.focus({ preventScroll: true }); });
+      setFormVisible(false); setError(""); setNotice("");
+      window.requestAnimationFrame(() => { if (detail.current) detail.current.scrollTop = 0; if (compact) detail.current?.focus({ preventScroll: true }); });
     });
     return () => controller.abort();
   }, [visible, openRequest, compact]);
+
+  useEffect(() => {
+    if (!visible || !composerProjectRequest || openedComposerRequest.current === composerProjectRequest.serial) return;
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      openedComposerRequest.current = composerProjectRequest.serial;
+      if (composerProjectRequest.project.private_required) { setError("Private Projects are not available for public page watches."); return; }
+      externalRead.current?.abort(); generation.current += 1;
+      setEditing("new"); setFormVisible(true); setFormProjectRequest(composerProjectRequest);
+      setConflict(undefined); setError(""); setNotice(""); setDrawerOpen(false);
+      window.requestAnimationFrame(() => { if (detail.current) detail.current.scrollTop = 0; detail.current?.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true }); });
+    });
+    return () => controller.abort();
+  }, [visible, composerProjectRequest, setDrawerOpen]);
+
+  useEffect(() => {
+    if (!visible || !externalWatchRequest || openedExternalRequest.current === externalWatchRequest.serial) return;
+    const controller = new AbortController();
+    externalRead.current?.abort(); externalRead.current = controller;
+    generation.current += 1;
+    void getWatch(externalWatchRequest.watch.id, controller.signal).then((saved) => {
+      if (controller.signal.aborted) return;
+      if (saved.id !== externalWatchRequest.watch.id) throw new Error("This watch is no longer available.");
+      if ((saved.project?.id ?? null) !== (externalWatchRequest.watch.project?.id ?? null) || (externalWatchRequest.watch.project && !saved.project?.available)) throw new Error("This watch's Project changed or is unavailable. Open it again from its current Project.");
+      openedExternalRequest.current = externalWatchRequest.serial;
+      setWatches((current) => mergeWatch(current, saved)); setSelectedId(saved.id);
+      setRunId(null); setRun(null); setRuns([]); setFormVisible(false); setError(""); setNotice(""); setDrawerOpen(false);
+      window.requestAnimationFrame(() => { if (detail.current) detail.current.scrollTop = 0; if (compact) detail.current?.focus({ preventScroll: true }); });
+    }).catch((reason: unknown) => { if (!controller.signal.aborted) setError(messageOf(reason)); });
+    return () => controller.abort();
+  }, [visible, externalWatchRequest, compact, setDrawerOpen]);
+
   function selectWatch(id: string) {
-    setSelectedId(id); setRunId(null); setRun(null); setRuns([]); setEditing(null); setError(""); setNotice(""); setConflict(undefined); showDetail();
+    externalRead.current?.abort();
+    setSelectedId(id); setRunId(null); setRun(null); setRuns([]); setFormVisible(false); setError(""); setNotice(""); showDetail();
   }
-  function newWatch() { setEditing("new"); setConflict(undefined); setError(""); setNotice(""); showDetail(); }
+  function newWatch() {
+    externalRead.current?.abort();
+    if (editing !== "new") { setFormKey((value) => value + 1); setFormProjectRequest(undefined); }
+    setEditing("new"); setFormVisible(true); setConflict(undefined); setError(""); setNotice(""); showDetail();
+  }
 
   async function reloadConflict(id: string) {
     try {
@@ -249,7 +298,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
   }
 
   async function act(watch: PublicWatch, action: "pause" | "resume" | "run" | "delete") {
-    if (busyRef.current) return;
+    if (busyRef.current || (watch.project && !watch.project.available && (action === "run" || action === "resume"))) return;
     busyRef.current = true; generation.current += 1; setBusy(true); setError(""); setNotice("");
     try {
       if (action === "delete") {
@@ -278,13 +327,15 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
     <div className="watch-columns">
       <aside className="watch-sidebar" id="watches-navigation" ref={sidebar} aria-label="Saved watches" role={compact ? "dialog" : undefined} aria-modal={sidebarOpen ? true : undefined} aria-hidden={compact && !sidebarOpen ? true : undefined} inert={compact && !sidebarOpen ? true : undefined}>
         <header className="agents-header"><div><p className="agents-eyebrow">Keep an eye on what matters</p><h1 id="watches-title">Watches</h1></div>{compact ? <button type="button" className="agents-secondary watch-sidebar-close" aria-label="Close watch controls" onClick={closeSidebar}>✕</button> : null}</header>
-        <div className="watch-sidebar-scroll"><button className="agents-primary" type="button" disabled={busy} onClick={newWatch}>New watch</button><p className="watch-help">Scheduled checks continue while you’re away. Only public pages are supported.</p><button className="agents-refresh" type="button" onClick={() => setToken((value) => value + 1)}>Refresh watches</button>{loading ? <p role="status">Loading watches…</p> : !watches.length ? <p className="agents-empty">No watches yet. Create one to follow a public page.</p> : <ul className="agents-task-list">{watches.map((watch) => <li key={watch.id}><button type="button" className="agents-task-card" aria-pressed={!editing && selectedId === watch.id} onClick={() => selectWatch(watch.id)} aria-label={`Open watch: ${watch.title}`}><span className={`agents-status agents-status-${watch.enabled ? "running" : "paused"}`}>{watch.enabled ? "Scheduled" : "Paused"}</span><strong>{watch.title}</strong><span className="agents-task-stage">{watch.active_run_id ? "Check in progress" : watch.latest_run ? runLabel(watch.latest_run) : "Awaiting baseline"}</span><span className="agents-task-stage">Next: {timestamp(watch.next_run_at)}</span></button></li>)}</ul>}</div>
+        <div className="watch-sidebar-scroll"><button className="agents-primary" type="button" disabled={busy} onClick={newWatch}>New watch</button><p className="watch-help">Scheduled checks continue while you’re away. Only public pages are supported.</p><button className="agents-refresh" type="button" onClick={() => setToken((value) => value + 1)}>Refresh watches</button>{loading ? <p role="status">Loading watches…</p> : !watches.length ? <p className="agents-empty">No watches yet. Create one to follow a public page.</p> : <ul className="agents-task-list">{watches.map((watch) => <li key={watch.id}><button type="button" className="agents-task-card" aria-pressed={!formActive && selectedId === watch.id} onClick={() => selectWatch(watch.id)} aria-label={`Open watch: ${watch.title}`}><span className={`agents-status agents-status-${watch.enabled ? "running" : "paused"}`}>{watch.enabled ? "Scheduled" : "Paused"}</span><strong>{watch.title}</strong><span className="agents-task-stage">{watch.active_run_id ? "Check in progress" : watch.latest_run ? runLabel(watch.latest_run) : "Awaiting baseline"}</span><span className="agents-task-stage">Next: {timestamp(watch.next_run_at)}</span></button></li>)}</ul>}</div>
       </aside>
       <section className="watch-detail-scroll" aria-label="Selected watch" tabIndex={0} ref={detail} inert={sidebarOpen ? true : undefined}>{errors}<div className="watch-detail">
-        {editing ? <WatchForm key={editing === "new" ? "new" : editing.id} watch={editing === "new" ? undefined : editing} timezone={timezone} busy={busy} conflict={conflict} onSave={save} onCancel={() => { setEditing(null); setConflict(undefined); }} /> : selected ? <>
-          <header className="watch-detail-header"><div className="agents-detail-toolbar"><span className={`agents-status agents-status-${selected.enabled ? "running" : "paused"}`}>{selected.enabled ? "Scheduled" : "Paused"}</span><WatchControls key={`${selected.id}:${selected.revision}:${visible}`} watch={selected} busy={busy} onAction={(action) => void act(selected, action)} onEdit={() => { setEditing(selected); setConflict(undefined); }} /></div><h2>{selected.title}</h2><a href={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a><p>{selected.criterion}</p><p>{scheduleLabel(selected)}</p><p>Next scheduled check: <strong>{timestamp(selected.next_run_at)}</strong></p>{!selected.enabled ? <p>Run now checks this page once and leaves the schedule paused.</p> : null}</header>
+        {editing ? <div hidden={!formActive}><WatchForm key={formKey} watch={editing === "new" ? undefined : editing} timezone={timezone} busy={busy} conflict={conflict} visible={visible && formActive} projectRequest={formProjectRequest} onSave={save} onCancel={() => { setEditing(null); setFormVisible(false); setFormProjectRequest(undefined); setConflict(undefined); }} /></div> : null}
+        {!formActive && editing ? <button className="agents-secondary watch-resume-draft" type="button" disabled={busy} onClick={() => { externalRead.current?.abort(); setFormVisible(true); showDetail(); }}>Resume draft</button> : null}
+        {formActive ? null : selected ? <>
+          <header className="watch-detail-header"><div className="agents-detail-toolbar"><span className={`agents-status agents-status-${selected.enabled ? "running" : "paused"}`}>{selected.enabled ? "Scheduled" : "Paused"}</span><WatchControls key={`${selected.id}:${selected.revision}:${visible}`} watch={selected} busy={busy} onAction={(action) => void act(selected, action)} onEdit={() => { externalRead.current?.abort(); setFormKey((value) => value + 1); setEditing(selected); setFormVisible(true); setFormProjectRequest(undefined); setConflict(undefined); }} /></div><h2>{selected.title}</h2><a href={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a><p>{selected.criterion}</p><WatchProjectView project={selected.project} onOpenProject={onOpenProject} /><p>{scheduleLabel(selected)}</p><p>Next scheduled check: <strong>{timestamp(selected.next_run_at)}</strong></p>{!selected.enabled ? <p>Run now checks this page once and leaves the schedule paused.</p> : null}</header>
           <section className="watch-history" aria-labelledby="watch-history-title"><h3 id="watch-history-title">Check history</h3><p className="watch-help">The first successful check saves a baseline. Later successful checks compare normalized page text; failed checks leave the baseline unchanged. Showing up to 50 recent checks.</p>{runs.length ? <ul>{runs.map((item) => <li key={item.id}><button type="button" aria-pressed={runId === item.id} onClick={() => { setRunId(item.id); setRun(null); }}><strong>{runLabel(item)}</strong><span>{item.kind === "catchup" ? "Catch-up after downtime" : item.kind === "manual" ? "Run now" : "Scheduled"}</span><time dateTime={item.scheduled_at}>{timestamp(item.scheduled_at)}</time></button></li>)}</ul> : <p className="agents-empty">No saved checks yet. Run now to establish a baseline, or wait for the first scheduled check.</p>}</section>
-          {run && run.id === runId && run.watch_id === selected.id ? <WatchRunDetail run={run} timestamp={timestamp} /> : loadingRun ? <p role="status">Loading saved check…</p> : null}
+          {run && run.id === runId && run.watch_id === selected.id ? <WatchRunDetail run={run} timestamp={timestamp} onOpenProject={onOpenProject} /> : loadingRun ? <p role="status">Loading saved check…</p> : null}
         </> : <div className="agents-welcome"><span className="agents-welcome-mark" aria-hidden="true">◉</span><h2>Follow a public page</h2><p>Save a schedule and a criterion for the changes you care about. Audrey keeps check history and adds relevant changes to Activity.</p><button className="agents-primary" type="button" onClick={newWatch}>Create a watch</button></div>}
       </div></section>
     </div>
@@ -299,9 +350,13 @@ function WatchControls({ watch, busy, onAction, onEdit }: { watch: PublicWatch; 
     window.addEventListener("blur", reset); document.addEventListener("visibilitychange", onVisible);
     return () => { window.removeEventListener("blur", reset); document.removeEventListener("visibilitychange", onVisible); };
   }, []);
-  return <div className="agents-task-actions watch-controls" role="group" aria-label="Watch controls"><button type="button" className="agents-primary" disabled={busy || Boolean(watch.active_run_id)} onClick={() => onAction("run")}>Run now</button><button type="button" className="agents-secondary" disabled={busy} onClick={() => onAction(watch.enabled ? "pause" : "resume")}>{watch.enabled ? "Pause" : "Resume"}</button><button type="button" className="agents-secondary" disabled={busy} onClick={onEdit}>Edit</button><button type="button" className={`agents-secondary danger-button${confirming ? " confirming-delete" : ""}`} disabled={busy} aria-label={confirming ? "Confirm delete watch" : "Delete watch"} aria-pressed={confirming} title={confirming ? "Click again to delete this watch, snapshots and history." : "Delete watch and history"} onBlur={() => setConfirming(false)} onKeyDown={(event) => { if (event.key === "Escape") setConfirming(false); }} onClick={() => { if (confirming) { setConfirming(false); onAction("delete"); } else setConfirming(true); }}>{confirming ? "✓" : "Delete watch"}</button></div>;
+  return <div className="agents-task-actions watch-controls" role="group" aria-label="Watch controls"><button type="button" className="agents-primary" disabled={busy || Boolean(watch.active_run_id) || Boolean(watch.project && !watch.project.available)} onClick={() => onAction("run")}>Run now</button><button type="button" className="agents-secondary" disabled={busy || Boolean(!watch.enabled && watch.project && !watch.project.available)} onClick={() => onAction(watch.enabled ? "pause" : "resume")}>{watch.enabled ? "Pause" : "Resume"}</button><button type="button" className="agents-secondary" disabled={busy} onClick={onEdit}>Edit</button><button type="button" className={`agents-secondary danger-button${confirming ? " confirming-delete" : ""}`} disabled={busy} aria-label={confirming ? "Confirm delete watch" : "Delete watch"} aria-pressed={confirming} title={confirming ? "Click again to delete this watch, snapshots and history." : "Delete watch and history"} onBlur={() => setConfirming(false)} onKeyDown={(event) => { if (event.key === "Escape") setConfirming(false); }} onClick={() => { if (confirming) { setConfirming(false); onAction("delete"); } else setConfirming(true); }}>{confirming ? "✓" : "Delete watch"}</button></div>;
 }
 
-function WatchRunDetail({ run, timestamp }: { run: WatchRun; timestamp: (value: string | null) => string }) {
-  return <section className="watch-run" aria-labelledby="watch-run-title"><h3 id="watch-run-title">{runLabel(run)}</h3><p>{run.kind === "catchup" ? "Catch-up after downtime" : run.kind === "manual" ? "Run now" : "Scheduled check"} · {timestamp(run.scheduled_at)}</p><p>Watch revision {run.watch_revision}{run.completed_at ? ` · Finished ${timestamp(run.completed_at)}` : ""}</p>{run.definition ? <details className="watch-saved-inputs"><summary>Saved check inputs</summary><dl><dt>Title</dt><dd>{run.definition.title}</dd><dt>Public page URL</dt><dd>{run.definition.url}</dd><dt>Change criterion</dt><dd>{run.definition.criterion}</dd><dt>Schedule</dt><dd>{scheduleLabel(run.definition)}</dd></dl></details> : null}{run.error ? <p className="agents-error" role="alert">{run.error}</p> : null}{run.status === "queued" || run.status === "running" ? <p role="status">This check is {run.status === "queued" ? "queued" : "in progress"}. Saved results will appear here.</p> : null}{run.outcome === "baseline" ? <p>This successful check established the saved baseline for future comparisons.</p> : null}{run.outcome === "unchanged" ? <p>The normalized page text is unchanged. No repeated notification was created.</p> : null}{run.outcome === "changed" ? <p>{run.significant === true ? "The local model found a change relevant to your criterion." : run.significant === false ? "The page changed; the local model did not find a change relevant to your criterion." : "The page changed."}</p> : null}{run.report ? <section><h4>{run.outcome === "changed" ? "Local model assessment" : "Check result"}</h4><p className="watch-plain-text">{run.report}</p></section> : null}{run.diff ? <details className="watch-diff"><summary>Exact normalized text diff</summary><pre>{run.diff}</pre></details> : null}</section>;
+function WatchRunDetail({ run, timestamp, onOpenProject }: { run: WatchRun; timestamp: (value: string | null) => string; onOpenProject?: (id: string) => void }) {
+  return <section className="watch-run" aria-labelledby="watch-run-title"><h3 id="watch-run-title">{runLabel(run)}</h3><p>{run.kind === "catchup" ? "Catch-up after downtime" : run.kind === "manual" ? "Run now" : "Scheduled check"} · {timestamp(run.scheduled_at)}</p><p>Watch revision {run.watch_revision}{run.completed_at ? ` · Finished ${timestamp(run.completed_at)}` : ""}</p>{run.definition ? <details className="watch-saved-inputs"><summary>Saved check inputs</summary><dl><dt>Title</dt><dd>{run.definition.title}</dd><dt>Public page URL</dt><dd>{run.definition.url}</dd><dt>Change criterion</dt><dd>{run.definition.criterion}</dd><dt>Schedule</dt><dd>{scheduleLabel(run.definition)}</dd><dt>Project at this check</dt><dd><WatchProjectView project={run.definition.project} onOpenProject={onOpenProject} historical /></dd></dl></details> : null}{run.error ? <p className="agents-error" role="alert">{run.error}</p> : null}{run.status === "queued" || run.status === "running" ? <p role="status">This check is {run.status === "queued" ? "queued" : "in progress"}. Saved results will appear here.</p> : null}{run.outcome === "baseline" ? <p>This successful check established the saved baseline for future comparisons.</p> : null}{run.outcome === "unchanged" ? <p>The normalized page text is unchanged. No repeated notification was created.</p> : null}{run.outcome === "changed" ? <p>{run.significant === true ? "The local model found a change relevant to your criterion." : run.significant === false ? "The page changed; the local model did not find a change relevant to your criterion." : "The page changed."}</p> : null}{run.report ? <section><h4>{run.outcome === "changed" ? "Local model assessment" : "Check result"}</h4><p className="watch-plain-text">{run.report}</p></section> : null}{run.diff ? <details className="watch-diff"><summary>Exact normalized text diff</summary><pre>{run.diff}</pre></details> : null}</section>;
+}
+
+function WatchProjectView({ project, onOpenProject, historical = false }: { project?: WatchProject | null; onOpenProject?: (id: string) => void; historical?: boolean }) {
+  return <div className="watch-project"><span>Project: <strong>{project?.name ?? (project ? "Unavailable Project" : "None")}</strong></span>{project?.available && onOpenProject ? <button className="agents-secondary" type="button" onClick={() => onOpenProject(project.id)}>Open Project</button> : null}{project && !project.available ? <p className="watch-help">{historical ? "The Project linked to this saved check is unavailable." : "This Project is unavailable. Edit the watch to choose another Project or None before running or resuming it."}</p> : null}</div>;
 }

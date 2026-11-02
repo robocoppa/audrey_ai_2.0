@@ -138,11 +138,27 @@ class WatchesRepository:
         record["limits"] = json.loads(record["limits_json"])
         return record
 
-    @staticmethod
-    def _public_run(record: dict, *, summary: bool = False) -> dict:
+    def _project(self, user_id: str, project_id: str | None) -> dict | None:
+        if project_id is None:
+            return None
+        row = self._conn.execute(
+            "SELECT name FROM app_projects WHERE user_id=? AND project_id=? AND private_required=0",
+            (user_id, project_id),
+        ).fetchone()
+        return {"id": project_id, "name": row["name"] if row else None, "available": row is not None}
+
+    def _require_project(self, user_id: str, project_id: str | None) -> None:
+        project = self._project(user_id, project_id)
+        if project is not None and not project["available"]:
+            raise WatchAccessError("Watch Project is unavailable.")
+
+    def _public_run(self, record: dict, *, summary: bool = False) -> dict:
+        definition = json.loads(record["definition_json"])
+        project_id = definition.pop("project_id", None)
+        definition["project"] = self._project(record["user_id"], project_id)
         return {
             "id": record["run_id"],
-            "definition": json.loads(record["definition_json"]),
+            "definition": definition,
             **{key: record[key] for key in (
                 "watch_id", "watch_revision", "status", "kind", "scheduled_at", "created_at",
                 "updated_at", "completed_at", "attempts", "outcome", "error",
@@ -167,6 +183,7 @@ class WatchesRepository:
                 "title", "url", "criterion", "revision", "created_at", "updated_at", "next_run_at",
             )},
             "schedule": record["schedule"], "enabled": bool(record["enabled"]),
+            "project": self._project(record["user_id"], record["project_id"]),
             "active_run_id": active["run_id"] if active else None,
             "latest_run": self._public_run(dict(latest), summary=summary) if latest else None,
         }
@@ -191,7 +208,7 @@ class WatchesRepository:
             )},
         }
 
-    def _lease(self, run_id: str, lease_token: str, fence: int) -> dict:
+    def _lease(self, run_id: str, lease_token: str, fence: int, *, check_project: bool = True) -> dict:
         record = self._run(run_id)
         watch = self._load(record["watch_id"], record["user_id"])
         if (
@@ -200,7 +217,16 @@ class WatchesRepository:
             or dt.datetime.fromisoformat(record["lease_expires_at"]) <= self._clock()
         ):
             raise WatchConflictError("Watch check authority changed or expired.")
+        if check_project:
+            self._require_project(record["user_id"], json.loads(record["definition_json"]).get("project_id"))
         return record
+
+    def fence_execution(self, *, run_id: str, lease_token: str, fence: int) -> None:
+        """Fence dispatch synchronously after the caller's final awaited read."""
+        with self._lock:
+            record = self._lease(run_id, lease_token, fence)
+            self._account(record)
+            self._budget(record)
 
     def _account(self, record: dict) -> None:
         if record["accounted_at"] is None:
@@ -266,6 +292,7 @@ class WatchesRepository:
     def _enqueue(self, watch: dict, *, kind: str, scheduled_at: str) -> str:
         run_id, now = str(uuid.uuid4()), _stamp(self._clock())
         definition = {key: watch[key] for key in ("title", "url", "criterion", "schedule")}
+        definition["project_id"] = watch["project_id"]
         baseline = self._baseline(watch["watch_id"])
         self._conn.execute(
             "INSERT INTO app_watch_runs (run_id,watch_id,user_id,watch_revision,definition_json,"
@@ -280,7 +307,7 @@ class WatchesRepository:
     async def create(
         self, *, user_id: str, title: str, url: str, criterion: str, schedule: dict,
         request_id: str, enabled: bool = True, limits: dict | None = None,
-        max_per_user: int = 20, max_global: int = 200,
+        max_per_user: int = 20, max_global: int = 200, project_id: str | None = None,
     ) -> dict:
         title, url = _text(title, 100, "title"), normalize_watch_url(url)
         criterion, request_id = _text(criterion, 2000, "criterion"), _text(request_id, 200, "request identity")
@@ -289,7 +316,13 @@ class WatchesRepository:
             raise WatchError("Invalid watch enabled state.")
         _integer(max_per_user, 1, 20)
         _integer(max_global, 1, 200)
-        digest = hashlib.sha256(_json([title, url, criterion, schedule, enabled]).encode()).hexdigest()
+        if project_id is not None:
+            project_id = _text(project_id, 300, "Project")
+        # Keep pre-Project request identities replayable after migration.
+        identity = [title, url, criterion, schedule, enabled]
+        if project_id is not None:
+            identity.append(project_id)
+        digest = hashlib.sha256(_json(identity).encode()).hexdigest()
 
         def work() -> dict:
             self._owner(user_id)
@@ -301,6 +334,7 @@ class WatchesRepository:
                 if existing["request_digest"] != digest:
                     raise WatchConflictError("Request identity already used for another watch.")
                 return self._public(self._load(existing["watch_id"], user_id))
+            self._require_project(user_id, project_id)
             counts = self._conn.execute(
                 "SELECT COUNT(*) AS total,COALESCE(SUM(user_id=?),0) AS owned FROM app_watches", (user_id,),
             ).fetchone()
@@ -309,26 +343,29 @@ class WatchesRepository:
             watch_id, now = str(uuid.uuid4()), self._clock()
             self._conn.execute(
                 "INSERT INTO app_watches (watch_id,user_id,request_id,request_digest,title,url,criterion,"
-                "schedule_json,limits_json,enabled,next_run_at,created_at,updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "schedule_json,limits_json,enabled,next_run_at,created_at,updated_at,project_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (watch_id, user_id, request_id, digest, title, url, criterion, _json(schedule), _json(limits),
                  int(enabled), _stamp(next_occurrence(schedule, now)) if enabled else None,
-                 _stamp(now), _stamp(now)),
+                 _stamp(now), _stamp(now), project_id),
             )
             return self._public(self._load(watch_id, user_id))
 
         return await asyncio.to_thread(self._transaction, work)
 
-    async def list(self, *, user_id: str, limit: int = 20) -> list[dict]:
+    async def list(self, *, user_id: str, limit: int = 20, project_id: str | None = None) -> list[dict]:
         _integer(limit, 1, 20)
+        if project_id is not None:
+            project_id = _text(project_id, 300, "Project")
 
         def work() -> list[dict]:
             with self._lock:
                 self._owner(user_id)
+                self._require_project(user_id, project_id)
                 return [self._public(self._load(row["watch_id"], user_id), summary=True) for row in
                         self._conn.execute(
-                            "SELECT watch_id FROM app_watches WHERE user_id=? ORDER BY created_at DESC,watch_id "
-                            "LIMIT ?", (user_id, limit),
+                            "SELECT watch_id FROM app_watches WHERE user_id=? AND (? IS NULL OR project_id=?) "
+                            "ORDER BY created_at DESC,watch_id LIMIT ?", (user_id, project_id, project_id, limit),
                         ).fetchall()]
         return await asyncio.to_thread(work)
 
@@ -342,6 +379,7 @@ class WatchesRepository:
         self, *, user_id: str, watch_id: str, expected_revision: int,
         title: Any = _UNSET, url: Any = _UNSET, criterion: Any = _UNSET,
         schedule: Any = _UNSET, enabled: Any = _UNSET, limits: dict | None = None,
+        project_id: Any = _UNSET,
     ) -> dict:
         _integer(expected_revision, 1, 2**63 - 1)
         changes = {}
@@ -358,6 +396,8 @@ class WatchesRepository:
             changes["enabled"] = enabled
         if limits is not None:
             changes["limits"] = _limits(limits)
+        if project_id is not _UNSET:
+            changes["project_id"] = None if project_id is None else _text(project_id, 300, "Project")
 
         def work() -> dict:
             record = self._load(watch_id, user_id)
@@ -365,6 +405,8 @@ class WatchesRepository:
                 raise WatchConflictError("Watch changed. Refresh before trying again.")
             old_url, old_schedule, old_enabled = record["url"], record["schedule"], record["enabled"]
             record.update(changes)
+            if record["enabled"] or "project_id" in changes:
+                self._require_project(user_id, record["project_id"])
             if record["url"] != old_url:
                 self._conn.execute("DELETE FROM app_watch_baselines WHERE watch_id=?", (watch_id,))
                 record["failure_key"] = ""
@@ -380,10 +422,10 @@ class WatchesRepository:
             )
             self._conn.execute(
                 "UPDATE app_watches SET title=?,url=?,criterion=?,schedule_json=?,limits_json=?,enabled=?,"
-                "revision=revision+1,next_run_at=?,failure_key=?,updated_at=? WHERE watch_id=?",
+                "revision=revision+1,next_run_at=?,failure_key=?,updated_at=?,project_id=? WHERE watch_id=?",
                 (record["title"], record["url"], record["criterion"], _json(record["schedule"]),
                  _json(record["limits"]), int(record["enabled"]), record["next_run_at"], record["failure_key"],
-                 _stamp(self._clock()), watch_id),
+                 _stamp(self._clock()), record["project_id"], watch_id),
             )
             return self._public(self._load(watch_id, user_id))
         return await asyncio.to_thread(self._transaction, work)
@@ -406,6 +448,7 @@ class WatchesRepository:
             watch = self._load(watch_id, user_id)
             if watch["revision"] != expected_revision:
                 raise WatchConflictError("Watch changed. Refresh before trying again.")
+            self._require_project(user_id, watch["project_id"])
             if not self._conn.execute(
                 "SELECT 1 FROM app_watch_runs WHERE watch_id=? AND status IN ('queued','running')", (watch_id,),
             ).fetchone():
@@ -439,6 +482,24 @@ class WatchesRepository:
                 (_stamp(next_occurrence(watch["schedule"], now, anchor=due)), watch["watch_id"]),
             )
 
+    def _pause_unavailable_projects(self) -> None:
+        """Retain saved history while revoking every queued or running check."""
+        now = _stamp(self._clock())
+        self._conn.execute(
+            "UPDATE app_watch_runs SET status='cancelled',fence=fence+1,lease_token='',lease_expires_at=NULL,"
+            "accounted_at=NULL,error='Watch Project is unavailable.',completed_at=?,updated_at=? "
+            "WHERE status IN ('queued','running') AND watch_id IN (SELECT watch_id FROM app_watches "
+            "WHERE project_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM app_projects p "
+            "WHERE p.project_id=app_watches.project_id AND p.user_id=app_watches.user_id AND p.private_required=0))",
+            (now, now),
+        )
+        self._conn.execute(
+            "UPDATE app_watches SET enabled=0,next_run_at=NULL,revision=revision+1,updated_at=? "
+            "WHERE project_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM app_projects p "
+            "WHERE p.project_id=app_watches.project_id AND p.user_id=app_watches.user_id AND p.private_required=0) "
+            "AND (enabled=1 OR next_run_at IS NOT NULL)", (now,),
+        )
+
     def _notice(self, record: dict, *, kind: str, body: str, dedup_key: str) -> None:
         title = json.loads(record["definition_json"])["title"]
         self._conn.execute(
@@ -466,6 +527,7 @@ class WatchesRepository:
         current_limits = _limits(limits) if limits is not None else None
 
         def work() -> dict | None:
+            self._pause_unavailable_projects()
             self._schedule_due()
             now = self._clock()
             rows = self._conn.execute(
@@ -622,10 +684,13 @@ class WatchesRepository:
             raise WatchError("Invalid watch retry.")
 
         def work() -> dict:
-            record = self._lease(run_id, lease_token, fence)
+            record = self._lease(run_id, lease_token, fence, check_project=False)
             self._account(record)
             limits = json.loads(record["limits_json"])
-            if (retry and record["attempts"] < 3 and record["operations"] < limits["max_operations"]
+            project = self._project(record["user_id"], json.loads(record["definition_json"]).get("project_id"))
+            project_available = project is None or project["available"]
+            if (retry and project_available and record["attempts"] < 3
+                    and record["operations"] < limits["max_operations"]
                     and record["active_seconds"] < limits["max_active_seconds"]):
                 record.update(status="queued", error=error, available_at=_stamp(
                     self._clock() + dt.timedelta(seconds=min(60 * 2 ** (record["attempts"] - 1), 900)),
@@ -699,7 +764,7 @@ class WatchesRepository:
 
     def fence_response(
         self, *, user_id: str, watches: list[dict] | tuple = (), runs: list[dict] | tuple = (),
-        notices: list[dict] | tuple = (),
+        notices: list[dict] | tuple = (), project_id: str | None = None,
     ) -> None:
         """Recheck canonical response proofs synchronously after the last await.
 
@@ -712,7 +777,7 @@ class WatchesRepository:
 
         def check_run(payload: dict, watch_id: str | None = None) -> None:
             row = self._conn.execute(
-                "SELECT r.watch_id,r.updated_at FROM app_watch_runs r JOIN app_watches w "
+                "SELECT r.watch_id,r.updated_at,r.definition_json FROM app_watch_runs r JOIN app_watches w "
                 "ON w.watch_id=r.watch_id WHERE r.run_id=? AND r.user_id=? AND w.user_id=?",
                 (payload["id"], user_id, user_id),
             ).fetchone()
@@ -722,18 +787,28 @@ class WatchesRepository:
                 raise WatchAccessError("Watch check is unavailable.")
             if "updated_at" in payload and row["updated_at"] != payload["updated_at"]:
                 raise WatchConflictError("Watch check changed. Refresh before trying again.")
+            definition = payload.get("definition")
+            if definition is not None and definition.get("project") != self._project(
+                user_id, json.loads(row["definition_json"]).get("project_id"),
+            ):
+                raise WatchConflictError("Watch check Project changed. Refresh before trying again.")
 
         with self._lock:
             self._owner(user_id)
+            self._require_project(user_id, project_id)
             for payload in watches:
                 row = self._conn.execute(
-                    "SELECT revision FROM app_watches WHERE watch_id=? AND user_id=?",
+                    "SELECT revision,project_id FROM app_watches WHERE watch_id=? AND user_id=?",
                     (payload["id"], user_id),
                 ).fetchone()
                 if row is None:
                     raise WatchAccessError("Watch is unavailable.")
                 if row["revision"] != payload["revision"]:
                     raise WatchConflictError("Watch changed. Refresh before trying again.")
+                if project_id is not None and row["project_id"] != project_id:
+                    raise WatchAccessError("Watch is unavailable.")
+                if payload.get("project") != self._project(user_id, row["project_id"]):
+                    raise WatchConflictError("Watch Project changed. Refresh before trying again.")
                 if payload.get("latest_run") is not None:
                     check_run(payload["latest_run"], payload["id"])
             for payload in runs:

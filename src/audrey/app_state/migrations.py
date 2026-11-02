@@ -1392,6 +1392,15 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON app_agent_project_contexts(user_id,project_id,task_id);
         """,
     ),
+    (
+        33,
+        """
+        ALTER TABLE app_watches ADD COLUMN project_id TEXT
+          CHECK (project_id IS NULL OR length(project_id) BETWEEN 1 AND 300);
+        CREATE INDEX IF NOT EXISTS idx_app_watches_project
+          ON app_watches(user_id,project_id,created_at DESC,watch_id);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

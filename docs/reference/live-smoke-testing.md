@@ -103,6 +103,40 @@ For a different checkout/container use `AUDREY_SMOKE_APPDATA` (or `APPDATA`) and
 `AUDREY_SMOKE_CONTAINER`; forwarded Python options include `--config`, `--json`
 and `--timeout-seconds` (positive, at most ten seconds).
 
+## Project Watch API smoke
+
+After pulling the Project Watch slice, run on Tower:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+tests/smoke/smoke-native-onbox.sh smoke_native_project_watches.py
+```
+
+Backend startup applies schema 33 automatically. No config change, recreation
+flag or upload is needed. The wrapper uses the `audrey:latest` image's Python
+against `http://audrey-ui:8080`, mounting the smoke source read-only. It needs a
+current `AUDREY_USER_JWT` in Tower `.env.smoke.local`; `AUDREY_ADMIN_JWT` is optional
+for this smoke. Remote credential freshness cannot be checked from the laptop.
+The account needs one free Watch slot and permission to create ordinary Projects
+and Watches, with Watches/local model access enabled.
+
+The smoke creates two disposable ordinary Projects and one **paused** public-page
+Watch, checks idempotency, Project filtering/renaming, explicit unlink/reassignment,
+and unavailable-Project handling, then deletes its fixtures in `finally`. Run and
+Resume are tested only after Project deletion, where both must reject the request;
+no check should be queued. The source is a reserved `.invalid` URL. The smoke
+does not request successful page fetches, uploads or model generations and does
+not alter existing Projects or Watches. Failure cleanup errors fail the run.
+
+Expect `PASS` lines for the contracts and cleanup, followed by
+`PASS Project Watches API smoke passed` and `(exit 0)`. Results return directly
+in the launching shell, with no report transfer or notifications. Add `--json`
+for a compact receipt. Each HTTP request has a ten-second timeout. Exit codes:
+0 pass, 1 API contract/cleanup finding, 2 setup failure, 3 harness crash,
+130 interrupted. This checks deployed native proxy/API integration; actual
+scheduled public-page comparisons and local-model quality remain separate.
+
 ## Service rebuilds
 
 The user runs these actions on Tower from /mnt/user/appdata/audrey_ai_2.0 after

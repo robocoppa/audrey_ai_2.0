@@ -405,5 +405,5 @@ async def test_run_history_retains_the_definition_that_produced_its_report(state
     await state.store.watches.update(**_key(state, watch), title="Other page", url="https://example.com/other",
                                      criterion="Other criterion")
     saved = await state.store.watches.get_run(user_id=state.owner.user_id, watch_id=watch["id"], run_id=run["id"])
-    assert saved["definition"] == {key: watch[key] for key in ("title", "url", "criterion", "schedule")}
+    assert saved["definition"] == {key: watch[key] for key in ("title", "url", "criterion", "schedule", "project")}
     assert "text" not in saved and "lease_token" not in saved

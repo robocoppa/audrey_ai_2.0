@@ -1,0 +1,42 @@
+.project-watches {
+  min-width: 0;
+  margin-top: 0.75rem;
+}
+
+.project-watches > header {
+  flex-wrap: wrap;
+}
+
+.project-watches > header > button,
+.project-watches > button {
+  min-height: 2.2rem;
+  max-width: 100%;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.65rem;
+  color: var(--text);
+  background: var(--surface-raised);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.project-watches > button {
+  margin-top: 0.6rem;
+}
+
+.project-watches > button:hover:not(:disabled) {
+  background: var(--surface-active);
+  box-shadow: 0 0 0.85rem rgb(52 153 250 / 12%);
+}
+
+.project-watches button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.project-watches button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

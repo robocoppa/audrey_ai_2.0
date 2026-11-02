@@ -1,7 +1,7 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
 **Status:** In progress, November 1, 2026. Public-research Agents, unified lexical
-Search, Project Knowledge and the first public-page Watch slice are implemented locally. The owner confirms Search
+Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner confirms Search
 returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
 
 The owner selected unified search, saved background tasks, project working
@@ -65,7 +65,7 @@ output-limit failure; live acceptance of the larger allowance remains pending.
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
 Adaptive multi-step plans, source-backed Project notes, file/Private agent inputs,
 semantic search,
-owned-file watches and Project-associated watches remain implementation work. Existing Private Tax tasks keep
+owned-file/Private and multiple-source watches remain implementation work. Existing Private Tax tasks keep
 their current behavior. The remaining sections specify the intended full feature.
 
 The first unified Search slice searches native completed/incomplete user and
@@ -160,7 +160,7 @@ cadence edits retain the baseline; URL/redirect identity or extraction changes r
 History exposes each run's saved URL, criterion and schedule separately from the
 current definition. Significant changes and persistent failures create deduplicated in-app Activity
 notices linked to the exact saved check. Unchanged checks remain in history. There
-are no external notifications. Owned-file/Private and Project-associated watches,
+are no external notifications. Owned-file/Private watches,
 multiple-source definitions remain later work.
 Affected hermetic checks and mocked desktop/phone browser flows pass; real public
 page changes, scheduled runtime and model-judgment acceptance remain manual.
@@ -303,7 +303,39 @@ and cancellation cleanup, with bounded waits and explicit exit codes. It needs n
 credentials, accounts, model calls or network access. The runner and negative
 failure detection pass locally; the deployed invocation is documented in
 [live testing](../reference/live-smoke-testing.md#installed-admission-smoke).
-Tower smoke execution and real GPU/HTTP contention acceptance remain unrun here.
+The owner reported a Tower pass for all five cases with exit 0: configured GPU
+capacity 1, per-user capacity 3 and background aging 30 seconds. Real GPU/HTTP
+contention acceptance remains unrun.
+
+### Project public-page watches
+
+Schema 33 optionally associates a public-page Watch with an owned ordinary Project.
+Project home lists its watches in a compact row below Knowledge/Agents. New watch
+in Project opens the existing Watch composer with only the Project preselected;
+the user still previews the schedule and presses Create watch. Existing links open
+the same Watch even before its first check. Current definitions and saved checks
+offer canonical Project navigation, while chat and unfinished Watch drafts remain
+reachable. Private Projects are excluded.
+
+This association organizes the public page; Project instructions, notes and files
+are not check inputs. Each check records its original Project ID in its immutable
+definition; names and availability come from fresh owned Project metadata. Edits
+may reassign or explicitly unlink a Watch, cancelling old queued/running work.
+An organizational change retains a URL-compatible baseline. Legacy unscoped
+definitions, checks and creation retries remain compatible.
+
+Project deletion or unavailability blocks dispatch, heartbeat and result commits
+immediately. The next scheduler sweep pauses linked definitions and cancels
+outstanding checks. Saved history stays readable; Pause/Edit/Delete and explicit
+unlink remain available. Run now/Resume require an available Project. Synchronous
+checks after awaited reads fence stale metadata and the final socket boundary.
+
+Affected backend/UI tests, migration replay, model-response deletion boundaries
+and responsive mocked browser checks verify this slice locally. The paused-watch
+[native smoke](../reference/live-smoke-testing.md#project-watch-api-smoke) exercises
+deployed Project/Watch API wiring without page fetches or model generation; its
+Tower run remains pending. Rebuild backend and UI; schema 33 applies automatically.
+No configuration change or upload is required.
 
 ## Product outcome
 
@@ -328,8 +360,8 @@ decision; then schedule a weekly check of a selected public release page.
 | Resource admission | Interactive preference, aged background fairness, cooperative queued handoffs and generation-boundary release | Live concurrent-chat/model acceptance and broader checkpoint-age monitoring |
 | Private tasks | Leases, revisions, source/model pins, budgets and committed-result delivery for Private tax reviews | General agent contracts and adapters; existing Private recovery currently pauses work |
 | Search | Local lexical API/sidebar, canonical reader and workspace links, exact message focus, bounded projection, approved notes and Project report filters | Semantic candidates and expanded native previews for retained text |
-| Projects | Compact overview with Knowledge/Agents below; approved knowledge in native chat and ordinary agents; fixed agent context, Project links and saved-work lists | Source-backed note and file/Private agent context, automatic proposals |
-| Scheduling | Explicit public-page schedules, snapshots/diffs, baselines and Activity alerts | Owned-file/Private, Project-associated and multiple-source watches |
+| Projects | Compact overview with Knowledge/Agents below and a Watch row; approved knowledge in native chat and ordinary agents; fixed agent context, Project links and saved-work lists | Source-backed note and file/Private agent context, automatic proposals |
+| Scheduling | Explicit public-page schedules, Project organization/navigation, snapshots/diffs, baselines and Activity alerts | Owned-file/Private and multiple-source watches |
 
 Code anchors:
 

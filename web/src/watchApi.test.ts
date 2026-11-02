@@ -17,3 +17,18 @@ it("keeps watch reads cancellable and mutations revisioned with owner authentica
   expect(fetchMock).toHaveBeenCalledWith("/api/notifications/notice%20%2F%20one/read", expect.objectContaining({ method: "POST" }));
   for (const [, init] of fetchMock.mock.calls as [string, RequestInit][]) { expect(init.credentials).toBe("same-origin"); expect(init.headers).not.toHaveProperty("Authorization"); }
 });
+
+it("filters Project watches without changing legacy list URLs or explicit detach bodies", async () => {
+  const fetchMock = vi.fn().mockImplementation(async () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+  vi.stubGlobal("fetch", fetchMock);
+  const signal = new AbortController().signal;
+  const definition: WatchDefinition = { title: "Page", url: "https://example.com/page", criterion: "New release", enabled: true, schedule: { kind: "daily", time: "09:00", timezone: "UTC" } };
+  await listWatches(signal);
+  await listWatches(signal, "project / one");
+  await createWatch({ ...definition, project_id: "project / one" }, "request-project");
+  await updateWatch("watch-1", { ...definition, project_id: null }, 3);
+  expect(fetchMock).toHaveBeenCalledWith("/api/watches", expect.objectContaining({ signal, cache: "no-store" }));
+  expect(fetchMock).toHaveBeenCalledWith("/api/watches?project_id=project+%2F+one", expect.objectContaining({ signal, cache: "no-store" }));
+  expect(fetchMock).toHaveBeenCalledWith("/api/watches", expect.objectContaining({ body: JSON.stringify({ ...definition, project_id: "project / one", request_id: "request-project" }) }));
+  expect(fetchMock).toHaveBeenCalledWith("/api/watches/watch-1", expect.objectContaining({ body: JSON.stringify({ ...definition, project_id: null, expected_revision: 3 }) }));
+});

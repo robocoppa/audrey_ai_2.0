@@ -4,7 +4,7 @@ import type { ComponentProps } from "react";
 
 import { App } from "./App";
 import { latestActionFetch } from "./agentTransport";
-import type { SearchTarget } from "./api";
+import type { PublicWatch, SearchTarget } from "./api";
 
 const workspaceMock = vi.hoisted(() => ({ enabled: false, projectBridge: false }));
 
@@ -19,6 +19,8 @@ vi.mock("./ChatWorkspace", async (importOriginal) => {
         {workspaceMock.projectBridge ? <>
           <button onClick={() => void props.onNewProjectAgent?.(BRIDGE_PROJECT)}>Prefill Project agent</button>
           <button onClick={() => void props.onOpenProjectAgent?.(BRIDGE_AGENT)}>Open saved Project agent</button>
+          <button onClick={() => void props.onNewProjectWatch?.(BRIDGE_PROJECT)}>Prefill Project watch</button>
+          <button onClick={() => void props.onOpenProjectWatch?.(BRIDGE_WATCH)}>Open saved Project watch</button>
           {props.projectOpenRequest ? <span>Opened Project {props.projectOpenRequest.project.name}</span> : null}
         </> : null}
         {props.menuActions}
@@ -40,6 +42,8 @@ const DEFAULT_PREFERENCES = {
 
 const BRIDGE_PROJECT = { id: "project-bridge", name: "Public releases", instructions: "Stable only.", created_at: "2026-10-31T10:00:00Z", updated_at: "2026-10-31T10:00:00Z" };
 const BRIDGE_AGENT = { id: "agent-bridge", objective: "Compare public releases", title: "Release comparison", status: "completed" as const, revision: 8, created_at: BRIDGE_PROJECT.created_at, updated_at: BRIDGE_PROJECT.updated_at, steps: [], result: "A saved report.", error: "", attempts: 1, project_context: { project_id: BRIDGE_PROJECT.id, project_name: BRIDGE_PROJECT.name, available: true, current: true, instructions_included: true, knowledge: [] } };
+
+const BRIDGE_WATCH: PublicWatch = { id: "watch-bridge", title: "Release monitoring", url: "https://example.com/releases", criterion: "New stable releases", schedule: { kind: "daily", time: "09:00", timezone: "UTC" }, enabled: true, revision: 1, next_run_at: "2026-11-02T09:00:00Z", active_run_id: null, latest_run: null, created_at: BRIDGE_PROJECT.created_at, updated_at: BRIDGE_PROJECT.updated_at, project: { id: BRIDGE_PROJECT.id, name: BRIDGE_PROJECT.name, available: true } };
 
 const DEFAULT_MODELS = [
   {
@@ -141,6 +145,78 @@ describe("App", () => {
     expect(navigation.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
     expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue("");
+  });
+
+  it("prefills a Project watch without a write and opens its existing definition before its first check", async () => {
+    workspaceMock.enabled = workspaceMock.projectBridge = true;
+    const base = mockCapabilitySession("degraded").getMockImplementation()!;
+    const fetchMock = vi.fn<(path: string, options?: RequestInit) => Promise<Response>>((path) => {
+      const payload = path === `/api/projects/${BRIDGE_PROJECT.id}` ? BRIDGE_PROJECT
+        : path === `/api/watches/${BRIDGE_WATCH.id}` ? BRIDGE_WATCH : path === "/api/watches" ? { items: [BRIDGE_WATCH] } : null;
+      return payload ? Promise.resolve(new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } })) : base(path);
+    }); vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Prefill Project watch" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(BRIDGE_PROJECT.id));
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Preserved watch draft" } });
+    const navigation = within(screen.getByRole("navigation", { name: "Workspaces" })); fireEvent.click(navigation.getByRole("button", { name: "Chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open saved Project watch" }));
+    expect(await screen.findByRole("heading", { name: BRIDGE_WATCH.title })).toBeVisible();
+    expect(screen.getByText("No saved checks yet. Run now to establish a baseline, or wait for the first scheduled check.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Open Project" }));
+    expect(await screen.findByText(`Opened Project ${BRIDGE_PROJECT.name}`)).toBeVisible();
+    fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resume draft" }));
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Preserved watch draft");
+    expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(BRIDGE_PROJECT.id);
+    expect(fetchMock.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false);
+  });
+
+  it("ignores a late Project watch prefill after another navigation", async () => {
+    workspaceMock.enabled = workspaceMock.projectBridge = true;
+    let resolve!: (response: Response) => void;
+    const base = mockCapabilitySession("degraded").getMockImplementation()!;
+    vi.stubGlobal("fetch", vi.fn((path: string) => path === `/api/projects/${BRIDGE_PROJECT.id}` ? new Promise<Response>((done) => { resolve = done; }) : base(path)));
+    render(<App />); fireEvent.click(await screen.findByRole("button", { name: "Prefill Project watch" }));
+    const navigation = within(screen.getByRole("navigation", { name: "Workspaces" })); fireEvent.click(navigation.getByRole("button", { name: "Agents" })); fireEvent.click(navigation.getByRole("button", { name: "Chat" }));
+    await act(async () => resolve(new Response(JSON.stringify(BRIDGE_PROJECT), { headers: { "Content-Type": "application/json" } })));
+    expect(navigation.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
+    expect(screen.getByRole("button", { name: "Tasks" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("form", { name: "Create watch" })).not.toBeInTheDocument();
+  });
+
+  it("ignores a late saved-watch read after the user leaves its Project", async () => {
+    workspaceMock.enabled = workspaceMock.projectBridge = true;
+    let resolve!: (response: Response) => void;
+    let signal: AbortSignal | null | undefined;
+    const base = mockCapabilitySession("degraded").getMockImplementation()!;
+    vi.stubGlobal("fetch", vi.fn((path: string, options?: RequestInit) => {
+      if (path === `/api/watches/${BRIDGE_WATCH.id}`) {
+        signal = options?.signal;
+        return new Promise<Response>((done) => { resolve = done; });
+      }
+      return base(path);
+    }));
+    render(<App />); fireEvent.click(await screen.findByRole("button", { name: "Open saved Project watch" }));
+    const navigation = within(screen.getByRole("navigation", { name: "Workspaces" }));
+    fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
+    expect(signal?.aborted).toBe(true);
+    await act(async () => resolve(new Response(JSON.stringify(BRIDGE_WATCH), { headers: { "Content-Type": "application/json" } })));
+    expect(screen.getByRole("button", { name: "Tasks" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("heading", { name: BRIDGE_WATCH.title })).not.toBeInTheDocument();
+  });
+
+  it.each(["private", "mismatched", "unavailable"] as const)("rejects a %s canonical Project watch link", async (reason) => {
+    workspaceMock.enabled = workspaceMock.projectBridge = true;
+    const base = mockCapabilitySession("degraded").getMockImplementation()!;
+    const fetchMock = vi.fn((path: string) => {
+      const payload = path === `/api/projects/${BRIDGE_PROJECT.id}` ? { ...BRIDGE_PROJECT, private_required: true }
+        : path === `/api/watches/${BRIDGE_WATCH.id}` ? { ...BRIDGE_WATCH, project: { ...BRIDGE_WATCH.project!, id: reason === "mismatched" ? "other-project" : BRIDGE_PROJECT.id, available: reason !== "unavailable" } } : null;
+      return payload ? Promise.resolve(new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } })) : base(path);
+    }); vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: reason === "private" ? "Prefill Project watch" : "Open saved Project watch" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(reason === "private" ? "unavailable for this Project" : "no longer available in this Project");
+    expect(within(screen.getByRole("navigation", { name: "Workspaces" })).getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
   });
 
   it.each(["message", "file", "agent", "knowledge"] as const)("follows a Search %s into its existing workspace after revalidating the source", async (kind) => {

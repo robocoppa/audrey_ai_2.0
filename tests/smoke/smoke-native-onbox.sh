@@ -21,7 +21,7 @@ case "${SMOKE_SCRIPT}" in
   smoke_native_auth_cutover.py|smoke_native_ui.py|smoke_native_files.py|\
   smoke_native_chat_projection.py|smoke_native_access_models.py|\
   smoke_native_preferences.py|smoke_native_tool_events.py|smoke_native_modes.py|\
-  smoke_native_restart_persistence.py)
+  smoke_native_restart_persistence.py|smoke_native_project_watches.py)
     ;;
   *)
     die "unsupported native smoke script: ${SMOKE_SCRIPT}"
@@ -56,7 +56,8 @@ done < "${ENV_FILE}"
 
 (( have_user == 1 )) \
   || die "${ENV_FILE} is missing AUDREY_USER_JWT"
-if [[ "${SMOKE_SCRIPT}" != "smoke_native_auth_cutover.py" ]]; then
+if [[ "${SMOKE_SCRIPT}" != "smoke_native_auth_cutover.py" &&
+      "${SMOKE_SCRIPT}" != "smoke_native_project_watches.py" ]]; then
   (( have_admin == 1 )) \
     || die "${ENV_FILE} is missing AUDREY_ADMIN_JWT"
 fi

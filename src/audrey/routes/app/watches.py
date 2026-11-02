@@ -27,11 +27,18 @@ _access = require_scope("compat:full")
 logger = logging.getLogger(__name__)
 
 
+class WatchProject(BaseModel):
+    id: str
+    name: str | None
+    available: bool
+
+
 class WatchRunInputs(BaseModel):
     title: str
     url: str
     criterion: str
     schedule: dict[str, Any]
+    project: WatchProject | None = None
 
 
 class WatchRunSummary(BaseModel):
@@ -69,6 +76,7 @@ class WatchResponse(BaseModel):
     next_run_at: str | None
     active_run_id: str | None
     latest_run: WatchRunSummary | None
+    project: WatchProject | None = None
 
 
 class NoticeResponse(BaseModel):
@@ -90,6 +98,7 @@ class WatchCreate(BaseModel):
     schedule: dict[str, Any]
     enabled: bool = Field(default=True, strict=True)
     request_id: str = Field(min_length=1, max_length=200)
+    project_id: str | None = Field(default=None, min_length=1, max_length=300)
 
 
 class WatchUpdate(BaseModel):
@@ -100,6 +109,7 @@ class WatchUpdate(BaseModel):
     criterion: str | None = Field(default=None, min_length=1, max_length=2000)
     schedule: dict[str, Any] | None = None
     enabled: bool | None = Field(default=None, strict=True)
+    project_id: str | None = Field(default=None, min_length=1, max_length=300)
 
 
 class WatchAction(BaseModel):
@@ -156,11 +166,13 @@ async def preview_watch(body: SchedulePreview, response: Response, principal: Pr
 
 
 @router.get("/watches", response_model=dict[str, list[WatchResponse]])
-async def list_watches(request: Request, response: Response, principal: Principal = Depends(_access)):
+async def list_watches(request: Request, response: Response,
+                       project_id: str | None = Query(default=None, min_length=1, max_length=300),
+                       principal: Principal = Depends(_access)):
     response.headers["Cache-Control"] = "private, no-store"
     try:
-        items = await _repository(request).list(user_id=principal.user_id, limit=20)
-        _fence(request, principal, watches=items)
+        items = await _repository(request).list(user_id=principal.user_id, limit=20, project_id=project_id)
+        _fence(request, principal, watches=items, project_id=project_id)
         return {"items": items}
     except WatchError as error:
         raise _error(error) from None
@@ -210,8 +222,8 @@ async def update_watch(watch_id: str, body: WatchUpdate, request: Request, respo
     response.headers["Cache-Control"] = "private, no-store"
     repository = _repository(request)
     values = body.model_dump(exclude_unset=True)
-    if any(value is None for value in values.values()) or len(values) <= 1:
-        raise HTTPException(422, "Choose at least one watch field to change; fields cannot be null.")
+    if any(value is None for key, value in values.items() if key != "project_id") or len(values) <= 1:
+        raise HTTPException(422, "Choose at least one watch field to change; only Project may be null.")
     try:
         await repository.get(user_id=principal.user_id, watch_id=watch_id)
         # Pausing and deletion remain available after grants/configuration change.

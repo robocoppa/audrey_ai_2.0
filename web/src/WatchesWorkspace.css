@@ -14,6 +14,10 @@
 .watch-detail-header p:nth-last-child(-n+2) { font-size: 0.78rem; color: var(--muted); }
 .watch-controls { gap: 0.4rem; }
 .watch-controls button { font-size: 0.76rem; min-height: 2.35rem; padding: 0.5rem 0.7rem; }
+.watch-project { display: flex; align-items: center; flex-wrap: wrap; gap: 0.55rem; margin: 0.65rem 0; color: var(--text-soft); font-size: 0.8rem; }
+.watch-project > button { min-height: 2rem; padding: 0.35rem 0.65rem; font-size: 0.75rem; }
+.watch-project > p { flex-basis: 100%; margin: 0; }
+.watch-resume-draft { margin-bottom: 1rem; }
 .watch-history, .watch-run { margin-top: 1.6rem; padding-top: 1.4rem; border-top: 1px solid var(--border); }
 .watch-history h3, .watch-run h3 { margin: 0; font-size: 0.95rem; }
 .watch-history ul { display: flex; flex-wrap: wrap; gap: 0.6rem; padding: 0; list-style: none; }

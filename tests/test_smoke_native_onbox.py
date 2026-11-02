@@ -6,6 +6,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "tests" / "smoke" / "smoke-native-onbox.sh"
 
@@ -72,15 +74,19 @@ def test_wrapper_pins_the_tower_runtime_contract():
     assert "${APPDATA}/tests/smoke:/smoke:ro" in text
     assert "/opt/venv/bin/python" in text
 
-def test_valid_native_env_invokes_the_expected_container_contract(tmp_path):
+@pytest.mark.parametrize("script,admin_required", [
+    ("smoke_native_ui.py", True),
+    ("smoke_native_project_watches.py", False),
+])
+def test_valid_native_env_invokes_the_expected_container_contract(tmp_path, script, admin_required):
     appdata = tmp_path / "appdata"
     scripts = appdata / "tests" / "smoke"
     scripts.mkdir(parents=True)
-    (scripts / "smoke_native_ui.py").write_text("# fixture\n")
+    (scripts / script).write_text("# fixture\n")
     env_file = appdata / ".env.smoke.local"
     env_file.write_text(
         "AUDREY_USER_JWT=user-jwt\n"
-        "AUDREY_ADMIN_JWT=admin-jwt\n"
+        + ("AUDREY_ADMIN_JWT=admin-jwt\n" if admin_required else "")
     )
 
     bin_dir = tmp_path / "bin"
@@ -108,7 +114,7 @@ def test_valid_native_env_invokes_the_expected_container_contract(tmp_path):
         }
     )
     result = subprocess.run(
-        ["bash", str(SCRIPT), "smoke_native_ui.py"],
+        ["bash", str(SCRIPT), script],
         env=env,
         text=True,
         capture_output=True,
@@ -125,5 +131,5 @@ def test_valid_native_env_invokes_the_expected_container_contract(tmp_path):
     assert args[-3:] == [
         "test-image",
         "/opt/venv/bin/python",
-        "/smoke/smoke_native_ui.py",
+        f"/smoke/{script}",
     ]

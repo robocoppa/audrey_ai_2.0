@@ -18,6 +18,7 @@ import {
   uploadPrecheck,
   type AudreyFile,
   type AgentTask,
+  type PublicWatch,
   type AudreyProject,
   type AudreyProjectFile,
   type Conversation,
@@ -29,6 +30,7 @@ import { TaxProjectSection } from "./TaxProjectSection";
 import { ProjectKnowledgeSection } from "./ProjectKnowledgeSection";
 import { SearchSourceViewer } from "./SearchSourceViewer";
 import { getKnowledgeSource, type KnowledgeEntry, type SearchResult, type SearchSource } from "./api";
+import { ProjectWatches } from "./ProjectWatches";
 import "./ProjectAgents.css";
 import "./ProjectWorkspace.css";
 
@@ -177,6 +179,8 @@ export function ProjectHome({
   onFilesChange,
   onNewProjectAgent,
   onOpenProjectAgent,
+  onNewProjectWatch,
+  onOpenProjectWatch,
 }: {
   visible?: boolean;
   project: AudreyProject;
@@ -192,6 +196,8 @@ export function ProjectHome({
   onFilesChange: (files: AudreyProjectFile[]) => void;
   onNewProjectAgent?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
   onOpenProjectAgent?: (task: AgentTask, signal?: AbortSignal) => void | Promise<void>;
+  onNewProjectWatch?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
+  onOpenProjectWatch?: (watch: PublicWatch, signal?: AbortSignal) => void | Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(project.name);
@@ -412,8 +418,12 @@ export function ProjectHome({
               aria-label={confirmingDelete ? "Confirm delete project" : "Delete project"}
               aria-pressed={confirmingDelete}
               title={confirmingDelete
-                ? "Click again to delete project. Conversations and files will be kept."
-                : "Conversations and files will be kept. Conversations return to your chat history with their processing setting unchanged."}
+                ? isPrivate
+                  ? "Click again to delete project. Conversations and files will be kept."
+                  : "Click again to delete project. Linked watches stop; saved checks, conversations and files will be kept."
+                : isPrivate
+                  ? "Conversations and files will be kept. Conversations return to your chat history with their processing setting unchanged."
+                  : "Linked watches stop; saved checks, conversations and files will be kept. Conversations return to your chat history with their processing setting unchanged."}
               onClick={() => {
                 if (confirmingDelete) {
                   void removeProject();
@@ -575,6 +585,9 @@ export function ProjectHome({
           key={project.id} project={project} visible={visible}
           onNew={onNewProjectAgent} onOpen={onOpenProjectAgent} /> : null}
       </div>
+      {!isPrivate && (onNewProjectWatch || onOpenProjectWatch) ? <ProjectWatches
+        key={project.id} project={project} visible={visible}
+        onNew={onNewProjectWatch} onOpen={onOpenProjectWatch} /> : null}
       {isPrivate ? <TaxProjectSection projectId={project.id} onConversationSelected={onConversationSelected} /> : null}
       {knowledgeSource ? <SearchSourceViewer result={knowledgeSource.result} loadSource={knowledgeSource.load} onClose={() => setKnowledgeSource(null)} /> : null}
 

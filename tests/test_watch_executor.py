@@ -46,6 +46,10 @@ class Repository:
         if self.revoked:
             raise AgentDispatchStoppedError("The watch definition changed.")
 
+    def fence_execution(self, **_lease):
+        if self.revoked:
+            raise AgentDispatchStoppedError("The watch definition changed.")
+
     async def reserve_operation(self, *, kind, **lease):
         await self.validate_lease(**lease)
         self.operations.append(kind)
@@ -515,3 +519,85 @@ async def test_real_repository_runtime_snapshots_and_notices_preserve_prior_base
     # The failed occurrence is in durable backoff; repeated wakes cannot retry
     # immediately or manufacture another notice.
     assert not await runtime.run_once()
+
+
+async def _project_watch(state):
+    from audrey.app_state.watches import WatchesRepository
+
+    repository = WatchesRepository(state.store._conn, state.store._lock)
+    state.store.watches = repository
+    project = await state.store.projects.create(
+        user_id=state.owner.user_id, name="Releases", instructions="Keep this Project context private.",
+    )
+    watch = await repository.create(
+        user_id=state.owner.user_id, title="Project releases", url=_URL,
+        criterion="New releases", request_id="project-boundary", enabled=False,
+        project_id=project.project_id,
+        schedule={"kind": "interval", "timezone": "UTC", "interval_minutes": 60},
+    )
+    return repository, project, watch
+
+
+async def test_project_deleted_after_final_await_is_fenced_before_page_dispatch(state, monkeypatch):
+    from audrey.app_state.watches import WatchAccessError
+
+    repository, project, watch = await _project_watch(state)
+    await repository.run_now(
+        user_id=state.owner.user_id, watch_id=watch["id"], expected_revision=watch["revision"],
+    )
+    run = await repository.claim()
+    original = repository.validate_lease
+    reads = 0
+
+    async def delete_after_read(**lease):
+        nonlocal reads
+        await original(**lease)
+        reads += 1
+        if reads == 2:
+            # Reproduce a valid worker read whose consumer resumes after deletion.
+            await state.store.projects.delete(user_id=state.owner.user_id, project_id=project.project_id)
+
+    monkeypatch.setattr(repository, "validate_lease", delete_after_read)
+    with pytest.raises(WatchAccessError, match="Project is unavailable"):
+        await state.executor(run)
+    assert not state.resolved and not state.fetches and not state.clients
+    assert repository._run(run["run_id"])["operations"] == 0
+    # Cleanup is still allowed although the execution context is gone.
+    failed = await repository.fail(
+        **{name: run[name] for name in ("run_id", "lease_token", "fence")},
+        error="Project unavailable.", retry=True,
+    )
+    assert failed["status"] == "failed"
+
+
+async def test_project_deleted_during_model_response_cannot_publish_or_replace_baseline(state):
+    repository, project, watch = await _project_watch(state)
+    runtime = WatchRuntime(repository, state.executor)
+
+    async def check():
+        await repository.run_now(
+            user_id=state.owner.user_id, watch_id=watch["id"], expected_revision=watch["revision"],
+        )
+        assert await runtime.run_once()
+        return (await repository.list_runs(user_id=state.owner.user_id, watch_id=watch["id"]))[0]
+
+    assert (await check())["outcome"] == "baseline"
+    baseline = repository._baseline(watch["id"])
+
+    async def delete_during_response():
+        await state.store.projects.delete(user_id=state.owner.user_id, project_id=project.project_id)
+
+    state.asset = PublicAsset(b"Release 3 is available.", "text/plain", _URL)
+    state.on_chat = delete_during_response
+    state.response["message"]["content"] = json.dumps({
+        "significant": True, "summary": "MODEL OUTPUT MUST NOT BE SAVED",
+    })
+    failed = await check()
+    assert failed["status"] == "failed" and failed["outcome"] is None
+    assert failed["report"] == "" and failed["diff"] == ""
+    assert repository._baseline(watch["id"]) == baseline
+    assert "MODEL OUTPUT" not in json.dumps(await repository.list_notices(user_id=state.owner.user_id))
+    assert state.calls and all(client._client.is_closed for client in state.clients)
+    assert "Keep this Project context private." not in json.dumps(state.calls)
+    assert not state.app.state.inflight.pressure_snapshot()["in_use"]
+    assert not state.app.state.gate.pressure_snapshot()["in_use"]

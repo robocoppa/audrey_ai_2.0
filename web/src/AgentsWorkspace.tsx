@@ -84,6 +84,8 @@ interface AgentsWorkspaceProps {
   onNavigationOpenChange?: (open: boolean) => void;
   composerProjectRequest?: { project: AudreyProject; serial: number };
   externalAgentRequest?: { task: AgentTask; serial: number };
+  composerWatchProjectRequest?: { project: AudreyProject; serial: number };
+  externalWatchRequest?: { watch: PublicWatch; serial: number };
   onOpenProject?: (projectId: string) => void;
 }
 
@@ -99,6 +101,8 @@ export function AgentsWorkspace(props: AgentsWorkspaceProps) {
   const requestSerial = useRef(0);
   const externalSerial = useRef<number | null>(null);
   const composerSerial = useRef<number | null>(null);
+  const watchComposerSerial = useRef<number | null>(null);
+  const watchExternalSerial = useRef<number | null>(null);
   const taskRevisions = useRef(new Map<string, number>());
   const receiveTasks = useCallback((tasks: AgentTask[]) => {
     taskRevisions.current = new Map(tasks.map((task) => [task.id, task.revision]));
@@ -129,6 +133,22 @@ export function AgentsWorkspace(props: AgentsWorkspaceProps) {
     queueMicrotask(() => { if (current) setView("tasks"); });
     return () => { current = false; };
   }, [props.composerProjectRequest]);
+  useEffect(() => {
+    const request = props.composerWatchProjectRequest;
+    if (!request || watchComposerSerial.current === request.serial) return;
+    watchComposerSerial.current = request.serial;
+    let current = true;
+    queueMicrotask(() => { if (current) { setWatchesOpened(true); setView("watches"); } });
+    return () => { current = false; };
+  }, [props.composerWatchProjectRequest]);
+  useEffect(() => {
+    const request = props.externalWatchRequest;
+    if (!request || watchExternalSerial.current === request.serial) return;
+    watchExternalSerial.current = request.serial;
+    let current = true;
+    queueMicrotask(() => { if (current) { setWatchesOpened(true); setView("watches"); } });
+    return () => { current = false; };
+  }, [props.externalWatchRequest]);
   useEffect(() => {
     if (!visible) return;
     const controller = new AbortController();
@@ -174,6 +194,9 @@ export function AgentsWorkspace(props: AgentsWorkspaceProps) {
       navigationOpen={props.navigationOpen}
       onNavigationOpenChange={props.onNavigationOpenChange}
       openRequest={watchRequest}
+      composerProjectRequest={props.composerWatchProjectRequest}
+      externalWatchRequest={props.externalWatchRequest}
+      onOpenProject={props.onOpenProject}
     /></div> : null}
     {activityOpened ? <div className="agents-hub-view" hidden={view !== "activity"}><ActivityWorkspace visible={visible && view === "activity"} timezone={props.timezone} onUnreadChange={receiveUnread}
       isAgentResultCurrent={(task) => (taskRevisions.current.get(task.id) ?? -1) <= task.revision}

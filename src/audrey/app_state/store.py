@@ -80,6 +80,7 @@ _ADDITIVE_COLUMN_MIGRATIONS = {
     },
     25: {"app_project_files": ("origin",)},
     28: {"app_agent_tasks": ("title", "title_attempted")},
+    33: {"app_watches": ("project_id",)},
 }
 
 
@@ -225,6 +226,8 @@ class ApplicationStore:
                         definition = "TEXT NOT NULL DEFAULT 'upload' CHECK (origin IN ('upload', 'generated'))"
                     elif column == "skill_version":
                         definition = "INTEGER NOT NULL DEFAULT 0"
+                    elif column == "project_id":
+                        definition = "TEXT CHECK (project_id IS NULL OR length(project_id) BETWEEN 1 AND 300)"
                     else:
                         definition = "TEXT NOT NULL DEFAULT " + repr("")
                     self._conn.execute(
@@ -235,6 +238,11 @@ class ApplicationStore:
                     self._conn.execute(guard_sql)
             if version == 25:
                 self._conn.execute(PROJECT_FILE_ORIGIN_GUARD_SQL)
+            if version == 33:
+                self._conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_app_watches_project "
+                    "ON app_watches(user_id,project_id,created_at DESC,watch_id)"
+                )
             self._conn.execute(
                 "INSERT INTO app_schema_migrations(version, applied_at) VALUES (?, ?)",
                 (version, stamp),

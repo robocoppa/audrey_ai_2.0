@@ -197,6 +197,7 @@ class WatchExecutor:
             # Catalog/identity reads await worker I/O. A pause or edit during
             # those reads must fence the socket opened immediately afterward.
             await repository.validate_lease(**lease)
+            repository.fence_execution(**lease)
             return principal
 
         principal = await authorize()

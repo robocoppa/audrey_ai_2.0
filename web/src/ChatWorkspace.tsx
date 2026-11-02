@@ -82,6 +82,7 @@ import {
   type AudreyProject,
   type AudreyProjectFile,
   type AgentTask,
+  type PublicWatch,
   type Conversation,
   type ConversationMessage,
   type MessageAttachment,
@@ -237,6 +238,8 @@ export function ChatWorkspace({
   conversationOpenRequest,
   onNewProjectAgent,
   onOpenProjectAgent,
+  onNewProjectWatch,
+  onOpenProjectWatch,
 }: {
   visible?: boolean;
   navigationOpen: boolean;
@@ -253,6 +256,8 @@ export function ChatWorkspace({
   conversationOpenRequest?: { conversation: Conversation; messageId: string; serial: number };
   onNewProjectAgent?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
   onOpenProjectAgent?: (task: AgentTask, signal?: AbortSignal) => void | Promise<void>;
+  onNewProjectWatch?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
+  onOpenProjectWatch?: (watch: PublicWatch, signal?: AbortSignal) => void | Promise<void>;
 }) {
   const [compactNavigation, setCompactNavigation] = useState(() =>
     window.matchMedia?.("(max-width: 1100px)").matches ?? false);
@@ -1280,6 +1285,8 @@ export function ChatWorkspace({
             onFilesChange={setProjectFiles}
             onNewProjectAgent={onNewProjectAgent}
             onOpenProjectAgent={onOpenProjectAgent}
+            onNewProjectWatch={onNewProjectWatch}
+            onOpenProjectWatch={onOpenProjectWatch}
           />
         ) : null}
         {!catalogUnavailable && projectError && selectedProject && !selected ? (

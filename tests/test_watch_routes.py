@@ -171,7 +171,7 @@ async def test_bots_group_blocks_execution_but_preserves_owned_reads_pause_and_d
 
 
 @pytest.mark.parametrize("extra", [
-    {"private_required": True}, {"project_id": "foreign"}, {"file_ids": ["foreign"]},
+    {"private_required": True}, {"file_ids": ["foreign"]},
     {"user_id": "bob"}, {"model": "cloud"}, {"limits": {"max_operations": 999}},
     {"enabled": "true"}, {"title": "x" * 101}, {"criterion": "x" * 2001},
 ])
@@ -314,7 +314,7 @@ async def test_historical_check_keeps_its_saved_url_and_criterion_after_watch_ed
     assert updated.status_code == 200
     historical = await watches.client.get(f"/api/watches/{watch['id']}/runs/{queued['active_run_id']}")
     assert historical.status_code == 200
-    assert historical.json()["definition"] == {key: watch[key] for key in ("title", "url", "criterion", "schedule")}
+    assert historical.json()["definition"] == {key: watch[key] for key in ("title", "url", "criterion", "schedule", "project")}
     assert historical.json()["status"] == "cancelled"
 
 

@@ -17,11 +17,13 @@ import {
   getCurrentUserPreferences,
   getAgentTask,
   getProject,
+  getWatch,
   listModels,
   listSkills,
   type AudreyModel,
   type AudreyProject,
   type AgentTask,
+  type PublicWatch,
   type Conversation,
   type SearchResult,
   type CapabilityHealth,
@@ -105,6 +107,8 @@ export function App() {
   const [projectLinkError, setProjectLinkError] = useState("");
   const [composerProjectRequest, setComposerProjectRequest] = useState<{ project: AudreyProject; serial: number; owner: string }>();
   const [externalAgentRequest, setExternalAgentRequest] = useState<{ task: AgentTask; serial: number; owner: string }>();
+  const [composerWatchProjectRequest, setComposerWatchProjectRequest] = useState<{ project: AudreyProject; serial: number; owner: string }>();
+  const [externalWatchRequest, setExternalWatchRequest] = useState<{ watch: PublicWatch; serial: number; owner: string }>();
   const [projectOpenRequest, setProjectOpenRequest] = useState<{ project: AudreyProject; serial: number; owner: string }>();
   const [conversationOpenRequest, setConversationOpenRequest] = useState<{ conversation: Conversation; messageId: string; serial: number; owner: string }>();
   const [fileOpenRequest, setFileOpenRequest] = useState<{ fileId: string; artifact: Extract<SearchResult["target"], { kind: "file" }>["artifact"]; owner: string }>();
@@ -165,11 +169,35 @@ export function App() {
     }, signal);
   }
 
+  async function newProjectWatch(project: AudreyProject, signal?: AbortSignal) {
+    await readProjectLink(async (currentSignal, serial) => {
+      const current = await getProject(project.id, currentSignal);
+      if (currentSignal.aborted || projectNavigation.current.serial !== serial) return;
+      if (current.id !== project.id || current.private_required) throw new Error("Public-page watches are unavailable for this Project.");
+      setComposerWatchProjectRequest({ project: current, serial, owner: workspaceOwner });
+      setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("agents");
+    }, signal);
+  }
+
+  async function openProjectWatch(watch: PublicWatch, signal?: AbortSignal) {
+    await readProjectLink(async (currentSignal, serial) => {
+      const projectId = watch.project?.id;
+      if (!projectId) throw new Error("This saved watch is no longer linked to this Project.");
+      const current = await getWatch(watch.id, currentSignal);
+      if (currentSignal.aborted || projectNavigation.current.serial !== serial) return;
+      if (current.id !== watch.id || current.project?.id !== projectId || !current.project.available) {
+        throw new Error("This saved watch is no longer available in this Project. Refresh before trying again.");
+      }
+      setExternalWatchRequest({ watch: current, serial, owner: workspaceOwner });
+      setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("agents");
+    }, signal);
+  }
+
   async function openAgentProject(projectId: string) {
     await readProjectLink(async (signal, serial) => {
       const project = await getProject(projectId, signal);
       if (signal.aborted || projectNavigation.current.serial !== serial) return;
-      if (project.id !== projectId || project.private_required) throw new Error("This agent's Project is unavailable.");
+      if (project.id !== projectId || project.private_required) throw new Error("This Project is unavailable.");
       setProjectOpenRequest({ project, serial, owner: workspaceOwner });
       setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("chat");
     });
@@ -438,6 +466,8 @@ export function App() {
               conversationOpenRequest={conversationOpenRequest?.owner === workspaceOwner ? conversationOpenRequest : undefined}
               onNewProjectAgent={newProjectAgent}
               onOpenProjectAgent={openProjectAgent}
+              onNewProjectWatch={newProjectWatch}
+              onOpenProjectWatch={openProjectWatch}
             />
           </Suspense>
         </div>
@@ -445,6 +475,8 @@ export function App() {
           <AgentsWorkspace key={`${session.user.id}:${workspaceRevision}`} visible={activeWorkspace === "agents" && !(searchOpen && compactSearch)} timezone={session.preferences.timezone} onActiveCountChange={setActiveAgentCount} navigationOpen={navigationOpen} onNavigationOpenChange={changeNavigation}
             composerProjectRequest={composerProjectRequest?.owner === workspaceOwner ? composerProjectRequest : undefined}
             externalAgentRequest={externalAgentRequest?.owner === workspaceOwner ? externalAgentRequest : undefined}
+            composerWatchProjectRequest={composerWatchProjectRequest?.owner === workspaceOwner ? composerWatchProjectRequest : undefined}
+            externalWatchRequest={externalWatchRequest?.owner === workspaceOwner ? externalWatchRequest : undefined}
             onOpenProject={(projectId) => void openAgentProject(projectId)} />
         </div>
         </div>

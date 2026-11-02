@@ -591,6 +591,12 @@ export type WatchSchedule = {
   weekday?: number;
 };
 
+export interface WatchProject {
+  id: string;
+  name: string | null;
+  available: boolean;
+}
+
 export interface WatchRunSummary {
   id: string;
   definition?: {
@@ -598,6 +604,7 @@ export interface WatchRunSummary {
     url: string;
     criterion: string;
     schedule: WatchSchedule;
+    project?: WatchProject | null;
   };
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   outcome: "baseline" | "unchanged" | "changed" | null;
@@ -623,6 +630,7 @@ export interface PublicWatch {
   title: string;
   url: string;
   criterion: string;
+  project?: WatchProject | null;
   schedule: WatchSchedule;
   enabled: boolean;
   revision: number;
@@ -633,7 +641,7 @@ export interface PublicWatch {
   updated_at: string;
 }
 
-export type WatchDefinition = Pick<PublicWatch, "title" | "url" | "criterion" | "schedule" | "enabled">;
+export type WatchDefinition = Pick<PublicWatch, "title" | "url" | "criterion" | "schedule" | "enabled"> & { project_id?: string | null };
 
 export interface WatchNotification {
   id: string;
@@ -673,8 +681,9 @@ export function getActivityAgentTask(id: string, signal?: AbortSignal): Promise<
   return apiJson(`/api/activity/agent/${encodeURIComponent(id)}/task`, { signal, cache: "no-store" });
 }
 
-export function listWatches(signal?: AbortSignal): Promise<{ items: PublicWatch[] }> {
-  return apiJson("/api/watches", { signal, cache: "no-store" });
+export function listWatches(signal?: AbortSignal, projectId?: string): Promise<{ items: PublicWatch[] }> {
+  const query = projectId ? `?${new URLSearchParams({ project_id: projectId })}` : "";
+  return apiJson(`/api/watches${query}`, { signal, cache: "no-store" });
 }
 
 export function getWatch(id: string, signal?: AbortSignal): Promise<PublicWatch> {
