@@ -14,10 +14,12 @@ import {
   type KnowledgeSourceRef,
   type ProjectKnowledgeList,
 } from "./api";
+import { KnowledgeSourcePicker } from "./KnowledgeSourcePicker";
 import "./ProjectKnowledgeSection.css";
 
 type Props = {
   project: AudreyProject;
+  visible?: boolean;
   onChanged?: () => void;
   onOpenSource?: (source: KnowledgeSourceRef, entry: KnowledgeEntry, index: number) => void;
 };
@@ -30,7 +32,7 @@ export function ProjectKnowledgeSection(props: Props) {
   return <ProjectKnowledge key={props.project.id} {...props} />;
 }
 
-function ProjectKnowledge({ project, onChanged, onOpenSource }: Props) {
+function ProjectKnowledge({ project, visible = true, onChanged, onOpenSource }: Props) {
   const headingId = useId();
   const active = useRef(true);
   const loadGeneration = useRef(0);
@@ -44,6 +46,7 @@ function ProjectKnowledge({ project, onChanged, onOpenSource }: Props) {
   const [kind, setKind] = useState<KnowledgeKind>("fact");
   const [text, setText] = useState("");
   const [pinned, setPinned] = useState(false);
+  const [sources, setSources] = useState<KnowledgeSourceRef[]>([]);
   const [saving, setSaving] = useState(false);
   const [createError, setCreateError] = useState("");
   const [editingIds, setEditingIds] = useState<Set<string>>(() => new Set());
@@ -111,11 +114,12 @@ function ProjectKnowledge({ project, onChanged, onOpenSource }: Props) {
     setCreateError("");
     requestId.current ??= crypto.randomUUID();
     try {
-      const entry = await createProjectKnowledge(project.id, { kind, text: text.trim(), pinned, request_id: requestId.current });
+      const entry = await createProjectKnowledge(project.id, { kind, text: text.trim(), pinned, ...(sources.length ? { sources } : {}), request_id: requestId.current });
       if (!active.current) return;
       changed(entry);
       setText("");
       setPinned(false);
+      setSources([]);
       setAdding(false);
       requestId.current = null;
       setStateFilter("current");
@@ -148,6 +152,8 @@ function ProjectKnowledge({ project, onChanged, onOpenSource }: Props) {
       </select></label>
       <label>Entry text<textarea value={text} maxLength={loaded?.limits.max_text_chars ?? 8000} rows={4} required disabled={saving}
         onChange={(event) => { setText(event.target.value); requestId.current = null; }} /></label>
+      <KnowledgeSourcePicker projectId={project.id} sources={sources} disabled={saving} visible={visible}
+        onChange={(next) => { setSources(next); requestId.current = null; }} />
       <label className="knowledge-check"><input type="checkbox" checked={pinned} disabled={saving} onChange={(event) => { setPinned(event.target.checked); requestId.current = null; }} />Pin for project context</label>
       <p className="knowledge-note">Entries you write are saved as approved. An action stays open until you complete it.</p>
       {createError ? <p role="alert" className="knowledge-error">{createError}</p> : null}
@@ -168,16 +174,17 @@ function ProjectKnowledge({ project, onChanged, onOpenSource }: Props) {
     {loadError ? <p role="alert" className="knowledge-error">Could not refresh project knowledge. {loadError} <button type="button" onClick={refresh}>Try again</button></p> : null}
     {loaded?.next_cursor ? <p role="status" className="knowledge-note">Some entries could not be loaded. Refresh to try again.</p> : null}
     {!loading && loaded && !entries.length ? <p className="project-panel-copy">{stateFilter === "proposed" ? "No proposals need review." : stateFilter === "history" ? "No rejected or superseded entries." : "No saved entries match this view."}</p> : null}
-    <div className="knowledge-entries">{entries.map((entry) => <KnowledgeCard key={entry.id} entry={entry} maxTextChars={loaded?.limits.max_text_chars ?? 8000}
+    <div className="knowledge-entries">{entries.map((entry) => <KnowledgeCard key={entry.id} entry={entry} visible={visible} maxTextChars={loaded?.limits.max_text_chars ?? 8000}
       replacement={entry.replaces_id ? loaded?.items.find((item) => item.id === entry.replaces_id) : undefined}
       onChanged={changed} onConflict={refresh} onOpenSource={onOpenSource}
       onEditingChange={(editing) => setEditingIds((current) => { const next = new Set(current); if (editing) next.add(entry.id); else next.delete(entry.id); return next; })} />)}</div>
   </section>;
 }
 
-function KnowledgeCard({ entry, replacement, maxTextChars, onChanged, onConflict, onOpenSource, onEditingChange }: {
+function KnowledgeCard({ entry, replacement, visible, maxTextChars, onChanged, onConflict, onOpenSource, onEditingChange }: {
   entry: KnowledgeEntry;
   replacement?: KnowledgeEntry;
+  visible: boolean;
   maxTextChars: number;
   onChanged: (entry?: KnowledgeEntry, deletedId?: string) => void;
   onConflict: () => void;
@@ -191,6 +198,8 @@ function KnowledgeCard({ entry, replacement, maxTextChars, onChanged, onConflict
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(entry.text);
   const [draftKind, setDraftKind] = useState(entry.kind);
+  const [draftSources, setDraftSources] = useState(entry.sources);
+  const [baseSources, setBaseSources] = useState(entry.sources);
   const [baseRevision, setBaseRevision] = useState(entry.revision);
   const [deleteRevision, setDeleteRevision] = useState<number | null>(null);
   const [history, setHistory] = useState<{ revision: number; items: KnowledgeEntry[] } | null>(null);
@@ -248,6 +257,8 @@ function KnowledgeCard({ entry, replacement, maxTextChars, onChanged, onConflict
   function beginEdit() {
     setDraft(entry.text);
     setDraftKind(entry.kind);
+    setDraftSources(entry.sources);
+    setBaseSources(entry.sources);
     setBaseRevision(entry.revision);
     setEditing(true);
     onEditingChange(true);
@@ -262,11 +273,19 @@ function KnowledgeCard({ entry, replacement, maxTextChars, onChanged, onConflict
       {entry.kind === "question" || entry.kind === "action" ? <span>{entry.work_status === "open" ? "Open" : entry.work_status === "resolved" ? "Resolved" : "Completed"}</span> : null}
       {entry.stale ? <span className="knowledge-stale">Sources need review</span> : null}
     </div><small>Revision {entry.revision}</small></header>
-    {editing ? <form className="knowledge-editor" onSubmit={(event) => { event.preventDefault(); if (!draftConflict && draft.trim()) void mutate(() => updateProjectKnowledge(entry.project_id, entry.id, { expected_revision: baseRevision, kind: draftKind, text: draft.trim() })); }}>
+    {editing ? <form className="knowledge-editor" onSubmit={(event) => {
+      event.preventDefault();
+      if (!draftConflict && draft.trim()) void mutate(() => updateProjectKnowledge(entry.project_id, entry.id, {
+        expected_revision: baseRevision, kind: draftKind, text: draft.trim(),
+        ...(!sameSources(draftSources, baseSources) ? { sources: draftSources } : {}),
+      }));
+    }}>
       <label>Entry type<select value={draftKind} disabled={busy} onChange={(event) => setDraftKind(event.target.value as KnowledgeKind)}>{KINDS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
       <label>Edit entry text<textarea value={draft} rows={4} maxLength={maxTextChars} disabled={busy} onChange={(event) => setDraft(event.target.value)} required /></label>
+      <KnowledgeSourcePicker projectId={entry.project_id} sources={draftSources} onChange={setDraftSources} disabled={busy} visible={visible} />
       {draftConflict ? <div className="knowledge-conflict"><p>Latest saved text · Revision {entry.revision}</p><blockquote>{entry.text}</blockquote>
-        <button type="button" onClick={() => { setBaseRevision(entry.revision); setError(""); }}>Keep my draft and use latest revision</button></div> : null}
+        <p>Latest saved source references</p>{entry.sources.length ? <ul>{entry.sources.map((source) => <li key={source.source_id}>{source.source_id} · Revision {source.revision}</li>)}</ul> : <p>No source references.</p>}
+        <button type="button" onClick={() => { setBaseRevision(entry.revision); setBaseSources(entry.sources); setError(""); }}>Keep my draft and use latest revision</button></div> : null}
       <div className="knowledge-actions"><button type="submit" disabled={busy || draftConflict || !draft.trim()}>{busy ? "Saving…" : "Save changes"}</button>
         <button type="button" disabled={busy} onClick={() => { setEditing(false); onEditingChange(false); setError(""); }}>Cancel edit</button></div>
     </form> : <p className="knowledge-text">{entry.text}</p>}
@@ -295,13 +314,19 @@ function KnowledgeCard({ entry, replacement, maxTextChars, onChanged, onConflict
         onClick={() => { if (confirmingDelete) void mutate(() => deleteProjectKnowledge(entry.project_id, entry.id, entry.revision)); else setDeleteRevision(entry.revision); }}>{confirmingDelete ? "✓" : "Delete"}</button>
     </div>
     {historyOpen ? <div className="knowledge-history" aria-label="Entry revision history"><p>Saved revision history{history && history.revision !== entry.revision ? ` through revision ${history.revision}` : ""}</p>
-      {historyLoading ? <p role="status">Loading revisions…</p> : history?.items.map((revision) => <section key={revision.revision}><h4>Revision {revision.revision} · {approvalLabel(revision.approval_state)}</h4><p>{revision.text}</p><small>{formatDate(revision.updated_at)}</small></section>)}
+      {historyLoading ? <p role="status">Loading revisions…</p> : history?.items.map((revision) => <section key={revision.revision}><h4>Revision {revision.revision} · {approvalLabel(revision.approval_state)}</h4><p>{revision.text}</p>
+        {revision.sources.length ? <details className="knowledge-sources"><summary>{revision.sources.length} saved source {revision.sources.length === 1 ? "reference" : "references"}</summary>
+          <ul>{revision.sources.map((source) => <li key={source.source_id}>{source.source_id} · Revision {source.revision}</li>)}</ul></details> : <p className="knowledge-note">No source references in this revision.</p>}
+        <small>{formatDate(revision.updated_at)}</small></section>)}
       {!historyLoading && !history?.items.length ? <p>No earlier revisions are available.</p> : null}
     </div> : null}
   </article>;
 }
 
 function kindLabel(kind: KnowledgeKind) { return KINDS.find((item) => item.value === kind)?.label ?? kind; }
+function sameSources(left: KnowledgeSourceRef[], right: KnowledgeSourceRef[]) {
+  return left.length === right.length && left.every((source, index) => source.source_id === right[index].source_id && source.revision === right[index].revision);
+}
 function approvalLabel(state: KnowledgeEntry["approval_state"]) {
   return state === "proposed" ? "Needs approval" : state === "approved" ? "Approved" : state === "rejected" ? "Rejected" : "Superseded";
 }

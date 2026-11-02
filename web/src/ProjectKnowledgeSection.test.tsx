@@ -13,6 +13,134 @@ function json(body: unknown, status = 200) { return new Response(JSON.stringify(
 function listing(items: KnowledgeEntry[]) { return { items, next_cursor: null, limits }; }
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+const reference = { source_id: "file:owned:text", revision: "text-v1" };
+function sourcePreview(revision = reference.revision) {
+  return { ...reference, revision, kind: "file", title: "Project source", text: "The inspected source passage.", offset: 0, next_offset: null, total_chars: 29, target: { kind: "file", file_id: "owned", artifact: "text" }, availability: "available", private_required: false };
+}
+
+async function attachSource() {
+  fireEvent.click(screen.getByRole("button", { name: "Source references (0/8)" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Preview Project source" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Attach reference" }));
+}
+
+it("saves explicitly inspected references and preserves a new entry draft when closed", async () => {
+  const saved = entry({ text: "Use the inspected date.", sources: [reference] });
+  const fetchMock = vi.fn().mockImplementation((path: string, options?: RequestInit) => {
+    if (path.includes("source-candidates")) return Promise.resolve(json({ items: [{ source_id: reference.source_id, kind: "file", title: "Project source", private_required: false }], next_cursor: null }));
+    if (path.includes("source-preview")) return Promise.resolve(json(sourcePreview()));
+    if (options?.method === "POST") return Promise.resolve(json(saved));
+    return Promise.resolve(json(listing([])));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<ProjectKnowledgeSection project={project} />);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Add entry" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Add entry" }));
+  fireEvent.change(screen.getByLabelText("Entry text"), { target: { value: saved.text } });
+  await attachSource();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add entry" }));
+  expect(screen.getByLabelText("Entry text")).toHaveValue(saved.text);
+  expect(screen.getByRole("button", { name: "Source references (1/8)" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Save entry" }));
+  await waitFor(() => expect(screen.queryByLabelText("Entry text")).not.toBeInTheDocument());
+  const [, options] = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
+  expect(JSON.parse(options!.body as string)).toEqual({ kind: "fact", text: saved.text, pinned: false, sources: [reference], request_id: expect.any(String) });
+});
+
+it("writes an explicit empty reference list when unlinking and preserves agent provenance", async () => {
+  const proposed = entry({ approval_state: "proposed", origin: "agent_report", source_task_id: "task-1", sources: [reference] });
+  const fetchMock = vi.fn().mockImplementation((path: string, options?: RequestInit) => Promise.resolve(json(path.includes("source-candidates") ? { items: [], next_cursor: null } : options?.method === "PATCH" ? { ...proposed, sources: [], revision: 2 } : listing([proposed]))));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<ProjectKnowledgeSection project={project} />);
+  fireEvent.click(await screen.findByRole("button", { name: "1 proposal needs your review" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Source references (1/8)" }));
+  fireEvent.click(screen.getByRole("button", { name: `Remove reference to ${reference.source_id}` }));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(screen.queryByLabelText("Edit entry text")).not.toBeInTheDocument());
+  const [, options] = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+  expect(JSON.parse(options!.body as string)).toEqual({ expected_revision: 1, kind: "decision", text: proposed.text, sources: [] });
+  expect(screen.getByText(/Proposed from an agent report/u)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Approve proposal" })).toBeVisible();
+});
+
+it("preserves saved references without reading or replacing them during a text-only edit", async () => {
+  const original = entry({ sources: [reference] });
+  const fetchMock = vi.fn().mockResolvedValueOnce(json(listing([original])))
+    .mockResolvedValueOnce(json({ ...original, text: "Clearer wording", revision: 2 }));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<ProjectKnowledgeSection project={project} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("Edit entry text"), { target: { value: "Clearer wording" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(screen.queryByLabelText("Edit entry text")).not.toBeInTheDocument());
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({ expected_revision: 1, kind: "decision", text: "Clearer wording" });
+  expect(screen.getByText("1 source reference")).toBeVisible();
+});
+
+it("keeps text and source drafts through a conflict and requires explicit rebase", async () => {
+  const latestReference = { source_id: "message:elsewhere", revision: "message-v2" };
+  const latest = entry({ text: "Latest saved text", sources: [latestReference], revision: 2 });
+  let writes = 0;
+  let reads = 0;
+  const fetchMock = vi.fn().mockImplementation((path: string, options?: RequestInit) => {
+    if (path.includes("source-candidates")) return Promise.resolve(json({ items: [], next_cursor: null }));
+    if (options?.method === "PATCH") {
+      writes++;
+      return Promise.resolve(writes === 1 ? json({ detail: "Revision conflict" }, 409) : json({ ...latest, text: "My unsaved text", sources: [], revision: 3 }));
+    }
+    reads++;
+    return Promise.resolve(json(listing([reads === 1 ? entry({ sources: [reference] }) : latest])));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<ProjectKnowledgeSection project={project} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("Edit entry text"), { target: { value: "My unsaved text" } });
+  fireEvent.click(screen.getByRole("button", { name: "Source references (1/8)" }));
+  fireEvent.click(screen.getByRole("button", { name: `Remove reference to ${reference.source_id}` }));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  const rebase = await screen.findByRole("button", { name: "Keep my draft and use latest revision" });
+  expect(screen.getByLabelText("Edit entry text")).toHaveValue("My unsaved text");
+  expect(screen.getByRole("button", { name: "Source references (0/8)" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  expect(screen.getByText("Latest saved source references")).toBeVisible();
+  expect(screen.getAllByText(`${latestReference.source_id} · Revision ${latestReference.revision}`)).toHaveLength(2);
+  fireEvent.click(rebase);
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(screen.queryByLabelText("Edit entry text")).not.toBeInTheDocument());
+  const bodies = fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH").map(([, init]) => JSON.parse(init!.body as string));
+  expect(bodies).toEqual([
+    { expected_revision: 1, kind: "decision", text: "My unsaved text", sources: [] },
+    { expected_revision: 2, kind: "decision", text: "My unsaved text", sources: [] },
+  ]);
+});
+
+it("changes the creation idempotency key when selected references change after failure", async () => {
+  const fetchMock = vi.fn().mockImplementation((path: string, options?: RequestInit) => {
+    if (path.includes("source-candidates")) return Promise.resolve(json({ items: [{ source_id: reference.source_id, kind: "file", title: "Project source", private_required: false }], next_cursor: null }));
+    if (path.includes("source-preview")) return Promise.resolve(json(sourcePreview()));
+    if (options?.method === "POST") return Promise.resolve(json({ detail: "Temporary failure" }, 503));
+    return Promise.resolve(json(listing([])));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<ProjectKnowledgeSection project={project} />);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Add entry" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Add entry" }));
+  fireEvent.change(screen.getByLabelText("Entry text"), { target: { value: "Keep this draft" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save entry" }));
+  await screen.findByRole("alert");
+  await attachSource();
+  fireEvent.click(screen.getByRole("button", { name: "Save entry" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save entry" })).toBeEnabled());
+  const bodies = fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(init!.body as string));
+  expect(bodies).toHaveLength(2);
+  expect(bodies[0].request_id).not.toBe(bodies[1].request_id);
+  expect(bodies[0]).not.toHaveProperty("sources");
+  expect(bodies[1].sources).toEqual([reference]);
+});
+
 it("shows approved entries, pending proposals and their provenance as plain text", async () => {
   const saved = entry({ text: "<script>not executable</script>", pinned: true });
   const proposed = entry({ id: "proposal-1", text: "Adopt a second model.", approval_state: "proposed", origin: "agent_report", source_task_id: "task-1" });
@@ -168,6 +296,22 @@ it("shows bounded revision history and source warnings without inventing source 
   fireEvent.click(screen.getByRole("button", { name: "History" }));
   expect(await screen.findByText("Earlier wording.")).toBeVisible();
   expect(fetchMock).toHaveBeenLastCalledWith("/api/projects/project-1/knowledge/entry-1/history", expect.objectContaining({ cache: "no-store" }));
+});
+
+it("shows saved reference revisions in history without reading historical source text", async () => {
+  const original = entry({ sources: [reference] });
+  const current = entry({ sources: [{ ...reference, revision: "text-v2" }], revision: 2 });
+  const fetchMock = vi.fn().mockResolvedValueOnce(json(listing([current])))
+    .mockResolvedValueOnce(json({ items: [original, current] }));
+  vi.stubGlobal("fetch", fetchMock);
+  render(<ProjectKnowledgeSection project={project} />);
+  fireEvent.click(await screen.findByRole("button", { name: "History" }));
+  const history = await screen.findByLabelText("Entry revision history");
+  const references = await within(history).findAllByText("1 saved source reference");
+  fireEvent.click(references[0]);
+  expect(within(history).getByText(`${reference.source_id} · Revision text-v1`)).toBeVisible();
+  expect(within(history).queryByRole("button", { name: "View source" })).not.toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
 it("passes a live source reference and entry identity to the source viewer", async () => {

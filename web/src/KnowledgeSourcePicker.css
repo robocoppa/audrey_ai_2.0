@@ -1,0 +1,24 @@
+.knowledge-source-picker { min-width: 0; }
+.knowledge-source-panel { display: grid; gap: 0.6rem; margin-top: 0.6rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: 0.6rem; min-width: 0; background: rgb(12 28 46 / 24%); }
+.knowledge-source-panel .knowledge-note { margin: 0; }
+.knowledge-source-selected { list-style: none; display: grid; gap: 0.65rem; padding: 0; margin: 0; min-width: 0; }
+.knowledge-source-selected li { display: grid; gap: 0.35rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--border); font-size: 0.72rem; overflow-wrap: anywhere; }
+.knowledge-source-selected small { display: block; margin-top: 0.2rem; color: var(--muted); }
+.knowledge-source-selected li > div, .knowledge-source-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.knowledge-source-type { display: grid; gap: 0.3rem; color: var(--muted); font-size: 0.73rem; }
+.knowledge-source-type select { max-width: 100%; }
+.knowledge-source-candidates { display: grid; gap: 0.35rem; max-height: 12rem; overflow-y: auto; min-width: 0; overscroll-behavior: contain; }
+.knowledge-source-candidates button { text-align: left; display: flex; align-items: center; gap: 0.5rem; justify-content: space-between; min-width: 0; }
+.knowledge-source-candidates button > span { overflow-wrap: anywhere; }
+.knowledge-source-candidates small { color: var(--muted); flex-shrink: 0; }
+.knowledge-source-preview { min-width: 0; border-top: 1px solid var(--border); padding-top: 0.7rem; }
+.knowledge-source-preview > header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; justify-content: space-between; }
+.knowledge-source-preview h4 { margin: 0; font-size: 0.8rem; color: var(--text); overflow-wrap: anywhere; }
+.knowledge-source-preview .knowledge-note { margin: 0.6rem 0; }
+.knowledge-source-preview blockquote { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; font-size: 0.78rem; margin: 0.6rem 0; padding: 0.5rem 0.7rem; border-left: 2px solid var(--border); color: var(--text); max-height: 15rem; overflow-y: auto; overscroll-behavior: contain; }
+.knowledge-source-pagination { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; margin-bottom: 0.6rem; }
+.knowledge-source-pagination > span { width: 100%; color: var(--muted); font-size: 0.67rem; }
+@media (max-width: 600px) {
+  .knowledge-source-panel { padding: 0.55rem; }
+  .knowledge-source-selected li > div > button { flex-grow: 1; }
+}

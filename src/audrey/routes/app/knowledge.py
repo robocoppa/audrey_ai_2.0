@@ -26,6 +26,13 @@ from audrey.app_state.knowledge import (
 from audrey.auth import require_scope
 from audrey.content_search import ContentSearchError
 from audrey.identity import Principal
+from audrey.knowledge_source_browser import (
+    KnowledgeSourceBrowser,
+    SourceBrowserConflictError,
+    decode_cursor,
+    encode_cursor,
+    valid_source_id,
+)
 from audrey.knowledge_sources import get_knowledge_resolver, source_in_project
 
 router = APIRouter(prefix="/projects/{project_id}/knowledge", tags=["application-knowledge"])
@@ -352,6 +359,81 @@ async def propose_knowledge(
         return (await _hydrate(principal, project, resolver, entry))[0]
     except KnowledgeError as error:
         raise _error(error) from None
+
+
+@router.get("/source-candidates")
+async def source_candidates(
+    request: Request,
+    response: Response,
+    project_id: str,
+    kind: Literal["message", "file", "agent"] = "message",
+    cursor: str | None = Query(default=None, max_length=1024),
+    limit: int = Query(default=20, ge=1, le=50),
+    principal: Principal = Depends(_access),
+):
+    response.headers["Cache-Control"] = "private, no-store"
+    store, project, resolver = await _resources(request, principal, project_id)
+    browser = KnowledgeSourceBrowser(store, resolver.reader)
+    try:
+        after = decode_cursor(cursor, principal, project, kind)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+    try:
+        values = await browser.page(principal, project, kind, after, limit)
+        # No await after the canonical owner/Project/source metadata fence.
+        if values != browser.snapshot(principal, project, kind, after, limit):
+            raise SourceBrowserConflictError("Project sources changed. Refresh the source list.")
+    except SourceBrowserConflictError as error:
+        raise HTTPException(409, str(error)) from None
+    except (OSError, sqlite3.Error, ContentSearchError, RuntimeError):
+        raise HTTPException(503, "Project sources are unavailable.") from None
+    return {
+        "items": [{"source_id": value[0], "kind": kind, "title": value[1],
+                   "private_required": value[2]} for value in values[:limit]],
+        "next_cursor": encode_cursor(values[limit - 1][0], principal, project, kind)
+        if len(values) > limit else None,
+    }
+
+
+@router.get("/source-preview")
+async def source_preview(
+    request: Request,
+    response: Response,
+    project_id: str,
+    source_id: str = Query(min_length=1, max_length=256),
+    revision: str | None = Query(default=None, min_length=1, max_length=256),
+    offset: int = Query(default=0, ge=0, le=500_000),
+    principal: Principal = Depends(_access),
+):
+    response.headers["Cache-Control"] = "private, no-store"
+    if not valid_source_id(source_id):
+        raise HTTPException(422, "Unsupported knowledge source.")
+    store, project, resolver = await _resources(request, principal, project_id)
+    document = await _read_source(principal, resolver, source_id)
+    if document is None:
+        raise HTTPException(404, "This Project source is unavailable.")
+    if (document.source_id != source_id or document.owner_id != principal.user_id
+            or not source_in_project(document, project)
+            or (revision is not None and str(document.revision) != revision)
+            or not resolver.reader.is_current(document)
+            or not _project_current(store, principal, project)):
+        raise HTTPException(409, "This source changed, was detached, or is unavailable.")
+    if offset > len(document.text):
+        raise HTTPException(422, "Text offset exceeds source length.")
+    end = min(len(document.text), offset + 4000)
+    return {
+        "source_id": document.source_id,
+        "revision": str(document.revision),
+        "kind": document.kind,
+        "title": document.title,
+        "text": document.text[offset:end],
+        "offset": offset,
+        "next_offset": end if end < len(document.text) else None,
+        "total_chars": len(document.text),
+        "target": document.target,
+        "availability": document.availability,
+        "private_required": document.private_required,
+    }
 
 
 @router.get("/{entry_id}/history")

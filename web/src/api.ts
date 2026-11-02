@@ -315,6 +315,18 @@ export interface KnowledgeSourceRef {
   revision: string;
 }
 
+export interface KnowledgeSourceCandidate {
+  source_id: string;
+  kind: "file" | "message" | "agent";
+  title: string;
+  private_required: boolean;
+}
+
+export interface KnowledgeSourceCandidateList {
+  items: KnowledgeSourceCandidate[];
+  next_cursor: string | null;
+}
+
 export interface KnowledgeEntry {
   id: string;
   project_id: string;
@@ -348,6 +360,7 @@ export interface KnowledgeUpdate {
   text?: string;
   pinned?: boolean;
   work_status?: KnowledgeEntry["work_status"];
+  sources?: KnowledgeSourceRef[];
 }
 
 export interface AudreyFile {
@@ -1163,7 +1176,19 @@ export function getProjectKnowledge(projectId: string, entryId: string, signal?:
   return apiJson<KnowledgeEntry>(projectKnowledgePath(projectId, entryId), { signal, cache: "no-store" });
 }
 
-export function createProjectKnowledge(projectId: string, entry: { kind: KnowledgeKind; text: string; pinned?: boolean; request_id: string }): Promise<KnowledgeEntry> {
+export function listKnowledgeSourceCandidates(projectId: string, kind: KnowledgeSourceCandidate["kind"], cursor?: string, signal?: AbortSignal): Promise<KnowledgeSourceCandidateList> {
+  const params = new URLSearchParams({ kind, limit: "20" });
+  if (cursor) params.set("cursor", cursor);
+  return apiJson<KnowledgeSourceCandidateList>(`${projectKnowledgePath(projectId)}/source-candidates?${params}`, { signal, cache: "no-store" });
+}
+
+export function getKnowledgeSourcePreview(projectId: string, sourceId: string, revision?: string, offset = 0, signal?: AbortSignal): Promise<SearchSource> {
+  const params = new URLSearchParams({ source_id: sourceId, offset: String(offset) });
+  if (revision !== undefined) params.set("revision", revision);
+  return apiJson<SearchSource>(`${projectKnowledgePath(projectId)}/source-preview?${params}`, { signal, cache: "no-store" });
+}
+
+export function createProjectKnowledge(projectId: string, entry: { kind: KnowledgeKind; text: string; pinned?: boolean; sources?: KnowledgeSourceRef[]; request_id: string }): Promise<KnowledgeEntry> {
   return apiJson<KnowledgeEntry>(projectKnowledgePath(projectId), {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(entry),
   });

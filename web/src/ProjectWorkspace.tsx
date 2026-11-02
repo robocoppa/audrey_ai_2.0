@@ -580,7 +580,7 @@ export function ProjectHome({
       </div>
 
       <div className="project-home-grid project-home-details">
-        <ProjectKnowledgeSection project={project} onOpenSource={(_source, entry, index) => { void openKnowledgeSource(entry, index); }} />
+        <ProjectKnowledgeSection project={project} visible={visible} onOpenSource={(_source, entry, index) => { void openKnowledgeSource(entry, index); }} />
         {!isPrivate && (onNewProjectAgent || onOpenProjectAgent) ? <ProjectAgents
           key={project.id} project={project} visible={visible}
           onNew={onNewProjectAgent} onOpen={onOpenProjectAgent} /> : null}

@@ -21,6 +21,7 @@ import {
   getProject,
   getSearchSource,
   getKnowledgeSource,
+  getKnowledgeSourcePreview,
   getProjectKnowledge,
   getProjectKnowledgeHistory,
   listAgentTasks,
@@ -30,6 +31,7 @@ import {
   readActivity,
   listProjects,
   listProjectKnowledge,
+  listKnowledgeSourceCandidates,
   removeProjectFile,
   resetAdminModelPolicy,
   searchContent,
@@ -122,6 +124,33 @@ describe("project knowledge requests", () => {
       expect(init.credentials).toBe("same-origin");
       expect(init.headers).not.toHaveProperty("Authorization");
     }
+  });
+
+  it("keeps source browsing Project scoped and pins paginated previews only when requested", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({ items: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const signal = new AbortController().signal;
+    await listKnowledgeSourceCandidates("project / owned", "message", "page+/=", signal);
+    await getKnowledgeSourcePreview("project / owned", "message / one", undefined, 0, signal);
+    await getKnowledgeSourcePreview("project / owned", "message / one", "revision/+", 4000, signal);
+    const root = "/api/projects/project%20%2F%20owned/knowledge";
+    expect(fetchMock).toHaveBeenCalledWith(`${root}/source-candidates?kind=message&limit=20&cursor=page%2B%2F%3D`, expect.objectContaining({ signal, cache: "no-store", credentials: "same-origin" }));
+    expect(fetchMock).toHaveBeenCalledWith(`${root}/source-preview?source_id=message+%2F+one&offset=0`, expect.objectContaining({ signal, cache: "no-store" }));
+    expect(fetchMock).toHaveBeenLastCalledWith(`${root}/source-preview?source_id=message+%2F+one&offset=4000&revision=revision%2F%2B`, expect.objectContaining({ signal, cache: "no-store" }));
+  });
+
+  it("sends selected reference metadata and distinguishes an explicit unlink from an omitted patch", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+    const sources = [{ source_id: "file:owned:text", revision: "revision-1" }];
+    await createProjectKnowledge("project-1", { kind: "fact", text: "A statement", sources, request_id: "selected" });
+    await updateProjectKnowledge("project-1", "entry-1", { expected_revision: 1, sources: [] });
+    await updateProjectKnowledge("project-1", "entry-1", { expected_revision: 2, text: "Reworded" });
+    expect(fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body as string))).toEqual([
+      { kind: "fact", text: "A statement", sources, request_id: "selected" },
+      { expected_revision: 1, sources: [] },
+      { expected_revision: 2, text: "Reworded" },
+    ]);
   });
 });
 

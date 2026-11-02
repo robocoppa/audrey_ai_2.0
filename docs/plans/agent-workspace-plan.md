@@ -63,7 +63,7 @@ This raises the original 2,048-token report allowance after a reported Research
 output-limit failure; live acceptance of the larger allowance remains pending.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
-Adaptive multi-step plans, source-backed Project notes, file/Private agent inputs,
+Adaptive multi-step plans, source-backed Project context for agents, file/Private agent inputs,
 semantic search,
 owned-file/Private and multiple-source watches remain implementation work. Existing Private Tax tasks keep
 their current behavior. The remaining sections specify the intended full feature.
@@ -126,8 +126,8 @@ Source references contain canonical IDs/revisions only, with Project-scoped sour
 previews and local ownership/deletion/detachment checks. Explicit user notes and
 report-linked user proposals retain their bodies with a source-review notice when
 references disappear, while automatic grounding excludes them. Automatically extracted
-source-derived notes, public-source snapshot references, automatic agent proposals,
-and a full source-reference editor are later work. Entry/Project deletion and account
+source-derived notes, public-source snapshot references and automatic agent proposals
+are later work. The source-reference editor is described below. Entry/Project deletion and account
 purge erase the new rows/history/manifests and invalidate/remove search copies.
 Limits are 200 entries per Project, 8,000 characters per entry, eight references and
 100 revisions per entry. No knowledge model calls, global-memory writes or cloud
@@ -333,9 +333,41 @@ checks after awaited reads fence stale metadata and the final socket boundary.
 Affected backend/UI tests, migration replay, model-response deletion boundaries
 and responsive mocked browser checks verify this slice locally. The paused-watch
 [native smoke](../reference/live-smoke-testing.md#project-watch-api-smoke) exercises
-deployed Project/Watch API wiring without page fetches or model generation; its
-Tower run remains pending. Rebuild backend and UI; schema 33 applies automatically.
-No configuration change or upload is required.
+deployed Project/Watch API wiring without page fetches or model generation. The
+owner reported a Tower pass for all six checks and disposable cleanup, exit 0:
+paused creation/idempotency, Project filtering/canonical rename, unlink/reassignment,
+deleted-Project Run/Resume rejection and unlink recovery. Actual scheduled page
+comparisons and local-model acceptance remain unrun. Deployment uses backend/UI
+rebuilds and automatic schema 33; no configuration change or upload is required.
+
+### Knowledge source-reference editing
+
+Knowledge's Add/Edit forms now let users browse saved Project messages (including
+archived conversations), attached file text/artifacts and their owned Agent reports.
+Canonical metadata listings are independent of Search backfill and never extract
+file bodies. Signed keyset cursors bind the owner, namespace, Project version,
+privacy and source type. Message labels include their role and sequence number.
+
+The user previews local text before explicitly attaching its ID/revision. Preview
+pages pin that revision; changed, detached or deleted sources cannot return stale
+text. Missing originals can still offer retained text with the existing label.
+Private sources remain inside an owned Private Project and use saved local text.
+No models or external fetches are involved.
+
+References can be removed or explicitly replaced with a reviewed current revision,
+up to eight per entry. Text and reference drafts survive conflicts and rebasing;
+text-only saves leave references alone. Revision history exposes saved reference
+metadata without restoring historical source bodies. These remain user-authored
+notes or user-reviewed report proposals, with existing stale-grounding restrictions.
+
+Backend/UI tests and responsive mocked browser checks cover source editing and
+its deletion/ownership boundaries. The reusable installed-backend
+[source smoke](../reference/live-smoke-testing.md#installed-knowledge-source-smoke)
+uses separate temporary SQLite/upload fixtures and an isolated ASGI application;
+it needs no credentials, network, model or production-account writes. The local
+smoke and its failure-detection harness pass. Its Tower
+run and native-browser acceptance with real sources remain pending. Deploy with
+backend/UI rebuilds; no schema or configuration change is required.
 
 ## Product outcome
 

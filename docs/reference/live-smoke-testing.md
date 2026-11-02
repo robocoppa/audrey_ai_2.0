@@ -14,6 +14,7 @@ English user input only; closed checks do not need another run.
 | Docker-only Ollama probe | Tower → `scripts/probes/probe-onbox.sh` |
 | Native UI/proxy protocol smoke | Tower → `tests/smoke/smoke-native-onbox.sh` |
 | Installed backend admission smoke, no models | Tower → `tests/smoke/smoke-agent-admission-onbox.sh` |
+| Installed Knowledge source API smoke, isolated data | Tower → `tests/smoke/smoke-knowledge-sources-onbox.sh` |
 
 Laptop checkout: `/home/bart/Documents/github/audrey/audrey_ai_2.0`.
 Tower checkout: `/mnt/user/appdata/audrey_ai_2.0`.
@@ -136,6 +137,40 @@ for a compact receipt. Each HTTP request has a ten-second timeout. Exit codes:
 0 pass, 1 API contract/cleanup finding, 2 setup failure, 3 harness crash,
 130 interrupted. This checks deployed native proxy/API integration; actual
 scheduled public-page comparisons and local-model quality remain separate.
+
+## Installed Knowledge source smoke
+
+After pulling the source-reference editor, run on Tower:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+tests/smoke/smoke-knowledge-sources-onbox.sh
+```
+
+No schema/configuration change, credentials, `.env.smoke.local` or upload is needed.
+The wrapper streams the checked-out probe into the running backend's installed
+Python package. It creates a separate ASGI application and temporary SQLite/upload
+fixtures, then removes them. It never opens the server's account/upload databases,
+contacts a network, calls a model or changes production data. An older image
+without the source browser exits with setup error 2; rebuild the backend first.
+
+Expect five `PASS` checks and `PASS Knowledge source smoke passed` with `(exit 0)`.
+They cover Project-scoped canonical candidates/cursors, preview paging and exact
+revisions, attach/refresh/remove, retained text after original loss, detachment,
+Private/owner fencing and disposable cleanup. Private fixtures represent already
+processed local sources; this does not test Private upload admission. Authentication
+is overridden in the separate fixture application, so this does not prove live
+Cloudflare/proxy wiring or browser behavior with real content.
+
+The smoke normally takes seconds; each case has a ten-second deadline. Add `--json`
+for a compact receipt or `--timeout-seconds` to lower the per-case deadline. Exit
+codes are 0 pass, 1 finding/timeout, 2 setup failure, 3 harness crash, 130 interrupted.
+Results print in the launching shell; no notifications or report transfer is needed.
+`AUDREY_SMOKE_APPDATA` (or `APPDATA`) and `AUDREY_SMOKE_CONTAINER` override the
+checkout/container. Real-file browser acceptance remains manual: use an owned
+Project's existing file/message, preview and attach it to a note, then explicitly
+review/replace a changed reference. A new upload is optional.
 
 ## Service rebuilds
 
