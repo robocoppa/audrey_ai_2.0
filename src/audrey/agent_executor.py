@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextlib import nullcontext
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
@@ -22,6 +23,7 @@ from audrey.processing_policy import (
     current_processing_policy,
 )
 from audrey.tools.discovery import ToolRegistry
+from audrey.tools.native_files import with_create_file
 
 PUBLIC_RESEARCH_TOOLS = frozenset({"web_search", "web_fetch"})
 logger = logging.getLogger(__name__)
@@ -302,6 +304,16 @@ class ResearchAgentExecutor:
         tools = getattr(self.app.state, "tools", ToolRegistry()).restrict(
             PUBLIC_RESEARCH_TOOLS if step_id == "research" else frozenset()
         )
+        from audrey.agent_files import agent_file_scope, agent_files_available
+
+        file_outputs = []
+        native_files = step_id == "research" and agent_files_available(self.app)
+        if native_files:
+            tools = with_create_file(tools)
+            # with_create_file constructs a fresh native spec. Shared discovery
+            # remains untouched; task retries have a longer identity than a chat reply.
+            spec = tools.by_name["create_file"]
+            spec.description = spec.description.replace("in this reply", "for this task")
         endpoints = {spec.name: (spec.server_url, spec.path) for spec in tools.specs()}
         previous = {
             step["id"]: step["result"] for step in task["steps"] if step["status"] == "completed"
@@ -353,6 +365,14 @@ class ResearchAgentExecutor:
 
             async def check_tool(name):
                 await authorize()
+                if name == "create_file" and native_files:
+                    # Native outputs have a task-bound handler, never an HTTP
+                    # endpoint from shared discovery. Verify current installed
+                    # weights before allowing model content into the renderer.
+                    await _verify_local(client, settings.model, endpoint, policy)
+                    await authorize()
+                    await repository.reserve_operation(**lease, step_id=step_id)
+                    return
                 current = getattr(self.app.state, "tools", ToolRegistry()).get(name)
                 if (
                     name not in PUBLIC_RESEARCH_TOOLS
@@ -368,6 +388,8 @@ class ResearchAgentExecutor:
             with (
                 agent_dispatch_scope(check_tool),
                 generation_budget(check_generation, record_generation),
+                agent_file_scope(app=self.app, principal=principal, task=task, files=file_outputs)
+                if native_files else nullcontext(),
             ):
                 if step_id == "research":
                     report = await (self.react_runner or run_react)(

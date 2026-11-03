@@ -168,7 +168,7 @@
 .agents-task-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; max-width: 100%; margin-left: auto; }
 .agents-task-actions .danger-button { min-width: 6.2rem; border-color: rgb(255 145 164 / 30%); background: rgb(255 145 164 / 6%); }
 .agents-task-actions .danger-button:hover:not(:disabled), .agents-task-actions .confirming-delete { border-color: rgb(255 145 164 / 56%); background: rgb(255 145 164 / 12%); }
-.agents-plan h3, .agents-result h3 { margin: 0 0 1rem; font-size: 0.95rem; }
+.agents-plan h3, .agents-result h3, .agents-outputs h3 { margin: 0 0 1rem; font-size: 0.95rem; }
 .agents-plan ol { display: grid; gap: 1rem; margin: 0; padding: 0; list-style: none; }
 .agents-step { display: flex; align-items: flex-start; gap: 0.7rem; }
 .agents-step > div { flex: 1; min-width: 0; }
@@ -181,6 +181,15 @@
 .agents-step summary { width: fit-content; padding: 0.2rem 0; cursor: pointer; color: var(--accent); }
 .agents-result { margin-top: 1.7rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
 .agents-result > p, .agents-empty { margin: 0; color: var(--muted); font-size: 0.84rem; line-height: 1.7; }
+.agents-outputs { margin-top: 1.7rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+.agents-outputs > p { margin: -0.4rem 0 0.8rem; color: var(--muted); font-size: 0.77rem; line-height: 1.6; }
+.agents-outputs ul { display: grid; gap: 0.55rem; padding: 0; margin: 0; list-style: none; }
+.agents-outputs li { min-width: 0; }
+.agents-output-download { display: flex; align-items: center; gap: 0.6rem; max-width: 100%; text-align: left; }
+.agents-output-download svg { flex: none; width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.agents-output-download > span:first-of-type { min-width: 0; overflow-wrap: anywhere; }
+.agents-output-action { flex: none; color: var(--muted); font-size: 0.7rem; }
+.agents-output-error { margin: 0.5rem 0 0; color: #f5a3aa; font-size: 0.77rem; line-height: 1.6; }
 .agents-markdown { font-size: 0.9rem; line-height: 1.7; overflow-wrap: anywhere; }
 .agents-markdown pre { max-width: 100%; overflow: auto; }
 .agents-markdown table { display: block; max-width: 100%; overflow-x: auto; }

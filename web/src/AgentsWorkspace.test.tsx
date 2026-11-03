@@ -26,6 +26,7 @@ const project = { id: "project-research", name: "Public release work", instructi
 const projectContext = { project_id: project.id, project_name: project.name, available: true, current: true, instructions_included: true, knowledge: [{ id: "note-one", revision: 1 }] };
 const knowledgeEntry: api.KnowledgeEntry = { id: "entry-open", project_id: project.id, kind: "action", text: "Compare public release dates.", approval_state: "approved", work_status: "open", revision: 3, pinned: false, origin: "user", sources: [], source_task_id: null, created_at: project.created_at, updated_at: project.updated_at, approved_at: project.updated_at, stale: false, source_warnings: [], replaces_id: null, base_revision: null };
 const knowledgeRequest = { project, entry: knowledgeEntry, serial: 1 };
+const savedOutput: api.AgentOutput = { file_id: "file_checklist", filename: "task-checklist.md", download_url: "/api/files/file_checklist/download", created_at: "2026-11-02T10:00:00Z" };
 
 beforeEach(() => {
   vi.spyOn(api, "listProjects").mockResolvedValue({ items: [], next_cursor: null, limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
@@ -42,6 +43,35 @@ afterEach(() => {
 });
 
 describe("AgentsWorkspace", () => {
+  it.each(["running", "paused", "failed", "cancelled", "completed"] as const)("keeps produced files available on a %s task with no result", async (status) => {
+    const saved = task({ status, result: "", outputs: [savedOutput] });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    render(<AgentsWorkspace />);
+    expect(await screen.findByRole("button", { name: "Download task-checklist.md" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Files" })).toHaveTextContent("Saved in My Files.");
+    expect(screen.getByRole("heading", { name: "Result" })).toBeVisible();
+  });
+
+  it("keeps saved files through summaries, reloads newer detail and removes a canonically deleted file", async () => {
+    const saved = task({ status: "completed", revision: 8, outputs: [savedOutput] });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    render(<AgentsWorkspace />);
+    await screen.findByRole("button", { name: "Download task-checklist.md" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh agent tasks" })).toBeEnabled());
+    let release!: (value: AgentTask) => void;
+    vi.mocked(api.getAgentTask).mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+    const { outputs: _outputs, ...summary } = saved;
+    void _outputs;
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [{ ...summary, revision: 9, summary: true }] });
+    const calls = vi.mocked(api.getAgentTask).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
+    await waitFor(() => expect(api.getAgentTask).toHaveBeenCalledTimes(calls + 1));
+    expect(screen.getAllByRole("button", { name: "Download task-checklist.md" })).toHaveLength(1);
+    await act(async () => release({ ...summary, revision: 9 }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Files" })).not.toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: saved.objective })).toBeVisible();
+  });
+
   it.each(["running", "failed", "completed"] as const)("uses Result for a general %s task", async (status) => {
     const saved = task({ status, result: status === "completed" ? "The drafted checklist." : "" });
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
@@ -50,7 +80,7 @@ describe("AgentsWorkspace", () => {
     expect(screen.queryByRole("heading", { name: "Report" })).not.toBeInTheDocument();
     if (status === "running") expect(screen.getByText("The result will appear here when Audrey completes its review.")).toBeVisible();
     else if (status === "failed") expect(screen.getByText("This task stopped before a final result was saved. Any completed steps are available above.")).toBeVisible();
-    else expect(screen.getByRole("button", { name: "Delete task" })).toHaveAttribute("title", "Delete saved task and result");
+    else expect(screen.getByRole("button", { name: "Delete task" })).toHaveAttribute("title", "Delete saved task and result. Created files stay in My Files.");
   });
 
   it("describes an empty general task workflow with a saved result", async () => {
@@ -546,7 +576,7 @@ describe("AgentsWorkspace", () => {
       : step.id === "plan" ? step : { ...step, status: "pending" as const });
     const original = task({
       status, revision: 7, result: status === "completed" ? "Original report." : "",
-      error: status === "failed" ? "Research stopped." : "", steps,
+      error: status === "failed" ? "Research stopped." : "", steps, outputs: [savedOutput],
     });
     let current = original;
     vi.mocked(api.listAgentTasks).mockImplementation(async () => ({ items: [current] }));
@@ -572,6 +602,7 @@ describe("AgentsWorkspace", () => {
     expect(cards[0]).toHaveAttribute("aria-pressed", "true");
     expect(cards[0]).toHaveTextContent("Queued");
     expect(screen.getByRole("heading", { name: original.objective })).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Download task-checklist.md" })).toHaveLength(1);
     fireEvent.click(screen.getByText("View saved plan"));
     expect(screen.getByText(original.steps[0].result)).toBeVisible();
     expect(screen.queryByText("Original report.")).not.toBeInTheDocument();

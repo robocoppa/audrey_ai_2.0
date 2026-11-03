@@ -18,6 +18,7 @@ English user input only; closed checks do not need another run.
 | Installed report suggestion smoke, mocked model transport | Tower → `tests/smoke/smoke-agent-knowledge-drafts-onbox.sh` |
 | Installed Agent Project Knowledge smoke, isolated data | Tower → `tests/smoke/smoke-agent-project-knowledge-onbox.sh` |
 | Installed Knowledge Agent smoke, isolated data/mocked model | Tower → `tests/smoke/smoke-knowledge-agents-onbox.sh` |
+| Installed Agent file smoke, isolated storage/mocked model | Tower → `tests/smoke/smoke-agent-files-onbox.sh` |
 
 Laptop checkout: `/home/bart/Documents/github/audrey/audrey_ai_2.0`.
 Tower checkout: `/mnt/user/appdata/audrey_ai_2.0`.
@@ -282,6 +283,51 @@ open an approved open Action/Question, select Assign to agent, review the
 draft and press Start agent. Confirm the saved agent's origin revision and that
 Knowledge still shows the entry as Open after the task completes. Assigned agents
 opens the same saved agent. No upload is required.
+
+## Installed Agent file smoke
+
+After pulling Agent file outputs, run on Tower:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+tests/smoke/smoke-agent-files-onbox.sh
+```
+
+Application schema 34 applies automatically at backend startup. No settings change,
+credentials, `.env.smoke.local` or upload is needed. The wrapper streams the
+checked-out probe into the running backend's installed Python package. Each case
+uses an isolated ASGI application and temporary canonical accounts, tasks, upload
+catalog and source directory; no production databases are opened. Authentication
+is overridden only inside the fixture. The first case runs the real task runtime,
+executor, ReAct loop and local-model client with mocked verified-Qwen replies,
+then downloads the actual rendered file through the owned route. Other cases use
+the same native file service, storage quota and renderer. No live network or model
+calls occur. Missing installed support exits 2; rebuild the backend first.
+
+Expect seven `PASS` checks and `PASS Agent file smoke passed` with `(exit 0)`.
+They verify an owned download and foreign-owner denial, identical retry/restart
+reuse and immutable content changes, explicit file deletion, cancelled task
+authority, quota and eight-file lifetime limits, task deletion retaining owned
+files, and isolated cleanup. This proves installed API/executor/storage contracts;
+the live worker, Cloudflare/proxy wiring and actual model output quality remain
+separate acceptance checks.
+
+The smoke normally takes seconds. `--json` prints a compact receipt;
+`--timeout-seconds` lowers the ten-second per-case deadline. The Linux runner
+uses a separate process per case so the deadline also bounds blocked synchronous
+work; timed-out children are terminated before their temporary fixture is removed.
+Exit codes: 0 pass, 1 finding/timeout, 2 setup failure, 3 harness crash, 130 interrupted.
+Results print in the launching shell, with no notifications or report transfer.
+`AUDREY_SMOKE_APPDATA` (or `APPDATA`) and `AUDREY_SMOKE_CONTAINER` override the
+checkout/container.
+
+Manual browser acceptance needs no upload: ask an Agent to create a downloadable
+checklist or CSV from text in its prompt. Download it from Files and confirm the
+same output appears in My Files and the task's ordinary Project. Run again should
+reuse identical content on the same task; changed content may create a new file.
+Deleting task history should retain the saved file in My Files. Real model
+acceptance checks whether it chooses the tool and creates the requested content.
 
 ## Service rebuilds
 

@@ -29,7 +29,7 @@ from typing import Any
 
 import httpx
 
-from audrey.agent_dispatch import authorize_agent_tool
+from audrey.agent_dispatch import AgentDispatchStoppedError, authorize_agent_tool
 from audrey.metrics import tool_call_seconds, tool_calls_total
 from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
 from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, ToolUserScope
@@ -196,12 +196,16 @@ async def dispatch_one(
     if policy is None and name == "create_file":
         # Resolve the owner/run binding before parsing or logging model content.
         try:
-            native_handler = native_file_handler(user_id=user_id)
+            from audrey.agent_files import agent_file_handler
+
+            native_handler = agent_file_handler(user_id=user_id)
+            if native_handler is None:
+                native_handler = native_file_handler(user_id=user_id)
         except NativeFileToolUnavailableError:
             tool_calls_total.labels(tool=name, outcome="error").inc()
             return ToolResult(name=name, call_id=call_id, content=json.dumps({
                 "error": "native_tool_unavailable",
-                "detail": "File creation requires an active native conversation.",
+                "detail": "File creation requires an active native conversation or agent task.",
             }), elapsed_s=0.0, is_error=True)
     if policy is not None:
         # Run before argument parsing, echoing or logging. Tool names alone
@@ -339,6 +343,10 @@ async def dispatch_one(
                 content=json.dumps({"error": "timeout", "detail": "Local tool timed out."}),
                 elapsed_s=elapsed, is_error=True,
             )
+        except AgentDispatchStoppedError:
+            # Revoked saved-task authority terminates the attempt. Returning a
+            # tool error would allow another model call after cancellation.
+            raise
         except Exception as exc:  # noqa: BLE001 - never expose untrusted exception text
             elapsed = round(time.monotonic() - start, 2)
             tool_calls_total.labels(tool=name, outcome="error").inc()

@@ -20,6 +20,7 @@ from fastapi.responses import Response
 
 from audrey import __version__
 from audrey.agent_executor import ResearchAgentExecutor, agent_settings
+from audrey.agent_files import recover_agent_output_staging_for_startup
 from audrey.agent_runtime import AgentRuntime
 from audrey.app_state import ApplicationStore
 from audrey.auth import AuthedUser, require_admin, require_principal
@@ -468,6 +469,9 @@ async def lifespan(app: FastAPI):
             name="audrey.tools.discovery",
         )
     try:
+        recovered_agent_staging = await recover_agent_output_staging_for_startup(app)
+        if recovered_agent_staging:
+            log.info("Agent output startup recovery cleared %d unregistered staging intent(s)", recovered_agent_staging)
         if content_search is not None:
             try:
                 await content_search.start()

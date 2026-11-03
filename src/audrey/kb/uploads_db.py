@@ -612,85 +612,109 @@ class UploadsDB:
         origin: str,
     ) -> QuotaDecision:
         with self._lock, self._transaction_locked():
-            committed = self._conn.execute(
-                "SELECT user, origin, filename, mime, bytes, kind, collection, chunks, status FROM uploads WHERE file_id = ?",
-                (file_id,),
-            ).fetchone()
-            if committed is not None:
-                if committed["user"] != user:
-                    raise ValueError("file id belongs to another user")
-                if committed["origin"] != origin or (origin == "generated" and any(
-                    committed[key] != value for key, value in {
-                        "filename": filename, "mime": mime, "bytes": bytes_, "kind": kind,
-                        "collection": collection, "chunks": chunks, "status": status,
-                    }.items()
-                )):
-                    raise ValueError("file commit does not match the stored output")
-                usage = self._quota_usage_locked(user)
-                return QuotaDecision(True, usage, bytes_, max_user_bytes)
+            return self._commit_reserved_upload_locked(
+                reservation_id, reservation_kind, user, file_id, filename, mime, bytes_, kind,
+                collection, chunks, uploaded_at, status, max_user_bytes, summary, origin,
+            )
 
-            if reservation_kind == "single_shot":
-                row = self._conn.execute(
-                    "SELECT user, bytes, private_required FROM storage_reservations "
-                    "WHERE reservation_id = ? AND kind = 'single_shot'",
-                    (reservation_id,),
-                ).fetchone()
-                if row is None or row["user"] != user:
-                    raise ValueError("single-shot reservation is missing or not owned")
-                reserved_bytes = int(row["bytes"])
-            elif reservation_kind == "chunked":
-                row = self._conn.execute(
-                    "SELECT s.user, s.total_bytes, s.private_required, "
-                    "COALESCE(SUM(p.bytes), 0) AS parts "
-                    "FROM upload_sessions s LEFT JOIN upload_parts p USING (upload_id) "
-                    "WHERE s.upload_id = ? GROUP BY s.upload_id",
-                    (reservation_id,),
-                ).fetchone()
-                if row is None or row["user"] != user:
-                    raise ValueError("chunk reservation is missing or not owned")
-                reserved_bytes = max(int(row["total_bytes"]), int(row["parts"]))
-            else:
-                raise ValueError(f"unknown reservation kind {reservation_kind!r}")
-
+    def _commit_reserved_upload_locked(
+        self,
+        reservation_id: str,
+        reservation_kind: str,
+        user: str,
+        file_id: str,
+        filename: str,
+        mime: str,
+        bytes_: int,
+        kind: str,
+        collection: str,
+        chunks: int,
+        uploaded_at: str,
+        status: str,
+        max_user_bytes: int,
+        summary: str,
+        origin: str,
+    ) -> QuotaDecision:
+        """Commit while the caller holds the upload lock and transaction."""
+        committed = self._conn.execute(
+            "SELECT user, origin, filename, mime, bytes, kind, collection, chunks, status FROM uploads WHERE file_id = ?",
+            (file_id,),
+        ).fetchone()
+        if committed is not None:
+            if committed["user"] != user:
+                raise ValueError("file id belongs to another user")
+            if committed["origin"] != origin or (origin == "generated" and any(
+                committed[key] != value for key, value in {
+                    "filename": filename, "mime": mime, "bytes": bytes_, "kind": kind,
+                    "collection": collection, "chunks": chunks, "status": status,
+                }.items()
+            )):
+                raise ValueError("file commit does not match the stored output")
             usage = self._quota_usage_locked(user)
-            if usage.total_bytes - reserved_bytes + bytes_ > max_user_bytes:
-                return QuotaDecision(False, usage, bytes_, max_user_bytes)
+            return QuotaDecision(True, usage, bytes_, max_user_bytes)
 
-            self._record_locked(
-                file_id,
-                user,
-                filename,
-                mime,
-                bytes_,
-                kind,
-                collection,
-                chunks,
-                uploaded_at,
-                status,
-                private_required=bool(row["private_required"]), origin=origin,
+        if reservation_kind == "single_shot":
+            row = self._conn.execute(
+                "SELECT user, bytes, private_required FROM storage_reservations "
+                "WHERE reservation_id = ? AND kind = 'single_shot'",
+                (reservation_id,),
+            ).fetchone()
+            if row is None or row["user"] != user:
+                raise ValueError("single-shot reservation is missing or not owned")
+            reserved_bytes = int(row["bytes"])
+        elif reservation_kind == "chunked":
+            row = self._conn.execute(
+                "SELECT s.user, s.total_bytes, s.private_required, "
+                "COALESCE(SUM(p.bytes), 0) AS parts "
+                "FROM upload_sessions s LEFT JOIN upload_parts p USING (upload_id) "
+                "WHERE s.upload_id = ? GROUP BY s.upload_id",
+                (reservation_id,),
+            ).fetchone()
+            if row is None or row["user"] != user:
+                raise ValueError("chunk reservation is missing or not owned")
+            reserved_bytes = max(int(row["total_bytes"]), int(row["parts"]))
+        else:
+            raise ValueError(f"unknown reservation kind {reservation_kind!r}")
+
+        usage = self._quota_usage_locked(user)
+        if usage.total_bytes - reserved_bytes + bytes_ > max_user_bytes:
+            return QuotaDecision(False, usage, bytes_, max_user_bytes)
+
+        self._record_locked(
+            file_id,
+            user,
+            filename,
+            mime,
+            bytes_,
+            kind,
+            collection,
+            chunks,
+            uploaded_at,
+            status,
+            private_required=bool(row["private_required"]), origin=origin,
+        )
+        if summary:
+            self._conn.execute(
+                "UPDATE uploads SET summary = ? WHERE file_id = ? AND user = ?",
+                (summary, file_id, user),
             )
-            if summary:
-                self._conn.execute(
-                    "UPDATE uploads SET summary = ? WHERE file_id = ? AND user = ?",
-                    (summary, file_id, user),
-                )
-            if reservation_kind == "single_shot":
-                self._conn.execute(
-                    "DELETE FROM storage_reservations WHERE reservation_id = ?",
-                    (reservation_id,),
-                )
-            else:
-                self._conn.execute(
-                    "DELETE FROM upload_parts WHERE upload_id = ?",
-                    (reservation_id,),
-                )
-                self._conn.execute(
-                    "DELETE FROM upload_sessions WHERE upload_id = ?",
-                    (reservation_id,),
-                )
-            return QuotaDecision(
-                True, self._quota_usage_locked(user), bytes_, max_user_bytes,
+        if reservation_kind == "single_shot":
+            self._conn.execute(
+                "DELETE FROM storage_reservations WHERE reservation_id = ?",
+                (reservation_id,),
             )
+        else:
+            self._conn.execute(
+                "DELETE FROM upload_parts WHERE upload_id = ?",
+                (reservation_id,),
+            )
+            self._conn.execute(
+                "DELETE FROM upload_sessions WHERE upload_id = ?",
+                (reservation_id,),
+            )
+        return QuotaDecision(
+            True, self._quota_usage_locked(user), bytes_, max_user_bytes,
+        )
 
     async def delete_upload(self, file_id: str, *, user: str) -> bool:
         """Delete the row for (file_id, user). Returns True if a row was removed.

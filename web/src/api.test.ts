@@ -243,6 +243,46 @@ describe("native content search requests", () => {
 describe("saved agent task requests", () => {
   afterEach(() => { vi.unstubAllGlobals(); });
 
+  const output = { file_id: "file_owned-1", filename: "task-checklist.md", download_url: "/api/files/file_owned-1/download", created_at: "2026-11-02T10:00:00Z" };
+
+  it("reads bounded canonical file metadata across task, list, action, answer and Activity responses", async () => {
+    const value = { id: "agent-owned", outputs: [output] };
+    const fetchMock = vi.fn().mockImplementation(async (path: string) => jsonResponse(path === "/api/agents" ? { items: [value] } : value));
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await listAgentTasks()).items[0].outputs).toEqual([output]);
+    expect((await getAgentTask(value.id)).outputs).toEqual([output]);
+    expect((await actOnAgentTask(value.id, "rerun", 3)).outputs).toEqual([output]);
+    expect((await answerAgentInput(value.id, "question", 3, "Continue.")).outputs).toEqual([output]);
+    expect((await getActivityAgentTask("notice")).outputs).toEqual([output]);
+    fetchMock.mockResolvedValueOnce(jsonResponse(value));
+    expect((await createAgentTask("Prepare a checklist", "new-task")).outputs).toEqual([output]);
+  });
+
+  it.each([
+    { ...output, download_url: "https://outside.example/api/files/file_owned-1/download" },
+    { ...output, download_url: "//outside.example/api/files/file_owned-1/download" },
+    { ...output, download_url: "/api/files/another/download" },
+    { ...output, download_url: "/api/files/file_owned-1/download?token=secret" },
+    { ...output, file_id: "../other", download_url: "/api/files/..%2Fother/download" },
+    { ...output, filename: "../private.md" },
+    { ...output, filename: "unsafe\nname.md" },
+    { ...output, filename: "" },
+    { ...output, created_at: "invalid" },
+  ])("rejects malformed or noncanonical file output %#", async (invalid) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ outputs: [invalid] })));
+    await expect(getAgentTask("owned")).rejects.toThrow("The saved agent files could not be read.");
+  });
+
+  it.each([null, {}, [output, output], Array.from({ length: 9 }, (_, index) => ({ ...output, file_id: `file_${index}`, download_url: `/api/files/file_${index}/download` }))])("rejects invalid output collections %#", async (outputs) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ outputs })));
+    await expect(getAgentTask("owned")).rejects.toThrow("The saved agent files could not be read.");
+  });
+
+  it("allows summaries and old task payloads without output metadata", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ id: "legacy", summary: true })));
+    expect(await getAgentTask("legacy")).toEqual({ id: "legacy", summary: true });
+  });
+
   it("uses the authenticated native API, encoded task IDs, idempotency and revisions", async () => {
     const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({ items: [] }));
     vi.stubGlobal("fetch", fetchMock);

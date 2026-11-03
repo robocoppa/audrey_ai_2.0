@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
+import re
 import secrets
 import sqlite3
 import threading
@@ -62,6 +63,29 @@ class AgentTaskAccessError(AgentTaskError):
 
 class AgentTaskContextError(AgentTaskConflictError):
     """A frozen Project input changed; cleanup and saved-report reads remain valid."""
+
+
+class AgentOutputLimitError(AgentTaskError):
+    """All eight durable output identities have already been used."""
+
+
+def _output_links(result: str, outputs: list[dict]) -> str:
+    """Retain canonical server links within the saved UTF-8 byte allowance."""
+    links = []
+    for item in outputs:
+        url = item["download_url"]
+        if re.search(r"\]\(" + re.escape(url) + r"\)", result):
+            continue
+        filename = item["filename"].replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+        links.append(f"[Download {filename}]({url})")
+    if not links:
+        return result
+    suffix = "\n\n" + "\n\n".join(links)
+    if len((result + suffix).encode("utf-8")) > 64000:
+        marker = "\n\n[Result shortened to retain file downloads.]"
+        allowance = 64000 - len((marker + suffix).encode("utf-8"))
+        result = result.encode("utf-8")[:max(0, allowance)].decode("utf-8", errors="ignore") + marker
+    return result + suffix
 
 
 def _text(value: str, *, maximum: int, name: str, empty: bool = False) -> str:
@@ -136,7 +160,17 @@ class AgentsRepository:
         record["limits"] = json.loads(record.pop("limits_json"))
         record["input_requests"] = self._input_requests(record["task_id"])
         record["project_context"] = self._project_contexts.public(task_id=record["task_id"], user_id=record["user_id"])
+        record["outputs"] = self._outputs(record["task_id"], record["user_id"])
         return record
+
+    def _outputs(self, task_id: str, user_id: str) -> list[dict]:
+        return [{"file_id": row["file_id"], "filename": row["filename"],
+                 "download_url": f"/api/files/{row['file_id']}/download", "created_at": row["created_at"]}
+                for row in self._conn.execute(
+                    "SELECT file_id,filename,created_at FROM app_agent_outputs "
+                    "WHERE task_id=? AND user_id=? AND status='ready' ORDER BY created_at,file_id",
+                    (task_id, user_id),
+                ).fetchall()]
 
     @staticmethod
     def _public(record: dict) -> dict:
@@ -150,6 +184,7 @@ class AgentsRepository:
             "steps": [dict(step) for step in record["steps"]],
             "input_requests": [dict(item) for item in record["input_requests"]],
             "project_context": record["project_context"],
+            **({"outputs": [dict(item) for item in record["outputs"]]} if record["outputs"] else {}),
         }
 
     def _internal(self, record: dict) -> dict:
@@ -244,6 +279,47 @@ class AgentsRepository:
                 self._budget(record)
                 return self._context(record)
         return await asyncio.to_thread(work)
+
+    async def reserve_output(
+        self, *, task_id: str, lease_token: str, fence: int, file_id: str,
+        filename: str, identity_sha256: str,
+    ) -> dict:
+        """Record content-free intent before bytes or catalog rows can be written."""
+        if (not isinstance(file_id, str) or not re.fullmatch(r"[0-9a-f-]{36}", file_id)
+                or not isinstance(identity_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", identity_sha256)):
+            raise AgentTaskError("Invalid output identity.")
+        filename = _text(filename, maximum=720, name="output filename")
+        if len(filename) > 180:
+            raise AgentTaskError("Invalid output filename.")
+
+        def work():
+            record = self._lease(task_id, lease_token, fence)
+            self._context(record)
+            self._account(record)
+            self._budget(record)
+            if self._internal(record)["current_step"] != "research":
+                raise AgentTaskConflictError("Only the Work step can create files.")
+            row = self._conn.execute("SELECT * FROM app_agent_outputs WHERE file_id=?", (file_id,)).fetchone()
+            if row is not None:
+                if (row["task_id"], row["user_id"], row["filename"], row["identity_sha256"]) != (
+                    task_id, record["user_id"], filename, identity_sha256,
+                ):
+                    raise AgentTaskConflictError("The output identity changed.")
+                return dict(row)
+            count = self._conn.execute(
+                "SELECT COUNT(*) FROM app_agent_outputs WHERE task_id=?", (task_id,),
+            ).fetchone()[0]
+            if count >= 8:
+                raise AgentOutputLimitError("At most eight distinct files can be created by this agent.")
+            now = _stamp(self._clock())
+            self._conn.execute(
+                "INSERT INTO app_agent_outputs(file_id,task_id,user_id,filename,identity_sha256,status,created_at) "
+                "VALUES (?,?,?,?,?,'reserved',?)", (file_id, task_id, record["user_id"], filename, identity_sha256, now),
+            )
+            self._save(record)
+            return dict(self._conn.execute("SELECT * FROM app_agent_outputs WHERE file_id=?", (file_id,)).fetchone())
+
+        return await asyncio.to_thread(self._transaction, work)
 
     def _queue_capacity(self, user_id: str, limits: dict, *, exclude_task_id: str | None = None) -> None:
         queued = self._conn.execute(
@@ -530,8 +606,9 @@ class AgentsRepository:
             self._context(record)
             self._account(record)
             self._budget(record)
+            saved_result = _output_links(result, record["outputs"]) if step_id == "research" else result
             step = next((item for item in record["steps"] if item["id"] == step_id), None)
-            if step is not None and step["status"] == "completed" and step["result"] == result:
+            if step is not None and step["status"] == "completed" and step["result"] == saved_result:
                 return self._internal(record)
             if step is None or self._internal(record)["current_step"] != step_id:
                 raise AgentTaskConflictError("Agent step changed.")
@@ -540,7 +617,7 @@ class AgentsRepository:
                 "AND status='reserved'", (task_id, fence, step_id),
             ).fetchone() is None:
                 raise AgentTaskConflictError("Reserve the agent operation before committing its result.")
-            step.update(status="completed", result=result)
+            step.update(status="completed", result=saved_result)
             next_step = next((item for item in record["steps"] if item["status"] != "completed"), None)
             if next_step is not None:
                 next_step["status"] = "running"
@@ -707,7 +784,7 @@ class AgentsRepository:
             self._budget(record)
             if any(step["status"] != "completed" for step in record["steps"]):
                 raise AgentTaskConflictError("Complete all agent steps before saving the result.")
-            record.update(status="completed", result=result, error="")
+            record.update(status="completed", result=_output_links(result, record["outputs"]), error="")
             self._clear_lease(record)
             self._save(record)
             insert_agent_notice(self._conn, record, created_at=record["updated_at"])

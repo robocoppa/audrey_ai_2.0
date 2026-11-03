@@ -22,11 +22,16 @@ from audrey.agent_executor import AgentSettings, ResearchAgentExecutor
 from audrey.agent_runtime import AgentRuntime
 from audrey.app_state import ApplicationStore
 from audrey.app_state.agents import AgentTaskError
+from audrey.auth import require_principal
 from audrey.content_sources import ContentSourceReader
+from audrey.kb.file_deletion import FileOperationLocks
+from audrey.kb.storage_lifecycle import StorageLifecycle
+from audrey.kb.uploads_db import UploadsDB
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import GenerationUsageError, OllamaClient
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.react import ReactResult
+from audrey.routes.app import router as app_router
 from audrey.routes.inflight import UserInflightRegistry
 from audrey.scheduling import current_local_workload
 from audrey.tools.discovery import ToolRegistry, ToolSpec
@@ -181,6 +186,32 @@ async def state(tmp_path, monkeypatch):
     for client in value.clients:
         await client.aclose()
     store.close()
+
+
+@pytest.fixture
+async def file_state(state, tmp_path):
+    db = UploadsDB(tmp_path / "agent-outputs.sqlite")
+    state.app.state.uploads_db = db
+    state.app.state.storage_lifecycle = StorageLifecycle(db)
+    state.app.state.file_operation_locks = FileOperationLocks()
+    state.app.state.cfg.raw["kb"] = {
+        "upload_root": str(tmp_path / "files"), "max_user_bytes": 1_000_000,
+    }
+    state.app.include_router(app_router)
+    state.app.dependency_overrides[require_principal] = lambda: state.owner
+    state.files_db = db
+    try:
+        yield state
+    finally:
+        db.close()
+
+
+def _file_call(**changes):
+    return _answer("", message={"tool_calls": [{"function": {
+        "name": "create_file", "arguments": {
+            "filename": "task-notes.md", "format": "md", "content": "# Useful task output", **changes,
+        },
+    }}]})
 
 
 async def _step(state, step_id="plan", *, max_operations=96, generated_title=True, project_id=None, knowledge_entry=None):
@@ -602,6 +633,145 @@ async def test_personal_tool_request_is_blocked_at_dispatch(state):
     with pytest.raises(AgentDispatchStoppedError, match="tool is unavailable"):
         await state.executor(task, "research")
     assert not state.tool_requests
+
+
+async def test_work_creates_owned_download_without_http_and_review_keeps_canonical_links(file_state):
+    s = file_state
+    project = await s.store.projects.create(user_id=s.owner.user_id, name="Task deliverables")
+    task = await _step(s, "research", project_id=project.project_id)
+    original_registry = dict(s.tools.by_name)
+    s.responses.extend([_file_call(), _answer("The task output is complete.")])
+    result = await s.executor(task, "research")
+    assert result == "The task output is complete."
+    assert not s.tool_requests and s.tools.by_name == original_registry
+    rows = await s.files_db.list_user(s.owner.storage_namespace)
+    assert len(rows) == 1 and rows[0]["origin"] == "generated"
+    outputs = (await s.store.agents.get(user_id=s.owner.user_id, task_id=task["id"]))["outputs"]
+    assert len(outputs) == 1 and outputs[0]["filename"] == "task-notes.md"
+    assert outputs[0]["file_id"] == rows[0]["file_id"]
+    payloads = _content_requests(s)
+    native_spec = next(item["function"] for item in payloads[0]["tools"] if item["function"]["name"] == "create_file")
+    assert "user" not in native_spec["parameters"]["properties"]
+    assert "project_id" not in native_spec["parameters"]["properties"]
+    assert json.loads(payloads[1]["messages"][-1]["content"])["file_id"] == outputs[0]["file_id"]
+    lease = {key: task[key] for key in ("lease_token", "fence")}
+    lease["task_id"] = task["id"]
+    saved = await s.store.agents.checkpoint(**lease, step_id="research", result=result)
+    assert outputs[0]["download_url"] in saved["steps"][1]["result"]
+    s.responses.append(_answer("Reviewed task output without a model-supplied link."))
+    reviewed = await s.executor(saved, "review")
+    await s.store.agents.checkpoint(**lease, step_id="review", result=reviewed)
+    completed = await s.store.agents.complete(**lease, result=reviewed)
+    assert outputs[0]["download_url"] in completed["result"]
+    assert not _content_requests(s)[-1].get("tools")
+    # Use the ASGI transport rather than the fixture's tool transport.
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=s.app), base_url="http://test") as client:
+        downloaded = await client.get(outputs[0]["download_url"])
+        assert downloaded.status_code == 200 and downloaded.text == "# Useful task output"
+        current = (await client.get(f"/api/agents/{task['id']}")).json()
+        assert current["outputs"] == outputs
+        summary = (await client.get("/api/agents")).json()["items"][0]
+        assert "outputs" not in summary
+    await s.store.agents.control(
+        user_id=s.owner.user_id, task_id=task["id"], expected_revision=completed["revision"], action="rerun",
+    )
+    s.responses.extend([_file_call(), _answer("Reused the task output."), _answer("Reviewed the reused task output.")])
+    assert await AgentRuntime(s.store.agents, s.executor).run_once()
+    repeated = await s.store.agents.get(user_id=s.owner.user_id, task_id=task["id"])
+    assert repeated["status"] == "completed" and repeated["outputs"] == outputs
+    assert len(await s.files_db.list_user(s.owner.storage_namespace)) == 1
+    assert repeated["steps"][0] == completed["steps"][0]
+
+
+@pytest.mark.parametrize("step_id", ["plan", "review"])
+async def test_planning_and_review_cannot_create_native_outputs(file_state, step_id):
+    s = file_state
+    task = await _step(s, step_id)
+    s.responses.append(_file_call())
+    with pytest.raises(AgentDispatchStoppedError, match="returned no report text"):
+        await s.executor(task, step_id)
+    assert not _content_requests(s)[0].get("tools")
+    assert not await s.files_db.list_user(s.owner.storage_namespace)
+    assert not s.tool_requests
+
+
+async def test_native_creation_consumes_the_saved_operation_allowance(file_state):
+    s = file_state
+    task = await _step(s, "research", max_operations=3)
+    s.responses.append(_file_call())
+    with pytest.raises(AgentTaskError, match="operation allowance"):
+        await s.executor(task, "research")
+    assert len(_content_requests(s)) == 1
+    assert not await s.files_db.list_user(s.owner.storage_namespace)
+    assert not s.tool_requests
+
+
+@pytest.mark.parametrize("kind", ["account", "model", "pause", "bots", "digest"])
+async def test_native_output_rechecks_live_authority_at_dispatch(file_state, kind):
+    s = file_state
+    task = await _step(s, "research")
+    s.responses.append(_file_call())
+
+    async def revoke():
+        if s.show_reads == 3:
+            if kind == "digest":
+                s.installed[0]["digest"] = "b" * 64
+            else:
+                await _revoke(s, task, kind)
+
+    # Digest mutation must precede tags parsing; other authority changes can
+    # happen during the renderer dispatch's final metadata await.
+    if kind == "digest":
+        async def change_digest():
+            if s.tag_reads == 3:
+                s.installed[0]["digest"] = "b" * 64
+        s.on_tags = change_digest
+    else:
+        s.on_show = revoke
+    with pytest.raises((AgentDispatchStoppedError, AgentTaskError)):
+        await s.executor(task, "research")
+    assert len(_content_requests(s)) == 1
+    assert not await s.files_db.list_user(s.owner.storage_namespace)
+    assert not s.tool_requests
+
+
+async def test_native_output_capability_does_not_grant_personal_tools(file_state):
+    s = file_state
+    task = await _step(s, "research")
+    s.responses.append(_search("memory_recall"))
+    with pytest.raises(AgentDispatchStoppedError, match="tool is unavailable"):
+        await s.executor(task, "research")
+    assert not await s.files_db.list_user(s.owner.storage_namespace)
+    assert not s.tool_requests
+
+
+async def test_native_output_callbacks_expire_with_the_work_scope(file_state):
+    from audrey.agent_files import agent_file_handler
+
+    s = file_state
+    task = await _step(s, "research")
+    release = asyncio.Event()
+    captured = {}
+    arguments = {"filename": "late.md", "format": "md", "content": "Too late."}
+
+    async def later():
+        await release.wait()
+        return await captured["handler"](arguments)
+
+    async def runner(*_args, **_kwargs):
+        captured["handler"] = agent_file_handler(user_id=s.owner.storage_namespace)
+        captured["child"] = asyncio.create_task(later())
+        return ReactResult(content="Work finished without creating a file.", tool_rounds=0, done_reason="stop")
+
+    executor = ResearchAgentExecutor(s.app, client_factory=s.executor.client_factory, react_runner=runner)
+    assert await executor(task, "research") == "Work finished without creating a file."
+    release.set()
+    with pytest.raises(AgentDispatchStoppedError, match="attempt has stopped"):
+        await captured["child"]
+    with pytest.raises(AgentDispatchStoppedError, match="attempt has stopped"):
+        await captured["handler"](arguments)
+    assert not await s.files_db.list_user(s.owner.storage_namespace)
+    assert not s.tool_requests
 
 
 async def test_every_provider_and_tool_dispatch_consumes_the_saved_operation_budget(state):

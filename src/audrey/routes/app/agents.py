@@ -54,6 +54,13 @@ class AgentProjectContextResponse(BaseModel):
     origin_entry: AgentKnowledgePinResponse | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
+class AgentOutputResponse(BaseModel):
+    file_id: str
+    filename: str
+    download_url: str
+    created_at: str
+
+
 class AgentTaskResponse(BaseModel):
     id: str
     objective: str
@@ -68,10 +75,14 @@ class AgentTaskResponse(BaseModel):
     attempts: int
     input_requests: list[AgentInputResponse] = Field(default_factory=list)
     project_context: AgentProjectContextResponse | None = None
+    outputs: list[AgentOutputResponse] = Field(
+        default_factory=list, max_length=8, exclude_if=lambda value: not value,
+    )
 
 
 class AgentTaskSummaryResponse(AgentTaskResponse):
     summary: Literal[True] = True
+    outputs: list[AgentOutputResponse] = Field(default_factory=list, exclude=True)
 
 
 class AgentListResponse(BaseModel):

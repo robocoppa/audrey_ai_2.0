@@ -22,6 +22,7 @@ import {
 } from "./api";
 import "./AgentsWorkspace.css";
 import { AgentKnowledgeDialog } from "./AgentKnowledgeDialog";
+import { AgentOutputs } from "./AgentOutputs";
 import { WatchesWorkspace } from "./WatchesWorkspace";
 import { ActivityWorkspace } from "./ActivityWorkspace";
 import { canAssignKnowledge, knowledgeTaskObjective, type KnowledgeAgentRequest } from "./knowledgeAgents";
@@ -64,6 +65,7 @@ function mergeTasks(current: AgentTask[], incoming: AgentTask[], deleted: Readon
       tasks.set(task.id, {
         ...task,
         result: saved.result,
+        outputs: task.outputs ?? saved.outputs,
         input_requests: task.revision === saved.revision ? saved.input_requests : task.input_requests,
         steps: task.steps.map((step) => ({ ...step, result: saved.steps.find(({ id }) => id === step.id)?.result ?? "" })),
         summary: task.revision === saved.revision ? saved.summary : true,
@@ -840,6 +842,7 @@ function AgentTasksWorkspace({
                     ))}
                   </ol>
                 </section>
+                <AgentOutputs key={`${selected.id}:${visible}`} outputs={selected.outputs} />
                 <section className="agents-result" aria-labelledby="agent-result-title">
                   <h3 id="agent-result-title">Result</h3>
                   {selected.status === "completed" && selected.result ? <button className="agents-secondary" type="button" onClick={() => setKnowledgeTask(selected)}>Propose Project knowledge</button> : null}
@@ -934,7 +937,7 @@ function AgentTaskControls({ task, busy, onAction, onDelete }: {
           className={`agents-secondary danger-button${confirmingDelete ? " confirming-delete" : ""}`}
           aria-label={confirmingDelete ? "Confirm delete task" : "Delete task"}
           aria-pressed={confirmingDelete}
-          title={confirmingDelete ? "Click again to delete this saved task and its result." : "Delete saved task and result"}
+          title={confirmingDelete ? "Click again to delete this saved task and its result. Created files stay in My Files." : "Delete saved task and result. Created files stay in My Files."}
           disabled={busy}
           onClick={() => {
             if (confirmingDelete) {

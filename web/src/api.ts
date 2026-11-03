@@ -579,15 +579,43 @@ export interface AgentTask {
   attempts: number;
   input_requests?: AgentInputRequest[];
   project_context?: AgentProjectContext | null;
+  outputs?: AgentOutput[];
+}
+
+export interface AgentOutput {
+  file_id: string;
+  filename: string;
+  download_url: string;
+  created_at: string;
+}
+
+export function isAgentOutput(value: unknown): value is AgentOutput {
+  if (!value || typeof value !== "object") return false;
+  const output = value as Partial<AgentOutput>;
+  return typeof output.file_id === "string" && /^[a-zA-Z0-9_-]+$/u.test(output.file_id)
+    && output.download_url === `/api/files/${encodeURIComponent(output.file_id)}/download`
+    && typeof output.filename === "string" && Boolean(output.filename.trim())
+    && Array.from(output.filename).length <= 240 && !/[\p{Cc}\\/]/u.test(output.filename)
+    && typeof output.created_at === "string" && Number.isFinite(Date.parse(output.created_at));
+}
+
+function readAgentOutputs(task: AgentTask): AgentTask {
+  if (task?.outputs === undefined) return task;
+  if (!Array.isArray(task.outputs) || task.outputs.length > 8 || task.outputs.some((output) => !isAgentOutput(output))
+    || new Set(task.outputs.map(({ file_id }) => file_id)).size !== task.outputs.length) {
+    throw new ApiError(502, "The saved agent files could not be read. Refresh this agent.");
+  }
+  return { ...task, outputs: task.outputs.map(({ file_id, filename, download_url, created_at }) => ({ file_id, filename, download_url, created_at })) };
 }
 
 export function listAgentTasks(signal?: AbortSignal, projectId?: string): Promise<{ items: AgentTask[] }> {
   const query = projectId ? `?${new URLSearchParams({ project_id: projectId })}` : "";
-  return apiJson<{ items: AgentTask[] }>(`/api/agents${query}`, { signal, cache: "no-store" });
+  return apiJson<{ items: AgentTask[] }>(`/api/agents${query}`, { signal, cache: "no-store" })
+    .then((result) => ({ ...result, items: result.items.map(readAgentOutputs) }));
 }
 
 export function getAgentTask(taskId: string, signal?: AbortSignal): Promise<AgentTask> {
-  return apiJson<AgentTask>(`/api/agents/${encodeURIComponent(taskId)}`, { signal, cache: "no-store" });
+  return apiJson<AgentTask>(`/api/agents/${encodeURIComponent(taskId)}`, { signal, cache: "no-store" }).then(readAgentOutputs);
 }
 
 export function createAgentTask(objective: string, requestId: string, projectId?: string | null, origin?: { id: string; revision: number }): Promise<AgentTask> {
@@ -596,7 +624,7 @@ export function createAgentTask(objective: string, requestId: string, projectId?
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ objective, request_id: requestId, ...(projectId !== undefined ? { project_id: projectId } : {}),
       ...(origin ? { knowledge_entry_id: origin.id, knowledge_entry_revision: origin.revision } : {}) }),
-  });
+  }).then(readAgentOutputs);
 }
 
 export function answerAgentInput(taskId: string, requestId: string, expectedRevision: number, answer: string): Promise<AgentTask> {
@@ -604,9 +632,9 @@ export function answerAgentInput(taskId: string, requestId: string, expectedRevi
   if (!text || new TextEncoder().encode(text).byteLength > 8000) {
     return Promise.reject(new ApiError(422, "Enter an answer of up to 8,000 UTF-8 bytes."));
   }
-  return apiJson(`/api/agents/${encodeURIComponent(taskId)}/inputs/${encodeURIComponent(requestId)}/answer`, {
+  return apiJson<AgentTask>(`/api/agents/${encodeURIComponent(taskId)}/inputs/${encodeURIComponent(requestId)}/answer`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision: expectedRevision, answer: text }),
-  });
+  }).then(readAgentOutputs);
 }
 
 export function actOnAgentTask(
@@ -618,7 +646,7 @@ export function actOnAgentTask(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, expected_revision: expectedRevision }),
-  });
+  }).then(readAgentOutputs);
 }
 
 export async function deleteAgentTask(taskId: string, expectedRevision: number): Promise<void> {
@@ -722,7 +750,7 @@ export function readActivity(origin: ActivityNotice["origin"], id: string, signa
 }
 
 export function getActivityAgentTask(id: string, signal?: AbortSignal): Promise<AgentTask> {
-  return apiJson(`/api/activity/agent/${encodeURIComponent(id)}/task`, { signal, cache: "no-store" });
+  return apiJson<AgentTask>(`/api/activity/agent/${encodeURIComponent(id)}/task`, { signal, cache: "no-store" }).then(readAgentOutputs);
 }
 
 export function listWatches(signal?: AbortSignal, projectId?: string): Promise<{ items: PublicWatch[] }> {

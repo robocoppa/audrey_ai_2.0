@@ -1,6 +1,6 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, November 2, 2026. Saved task Agents, unified lexical
+**Status:** In progress, November 3, 2026. Saved task Agents, unified lexical
 Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner confirms Search
 returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
 
@@ -39,8 +39,9 @@ Application schema 26 introduced owner-bound tasks and operation reservations wi
 leases, fenced writes and cumulative limits. The lifecycle worker reuses committed
 steps after interruption; uncommitted model/read work can repeat within the saved
 allowance. Every provider/tool dispatch revalidates live task/account/model access.
-Agents currently offer web search/fetch when needed; automatic personal-memory recall and
-file/write tools are excluded. Every model step uses only verified local
+Agents offer web search/fetch when needed and native downloadable file creation
+during Work, as described below. Automatic personal-memory recall, source-file
+inputs and other write tools remain pending. Every model step uses only verified local
 `qwen3.8:latest`, with no classifier, cloud panel or fallback. The worker verifies
 installed local weights before generation and pins their digest within each step;
 missing or changed metadata stops execution. Public web tools still fetch source
@@ -485,8 +486,9 @@ Plan/Work/Review prompts choose tools when useful; work on supplied text does no
 require browsing, citations or an external-source appendix. Missing web tools no
 longer block creating or running a model-only task. Actual tool calls still check
 the live allowlist, endpoint, owner, lease, model and context authority. The current
-tool set remains web search and page reads; arbitrary external effects are not
-newly implemented or authorized. Retained `research` checkpoint IDs keep saved
+tool set now also includes native file creation during Work, described below.
+External actions such as purchases or messages remain outside the implemented tools.
+Retained `research` checkpoint IDs keep saved
 Plans/results and Run again compatible while their displayed stage reads Work.
 
 The focused [installed smoke](../reference/live-smoke-testing.md#installed-knowledge-agent-smoke)
@@ -496,8 +498,55 @@ checks require no credentials, live network/models or production-account writes.
 Affected backend/UI checks and mocked browser acceptance at 1,366, 390 and 320 pixels
 pass, including exact prefill, draft choices, explicit Start, origin payload, Work
 labels and opening the same assigned Agent. Backend/UI rebuilds are required;
-no schema/configuration change or upload is needed. Real-model and deployed
-browser acceptance remain separate.
+no schema/configuration change or upload was needed for that assignment slice.
+The owner reports all seven installed Tower checks passed, exit 0. Real-model and
+deployed browser acceptance remain separate.
+
+### Agent file outputs
+
+Work can use the existing native `create_file` tool to produce TXT, Markdown, CSV,
+JSON, DOCX or XLSX deliverables. Files are ordinary owned generated outputs in
+My Files, with a Project attachment when the task belongs to an ordinary Project
+and its file limit permits it. A full Project leaves the file in My Files with
+a tool notice. Plan and Review cannot write files. Source-file and Private inputs,
+code execution and external write tools are unchanged.
+
+Each task has eight lifetime distinct output identities, counting pending attempts
+and deleted files. Requests use the existing safe renderer, a 256 KiB argument
+limit and its 4 MiB output limit, plus normal owner storage quotas. Rendered
+spreadsheets do not introduce executable formulas. Owner, task and normalized
+content determine the file identity: identical retries, restarts and Run again
+reuse bytes, while changed content creates an immutable new file. Explicit file
+deletion prevents recreation of that identity. Deleting task history removes
+its receipts while retaining independently saved My Files outputs.
+
+Application schema 34 stores reserved/ready output intents with owner/task identity,
+filename and digest; receipts contain no file bodies or tool arguments. The final
+publication holds application then upload locks, rechecks the live lease, owner,
+model access, Project context and deletion tombstones, and commits the catalog
+and ready receipt without awaiting. The upload database's shared commit helper
+also preserves existing native chat behavior. These are separate databases: if
+the catalog commits before a crash prevents the receipt commit, an authorized
+retry adopts that exact file. Before starting the Agent worker, startup recovery
+removes only exact unregistered pending source/sidecar paths and releases their
+quota reservations; cataloged files are retained. Pending intents still count
+toward the lifetime limit. Cancellation and revoked scope stop publication.
+
+The task's Files panel exposes canonical authenticated downloads while working,
+failed, cancelled, completed or rerunning. List summaries omit output metadata;
+full task refreshes reconcile the panel. Work checkpoints and final reports retain
+canonical file links even when Review omits them. Downloads use normal ownership
+and deletion checks, with a recoverable missing-file message. Generated working
+outputs do not become independent evidence.
+
+Affected backend tests, frontend checks and mocked browser acceptance at 1,366,
+390 and 320 pixels pass. The focused
+[installed Agent file smoke](../reference/live-smoke-testing.md#installed-agent-file-smoke)
+uses isolated temporary canonical data and mocked verified local replies, without
+production accounts, credentials, a live network or models. Tower execution,
+live worker/proxy wiring and actual Qwen file quality remain unrun. Backend/UI
+rebuilds are required; schema 34 applies automatically. No settings change or
+upload is needed.
 
 ## Product outcome
 
@@ -518,7 +567,7 @@ decision; then schedule a weekly check of a selected public release page.
 
 | Area | Already present | Work required |
 | --- | --- | --- |
-| Native runs | Saved agent objectives, three-stage plans/checkpoints, planning questions, leases and restart dispatch | Adaptive steps and finer-grained within-step recovery |
+| Native runs | Saved agent objectives, three-stage plans/checkpoints, planning questions, owned downloadable files, leases and restart dispatch | Adaptive steps and finer-grained within-step recovery |
 | Resource admission | Interactive preference, aged background fairness, cooperative queued handoffs and generation-boundary release | Live concurrent-chat/model acceptance and broader checkpoint-age monitoring |
 | Private tasks | Leases, revisions, source/model pins, budgets and committed-result delivery for Private tax reviews | General agent contracts and adapters; existing Private recovery currently pauses work |
 | Search | Local lexical API/sidebar, canonical reader and workspace links, exact message focus, bounded projection, approved notes and Project report filters | Semantic candidates and expanded native previews for retained text |

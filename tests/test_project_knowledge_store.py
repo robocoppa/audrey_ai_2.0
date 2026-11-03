@@ -358,10 +358,10 @@ async def test_deletion_erases_entries_history_and_run_references(state, erase):
 
 
 async def test_migration_is_additive_reopen_safe_and_preserves_existing_project(state):
-    assert state.store.schema_version == 33
+    assert state.store.schema_version == 34
     second = ApplicationStore(state.store.path)
     try:
-        assert second.schema_version == 33
+        assert second.schema_version == 34
         assert await second.projects.get(
             user_id=state.owner.user_id, project_id=state.project.project_id,
         ) == state.project

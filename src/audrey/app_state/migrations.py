@@ -1401,6 +1401,28 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON app_watches(user_id,project_id,created_at DESC,watch_id);
         """,
     ),
+    (
+        34,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_app_agent_tasks_task_owner
+          ON app_agent_tasks(task_id,user_id);
+        CREATE TABLE IF NOT EXISTS app_agent_outputs (
+          file_id TEXT PRIMARY KEY CHECK (length(file_id)=36),
+          task_id TEXT NOT NULL REFERENCES app_agent_tasks(task_id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+          filename TEXT NOT NULL CHECK (length(filename) BETWEEN 1 AND 180),
+          identity_sha256 TEXT NOT NULL CHECK (length(identity_sha256)=64),
+          status TEXT NOT NULL CHECK (status IN ('reserved','ready')),
+          created_at TEXT NOT NULL,
+          committed_at TEXT,
+          FOREIGN KEY (task_id,user_id) REFERENCES app_agent_tasks(task_id,user_id) ON DELETE CASCADE,
+          CHECK ((status='reserved' AND committed_at IS NULL)
+              OR (status='ready' AND committed_at IS NOT NULL))
+        );
+        CREATE INDEX IF NOT EXISTS idx_app_agent_outputs_task
+          ON app_agent_outputs(task_id,created_at,file_id);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

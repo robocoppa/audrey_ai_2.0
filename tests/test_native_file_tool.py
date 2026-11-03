@@ -14,6 +14,7 @@ from test_native_private_workflow import _settle
 from test_native_private_workflow import document_setup as document_setup
 from test_native_private_workflow import native as native
 
+from audrey.agent_dispatch import AgentDispatchStoppedError
 from audrey.identity import Principal
 from audrey.processing_policy import ProcessingPolicy, processing_scope
 from audrey.tools.discovery import ToolRegistry
@@ -124,6 +125,15 @@ async def test_creation_failure_does_not_leak_content_or_create_download(monkeyp
             result = await dispatch(client)
     assert result.is_error and files == []
     assert "PRIVATE_DOCUMENT" not in result.content + caplog.text
+
+
+async def test_revoked_agent_authority_stops_native_dispatch_instead_of_becoming_a_tool_reply(monkeypatch):
+    service = AsyncMock(side_effect=AgentDispatchStoppedError("The agent attempt has stopped."))
+    monkeypatch.setattr("audrey.generated_files.create_generated_file", service)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(no_network), trust_env=False) as client:
+        with native_file_scope(app=object(), principal=OWNER, conversation_id="con_owned", run_id="run_owned", files=[]):
+            with pytest.raises(AgentDispatchStoppedError, match="attempt has stopped"):
+                await dispatch(client)
 
 
 async def test_concurrent_calls_obey_per_run_file_cap(monkeypatch):
