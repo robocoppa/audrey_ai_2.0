@@ -95,6 +95,17 @@ async def test_native_agents_create_idempotently_and_hide_worker_authority(agent
     assert len(agents.wakes) == 2
 
 
+@pytest.mark.parametrize("files,project", [
+    (["file"], None), (["a", "b", "c", "d"], "project"),
+    (["a", "a"], "project"), ([123], "project"), ([""], "project"),
+])
+async def test_file_input_request_shape_rejected_before_task_creation(agents, files, project):
+    response = await _create(agents, file_ids=files, project_id=project)
+    assert response.status_code == 422
+    assert not await agents.store.agents.list(user_id=agents.owners[0].user_id)
+    assert not agents.wakes
+
+
 async def test_api_returns_persisted_title_and_short_fallback_without_exposing_original_paragraph(agents):
     objective = "Compare the public release notes and explain all meaningful changes. " * 10
     created = (await _create(agents, objective=objective)).json()

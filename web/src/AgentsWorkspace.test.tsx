@@ -27,6 +27,8 @@ const projectContext = { project_id: project.id, project_name: project.name, ava
 const knowledgeEntry: api.KnowledgeEntry = { id: "entry-open", project_id: project.id, kind: "action", text: "Compare public release dates.", approval_state: "approved", work_status: "open", revision: 3, pinned: false, origin: "user", sources: [], source_task_id: null, created_at: project.created_at, updated_at: project.updated_at, approved_at: project.updated_at, stale: false, source_warnings: [], replaces_id: null, base_revision: null };
 const knowledgeRequest = { project, entry: knowledgeEntry, serial: 1 };
 const savedOutput: api.AgentOutput = { file_id: "file_checklist", filename: "task-checklist.md", download_url: "/api/files/file_checklist/download", created_at: "2026-11-02T10:00:00Z" };
+const selectedProjectFile: api.AudreyProjectFile = { id: "file-input", filename: "project-instructions.txt", mime: "text/plain", kind: "text", bytes: 900, status: "ready", uploaded_at: project.created_at, added_at: project.created_at };
+const fileInputs: api.AgentFileInputs = { current: true, files: [{ file_id: selectedProjectFile.id, filename: selectedProjectFile.filename, artifact: "text", chars: 500, total_chars: 900, truncated: true, origin: "upload" }] };
 
 beforeEach(() => {
   vi.spyOn(api, "listProjects").mockResolvedValue({ items: [], next_cursor: null, limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
@@ -43,6 +45,81 @@ afterEach(() => {
 });
 
 describe("AgentsWorkspace", () => {
+  it("starts only with explicitly selected Project files, keeps selections across navigation, then clears them on success", async () => {
+    vi.spyOn(api, "listProjectFiles").mockResolvedValue({ items: [selectedProjectFile], limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
+    vi.spyOn(api, "getProject").mockResolvedValue(project);
+    const saved = task({ file_inputs: fileInputs, project_context: projectContext });
+    vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const create = vi.spyOn(api, "createAgentTask").mockImplementation(async () => { vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); return saved; });
+    const request = { project, serial: 1 };
+    const { rerender } = render(<AgentsWorkspace composerProjectRequest={request} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Project files Optional" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "project-instructions.txt" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Make a checklist from this file." } });
+    rerender(<AgentsWorkspace composerProjectRequest={request} visible={false} />);
+    rerender(<AgentsWorkspace composerProjectRequest={request} visible />);
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "project-instructions.txt" })).toBeChecked());
+    expect(create).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    await waitFor(() => expect(create).toHaveBeenCalledWith("Make a checklist from this file.", expect.any(String), project.id, undefined, [selectedProjectFile.id]));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue(""));
+    expect(screen.getByRole("checkbox", { name: "project-instructions.txt" })).not.toBeChecked();
+    fireEvent.click(await screen.findByText("Input files · 1", { selector: "summary" }));
+    expect(screen.getByText(/500 of 900 characters · Shortened/)).toBeVisible();
+  });
+
+  it("keeps the objective and file selection after the server rejects unavailable saved text", async () => {
+    vi.spyOn(api, "listProjectFiles").mockResolvedValue({ items: [selectedProjectFile], limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
+    vi.spyOn(api, "getProject").mockResolvedValue(project);
+    const create = vi.spyOn(api, "createAgentTask").mockRejectedValue(new api.ApiError(422, "Saved text is unavailable for a selected file. Choose another file."));
+    render(<AgentsWorkspace composerProjectRequest={{ project, serial: 1 }} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Project files Optional" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "project-instructions.txt" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Use this file" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Saved text is unavailable");
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Use this file");
+    expect(screen.getByRole("checkbox", { name: "project-instructions.txt" })).toBeChecked();
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["change Project", "clear draft"])("discards file selections when users %s", async (action) => {
+    vi.mocked(api.listProjects).mockResolvedValue({ items: [project], next_cursor: null, limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
+    vi.spyOn(api, "listProjectFiles").mockResolvedValue({ items: [selectedProjectFile], limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
+    vi.spyOn(api, "getProject").mockResolvedValue(project);
+    const create = vi.spyOn(api, "createAgentTask").mockResolvedValue(task());
+    render(<AgentsWorkspace composerProjectRequest={{ project, serial: 1 }} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Project files Optional" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "project-instructions.txt" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Use my objective" } });
+    if (action === "change Project") {
+      fireEvent.change(screen.getByRole("combobox", { name: "Project" }), { target: { value: "" } });
+      fireEvent.change(screen.getByRole("combobox", { name: "Project" }), { target: { value: project.id } });
+      fireEvent.click(screen.getByRole("button", { name: "Project files Optional" }));
+    } else {
+      fireEvent.click(screen.getByRole("button", { name: "Clear draft" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Fresh objective" } });
+    }
+    expect(await screen.findByRole("checkbox", { name: "project-instructions.txt" })).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1)); expect(create.mock.calls[0]).toHaveLength(3);
+  });
+
+  it.each(["completed", "paused", "waiting_for_input"] as const)("blocks continuation for stale file inputs on a %s task", async (status) => {
+    const saved = status === "waiting_for_input" ? waitingTask({ file_inputs: { ...fileInputs, current: false } }) : task({ status, file_inputs: { ...fileInputs, current: false } });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const action = vi.spyOn(api, "actOnAgentTask"); const answer = vi.spyOn(api, "answerAgentInput");
+    render(<AgentsWorkspace />);
+    fireEvent.click(await screen.findByText("Input files changed", { selector: "summary" }));
+    expect(screen.getByText(/A selected file changed or is unavailable/)).toBeVisible();
+    if (status === "waiting_for_input") {
+      fireEvent.change(screen.getByRole("textbox", { name: "Your answer" }), { target: { value: "Use this answer" } });
+      expect(screen.getByRole("button", { name: "Answer and continue" })).toBeDisabled();
+      fireEvent.submit(screen.getByRole("form", { name: "Answer agent question" }));
+    } else expect(screen.getByRole("button", { name: status === "paused" ? "Resume" : "Run again" })).toBeDisabled();
+    expect(action).not.toHaveBeenCalled(); expect(answer).not.toHaveBeenCalled();
+  });
+
   it.each(["running", "paused", "failed", "cancelled", "completed"] as const)("keeps produced files available on a %s task with no result", async (status) => {
     const saved = task({ status, result: "", outputs: [savedOutput] });
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
@@ -53,22 +130,25 @@ describe("AgentsWorkspace", () => {
   });
 
   it("keeps saved files through summaries, reloads newer detail and removes a canonically deleted file", async () => {
-    const saved = task({ status: "completed", revision: 8, outputs: [savedOutput] });
+    const saved = task({ status: "completed", revision: 8, outputs: [savedOutput], file_inputs: { ...fileInputs, current: false } });
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
     render(<AgentsWorkspace />);
     await screen.findByRole("button", { name: "Download task-checklist.md" });
     await waitFor(() => expect(screen.getByRole("button", { name: "Refresh agent tasks" })).toBeEnabled());
     let release!: (value: AgentTask) => void;
     vi.mocked(api.getAgentTask).mockImplementation(() => new Promise((resolve) => { release = resolve; }));
-    const { outputs: _outputs, ...summary } = saved;
-    void _outputs;
+    const { outputs: _outputs, file_inputs: _inputs, ...summary } = saved;
+    void _outputs; void _inputs;
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [{ ...summary, revision: 9, summary: true }] });
     const calls = vi.mocked(api.getAgentTask).mock.calls.length;
     fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
     await waitFor(() => expect(api.getAgentTask).toHaveBeenCalledTimes(calls + 1));
     expect(screen.getAllByRole("button", { name: "Download task-checklist.md" })).toHaveLength(1);
+    expect(screen.getByText("Input files changed", { selector: "summary" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Run again" })).toBeDisabled();
     await act(async () => release({ ...summary, revision: 9 }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Files" })).not.toBeInTheDocument());
+    expect(screen.queryByText("Input files changed", { selector: "summary" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: saved.objective })).toBeVisible();
   });
 

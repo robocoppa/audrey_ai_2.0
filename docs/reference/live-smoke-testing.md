@@ -19,6 +19,7 @@ English user input only; closed checks do not need another run.
 | Installed Agent Project Knowledge smoke, isolated data | Tower → `tests/smoke/smoke-agent-project-knowledge-onbox.sh` |
 | Installed Knowledge Agent smoke, isolated data/mocked model | Tower → `tests/smoke/smoke-knowledge-agents-onbox.sh` |
 | Installed Agent file smoke, isolated storage/mocked model | Tower → `tests/smoke/smoke-agent-files-onbox.sh` |
+| Installed Agent file-input smoke, isolated sources/mocked model | Tower → `tests/smoke/smoke-agent-file-inputs-onbox.sh` |
 
 Laptop checkout: `/home/bart/Documents/github/audrey/audrey_ai_2.0`.
 Tower checkout: `/mnt/user/appdata/audrey_ai_2.0`.
@@ -328,6 +329,50 @@ same output appears in My Files and the task's ordinary Project. Run again shoul
 reuse identical content on the same task; changed content may create a new file.
 Deleting task history should retain the saved file in My Files. Real model
 acceptance checks whether it chooses the tool and creates the requested content.
+
+## Installed Agent file-input smoke
+
+After pulling selected Project file inputs, run on Tower:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+tests/smoke/smoke-agent-file-inputs-onbox.sh
+```
+
+Application schema 35 applies automatically at backend startup. No settings change,
+credentials, `.env.smoke.local` or upload is needed. The wrapper streams the
+checked-out probe into the running backend's installed Python package. Temporary
+accounts, ordinary/Private Projects, tasks, source bytes and upload catalogs are
+isolated from production. Authentication is overridden only inside the fixture.
+The execution case uses the real task runtime, executor, ReAct loop and renderer,
+with mocked verified local-Qwen replies; it checks selected text in each stage,
+creates a real output and downloads its bytes. No live network or models run.
+Missing installed support exits 2; rebuild the backend first.
+
+Expect seven `PASS` checks and `PASS Agent file input smoke passed` with `(exit 0)`.
+They verify explicit selection/metadata, selected-only model context and a real
+output, pinned restart and same-task rerun, owner/Private/attachment/readability
+boundaries, changed/deleted/detached source fences, bounded retained/OCR/transcript
+and generated text, and isolated cleanup. The running worker, proxy authentication
+and actual model comprehension remain separate acceptance checks.
+
+The smoke normally takes seconds. `--json` prints a compact receipt;
+`--timeout-seconds` lowers the ten-second per-case deadline. Each Linux forked
+case has a parent-enforced deadline, including blocked synchronous work; the child
+is terminated before its temporary fixture is removed. Exit codes: 0 pass,
+1 finding/timeout, 2 setup failure, 3 harness crash, 130 interrupted. Results print
+in the launching shell; no notifications or report transfer are needed.
+`AUDREY_SMOKE_APPDATA` (or `APPDATA`) and `AUDREY_SMOKE_CONTAINER` override the
+checkout/container.
+
+For manual browser acceptance, use an existing ordinary Project with a readable
+ready file. In Agents, choose the Project, open Project files and explicitly select
+the file, then assign a task that uses its content. Confirm the task's Input files
+details, including any shortened extract, and inspect the resulting work. No
+upload is needed when a suitable file already exists; otherwise add one through
+the Project's normal file flow first. Selecting a Project alone does not select
+its files. Private Projects remain unavailable here.
 
 ## Service rebuilds
 

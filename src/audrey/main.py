@@ -469,6 +469,9 @@ async def lifespan(app: FastAPI):
             name="audrey.tools.discovery",
         )
     try:
+        from audrey.agent_file_inputs import get_agent_file_inputs
+
+        get_agent_file_inputs(app)
         recovered_agent_staging = await recover_agent_output_staging_for_startup(app)
         if recovered_agent_staging:
             log.info("Agent output startup recovery cleared %d unregistered staging intent(s)", recovered_agent_staging)

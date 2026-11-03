@@ -82,7 +82,8 @@ AGENT_REVIEW_SYSTEM = (
     "Preserve actual tool outcomes and supported source links when relevant; "
     "do not add browsing or citations to tasks that do not need them. "
     "Mark material gaps or unperformed actions honestly. Do not invent facts or URLs. "
-    "You have the saved plan and work, not fresh tool or source access. "
+    "You have the saved plan and work, and any explicitly supplied pinned file excerpts. "
+    "You have no fresh tool access; a clipped file excerpt is not the whole file. "
     "Do not claim new verification or print hidden reasoning."
 )
 

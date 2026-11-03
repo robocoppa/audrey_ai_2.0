@@ -40,8 +40,9 @@ leases, fenced writes and cumulative limits. The lifecycle worker reuses committ
 steps after interruption; uncommitted model/read work can repeat within the saved
 allowance. Every provider/tool dispatch revalidates live task/account/model access.
 Agents offer web search/fetch when needed and native downloadable file creation
-during Work, as described below. Automatic personal-memory recall, source-file
-inputs and other write tools remain pending. Every model step uses only verified local
+during Work, as described below. Users can explicitly select ordinary Project
+files as bounded local inputs. Automatic personal-memory recall and other write
+tools remain pending. Every model step uses only verified local
 `qwen3.8:latest`, with no classifier, cloud panel or fallback. The worker verifies
 installed local weights before generation and pins their digest within each step;
 missing or changed metadata stops execution. Public web tools still fetch source
@@ -64,7 +65,7 @@ This raises the original 2,048-token report allowance after a reported Research
 output-limit failure; live acceptance of the larger allowance remains pending.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
-Adaptive multi-step plans, file-backed Project context for agents, file/Private agent inputs,
+Adaptive multi-step plans, file-backed Knowledge context for agents, Private agent inputs,
 semantic search,
 owned-file/Private and multiple-source watches remain implementation work. Existing Private Tax tasks keep
 their current behavior. The remaining sections specify the intended full feature.
@@ -121,8 +122,9 @@ pinned/relevant/open-work priority. Notes are quoted data below platform guidanc
 pending, rejected, superseded and stale-source entries cannot ground a new run.
 Each native run saves only its selected entry IDs/revisions; generation rechecks the
 frozen knowledge/source proofs and fails if they change. Private Project chat stays
-inside its existing verified local policy. Public background Agents still have no
-file or Private inputs, and saved Private Tax tasks keep their established context/admission.
+inside its existing verified local policy. Public background Agents accept only
+explicitly selected ordinary Project files, as described below; Private inputs
+remain unsupported. Saved Private Tax tasks keep their established context/admission.
 
 Source references contain canonical IDs/revisions only, with Project-scoped source
 previews and local ownership/deletion/detachment checks. Explicit user notes and
@@ -224,8 +226,9 @@ hidden or superseded reads abort, while mounted conversation and agent drafts st
 Creation freezes up to 2,000 tokens of Project instructions and 1,000 text tokens
 across at most 12 approved notes. Selection prioritizes
 pinned, relevant and open work; newly added notes are not silently adopted. Current
-message/report-backed notes are supported as described below; file-backed notes,
-file contents and Private Projects remain outside this public workflow.
+message/report-backed notes are supported as described below; file-backed notes
+and Private Projects remain outside automatic context. File excerpts require
+the separate explicit selection described below.
 Every step receives the selected context as quoted working data under platform
 guidance. Approved notes do not verify truth or authorize new tools or actions.
 All model calls remain verified local Qwen; only Work offers the available tools.
@@ -508,8 +511,8 @@ Work can use the existing native `create_file` tool to produce TXT, Markdown, CS
 JSON, DOCX or XLSX deliverables. Files are ordinary owned generated outputs in
 My Files, with a Project attachment when the task belongs to an ordinary Project
 and its file limit permits it. A full Project leaves the file in My Files with
-a tool notice. Plan and Review cannot write files. Source-file and Private inputs,
-code execution and external write tools are unchanged.
+a tool notice. Plan and Review cannot write files. Selected ordinary file inputs
+are described below; Private inputs, code execution and external write tools remain pending.
 
 Each task has eight lifetime distinct output identities, counting pending attempts
 and deleted files. Requests use the existing safe renderer, a 256 KiB argument
@@ -543,10 +546,57 @@ Affected backend tests, frontend checks and mocked browser acceptance at 1,366,
 390 and 320 pixels pass. The focused
 [installed Agent file smoke](../reference/live-smoke-testing.md#installed-agent-file-smoke)
 uses isolated temporary canonical data and mocked verified local replies, without
-production accounts, credentials, a live network or models. Tower execution,
-live worker/proxy wiring and actual Qwen file quality remain unrun. Backend/UI
+production accounts, credentials, a live network or models. The owner reports all
+seven installed Tower file-output checks passed, exit 0. Live worker/proxy wiring
+and actual Qwen file quality remain unrun. Backend/UI
 rebuilds are required; schema 34 applies automatically. No settings change or
 upload is needed.
+
+### Explicit Project file inputs for Agents
+
+The Agent composer offers an optional Project files chooser after an ordinary
+Project is selected. It loads ready file metadata only when opened; up to three
+files can be selected. Navigation and rejected starts preserve the draft and
+selections. Changing Projects, Clear draft and successful creation clear selected
+IDs. Hidden reads abort and reopening revalidates. Starting sends only file IDs,
+with the reviewed objective and Project; it does not grant access to other files.
+
+At Start, the server verifies the current owner, ordinary Project attachment,
+ready catalog and deletion state, then reads canonical saved text locally.
+Documents and images use extracted text or saved OCR; audio/video use saved
+transcripts. Retained text can be used when original bytes were reclaimed.
+Generated files are identified as working outputs. Empty, unreadable, protected
+or oversized sources fail without starting a task or silently dropping a file.
+The existing reader bounds disk/expanded inputs to 8 MiB and text to 500,000
+characters. Each selected file supplies at most 1,500 tokens, up to 4,500 total;
+the task detail shows the included/full character counts and shortened extracts.
+
+Schema 35 persists only owner/task/Project identities and bounded metadata pins:
+catalog and text digests, prefix length, chosen attachment timestamp/origin and
+relative file stat proofs. It stores no source text or absolute paths. Each
+Plan/Work/Review step rereads the pinned canonical text and verifies its digest.
+Synchronous owner, catalog, attachment and disk checks guard model/tool admission,
+checkpoint/final commits and generated-file publication. Publication uses a
+shared locked catalog reader within the existing application→upload lock order,
+so checking selected inputs does not reacquire the upload lock.
+
+Restart and Run again preserve the same selected versions and completed Plan.
+Changing, deleting, detaching or reattaching a selected source blocks new work;
+the user starts a new task to select its current text. Project renaming, unrelated
+file changes and membership in other Projects do not change the input selection.
+Metadata remains visible with a stale-input notice; Resume, Run again and input
+answers are blocked. Saved reports retain their normal history behavior. Task or
+account deletion cascades input pins; this introduces no retained source-body copy.
+Project Knowledge's automatic file-backed references and Private Agent inputs
+remain later work. File excerpts are quoted data and confer no new tool authority.
+
+Affected backend tests, frontend tests/typecheck/lint/build and mocked Chromium
+checks at 1,366, 390 and 320 pixels pass. The
+[installed file-input smoke](../reference/live-smoke-testing.md#installed-agent-file-input-smoke)
+exercises real canonical storage, local extraction, task execution and generated
+downloads with mocked verified-Qwen replies. Tower execution and actual model
+quality remain pending. Rebuild backend/UI; schema 35 applies automatically.
+No settings, credentials or upload are required for the isolated smoke.
 
 ## Product outcome
 
@@ -571,7 +621,7 @@ decision; then schedule a weekly check of a selected public release page.
 | Resource admission | Interactive preference, aged background fairness, cooperative queued handoffs and generation-boundary release | Live concurrent-chat/model acceptance and broader checkpoint-age monitoring |
 | Private tasks | Leases, revisions, source/model pins, budgets and committed-result delivery for Private tax reviews | General agent contracts and adapters; existing Private recovery currently pauses work |
 | Search | Local lexical API/sidebar, canonical reader and workspace links, exact message focus, bounded projection, approved notes and Project report filters | Semantic candidates and expanded native previews for retained text |
-| Projects | Compact overview with Knowledge/Agents below and a Watch row; approved knowledge in native chat and ordinary agents; fixed agent context, Project links and saved-work lists | Source-backed note and file/Private agent context, automatic proposals |
+| Projects | Compact overview with Knowledge/Agents below and a Watch row; approved knowledge in native chat and ordinary agents; selected ordinary file inputs, fixed context, Project links and saved-work lists | File-backed Knowledge and Private agent context, automatic proposals |
 | Scheduling | Explicit public-page schedules, Project organization/navigation, snapshots/diffs, baselines and Activity alerts | Owned-file/Private and multiple-source watches |
 
 Code anchors:

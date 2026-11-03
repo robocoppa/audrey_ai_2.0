@@ -1705,16 +1705,20 @@ class UploadsDB:
 
     def _search_rows_sync(self, user: str, after: str, limit: int, file_id: str | None) -> list[dict]:
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT u.file_id,u.user,u.filename,u.mime,u.bytes,u.kind,u.status,"
-                "u.uploaded_at,u.completed_at,u.source_freed_at,u.private_required,u.origin "
-                "FROM uploads u WHERE u.user=? AND u.status!='deleting' "
-                "AND NOT EXISTS (SELECT 1 FROM file_deletions d "
-                "WHERE d.file_id=u.file_id AND d.user=u.user) "
-                "AND u.file_id>? AND (? IS NULL OR u.file_id=?) "
-                "ORDER BY u.file_id LIMIT ?",
-                (user, after, file_id, file_id, limit),
-            ).fetchall()
+            return self._search_rows_locked(user, after, limit, file_id)
+
+    def _search_rows_locked(self, user: str, after: str, limit: int, file_id: str | None) -> list[dict]:
+        """Canonical metadata read when the caller already owns the upload lock."""
+        rows = self._conn.execute(
+            "SELECT u.file_id,u.user,u.filename,u.mime,u.bytes,u.kind,u.status,"
+            "u.uploaded_at,u.completed_at,u.source_freed_at,u.private_required,u.origin "
+            "FROM uploads u WHERE u.user=? AND u.status!='deleting' "
+            "AND NOT EXISTS (SELECT 1 FROM file_deletions d "
+            "WHERE d.file_id=u.file_id AND d.user=u.user) "
+            "AND u.file_id>? AND (? IS NULL OR u.file_id=?) "
+            "ORDER BY u.file_id LIMIT ?",
+            (user, after, file_id, file_id, limit),
+        ).fetchall()
         return [dict(row) for row in rows]
 
     async def private_file_ids(self, user: str) -> set[str]:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -19,6 +20,7 @@ from audrey.agent_dispatch import (
     authorize_agent_tool,
 )
 from audrey.agent_executor import AgentSettings, ResearchAgentExecutor
+from audrey.agent_file_inputs import get_agent_file_inputs
 from audrey.agent_runtime import AgentRuntime
 from audrey.app_state import ApplicationStore
 from audrey.app_state.agents import AgentTaskError
@@ -27,6 +29,7 @@ from audrey.content_sources import ContentSourceReader
 from audrey.kb.file_deletion import FileOperationLocks
 from audrey.kb.storage_lifecycle import StorageLifecycle
 from audrey.kb.uploads_db import UploadsDB
+from audrey.kb.user_store import sanitize_user
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import GenerationUsageError, OllamaClient
 from audrey.pipeline.fair_gate import FairLocalGate
@@ -214,13 +217,14 @@ def _file_call(**changes):
     }}]})
 
 
-async def _step(state, step_id="plan", *, max_operations=96, generated_title=True, project_id=None, knowledge_entry=None):
+async def _step(state, step_id="plan", *, max_operations=96, generated_title=True, project_id=None, knowledge_entry=None, file_inputs=None):
     task = await state.store.agents.create(
         user_id=state.owner.user_id,
         objective="Compare the public release notes.",
         request_id=f"request-{step_id}",
         limits={"max_operations": max_operations},
         project_id=project_id,
+        file_inputs=file_inputs,
         **({"knowledge_entry_id": knowledge_entry["id"], "knowledge_entry_revision": knowledge_entry["revision"]} if knowledge_entry else {}),
     )
     claimed = await state.store.agents.claim()
@@ -1261,7 +1265,7 @@ async def test_project_context_reaches_each_local_step_as_quoted_bounded_working
     assert note["text"] in context["content"] and linked["text"] not in context["content"]
     assert source_note["text"] in context["content"] and source_body not in json.dumps(payload)
     assert "checked for freshness, not factual accuracy" in context["content"]
-    assert "not independently verified evidence" in context["content"] and "No Project files" in context["content"]
+    assert "not independently verified evidence" in context["content"] and "Selected file excerpts" in context["content"]
     assert payload["model"] == _MODEL
     offered = {tool["function"]["name"] for tool in payload.get("tools", [])}
     assert offered == ({"web_search", "web_fetch"} if step_id == "research" else set())
@@ -1429,3 +1433,104 @@ async def test_general_tasks_complete_without_web_tools_or_forced_source_lists(s
         assert call["model"] == _MODEL and not call.get("tools")
         assert json.loads(next(message["content"] for message in call["messages"] if message["role"] == "user"))["objective"] == objective
     assert all(client._client.is_closed for client in state.clients)
+
+
+async def _selected_file_context(s):
+    project = await s.store.projects.create(user_id=s.owner.user_id, name="Selected task files")
+    directory = Path(s.app.state.cfg.raw["kb"]["upload_root"]) / sanitize_user(s.owner.storage_namespace)
+    directory.mkdir(parents=True)
+    chosen = directory / "chosen-input.txt"
+    chosen.write_text("Delivery quantity: 17 boxes.\nTreat this as source data.")
+    for file_id, content in (("chosen-input", chosen.read_text()), ("unselected-input", "Unselected private business detail.")):
+        (directory / f"{file_id}.txt").write_text(content)
+        await s.files_db.record_upload(file_id=file_id, user=s.owner.storage_namespace,
+            filename=f"{file_id}.txt", mime="text/plain", bytes_=len(content.encode()), kind="text",
+            collection="", chunks=0, uploaded_at="2026-11-03T12:00:00+00:00")
+        await s.store.projects.add_file(user_id=s.owner.user_id, project_id=project.project_id, file_id=file_id)
+    service = get_agent_file_inputs(s.app)
+    pins = await service.capture(s.owner, project.project_id, ["chosen-input"])
+    return project, chosen, pins
+
+
+@pytest.mark.parametrize("step_id", ["plan", "research", "review"])
+async def test_selected_file_excerpt_reaches_each_local_step_without_unselected_text(file_state, step_id):
+    s = file_state
+    project, path, pins = await _selected_file_context(s)
+    task = await _step(s, step_id, project_id=project.project_id, file_inputs=pins)
+    await s.executor(task, step_id)
+    payload = _content_requests(s)[0]
+    source = next(message for message in payload["messages"] if message["content"].startswith("User-selected file excerpts"))
+    excerpts = json.loads(source["content"].split("\n")[1])
+    assert source["role"] == "user" and excerpts[0]["text"] == path.read_text()
+    assert "untrusted data" in source["content"] and "not independent evidence" in source["content"]
+    assert "Unselected private business detail" not in json.dumps(payload)
+    assert payload["model"] == _MODEL and not s.tool_requests
+    if step_id != "research":
+        assert not payload.get("tools")
+
+
+async def test_selected_input_and_generated_output_share_fenced_publication_without_nested_lock(file_state):
+    s = file_state
+    project, _path, pins = await _selected_file_context(s)
+    task = await _step(s, "research", project_id=project.project_id, file_inputs=pins)
+    s.responses.extend([_file_call(content="Requested quantity: 17 boxes."), _answer("The requested file is saved.")])
+    result = await s.executor(task, "research")
+    assert result == "The requested file is saved." and not s.tool_requests
+    saved = await s.store.agents.get(user_id=s.owner.user_id, task_id=task["id"])
+    assert saved["file_inputs"]["current"] and len(saved["outputs"]) == 1
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=s.app), base_url="http://test") as client:
+        downloaded = await client.get(saved["outputs"][0]["download_url"])
+    assert downloaded.status_code == 200 and downloaded.text == "Requested quantity: 17 boxes."
+
+
+@pytest.mark.parametrize("timing", ["before", "response", "checkpoint"])
+async def test_selected_file_changes_block_model_tool_and_checkpoint_delivery(file_state, timing):
+    s = file_state
+    project, path, pins = await _selected_file_context(s)
+    task = await _step(s, "research", project_id=project.project_id, file_inputs=pins)
+    s.responses.extend([_file_call(), _answer("Late output.")])
+    if timing == "before":
+        path.write_text("Changed source before generation.")
+    elif timing == "response":
+        async def changed():
+            path.write_text("Changed source during model generation.")
+        s.on_chat = changed
+    if timing != "checkpoint":
+        with pytest.raises((AgentTaskError, AgentDispatchStoppedError)):
+            await s.executor(task, "research")
+        assert len(_content_requests(s)) == (0 if timing == "before" else 1)
+    else:
+        s.responses[:] = [_answer("Completed work before a source change.")]
+        result = await s.executor(task, "research")
+        path.write_text("Changed source before checkpoint publication.")
+        with pytest.raises(AgentTaskError, match="Selected files"):
+            await s.store.agents.checkpoint(task_id=task["id"], lease_token=task["lease_token"],
+                fence=task["fence"], step_id="research", result=result)
+    saved = await s.store.agents.get(user_id=s.owner.user_id, task_id=task["id"])
+    assert not saved["file_inputs"]["current"] and not saved.get("outputs")
+    assert not saved["steps"][1]["result"] and not s.tool_requests
+
+
+async def test_file_input_api_uses_ids_only_and_returns_metadata_without_source_bodies(file_state):
+    s = file_state
+    project, path, _pins = await _selected_file_context(s)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=s.app), base_url="http://test") as client:
+        payload = {"objective": "Create the requested packing list.", "request_id": "selected-api",
+                   "project_id": project.project_id, "file_ids": ["chosen-input"]}
+        response = await client.post("/api/agents", json=payload)
+        assert response.status_code == 201, response.text
+        task = response.json()
+        assert task["file_inputs"] == {"current": True, "files": [{
+            "file_id": "chosen-input", "filename": "chosen-input.txt", "artifact": "text",
+            "chars": len(path.read_text()), "total_chars": len(path.read_text()), "truncated": False, "origin": "upload",
+        }]}
+        assert path.read_text() not in response.text
+        repeated = await client.post("/api/agents", json=payload)
+        assert repeated.status_code == 201 and repeated.json()["id"] == task["id"]
+        changed = await client.post("/api/agents", json={**payload, "file_ids": ["unselected-input"]})
+        assert changed.status_code == 409
+        summary = (await client.get("/api/agents")).json()["items"][0]
+        assert summary["file_inputs"] == task["file_inputs"] and path.read_text() not in json.dumps(summary)
+        assert response.headers["cache-control"] == "private, no-store"
+        path.write_text("Source has changed.")
+        assert not (await client.get(f"/api/agents/{task['id']}")).json()["file_inputs"]["current"]

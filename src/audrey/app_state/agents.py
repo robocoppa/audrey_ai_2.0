@@ -127,6 +127,7 @@ class AgentsRepository:
     def __init__(self, connection: sqlite3.Connection, lock: threading.RLock) -> None:
         self._conn, self._lock = connection, lock
         self._project_contexts = AgentProjectContexts(connection)
+        self._file_input_service = None
         self._clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.UTC)
 
     def _transaction(self, work: Callable[[], Any]) -> Any:
@@ -161,7 +162,31 @@ class AgentsRepository:
         record["input_requests"] = self._input_requests(record["task_id"])
         record["project_context"] = self._project_contexts.public(task_id=record["task_id"], user_id=record["user_id"])
         record["outputs"] = self._outputs(record["task_id"], record["user_id"])
+        record["file_inputs"] = self._file_inputs_public(record["task_id"], record["user_id"])
         return record
+
+    def _file_input_pins(self, task_id: str, user_id: str) -> list[tuple[str, dict]]:
+        return [(row["project_id"], json.loads(row["pin_json"])) for row in self._conn.execute(
+            "SELECT project_id,pin_json FROM app_agent_file_inputs WHERE task_id=? AND user_id=? ORDER BY position",
+            (task_id, user_id),
+        ).fetchall()]
+
+    def _file_inputs_public(self, task_id: str, user_id: str) -> dict | None:
+        from audrey.agent_file_inputs import public_file
+
+        pins = self._file_input_pins(task_id, user_id)
+        if not pins:
+            return None
+        service = self._file_input_service
+        return {"current": bool(service and all(service.is_current(user_id, project, pin) for project, pin in pins)),
+                "files": [public_file(pin) for _project, pin in pins]}
+
+    def _fence_file_inputs(self, record: dict) -> None:
+        from audrey.agent_file_inputs import FILES_CHANGED
+
+        selected = self._file_inputs_public(record["task_id"], record["user_id"])
+        if selected is not None and not selected["current"]:
+            raise AgentTaskContextError(FILES_CHANGED)
 
     def _outputs(self, task_id: str, user_id: str) -> list[dict]:
         return [{"file_id": row["file_id"], "filename": row["filename"],
@@ -185,6 +210,7 @@ class AgentsRepository:
             "input_requests": [dict(item) for item in record["input_requests"]],
             "project_context": record["project_context"],
             **({"outputs": [dict(item) for item in record["outputs"]]} if record["outputs"] else {}),
+            **({"file_inputs": record["file_inputs"]} if record["file_inputs"] is not None else {}),
         }
 
     def _internal(self, record: dict) -> dict:
@@ -258,6 +284,7 @@ class AgentsRepository:
             raise AgentTaskError("Agent active execution allowance exhausted.")
 
     def _context(self, record: dict) -> dict | None:
+        self._fence_file_inputs(record)
         try:
             return self._project_contexts.resolve(task_id=record["task_id"], user_id=record["user_id"])
         except AgentProjectChangedError:
@@ -338,10 +365,19 @@ class AgentsRepository:
         self, *, user_id: str, objective: str, request_id: str, limits: dict | None = None,
         project_id: str | None = None,
         knowledge_entry_id: str | None = None, knowledge_entry_revision: int | None = None,
+        file_inputs=None,
     ) -> dict:
         objective = _text(objective, maximum=8000, name="objective")
         request_id = _text(request_id, maximum=200, name="request identity")
         limits = _limits(limits)
+        from audrey.agent_file_inputs import FILES_CHANGED, CapturedFileInputs
+
+        if file_inputs is not None and (
+            not isinstance(file_inputs, CapturedFileInputs) or file_inputs.owner_id != user_id
+            or file_inputs.project_id != project_id or len(file_inputs.pins) > 3
+        ):
+            raise AgentTaskError("Invalid selected Project files.")
+        selected_pins = file_inputs.pins if file_inputs is not None else ()
         if project_id is not None:
             project_id = _text(project_id, maximum=300, name="Project identity")
         if (knowledge_entry_id is None) != (knowledge_entry_revision is None):
@@ -363,7 +399,10 @@ class AgentsRepository:
                 saved_project = record["project_context"]["project_id"] if record["project_context"] else None
                 saved_origin = record["project_context"].get("origin_entry") if record["project_context"] else None
                 requested_origin = {"id": knowledge_entry_id, "revision": knowledge_entry_revision} if knowledge_entry_id is not None else None
-                if record["objective"] != objective or saved_project != project_id or saved_origin != requested_origin:
+                saved_files = sorted(pin["file_id"] for _project, pin in self._file_input_pins(record["task_id"], user_id))
+                requested_files = sorted(pin["file_id"] for pin in selected_pins)
+                if (record["objective"] != objective or saved_project != project_id or saved_origin != requested_origin
+                        or saved_files != requested_files):
                     raise AgentTaskConflictError("Request identity already used for another objective, Project or knowledge entry.")
                 return self._public(record)
             self._queue_capacity(user_id, limits)
@@ -391,6 +430,13 @@ class AgentsRepository:
                     raise AgentTaskAccessError("Project context is unavailable.") from None
                 except AgentProjectChangedError as error:
                     raise AgentTaskConflictError(str(error)) from None
+            for position, pin in enumerate(selected_pins):
+                if self._file_input_service is None or not self._file_input_service.is_current(user_id, project_id, pin):
+                    raise AgentTaskContextError(FILES_CHANGED)
+                self._conn.execute(
+                    "INSERT INTO app_agent_file_inputs(task_id,user_id,project_id,position,file_id,pin_json) VALUES (?,?,?,?,?,?)",
+                    (task_id, user_id, project_id, position, pin["file_id"], json.dumps(pin, ensure_ascii=False, separators=(",", ":"))),
+                )
             return self._public(self._load(task_id, user_id))
 
         return await asyncio.to_thread(self._transaction, work)
@@ -431,6 +477,7 @@ class AgentsRepository:
                         "summary": True,
                         "input_requests": [],
                         "project_context": self._project_contexts.public(task_id=row["task_id"], user_id=user_id),
+                        **({"file_inputs": selected} if (selected := self._file_inputs_public(row["task_id"], user_id)) is not None else {}),
                         "steps": [{
                             "id": key, "label": label, "status": row[f"{key}_status"], "result": "",
                         } for key, label in _STEP_LABELS],
@@ -469,6 +516,8 @@ class AgentsRepository:
                     payload.get("input_requests") and self._input_requests(payload["id"]) != payload["input_requests"]
                 ) or (
                     self._project_contexts.public(task_id=payload["id"], user_id=user_id) != payload.get("project_context")
+                ) or (
+                    self._file_inputs_public(payload["id"], user_id) != payload.get("file_inputs")
                 ):
                     raise AgentTaskConflictError("Agent task changed. Refresh before trying again.")
 

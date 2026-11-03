@@ -32,6 +32,7 @@ import {
   readActivity,
   listProjects,
   listProjectKnowledge,
+  listProjectFiles,
   listKnowledgeSourceCandidates,
   removeProjectFile,
   resetAdminModelPolicy,
@@ -66,6 +67,22 @@ describe("Project agent requests", () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({ objective: "Research this action", request_id: "entry-key", project_id: "project-one", knowledge_entry_id: "note-one", knowledge_entry_revision: 7 });
     await createAgentTask("Another objective", "plain-key", "project-one");
     expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({ objective: "Another objective", request_id: "plain-key", project_id: "project-one" });
+  });
+
+  it("sends only explicit selected file IDs and binds cancellable Project file reads", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({})); vi.stubGlobal("fetch", fetchMock);
+    await createAgentTask("Draft a checklist", "file-key", "project-one", { id: "note-one", revision: 7 }, ["file-one", "file-two"]);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({ objective: "Draft a checklist", request_id: "file-key", project_id: "project-one", knowledge_entry_id: "note-one", knowledge_entry_revision: 7, file_ids: ["file-one", "file-two"] });
+    await createAgentTask("Another task", "empty-key", "project-one", undefined, []);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).not.toHaveProperty("file_ids");
+    const signal = new AbortController().signal; await listProjectFiles("project / one", signal);
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/projects/project%20%2F%20one/files", expect.objectContaining({ signal, cache: "no-store", credentials: "same-origin" }));
+  });
+
+  it.each([[undefined, ["file-one"]], ["project", ["one", "two", "three", "four"]], ["project", ["one", "one"]], ["project", ["../other"]]] as const)("rejects invalid file selection before dispatch %#", async (projectId, ids) => {
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    await expect(createAgentTask("Task", "request", projectId, undefined, [...ids])).rejects.toThrow("Choose up to three files");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
@@ -244,6 +261,23 @@ describe("saved agent task requests", () => {
   afterEach(() => { vi.unstubAllGlobals(); });
 
   const output = { file_id: "file_owned-1", filename: "task-checklist.md", download_url: "/api/files/file_owned-1/download", created_at: "2026-11-02T10:00:00Z" };
+  const input = { file_id: "file-input", filename: "instructions.txt", artifact: "text", chars: 100, total_chars: 200, truncated: true, origin: "upload" };
+
+  it("retains bounded input metadata and drops unexpected source bodies on every task read", async () => {
+    const value = { id: "agent-owned", file_inputs: { current: false, files: [{ ...input, body: "Not response metadata" }] } };
+    const fetchMock = vi.fn().mockImplementation(async (path: string) => jsonResponse(path === "/api/agents" ? { items: [value] } : value)); vi.stubGlobal("fetch", fetchMock);
+    const expected = { current: false, files: [input] };
+    expect((await listAgentTasks()).items[0].file_inputs).toEqual(expected);
+    expect((await getAgentTask(value.id)).file_inputs).toEqual(expected);
+    expect((await actOnAgentTask(value.id, "resume", 3)).file_inputs).toEqual(expected);
+    expect((await answerAgentInput(value.id, "question", 3, "Continue")).file_inputs).toEqual(expected);
+    expect((await getActivityAgentTask("notice")).file_inputs).toEqual(expected);
+  });
+
+  it.each([null, {}, { current: true, files: [] }, { current: "true", files: [input] }, { current: true, files: [input, input] }, { current: true, files: [{ ...input, chars: 201 }] }, { current: true, files: [{ ...input, artifact: "source" }] }, { current: true, files: [{ ...input, origin: "external" }] }, { current: true, files: [{ ...input, file_id: "../other" }] }])("rejects malformed file input metadata %#", async (file_inputs) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ file_inputs })));
+    await expect(getAgentTask("owned")).rejects.toThrow("The saved agent input files could not be read.");
+  });
 
   it("reads bounded canonical file metadata across task, list, action, answer and Activity responses", async () => {
     const value = { id: "agent-owned", outputs: [output] };

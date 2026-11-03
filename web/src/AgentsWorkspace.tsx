@@ -17,12 +17,14 @@ import {
   type AgentTaskStatus,
   type AgentInputRequest,
   type AudreyProject,
+  type AudreyProjectFile,
   type PublicWatch,
   type WatchRun,
 } from "./api";
 import "./AgentsWorkspace.css";
 import { AgentKnowledgeDialog } from "./AgentKnowledgeDialog";
 import { AgentOutputs } from "./AgentOutputs";
+import { AgentFileInputsView, AgentFilePicker } from "./AgentFileInputs";
 import { WatchesWorkspace } from "./WatchesWorkspace";
 import { ActivityWorkspace } from "./ActivityWorkspace";
 import { canAssignKnowledge, knowledgeTaskObjective, type KnowledgeAgentRequest } from "./knowledgeAgents";
@@ -32,7 +34,7 @@ const STATUS_LABELS: Record<AgentTaskStatus, string> = {
   cancelled: "Cancelled", failed: "Failed", waiting_for_input: "Waiting for input",
 };
 
-const PROJECT_CONTEXT_HELP = "Uses Project instructions and approved notes. Message and Agent report links are checked for freshness; source bodies and files are not included.";
+const PROJECT_CONTEXT_HELP = "Uses Project instructions and approved notes. Message and Agent report links are checked for freshness. Files are included only when you select them.";
 
 function stepLabel(step: AgentTask["steps"][number] | undefined): string | undefined {
   return step ? ({ plan: "Plan", research: "Work", review: "Review" }[step.id]) : undefined;
@@ -50,8 +52,9 @@ function isFinished(task: AgentTask) {
   return ["completed", "cancelled", "failed"].includes(task.status);
 }
 
-function projectContextBlocked(task: AgentTask) {
-  return Boolean(task.project_context && (!task.project_context.available || !task.project_context.current));
+function agentContextBlocked(task: AgentTask) {
+  return Boolean(task.project_context && (!task.project_context.available || !task.project_context.current))
+    || task.file_inputs?.current === false;
 }
 
 // Polls can finish after a user action. A saved newer revision always wins.
@@ -66,6 +69,7 @@ function mergeTasks(current: AgentTask[], incoming: AgentTask[], deleted: Readon
         ...task,
         result: saved.result,
         outputs: task.outputs ?? saved.outputs,
+        file_inputs: task.file_inputs ?? saved.file_inputs,
         input_requests: task.revision === saved.revision ? saved.input_requests : task.input_requests,
         steps: task.steps.map((step) => ({ ...step, result: saved.steps.find(({ id }) => id === step.id)?.result ?? "" })),
         summary: task.revision === saved.revision ? saved.summary : true,
@@ -255,6 +259,7 @@ function AgentTasksWorkspace({
   const [projectsError, setProjectsError] = useState("");
   const [projectRefresh, setProjectRefresh] = useState(0);
   const [composerProject, setComposerProject] = useState<AudreyProject | null>(null);
+  const [composerFiles, setComposerFiles] = useState<{ projectId: string; files: AudreyProjectFile[] } | null>(null);
   const [composerOrigin, setComposerOrigin] = useState<{ id: string; revision: number } | null>(null);
   const [pendingKnowledgeRequest, setPendingKnowledgeRequest] = useState<KnowledgeAgentRequest | null>(null);
   const [unavailableProjectId, setUnavailableProjectId] = useState<string | null>(null);
@@ -373,10 +378,12 @@ function AgentTasksWorkspace({
           setPendingKnowledgeRequest(knowledgeRequest);
           needsChoice = true;
         } else {
+          if (composerProject?.id !== request.project.id) setComposerFiles(null);
           setObjective(nextObjective); setComposerProject(request.project); setUnavailableProjectId(null);
           setComposerOrigin({ id: knowledgeRequest.entry.id, revision: knowledgeRequest.entry.revision }); setPendingKnowledgeRequest(null);
         }
       } else {
+        if (composerProject?.id !== request.project.id) setComposerFiles(null);
         setComposerProject(request.project); setUnavailableProjectId(null); setComposerOrigin(null); setPendingKnowledgeRequest(null);
       }
       if (compactNavigation) setSidebarOpen(true);
@@ -510,6 +517,7 @@ function AgentTasksWorkspace({
     if (busyRef.current || !text.trim() || objectiveTooLong(text) || pendingKnowledgeRequest || composerProject?.id === unavailableProjectId) return;
     const requestedProject = composerProject;
     const requestedOrigin = composerOrigin;
+    const requestedFiles = composerFiles?.projectId === requestedProject?.id ? composerFiles?.files ?? [] : [];
     busyRef.current = true;
     mutationGeneration.current += 1;
     setBusy(true);
@@ -532,7 +540,9 @@ function AgentTasksWorkspace({
         projectVerified = true;
       }
       const task = requestedProject
-        ? requestedOrigin
+        ? requestedFiles.length
+          ? await createAgentTask(text.trim(), createRequest.current.requestId, requestedProject.id, requestedOrigin ?? undefined, requestedFiles.map(({ id }) => id))
+          : requestedOrigin
           ? await createAgentTask(text.trim(), createRequest.current.requestId, requestedProject.id, requestedOrigin)
           : await createAgentTask(text.trim(), createRequest.current.requestId, requestedProject.id)
         : await createAgentTask(text.trim(), createRequest.current.requestId);
@@ -543,7 +553,7 @@ function AgentTasksWorkspace({
       setSelectedId(task.id);
       showWorkflow();
       setFilter("all");
-      if (key.startsWith("new:")) { setObjective(""); setComposerOrigin(null); }
+      if (key.startsWith("new:")) { setObjective(""); setComposerOrigin(null); setComposerFiles(null); }
     } catch (reason) {
       if (mounted.current) {
         if (requestedProject && !projectVerified && reason instanceof ApiError && reason.status === 404) {
@@ -559,11 +569,12 @@ function AgentTasksWorkspace({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void startTask(objective, `new:${JSON.stringify([objective.trim(), composerProject?.id ?? null, composerOrigin])}`);
+    void startTask(objective, `new:${JSON.stringify([objective.trim(), composerProject?.id ?? null, composerOrigin,
+      composerFiles?.projectId === composerProject?.id ? composerFiles?.files.map(({ id }) => id) : []])}`);
   }
 
   async function act(task: AgentTask, action: "pause" | "resume" | "cancel" | "rerun") {
-    if (busyRef.current || (action === "resume" || action === "rerun") && projectContextBlocked(task)) return;
+    if (busyRef.current || (action === "resume" || action === "rerun") && agentContextBlocked(task)) return;
     busyRef.current = true;
     mutationGeneration.current += 1;
     setBusy(true);
@@ -633,7 +644,7 @@ function AgentTasksWorkspace({
   }
 
   async function answerInput(task: AgentTask, request: AgentInputRequest, draft: AnswerDraft) {
-    if (busyRef.current || projectContextBlocked(task) || task.status !== "waiting_for_input" || draft.revision !== task.revision
+    if (busyRef.current || agentContextBlocked(task) || task.status !== "waiting_for_input" || draft.revision !== task.revision
       || request.answer !== null || task.input_requests?.find((item) => item.answer === null)?.id !== request.id) return;
     busyRef.current = true; mutationGeneration.current += 1;
     setBusy(true); setError(""); setNotice("");
@@ -713,7 +724,7 @@ function AgentTasksWorkspace({
               <label htmlFor="agent-project">Project <span className="agents-optional">Optional</span></label>
               <select id="agent-project" aria-label="Project" value={composerProject?.id ?? ""} disabled={busy} onChange={(event) => {
                 setComposerProject(composerProjects.find((project) => project.id === event.target.value) ?? null); setUnavailableProjectId(null);
-                setComposerOrigin(null); setPendingKnowledgeRequest(null);
+                setComposerOrigin(null); setPendingKnowledgeRequest(null); setComposerFiles(null);
               }}>
                 <option value="">None</option>
                 {composerProjects.map((project) => <option key={project.id} value={project.id}>{project.name}{project.id === unavailableProjectId ? " (unavailable)" : ""}</option>)}
@@ -724,10 +735,15 @@ function AgentTasksWorkspace({
               {projectsError ? <div className="agents-project-error"><p role="alert">{projectsError}</p><button className="agents-secondary" type="button" disabled={projectsLoading} onClick={() => setProjectRefresh((value) => value + 1)}>Retry Projects</button></div> : null}
               {projectsCursor ? <button className="agents-secondary" type="button" disabled={projectsLoading} onClick={() => void loadMoreProjects()}>Load more Projects</button> : null}
               {composerProject?.id === unavailableProjectId ? <p className="agents-project-unavailable">The selected Project is unavailable. Choose another Project or None.</p> : null}
+              {composerProject && composerProject.id !== unavailableProjectId ? <AgentFilePicker key={composerProject.id}
+                projectId={composerProject.id} selected={composerFiles?.projectId === composerProject.id ? composerFiles.files : []}
+                onChange={(files) => setComposerFiles({ projectId: composerProject.id, files })}
+                visible={visible && (!compactNavigation || sidebarOpen)} disabled={busy} /> : null}
               {pendingKnowledgeRequest ? <div className="agents-knowledge-confirm" role="group" aria-label="Use Project Knowledge entry">
                 <p>Your task draft is kept. Use this Project {pendingKnowledgeRequest.entry.kind} instead?</p>
                 <blockquote>{pendingKnowledgeRequest.entry.text}</blockquote>
                 <div><button className="agents-secondary" type="button" disabled={busy} onClick={() => {
+                  if (composerProject?.id !== pendingKnowledgeRequest.project.id) setComposerFiles(null);
                   setObjective(knowledgeTaskObjective(pendingKnowledgeRequest.entry)); setComposerProject(pendingKnowledgeRequest.project);
                   setComposerOrigin({ id: pendingKnowledgeRequest.entry.id, revision: pendingKnowledgeRequest.entry.revision });
                   setUnavailableProjectId(null); setPendingKnowledgeRequest(null); setError(""); objectiveRef.current?.focus();
@@ -751,7 +767,7 @@ function AgentTasksWorkspace({
               <p id="agent-objective-help">All agent steps use local models with no cloud fallback. You can leave this page and return to the saved progress and result.</p>
               {objectiveTooLong(objective) ? <p role="alert" className="agents-error">Shorten the task objective to 6,000 characters and 8,000 UTF-8 bytes before starting. {composerOrigin ? "Your full entry remains saved in Project Knowledge." : "Your draft is kept."}</p> : null}
               <button className="agents-primary" type="submit" disabled={busy || !objective.trim() || objectiveTooLong(objective) || Boolean(pendingKnowledgeRequest) || composerProject?.id === unavailableProjectId}>{busy ? "Saving…" : "Start agent"}</button>
-              {objective || composerOrigin ? <button className="agents-secondary" type="button" disabled={busy} onClick={() => { setObjective(""); setComposerOrigin(null); setPendingKnowledgeRequest(null); createRequest.current = null; objectiveRef.current?.focus(); }}>Clear draft</button> : null}
+              {objective || composerOrigin || composerFiles?.files.length ? <button className="agents-secondary" type="button" disabled={busy} onClick={() => { setObjective(""); setComposerOrigin(null); setComposerFiles(null); setPendingKnowledgeRequest(null); createRequest.current = null; objectiveRef.current?.focus(); }}>Clear draft</button> : null}
             </form>
 
             {selected && !isFinished(selected) ? (
@@ -819,9 +835,10 @@ function AgentTasksWorkspace({
                   <p>Last activity <time dateTime={selected.updated_at}>{timestamp(selected.updated_at)}</time></p>
                 </header>
                 {selected.project_context ? <AgentProjectContextView task={selected} onOpenProject={onOpenProject} /> : null}
+                <AgentFileInputsView inputs={selected.file_inputs} />
                 {selected.status === "paused" ? <p className="agents-notice">Completed steps are saved. Resume to continue from the next unfinished step.</p> : null}
                 {selected.error ? <p className="agents-error" role="alert">{selected.error}</p> : null}
-                {selected.status === "waiting_for_input" ? selectedInput && selectedInputDraft ? <AgentInputPanel request={selectedInput} revision={selected.revision} draft={selectedInputDraft} busy={busy} contextBlocked={projectContextBlocked(selected)}
+                {selected.status === "waiting_for_input" ? selectedInput && selectedInputDraft ? <AgentInputPanel request={selectedInput} revision={selected.revision} draft={selectedInputDraft} busy={busy} contextBlocked={agentContextBlocked(selected)}
                   onChange={(text) => setAnswerDrafts((current) => ({ ...current, [selectedInputKey]: { text, revision: current[selectedInputKey]?.revision ?? selected.revision } }))}
                   onUseLatest={() => setAnswerDrafts((current) => ({ ...current, [selectedInputKey]: { text: current[selectedInputKey]?.text ?? "", revision: selected.revision } }))}
                   onAnswer={() => void answerInput(selected, selectedInput, selectedInputDraft)} />
@@ -928,10 +945,10 @@ function AgentTaskControls({ task, busy, onAction, onDelete }: {
   return (
     <div className="agents-task-actions" role="group" aria-label="Agent controls">
       {isMoving(task) ? <button type="button" className="agents-secondary" disabled={busy} onClick={() => onAction("pause")}>Pause</button> : null}
-      {task.status === "paused" ? <button type="button" className="agents-primary" disabled={busy || projectContextBlocked(task)} onClick={() => onAction("resume")}>Resume</button> : null}
+      {task.status === "paused" ? <button type="button" className="agents-primary" disabled={busy || agentContextBlocked(task)} onClick={() => onAction("resume")}>Resume</button> : null}
       {!isFinished(task) ? <button type="button" className="agents-secondary" disabled={busy} onClick={() => onAction("cancel")}>Cancel</button> : null}
       {isFinished(task) ? <>
-        <button type="button" className="agents-primary" disabled={busy || projectContextBlocked(task)} onClick={() => { setConfirmingDelete(false); onAction("rerun"); }}>Run again</button>
+        <button type="button" className="agents-primary" disabled={busy || agentContextBlocked(task)} onClick={() => { setConfirmingDelete(false); onAction("rerun"); }}>Run again</button>
         <button
           type="button"
           className={`agents-secondary danger-button${confirmingDelete ? " confirming-delete" : ""}`}

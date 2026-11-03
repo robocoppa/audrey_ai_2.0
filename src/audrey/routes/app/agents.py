@@ -6,7 +6,7 @@ import asyncio
 import logging
 import sqlite3
 from collections.abc import Coroutine
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -61,6 +61,21 @@ class AgentOutputResponse(BaseModel):
     created_at: str
 
 
+class AgentFileInputResponse(BaseModel):
+    file_id: str
+    filename: str
+    artifact: Literal["text", "transcript"]
+    chars: int = Field(ge=1)
+    total_chars: int = Field(ge=1)
+    truncated: bool
+    origin: Literal["upload", "generated"]
+
+
+class AgentFileInputsResponse(BaseModel):
+    current: bool
+    files: list[AgentFileInputResponse] = Field(min_length=1, max_length=3)
+
+
 class AgentTaskResponse(BaseModel):
     id: str
     objective: str
@@ -78,6 +93,7 @@ class AgentTaskResponse(BaseModel):
     outputs: list[AgentOutputResponse] = Field(
         default_factory=list, max_length=8, exclude_if=lambda value: not value,
     )
+    file_inputs: AgentFileInputsResponse | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class AgentTaskSummaryResponse(AgentTaskResponse):
@@ -96,6 +112,9 @@ class AgentCreateRequest(BaseModel):
     project_id: str | None = Field(default=None, min_length=1, max_length=300)
     knowledge_entry_id: str | None = Field(default=None, min_length=1, max_length=300)
     knowledge_entry_revision: int | None = Field(default=None, ge=1, le=2**63 - 1, strict=True)
+    file_ids: list[Annotated[str, Field(min_length=1, max_length=200, strict=True)]] = Field(
+        default_factory=list, max_length=3,
+    )
 
     @model_validator(mode="after")
     def validate_knowledge_origin(self):
@@ -103,6 +122,10 @@ class AgentCreateRequest(BaseModel):
             raise ValueError("Project knowledge identity and revision must be supplied together.")
         if self.knowledge_entry_id is not None and self.project_id is None:
             raise ValueError("Project knowledge tasks require a Project.")
+        if self.file_ids and self.project_id is None:
+            raise ValueError("Selected files require a Project.")
+        if len(set(self.file_ids)) != len(self.file_ids):
+            raise ValueError("Choose each file only once.")
         return self
 
 
@@ -139,6 +162,9 @@ def _repository(request: Request):
     store = getattr(request.app.state, "application_store", None)
     if store is None or not hasattr(store, "agents"):
         raise HTTPException(status_code=503, detail="Saved agents are unavailable.")
+    from audrey.agent_file_inputs import get_agent_file_inputs
+
+    get_agent_file_inputs(request.app)
     return store.agents
 
 
@@ -177,10 +203,16 @@ async def create_agent(body: AgentCreateRequest, request: Request, response: Res
     try:
         await research_authority(request.app, principal.user_id)
         settings = agent_settings(request.app)
+        from audrey.agent_file_inputs import get_agent_file_inputs
+
+        inputs = get_agent_file_inputs(request.app)
+        if body.file_ids and inputs is None:
+            raise HTTPException(status_code=503, detail="Agent file inputs are unavailable.")
+        pins = await inputs.capture(principal, body.project_id, body.file_ids) if body.file_ids else None
         task = await repository.create(user_id=principal.user_id, objective=body.objective,
                                        request_id=body.request_id, limits=settings.task_limits(), project_id=body.project_id,
                                        knowledge_entry_id=body.knowledge_entry_id,
-                                       knowledge_entry_revision=body.knowledge_entry_revision)
+                                       knowledge_entry_revision=body.knowledge_entry_revision, file_inputs=pins)
         repository.fence_response(user_id=principal.user_id, tasks=[task])
     except AgentDispatchStoppedError as error:
         raise HTTPException(status_code=503, detail=str(error)) from None

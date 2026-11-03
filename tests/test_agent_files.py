@@ -337,7 +337,7 @@ async def test_schema33_upgrade_preserves_task_and_adds_owner_fenced_metadata_on
     state.store.close()
     state.store = ApplicationStore(state.tmp_path / "app.sqlite")
     state.app.state.application_store = state.store
-    assert state.store.schema_version == 34
+    assert state.store.schema_version == 35
     restored = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
     assert restored["steps"] == task["steps"]
     with state.store._lock, pytest.raises(sqlite3.IntegrityError):

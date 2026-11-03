@@ -11,7 +11,7 @@ import json
 import sqlite3
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
@@ -268,7 +268,9 @@ async def create_agent_file(app, principal, task, arguments, *, scope_guard=None
             def publish():
                 # Global lock order is application -> uploads. There is no
                 # await between the final lease fence, publication and receipt.
-                with store._lock, db._lock, write_transaction(store._conn), db._transaction_locked():
+                inputs = store.agents._file_input_service
+                with (store._lock, db._lock, write_transaction(store._conn), db._transaction_locked(),
+                      inputs.catalog_lock_already_held() if inputs else nullcontext()):
                     record = _authority(app, principal, task, scope_guard)
                     receipt = store._conn.execute(
                         "SELECT * FROM app_agent_outputs WHERE file_id=? AND task_id=? AND user_id=?",

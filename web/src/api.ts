@@ -579,7 +579,21 @@ export interface AgentTask {
   attempts: number;
   input_requests?: AgentInputRequest[];
   project_context?: AgentProjectContext | null;
+  file_inputs?: AgentFileInputs;
   outputs?: AgentOutput[];
+}
+
+export interface AgentFileInputs {
+  current: boolean;
+  files: Array<{
+    file_id: string;
+    filename: string;
+    artifact: "text" | "transcript";
+    chars: number;
+    total_chars: number;
+    truncated: boolean;
+    origin: "upload" | "generated";
+  }>;
 }
 
 export interface AgentOutput {
@@ -599,7 +613,23 @@ export function isAgentOutput(value: unknown): value is AgentOutput {
     && typeof output.created_at === "string" && Number.isFinite(Date.parse(output.created_at));
 }
 
-function readAgentOutputs(task: AgentTask): AgentTask {
+function readAgentTaskFiles(task: AgentTask): AgentTask {
+  if (task?.file_inputs !== undefined) {
+    const inputs = task.file_inputs;
+    if (!inputs || typeof inputs !== "object" || typeof inputs.current !== "boolean"
+      || !Array.isArray(inputs.files) || inputs.files.length < 1 || inputs.files.length > 3
+      || inputs.files.some((file) => !file || typeof file !== "object"
+        || typeof file.file_id !== "string" || !/^[a-zA-Z0-9_-]+$/u.test(file.file_id)
+        || typeof file.filename !== "string" || !file.filename.trim() || Array.from(file.filename).length > 1000 || /[\p{Cc}\\/]/u.test(file.filename)
+        || !["text", "transcript"].includes(file.artifact) || !["upload", "generated"].includes(file.origin)
+        || !Number.isSafeInteger(file.chars) || !Number.isSafeInteger(file.total_chars)
+        || file.chars < 1 || file.total_chars < file.chars || typeof file.truncated !== "boolean")
+      || new Set(inputs.files.map(({ file_id }) => file_id)).size !== inputs.files.length) {
+      throw new ApiError(502, "The saved agent input files could not be read. Refresh this agent.");
+    }
+    task = { ...task, file_inputs: { current: inputs.current,
+      files: inputs.files.map(({ file_id, filename, artifact, chars, total_chars, truncated, origin }) => ({ file_id, filename, artifact, chars, total_chars, truncated, origin })) } };
+  }
   if (task?.outputs === undefined) return task;
   if (!Array.isArray(task.outputs) || task.outputs.length > 8 || task.outputs.some((output) => !isAgentOutput(output))
     || new Set(task.outputs.map(({ file_id }) => file_id)).size !== task.outputs.length) {
@@ -611,20 +641,25 @@ function readAgentOutputs(task: AgentTask): AgentTask {
 export function listAgentTasks(signal?: AbortSignal, projectId?: string): Promise<{ items: AgentTask[] }> {
   const query = projectId ? `?${new URLSearchParams({ project_id: projectId })}` : "";
   return apiJson<{ items: AgentTask[] }>(`/api/agents${query}`, { signal, cache: "no-store" })
-    .then((result) => ({ ...result, items: result.items.map(readAgentOutputs) }));
+    .then((result) => ({ ...result, items: result.items.map(readAgentTaskFiles) }));
 }
 
 export function getAgentTask(taskId: string, signal?: AbortSignal): Promise<AgentTask> {
-  return apiJson<AgentTask>(`/api/agents/${encodeURIComponent(taskId)}`, { signal, cache: "no-store" }).then(readAgentOutputs);
+  return apiJson<AgentTask>(`/api/agents/${encodeURIComponent(taskId)}`, { signal, cache: "no-store" }).then(readAgentTaskFiles);
 }
 
-export function createAgentTask(objective: string, requestId: string, projectId?: string | null, origin?: { id: string; revision: number }): Promise<AgentTask> {
+export function createAgentTask(objective: string, requestId: string, projectId?: string | null, origin?: { id: string; revision: number }, fileIds?: string[]): Promise<AgentTask> {
+  if (fileIds?.length && (!projectId || fileIds.length > 3 || new Set(fileIds).size !== fileIds.length
+    || fileIds.some((id) => !/^[a-zA-Z0-9_-]+$/u.test(id)))) {
+    return Promise.reject(new ApiError(422, "Choose up to three files from the selected Project."));
+  }
   return apiJson<AgentTask>("/api/agents", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ objective, request_id: requestId, ...(projectId !== undefined ? { project_id: projectId } : {}),
-      ...(origin ? { knowledge_entry_id: origin.id, knowledge_entry_revision: origin.revision } : {}) }),
-  }).then(readAgentOutputs);
+      ...(origin ? { knowledge_entry_id: origin.id, knowledge_entry_revision: origin.revision } : {}),
+      ...(fileIds?.length ? { file_ids: fileIds } : {}) }),
+  }).then(readAgentTaskFiles);
 }
 
 export function answerAgentInput(taskId: string, requestId: string, expectedRevision: number, answer: string): Promise<AgentTask> {
@@ -634,7 +669,7 @@ export function answerAgentInput(taskId: string, requestId: string, expectedRevi
   }
   return apiJson<AgentTask>(`/api/agents/${encodeURIComponent(taskId)}/inputs/${encodeURIComponent(requestId)}/answer`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision: expectedRevision, answer: text }),
-  }).then(readAgentOutputs);
+  }).then(readAgentTaskFiles);
 }
 
 export function actOnAgentTask(
@@ -646,7 +681,7 @@ export function actOnAgentTask(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, expected_revision: expectedRevision }),
-  }).then(readAgentOutputs);
+  }).then(readAgentTaskFiles);
 }
 
 export async function deleteAgentTask(taskId: string, expectedRevision: number): Promise<void> {
@@ -750,7 +785,7 @@ export function readActivity(origin: ActivityNotice["origin"], id: string, signa
 }
 
 export function getActivityAgentTask(id: string, signal?: AbortSignal): Promise<AgentTask> {
-  return apiJson<AgentTask>(`/api/activity/agent/${encodeURIComponent(id)}/task`, { signal, cache: "no-store" }).then(readAgentOutputs);
+  return apiJson<AgentTask>(`/api/activity/agent/${encodeURIComponent(id)}/task`, { signal, cache: "no-store" }).then(readAgentTaskFiles);
 }
 
 export function listWatches(signal?: AbortSignal, projectId?: string): Promise<{ items: PublicWatch[] }> {
@@ -1214,9 +1249,10 @@ export function createProjectConversation(
   );
 }
 
-export function listProjectFiles(projectId: string): Promise<AudreyProjectFileList> {
+export function listProjectFiles(projectId: string, signal?: AbortSignal): Promise<AudreyProjectFileList> {
   return apiJson<AudreyProjectFileList>(
     `/api/projects/${encodeURIComponent(projectId)}/files`,
+    { signal, cache: "no-store" },
   );
 }
 
