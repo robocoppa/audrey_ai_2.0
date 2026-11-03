@@ -26,6 +26,7 @@ import {
   getProjectKnowledge,
   getProjectKnowledgeHistory,
   listAgentTasks,
+  listAgentEvents,
   listActivity,
   getActivityUnreadCount,
   getActivityAgentTask,
@@ -47,6 +48,43 @@ import {
   type SearchResult,
   type KnowledgeEntry,
 } from "./api";
+
+describe("Agent activity metadata", () => {
+  const event = { seq: 7, attempt: 1, stage: "research", kind: "model", state: "completed", tool: null,
+    created_at: "2026-11-03T14:00:00Z", finished_at: "2026-11-03T14:00:01Z", duration_ms: 1000, input_tokens: 20, output_tokens: 10 };
+  afterEach(() => { vi.unstubAllGlobals(); });
+  it("reads an owned cancellable page, preserving only allowlisted metadata", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ items: [{ ...event, prompt: "must not enter state", result: "raw result", url: "https://private.example" }], has_more: true, truncated: false, secret: "drop" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const signal = new AbortController().signal;
+    expect(await listAgentEvents("agent / one", signal, 8)).toEqual({ items: [event], has_more: true, truncated: false });
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith("/api/agents/agent%20%2F%20one/events?limit=50&before=8", expect.objectContaining({ credentials: "same-origin", signal, cache: "no-store" }));
+  });
+  it.each([
+    { seq: 0 }, { seq: 1.2 }, { attempt: 0 }, { stage: "prompt body" }, { kind: "reasoning" }, { state: "success" },
+    { tool: "web_search" }, { kind: "tool", tool: null }, { kind: "tool", tool: "execute_code" },
+    { created_at: "invalid" }, { finished_at: null }, { state: "started" }, { duration_ms: -1 }, { input_tokens: "5" }, { output_tokens: 2.3 },
+  ])("rejects malformed operation metadata %#", async (patch) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ items: [{ ...event, ...patch }], has_more: false, truncated: false })));
+    await expect(listAgentEvents("owned")).rejects.toThrow("This agent’s activity could not be read.");
+  });
+  it.each([
+    { items: [event, event], has_more: false, truncated: false },
+    { items: [{ ...event, seq: 6 }, event], has_more: false, truncated: false },
+    { items: [], has_more: "false", truncated: false },
+    { items: [], has_more: false },
+  ])("rejects broken paging contracts %#", async (value) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(value)));
+    await expect(listAgentEvents("owned")).rejects.toThrow("This agent’s activity could not be read.");
+  });
+  it("rejects cursor violations and does not dispatch invalid cursor requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ items: [event], has_more: false, truncated: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(listAgentEvents("owned", undefined, 7)).rejects.toThrow("This agent’s activity could not be read.");
+    await expect(listAgentEvents("owned", undefined, -1)).rejects.toThrow("Choose a valid activity page.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("Project agent requests", () => {
   afterEach(() => { vi.unstubAllGlobals(); });

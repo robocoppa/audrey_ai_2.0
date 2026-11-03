@@ -40,6 +40,12 @@ _LIMIT_BOUNDS = {
     "max_queued_global": (1, 1000),
 }
 _STEP_LABELS = (("plan", "Plan"), ("research", "Work"), ("review", "Review"))
+_EVENT_LIMIT = 200
+_EVENT_FIELDS = (
+    "seq", "attempt", "stage", "kind", "state", "tool", "created_at", "finished_at",
+    "duration_ms", "input_tokens", "output_tokens",
+)
+_EVENT_TOOLS = frozenset({"web_search", "web_fetch", "create_file"})
 _PUBLIC_FIELDS = (
     "objective", "title", "status", "revision", "created_at", "updated_at", "result", "error", "attempts",
 )
@@ -261,8 +267,14 @@ class AgentsRepository:
         record["active_seconds"] += max(0.0, (end - start).total_seconds())
         record["accounted_at"] = _stamp(end)
 
-    @staticmethod
-    def _clear_lease(record: dict) -> None:
+    def _interrupt_events(self, record: dict) -> None:
+        self._conn.execute(
+            "UPDATE app_agent_events SET state='interrupted',finished_at=? "
+            "WHERE task_id=? AND state='started'", (_stamp(self._clock()), record["task_id"]),
+        )
+
+    def _clear_lease(self, record: dict) -> None:
+        self._interrupt_events(record)
         record.update(lease_token="", lease_expires_at=None, accounted_at=None)
         for step in record["steps"]:
             if step["status"] == "running":
@@ -306,6 +318,142 @@ class AgentsRepository:
                 self._budget(record)
                 return self._context(record)
         return await asyncio.to_thread(work)
+
+    @staticmethod
+    def _event_identity(stage: str, kind: str, tool: str | None) -> None:
+        if (not isinstance(stage, str) or stage not in {"plan", "research", "review", "title"}
+                or not isinstance(kind, str) or kind not in {"stage", "model", "tool"}
+                or (stage == "title" and kind != "model")
+                or (kind == "tool" and (stage != "research" or not isinstance(tool, str) or tool not in _EVENT_TOOLS))
+                or (kind != "tool" and tool is not None)):
+            raise AgentTaskError("Invalid agent activity.")
+
+    def _start_event(self, record: dict, *, stage: str, kind: str, tool: str | None = None) -> int:
+        """Insert content-free activity inside an existing fenced transaction."""
+        seq = self._conn.execute(
+            "SELECT COALESCE(MAX(seq),0)+1 FROM app_agent_events WHERE task_id=?", (record["task_id"],),
+        ).fetchone()[0]
+        self._conn.execute(
+            "INSERT INTO app_agent_events(task_id,user_id,seq,attempt,fence,stage,kind,state,tool,created_at) "
+            "VALUES (?,?,?,?,?,?,?,'started',?,?)",
+            (record["task_id"], record["user_id"], seq, record["attempts"], record["fence"],
+             stage, kind, tool, _stamp(self._clock())),
+        )
+        self._conn.execute(
+            "DELETE FROM app_agent_events WHERE task_id=? AND seq<=?",
+            (record["task_id"], seq - _EVENT_LIMIT),
+        )
+        return seq
+
+    async def start_event(
+        self, *, task_id: str, lease_token: str, fence: int,
+        stage: str, kind: str, tool: str | None = None,
+    ) -> int:
+        """Observe a dispatch without changing task revisions, charges or notices."""
+        self._event_identity(stage, kind, tool)
+
+        def work() -> int:
+            record = self._lease(task_id, lease_token, fence)
+            self._context(record)
+            self._account(record)
+            self._budget(record)
+            if stage != "title" and self._internal(record)["current_step"] != stage:
+                raise AgentTaskConflictError("Agent step changed.")
+            return self._start_event(record, stage=stage, kind=kind, tool=tool)
+
+        return await asyncio.to_thread(self._transaction, work)
+
+    async def finish_event(
+        self, *, task_id: str, lease_token: str, fence: int, seq: int,
+        state: str = "completed", duration_ms: int | None = None,
+        input_tokens: int | None = None, output_tokens: int | None = None,
+    ) -> None:
+        _integer(seq, 1, 2**63 - 1)
+        if not isinstance(state, str) or state not in {"completed", "failed"}:
+            raise AgentTaskError("Invalid agent activity outcome.")
+        for value in (duration_ms, input_tokens, output_tokens):
+            if value is not None:
+                _integer(value, 0, 2**63 - 1)
+
+        def work() -> None:
+            record = self._lease(task_id, lease_token, fence)
+            self._context(record)
+            self._account(record)
+            self._budget(record)
+            row = self._conn.execute(
+                "SELECT * FROM app_agent_events WHERE task_id=? AND seq=? AND fence=?",
+                (task_id, seq, fence),
+            ).fetchone()
+            if row is None:
+                oldest = self._conn.execute(
+                    "SELECT MIN(seq) FROM app_agent_events WHERE task_id=?", (task_id,),
+                ).fetchone()[0]
+                # Activity retention must never make otherwise authorized
+                # useful work fail. A pruned identity has no row left to alter.
+                if oldest is not None and seq < oldest:
+                    return
+                raise AgentTaskConflictError("Agent activity changed or expired.")
+            if row["kind"] != "model" and (input_tokens is not None or output_tokens is not None):
+                raise AgentTaskError("Invalid agent activity counts.")
+            if row["state"] == "started" and row["stage"] != "title" and (
+                row["stage"] != self._internal(record)["current_step"]
+            ):
+                raise AgentTaskConflictError("Agent step changed.")
+            if row["state"] != "started":
+                if all(row[key] == value for key, value in (
+                    ("state", state), ("duration_ms", duration_ms), ("input_tokens", input_tokens),
+                    ("output_tokens", output_tokens),
+                )):
+                    return
+                raise AgentTaskConflictError("Agent activity already finished.")
+            self._conn.execute(
+                "UPDATE app_agent_events SET state=?,finished_at=?,duration_ms=?,input_tokens=?,output_tokens=? "
+                "WHERE task_id=? AND seq=? AND fence=?",
+                (state, _stamp(self._clock()), duration_ms, input_tokens, output_tokens, task_id, seq, fence),
+            )
+
+        return await asyncio.to_thread(self._transaction, work)
+
+    async def events(
+        self, *, user_id: str, task_id: str, before: int | None = None, limit: int = 50,
+    ) -> dict:
+        """Return newest-first bounded history, independently of task revisions."""
+        _integer(limit, 1, 100)
+        if before is not None:
+            _integer(before, 1, 2**63 - 1)
+
+        def work() -> dict:
+            with self._lock:
+                self._load(task_id, user_id)
+                rows = self._conn.execute(
+                    "SELECT * FROM app_agent_events WHERE task_id=? AND user_id=? "
+                    "AND (? IS NULL OR seq<?) ORDER BY seq DESC LIMIT ?",
+                    (task_id, user_id, before, before, limit + 1),
+                ).fetchall()
+                oldest = self._conn.execute(
+                    "SELECT MIN(seq) FROM app_agent_events WHERE task_id=?", (task_id,),
+                ).fetchone()[0]
+                return {"items": [{key: row[key] for key in _EVENT_FIELDS} for row in rows[:limit]],
+                        "has_more": len(rows) > limit, "truncated": oldest is not None and oldest > 1}
+
+        return await asyncio.to_thread(work)
+
+    def fence_events_response(self, *, user_id: str, task_id: str, page: dict) -> None:
+        """Recheck owner/deletion and mutable or pruned rows after awaited reads."""
+        with self._lock:
+            self._load(task_id, user_id)
+            for item in page["items"]:
+                row = self._conn.execute(
+                    "SELECT * FROM app_agent_events WHERE task_id=? AND user_id=? AND seq=?",
+                    (task_id, user_id, item["seq"]),
+                ).fetchone()
+                if row is None or {key: row[key] for key in _EVENT_FIELDS} != item:
+                    raise AgentTaskConflictError("Agent activity changed. Refresh before trying again.")
+            oldest = self._conn.execute(
+                "SELECT MIN(seq) FROM app_agent_events WHERE task_id=?", (task_id,),
+            ).fetchone()[0]
+            if page["truncated"] != (oldest is not None and oldest > 1):
+                raise AgentTaskConflictError("Agent activity changed. Refresh before trying again.")
 
     async def reserve_output(
         self, *, task_id: str, lease_token: str, fence: int, file_id: str,
@@ -573,6 +721,9 @@ class AgentsRepository:
                     self._save(record)
                     insert_agent_notice(self._conn, record, created_at=record["updated_at"])
                     continue
+                # An expired lease has an unknown dispatch outcome. Preserve
+                # its history without treating an unobserved response as success.
+                self._interrupt_events(record)
                 record.update(
                     status="running", attempts=record["attempts"] + 1, fence=record["fence"] + 1,
                     lease_token=secrets.token_urlsafe(32),
@@ -639,6 +790,11 @@ class AgentsRepository:
                 "(operation_id,task_id,fence,step_id,status,created_at) VALUES (?,?,?,?,'reserved',?)",
                 (operation_id, task_id, fence, step_id, _stamp(self._clock())),
             )
+            if self._conn.execute(
+                "SELECT COUNT(*) FROM app_agent_operations WHERE task_id=? AND fence=? AND step_id=?",
+                (task_id, fence, step_id),
+            ).fetchone()[0] == 1:
+                self._start_event(record, stage=step_id, kind="stage")
             record["operations"] += 1
             self._save(record)
             return operation_id
@@ -673,6 +829,11 @@ class AgentsRepository:
             self._conn.execute(
                 "UPDATE app_agent_operations SET status='committed',committed_at=? "
                 "WHERE task_id=? AND fence=? AND step_id=?",
+                (_stamp(self._clock()), task_id, fence, step_id),
+            )
+            self._conn.execute(
+                "UPDATE app_agent_events SET state='completed',finished_at=? "
+                "WHERE task_id=? AND fence=? AND stage=? AND kind='stage' AND state='started'",
                 (_stamp(self._clock()), task_id, fence, step_id),
             )
             self._save(record)

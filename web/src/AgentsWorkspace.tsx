@@ -24,6 +24,7 @@ import {
 import "./AgentsWorkspace.css";
 import { AgentKnowledgeDialog } from "./AgentKnowledgeDialog";
 import { AgentOutputs } from "./AgentOutputs";
+import { AgentRecentActivity } from "./AgentRecentActivity";
 import { AgentFileInputsView, AgentFilePicker } from "./AgentFileInputs";
 import { WatchesWorkspace } from "./WatchesWorkspace";
 import { ActivityWorkspace } from "./ActivityWorkspace";
@@ -859,6 +860,7 @@ function AgentTasksWorkspace({
                     ))}
                   </ol>
                 </section>
+                <AgentRecentActivity key={selected.id} task={selected} visible={visible && !sidebarOpen} timezone={timezone} />
                 <AgentOutputs key={`${selected.id}:${visible}`} outputs={selected.outputs} />
                 <section className="agents-result" aria-labelledby="agent-result-title">
                   <h3 id="agent-result-title">Result</h3>

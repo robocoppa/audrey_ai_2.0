@@ -594,9 +594,59 @@ Affected backend tests, frontend tests/typecheck/lint/build and mocked Chromium
 checks at 1,366, 390 and 320 pixels pass. The
 [installed file-input smoke](../reference/live-smoke-testing.md#installed-agent-file-input-smoke)
 exercises real canonical storage, local extraction, task execution and generated
-downloads with mocked verified-Qwen replies. Tower execution and actual model
-quality remain pending. Rebuild backend/UI; schema 35 applies automatically.
+downloads with mocked verified-Qwen replies. The owner reports all seven installed
+Tower checks passed, exit 0. Live worker/browser acceptance and actual model quality
+remain pending. Rebuild backend/UI; schema 35 applies automatically.
 No settings, credentials or upload are required for the isolated smoke.
+
+### Observed Agent execution history
+
+Each task now has Recent activity below Plan and progress. It shows actual local
+model requests, allowed tool invocations and stage checkpoints, with attempt,
+timestamp, outcome and measured duration/token counts when available. The compact
+view shows six entries; users can expand its independently scrolling list and
+load older pages. Active selected tasks refresh every three seconds. Collapsing,
+hiding or changing tasks cancels reads, and reopening revalidates. New entries
+preserve the visible history anchor, workflow scroll and keyboard focus.
+
+Application schema 36 stores metadata-only events with per-task sequence numbers.
+Only Plan/Work/Review/Title stages, model/stage/tool kinds and three known tool
+names are accepted. There are no event fields for prompts, reasoning, search
+queries, URLs, filenames, source/output bodies, raw exceptions or arbitrary
+provider text. Model usage comes from accepted terminal measurements; missing or
+unsafe counts remain unknown. These counts describe recent recorded calls,
+not lifetime usage or the task's conservative reservation charges.
+
+A model request starts after resource admission and live authorization, directly
+before transport. Tool events wrap actual invocation after argument and policy
+guards; a tool error is not reported as success. Started records are dispatch
+intent, not proof of a completed effect. Successful stage events commit in the
+same transaction as their saved checkpoint. Every callback rechecks the current
+owner, lease, Project/file context and budget; inherited callbacks cannot outlive
+their execution scope. Pause, Cancel, worker stop, failure and expired-lease
+recovery mark unmatched starts Interrupted. This means no outcome/checkpoint was
+recorded; it does not claim an external effect was undone. Known model/tool
+failures retain their Failed outcome. A late callback cannot overwrite interruption.
+
+History survives database reopening and Run again on the same task, with distinct
+attempt labels and the existing saved Plan behavior. At most 200 recent entries
+are retained per task; omitted older history is disclosed, and pruning cannot
+prevent authorized work from completing. Legacy tasks have no invented historical
+events. Event writes and reads leave task revisions, operation charges and
+notification state unchanged. Task/account deletion cascades the rows. The
+owner-only `/api/agents/{task_id}/events` endpoint returns newest-first pages of
+at most 50 events with a before-sequence cursor and a final response fence;
+events stay out of task responses and history-list summaries.
+
+Affected backend tests, frontend tests/typecheck/lint/build and mocked responsive
+browser checks at 1,366, 390 and 320 pixels pass. The
+[installed event smoke](../reference/live-smoke-testing.md#installed-agent-event-smoke)
+uses real temporary SQLite, owned API routes, task execution and file downloads,
+with scripted local-model replies. Negative checks deliberately remove model
+observations and disable interruption to confirm the probe fails. This is an
+isolated integration check: live worker/browser/Qwen acceptance remains unrun.
+Backend/UI rebuilds are required; schema 36 applies automatically, without a
+configuration change. No credentials or upload are required for the smoke.
 
 ## Product outcome
 
@@ -617,7 +667,7 @@ decision; then schedule a weekly check of a selected public release page.
 
 | Area | Already present | Work required |
 | --- | --- | --- |
-| Native runs | Saved agent objectives, three-stage plans/checkpoints, planning questions, owned downloadable files, leases and restart dispatch | Adaptive steps and finer-grained within-step recovery |
+| Native runs | Saved agent objectives, three-stage plans/checkpoints, recent observed activity, planning questions, owned downloadable files, leases and restart dispatch | Adaptive steps and finer-grained within-step recovery |
 | Resource admission | Interactive preference, aged background fairness, cooperative queued handoffs and generation-boundary release | Live concurrent-chat/model acceptance and broader checkpoint-age monitoring |
 | Private tasks | Leases, revisions, source/model pins, budgets and committed-result delivery for Private tax reviews | General agent contracts and adapters; existing Private recovery currently pauses work |
 | Search | Local lexical API/sidebar, canonical reader and workspace links, exact message focus, bounded projection, approved notes and Project report filters | Semantic candidates and expanded native previews for retained text |

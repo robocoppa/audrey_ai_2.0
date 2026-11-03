@@ -20,6 +20,7 @@ English user input only; closed checks do not need another run.
 | Installed Knowledge Agent smoke, isolated data/mocked model | Tower → `tests/smoke/smoke-knowledge-agents-onbox.sh` |
 | Installed Agent file smoke, isolated storage/mocked model | Tower → `tests/smoke/smoke-agent-files-onbox.sh` |
 | Installed Agent file-input smoke, isolated sources/mocked model | Tower → `tests/smoke/smoke-agent-file-inputs-onbox.sh` |
+| Installed Agent event smoke, isolated execution/scripted model | Tower → `tests/smoke/smoke-agent-events-onbox.sh` |
 
 Laptop checkout: `/home/bart/Documents/github/audrey/audrey_ai_2.0`.
 Tower checkout: `/mnt/user/appdata/audrey_ai_2.0`.
@@ -373,6 +374,51 @@ details, including any shortened extract, and inspect the resulting work. No
 upload is needed when a suitable file already exists; otherwise add one through
 the Project's normal file flow first. Selecting a Project alone does not select
 its files. Private Projects remain unavailable here.
+
+## Installed Agent event smoke
+
+After pulling per-task Recent activity, run on Tower:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+tests/smoke/smoke-agent-events-onbox.sh
+```
+
+Application schema 36 applies automatically. No settings change, credentials,
+`.env.smoke.local` or upload is needed. The wrapper streams the checked-out probe
+into the backend container's installed Python package. It builds a separate ASGI
+application with temporary accounts, SQLite databases, Projects and files;
+authentication is overridden only in that fixture. It does not open production
+databases or call the running HTTP server. Two cases use the real task runtime,
+executor, model-client protocol, tool dispatcher and renderer, with scripted model
+metadata/replies; one downloads a real generated file, the other forces a quota
+failure. No real Qwen inference or live network requests occur.
+
+Expect seven `PASS` checks and `PASS Agent event smoke passed` with `(exit 0)`.
+Six scenario groups check actual event/usage recording without copied content,
+tool failure classification, reopened-database/expired-lease recovery and rerun,
+cancellation rejecting late success, owner/pagination/revision/deletion boundaries,
+and 200-entry retention; the seventh confirms temporary fixture cleanup. Reopening
+SQLite does not test a Docker restart. These checks prove installed integration
+contracts, not the browser, Cloudflare authentication, live worker or model quality.
+
+The smoke normally takes seconds because model replies are scripted and fixtures
+are tiny and local. `--json` prints a compact receipt; `--timeout-seconds` lowers
+the ten-second per-case deadline. Linux forked cases have parent-enforced hard
+deadlines, including blocked synchronous work; children stop before fixture
+cleanup. Exit codes: 0 pass, 1 finding/timeout, 2 setup failure, 3 harness crash,
+130 interrupted. Results print in the launching shell; no notifications or report
+transfer. `AUDREY_SMOKE_APPDATA` (or `APPDATA`) and `AUDREY_SMOKE_CONTAINER`
+override the checkout/container.
+
+Manual live acceptance needs no upload: start an Agent with “Create a downloadable
+Markdown checklist for preparing a vegetable garden.” While it runs, open Recent
+activity and confirm model/tool entries populate, then download the created file.
+Reload the page and confirm saved history remains; Run again should keep the same
+task and append a new attempt. A completed task alone does not establish useful
+content: inspect the file. This separately checks real local-model/tool choice,
+the running worker and browser/proxy wiring.
 
 ## Service rebuilds
 

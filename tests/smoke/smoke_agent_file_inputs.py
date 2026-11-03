@@ -319,7 +319,8 @@ async def owner_private_membership_and_availability(s):
         require(response.status_code in {404, 409, 422}, "An unavailable or unauthorized source was accepted.")
     await s.create([owned], project_id=None, status=422)
     await s.create([owned, owned], status=422)
-    await s.create([owned] * 4, status=422)
+    extra = [await s.file(name=f"extra-{index}.txt") for index in range(3)]
+    await s.create([owned, *extra], status=422)
     s.current = s.other
     await s.create([owned], status=404)
     s.current = s.owner

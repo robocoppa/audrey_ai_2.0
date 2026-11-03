@@ -583,6 +583,52 @@ export interface AgentTask {
   outputs?: AgentOutput[];
 }
 
+export interface AgentEvent {
+  seq: number;
+  attempt: number;
+  stage: "plan" | "research" | "review" | "title";
+  kind: "stage" | "model" | "tool";
+  state: "started" | "completed" | "failed" | "interrupted";
+  tool: "web_search" | "web_fetch" | "create_file" | null;
+  created_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+}
+
+export interface AgentEventsPage { items: AgentEvent[]; has_more: boolean; truncated: boolean }
+
+export async function listAgentEvents(taskId: string, signal?: AbortSignal, before?: number): Promise<AgentEventsPage> {
+  if (before !== undefined && (!Number.isSafeInteger(before) || before < 1)) {
+    throw new ApiError(422, "Choose a valid activity page.");
+  }
+  const query = new URLSearchParams({ limit: "50" });
+  if (before !== undefined) query.set("before", String(before));
+  const result = await apiJson<AgentEventsPage>(`/api/agents/${encodeURIComponent(taskId)}/events?${query}`, { signal, cache: "no-store" });
+  const count = (value: unknown) => value === null || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0);
+  const date = (value: unknown) => typeof value === "string" && Number.isFinite(Date.parse(value));
+  if (!result || typeof result !== "object" || typeof result.has_more !== "boolean" || typeof result.truncated !== "boolean"
+    || !Array.isArray(result.items) || result.items.length > 50
+    || result.items.some((event, index) => !event || typeof event !== "object"
+      || !Number.isSafeInteger(event.seq) || event.seq < 1 || (before !== undefined && event.seq >= before)
+      || (index > 0 && event.seq >= result.items[index - 1].seq)
+      || !Number.isSafeInteger(event.attempt) || event.attempt < 1
+      || !["plan", "research", "review", "title"].includes(event.stage)
+      || !["stage", "model", "tool"].includes(event.kind)
+      || !["started", "completed", "failed", "interrupted"].includes(event.state)
+      || (event.kind === "tool" ? !["web_search", "web_fetch", "create_file"].includes(event.tool ?? "") : event.tool !== null)
+      || !date(event.created_at) || (event.finished_at !== null && !date(event.finished_at))
+      || (event.state === "started" ? event.finished_at !== null : event.finished_at === null)
+      || !count(event.duration_ms) || !count(event.input_tokens) || !count(event.output_tokens))) {
+    throw new ApiError(502, "This agent’s activity could not be read. Try again.");
+  }
+  return { has_more: result.has_more, truncated: result.truncated,
+    items: result.items.map(({ seq, attempt, stage, kind, state, tool, created_at, finished_at, duration_ms, input_tokens, output_tokens }) => (
+      { seq, attempt, stage, kind, state, tool, created_at, finished_at, duration_ms, input_tokens, output_tokens }
+    )) };
+}
+
 export interface AgentFileInputs {
   current: boolean;
   files: Array<{

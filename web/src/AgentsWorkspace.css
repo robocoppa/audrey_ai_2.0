@@ -196,6 +196,25 @@
 .agents-step details { margin-top: 0.6rem; font-size: 0.83rem; }
 .agents-step summary { width: fit-content; padding: 0.2rem 0; cursor: pointer; color: var(--accent); }
 .agents-result { margin-top: 1.7rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+.agents-recent-activity { min-width: 0; margin-top: 1.3rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.agents-recent-activity h3 { margin: 0 0 0.65rem; }
+.agents-activity-toggle { display: flex; align-items: center; gap: 0.5rem; padding: 0.2rem 0; border: 0; color: var(--text-soft); background: transparent; font: inherit; font-size: 0.86rem; cursor: pointer; }
+.agents-activity-toggle > span { width: 0.8rem; color: var(--muted); }
+.agents-activity-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 0.2rem; }
+.agents-event-list { display: grid; gap: 0; max-height: 22rem; max-height: min(22rem, 48dvh); min-width: 0; margin: 0; padding: 0 0.45rem 0 0; overflow-y: auto; overscroll-behavior: contain; list-style: none; scrollbar-width: thin; }
+.agents-event-list li { min-width: 0; padding: 0.6rem 0; border-bottom: 1px solid var(--border); }
+.agents-event-list li:last-child { border-bottom: 0; }
+.agents-event-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.7rem; color: var(--text-soft); font-size: 0.78rem; }
+.agents-event-line strong { font-weight: 500; }
+.agents-event-line > span { margin-left: auto; color: var(--muted); font-size: 0.7rem; }
+.agents-event-failed .agents-event-line > span { color: #f5a3aa; }
+.agents-event-meta, .agents-event-usage { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.68rem; line-height: 1.6; overflow-wrap: anywhere; }
+.agents-event-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
+.agents-event-actions:empty { display: none; }
+.agents-event-actions button { font-size: 0.7rem; }
+.agents-event-empty, .agents-event-error { margin: 0.4rem 0; color: var(--muted); font-size: 0.75rem; line-height: 1.6; }
+.agents-event-error { color: #f5a3aa; }
+.agents-event-error button { margin-left: 0.3rem; font-size: 0.7rem; }
 .agents-result > p, .agents-empty { margin: 0; color: var(--muted); font-size: 0.84rem; line-height: 1.7; }
 .agents-outputs { margin-top: 1.7rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
 .agents-outputs > p { margin: -0.4rem 0 0.8rem; color: var(--muted); font-size: 0.77rem; line-height: 1.6; }

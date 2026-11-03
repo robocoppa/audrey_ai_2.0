@@ -17,6 +17,7 @@ from audrey.agent_dispatch import (
     AgentDispatchStoppedError,
     AgentInputRequest,
     agent_dispatch_scope,
+    agent_tool_execution,
     authorize_agent_tool,
 )
 from audrey.agent_executor import AgentSettings, ResearchAgentExecutor
@@ -31,7 +32,7 @@ from audrey.kb.storage_lifecycle import StorageLifecycle
 from audrey.kb.uploads_db import UploadsDB
 from audrey.kb.user_store import sanitize_user
 from audrey.models.health import HealthTracker
-from audrey.models.ollama import GenerationUsageError, OllamaClient
+from audrey.models.ollama import GenerationUsageError, OllamaClient, OllamaError
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.react import ReactResult
 from audrey.routes.app import router as app_router
@@ -372,6 +373,7 @@ async def test_queued_background_work_rechecks_authority_without_charging_model_
             await asyncio.wait_for(queued.wait(), 2)
             assert registry.pressure_snapshot()["waiting"] == 1
             assert not _content_requests(state, include_titles=True)
+            assert all(row["kind"] == "stage" for row in await _activity(state, task))
             if revocation == "cancel":
                 current = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
                 await state.store.agents.control(
@@ -393,6 +395,7 @@ async def test_queued_background_work_rechecks_authority_without_charging_model_
                 executing.cancel()
             await asyncio.gather(executing, return_exceptions=True)
     assert not _content_requests(state, include_titles=True) and not state.tool_requests
+    assert all(row["kind"] == "stage" for row in await _activity(state, task))
     assert state.store._conn.execute(
         "SELECT operations FROM app_agent_tasks WHERE task_id=?", (task["id"],),
     ).fetchone()[0] == operations
@@ -1534,3 +1537,208 @@ async def test_file_input_api_uses_ids_only_and_returns_metadata_without_source_
         assert response.headers["cache-control"] == "private, no-store"
         path.write_text("Source has changed.")
         assert not (await client.get(f"/api/agents/{task['id']}")).json()["file_inputs"]["current"]
+
+
+async def _activity(state, task):
+    page = await state.store.agents.events(user_id=state.owner.user_id, task_id=task["id"], limit=100)
+    return list(reversed(page["items"]))
+
+
+async def test_activity_tracks_actual_title_model_web_and_native_invocations(file_state):
+    s = file_state
+    task = await _step(s, "research", generated_title=False)
+    s.responses.extend([
+        _search(), _search("web_fetch"), _file_call(),
+        _answer("Secret report text must not enter activity.", prompt_eval_count=23),
+    ])
+    observed = []
+
+    async def in_transport():
+        latest = (await _activity(s, task))[-1]
+        assert latest["state"] == "started"
+        observed.append((latest["kind"], latest["stage"], latest["tool"]))
+
+    s.on_chat = s.on_tool = in_transport
+    assert await s.executor(task, "research") == "Secret report text must not enter activity.\n\nSelected public sources:\n- " + _PUBLIC_URL
+    events = await _activity(s, task)
+    dispatched = [row for row in events if row["kind"] != "stage"]
+    assert [(row["kind"], row["stage"], row["tool"], row["state"]) for row in dispatched] == [
+        ("model", "title", None, "completed"),
+        ("model", "research", None, "completed"),
+        ("tool", "research", "web_search", "completed"),
+        ("model", "research", None, "completed"),
+        ("tool", "research", "web_fetch", "completed"),
+        ("model", "research", None, "completed"),
+        ("tool", "research", "create_file", "completed"),
+        ("model", "research", None, "completed"),
+    ]
+    assert len(observed) == 7  # Five model transports and two HTTP tools; native file has no HTTP.
+    assert dispatched[-1]["input_tokens"] == 23 and dispatched[-1]["output_tokens"] == 7
+    assert all(type(row["duration_ms"]) is int and row["duration_ms"] >= 0 for row in dispatched)
+    assert all(row["finished_at"] and row["attempt"] == task["attempts"] for row in dispatched)
+    serialized = json.dumps(events)
+    for secret in ("Secret report", _PUBLIC_URL, "task-notes.md", "Useful task output", task["objective"]):
+        assert secret not in serialized
+    assert len(await s.files_db.list_user(s.owner.storage_namespace)) == 1
+    # Two stage reservations, one title, four model calls and three tools.
+    assert s.store._conn.execute("SELECT operations FROM app_agent_tasks").fetchone()[0] == 10
+
+
+@pytest.mark.parametrize("failure", ["length", "usage", "empty", "transport"])
+async def test_activity_model_failures_are_safe_terminal_rows(state, failure):
+    task = await _step(state)
+    if failure == "length":
+        state.responses.append(_answer("Sensitive partial response", done_reason="length"))
+    elif failure == "usage":
+        state.responses.append({"done": True, "message": {"content": "Sensitive unmeasured response"}})
+    elif failure == "empty":
+        state.responses.append(_answer("", message={"thinking": "Sensitive hidden reasoning"}))
+    else:
+        async def broken():
+            raise httpx.ConnectError("Sensitive provider URL and body")
+        state.on_chat = broken
+    with pytest.raises((AgentDispatchStoppedError, GenerationUsageError, OllamaError)):
+        await state.executor(task, "plan")
+    models = [row for row in await _activity(state, task) if row["kind"] == "model"]
+    assert len(models) == 1 and models[0]["state"] == "failed"
+    assert models[0]["input_tokens"] is None
+    assert models[0]["output_tokens"] == (7 if failure in {"length", "empty"} else None)
+    assert models[0]["duration_ms"] >= 0 and "Sensitive" not in json.dumps(models)
+
+
+async def test_activity_optional_title_failure_does_not_mark_useful_model_failed(state):
+    task = await _step(state, generated_title=False)
+    state.title_responses.append(_answer("Sensitive partial title", done_reason="length"))
+    assert await state.executor(task, "plan") == "Grounded report."
+    models = [row for row in await _activity(state, task) if row["kind"] == "model"]
+    assert [(row["stage"], row["state"]) for row in models] == [("title", "failed"), ("plan", "completed")]
+    assert "Sensitive" not in json.dumps(models)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "network", "native_arguments"])
+async def test_activity_tool_failures_follow_real_dispatch_outcome(file_state, failure):
+    s = file_state
+    task = await _step(s, "research")
+    if failure == "native_arguments":
+        s.responses.extend([_file_call(format="exe"), _answer("Explained the unavailable output.")])
+        tool = "create_file"
+    else:
+        async def broken():
+            error = httpx.ReadTimeout if failure == "timeout" else httpx.ConnectError
+            raise error("Sensitive URL and error")
+        s.on_tool = broken
+        s.responses.extend([_search(), _answer("Explained the unavailable source.")])
+        tool = "web_search"
+    await s.executor(task, "research")
+    tools = [row for row in await _activity(s, task) if row["kind"] == "tool"]
+    assert len(tools) == 1 and tools[0]["tool"] == tool and tools[0]["state"] == "failed"
+    assert tools[0]["duration_ms"] >= 0 and tools[0]["input_tokens"] is None
+    assert "Sensitive" not in json.dumps(tools)
+
+
+@pytest.mark.parametrize("name,args", [("memory_recall", {}), ("unknown_secret_tool", {}), ("web_search", "not JSON")])
+async def test_activity_never_reports_blocked_or_uninvoked_tools(state, name, args):
+    task = await _step(state, "research")
+    state.responses.extend([
+        _answer("", message={"tool_calls": [{"function": {"name": name, "arguments": args}}]}),
+        _answer("Handled invalid tool arguments."),
+    ])
+    if name == "web_search":
+        with pytest.raises(json.JSONDecodeError):
+            await state.executor(task, "research")
+    else:
+        with pytest.raises(AgentDispatchStoppedError, match="unavailable"):
+            await state.executor(task, "research")
+    assert not state.tool_requests
+    assert not [row for row in await _activity(state, task) if row["kind"] == "tool"]
+
+
+@pytest.mark.parametrize("transport", ["model", "tool"])
+async def test_activity_pause_during_transport_prevents_late_success(state, transport):
+    task = await _step(state, "research")
+
+    async def pause():
+        await _revoke(state, task, "pause")
+
+    if transport == "model":
+        state.on_chat = pause
+    else:
+        state.responses.append(_search())
+        state.on_tool = pause
+    with pytest.raises((AgentTaskError, AgentDispatchStoppedError)):
+        await state.executor(task, "research")
+    events = await _activity(state, task)
+    pending = [row for row in events if row["kind"] == transport]
+    assert pending and pending[-1]["state"] == "interrupted"
+    assert not [row for row in events if row["state"] == "started"]
+
+
+async def test_activity_inherited_model_callback_expires_before_content_dispatch(state):
+    task = await _step(state, "research")
+    release = asyncio.Event()
+    escaped = []
+
+    async def runner(local, *_args, **_kwargs):
+        async def late():
+            await release.wait()
+            return await local.chat(model=_MODEL, messages=[{"role": "user", "content": "Late secret"}])
+        escaped.append(asyncio.create_task(late()))
+        return ReactResult(content="Saved result.", tool_rounds=0, done_reason="stop", retrieved=[])
+
+    state.executor.react_runner = runner
+    assert await state.executor(task, "research") == "Saved result."
+    release.set()
+    with pytest.raises(AgentDispatchStoppedError, match="stopped"):
+        await escaped[0]
+    assert not _content_requests(state)
+    assert not [row for row in await _activity(state, task) if row["kind"] == "model"]
+
+
+@pytest.mark.parametrize("entered", [False, True])
+async def test_activity_inherited_tool_observer_cannot_outlive_its_scope(entered):
+    ready, release = asyncio.Event(), asyncio.Event()
+    starts, finishes = [], []
+
+    async def check(_name):
+        return None
+
+    async def start(name):
+        starts.append(name)
+        return 1
+
+    async def finish(seq, failed, duration_ms):
+        finishes.append((seq, failed, duration_ms))
+
+    async def late():
+        if not entered:
+            ready.set()
+            await release.wait()
+        async with agent_tool_execution("web_search") as outcome:
+            ready.set()
+            await release.wait()
+            outcome(False)
+
+    with agent_dispatch_scope(check, start=start, finish=finish):
+        child = asyncio.create_task(late())
+        await ready.wait()
+    release.set()
+    with pytest.raises(AgentDispatchStoppedError, match="stopped"):
+        await child
+    assert starts == (["web_search"] if entered else [])
+    assert not finishes
+
+
+@pytest.mark.parametrize("provider,value,expected", [
+    ("prompt_eval_count", True, None),
+    ("prompt_eval_count", -1, None),
+    ("prompt_eval_count", 2**53, None),
+    ("eval_count", 2**53, None),
+    ("eval_count", 2**53 - 1, 2**53 - 1),
+])
+async def test_activity_unknown_or_unsafe_token_counts_do_not_invent_measurements(state, provider, value, expected):
+    task = await _step(state)
+    state.responses.append(_answer(**{provider: value}))
+    assert await state.executor(task, "plan") == "Grounded report."
+    event = next(row for row in await _activity(state, task) if row["kind"] == "model")
+    field = "input_tokens" if provider == "prompt_eval_count" else "output_tokens"
+    assert event[field] == expected and event["state"] == "completed"

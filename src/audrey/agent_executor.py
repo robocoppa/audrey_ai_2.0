@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from contextlib import nullcontext
+import time
+from contextlib import contextmanager, nullcontext, suppress
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
@@ -187,14 +190,79 @@ async def _verify_local(client, model, endpoint, policy=None):
 
 
 class _LocalOnlyClient:
-    def __init__(self, client, model, *, task_id, step_id):
+    @dataclass
+    class _Call:
+        active: bool = True
+        seq: int | None = None
+        started: float = 0.0
+        counts: dict[str, int] = field(default_factory=dict)
+
+    def __init__(self, client, model, *, task_id, step_id, repository, lease, authorize):
         self.client, self.model = client, model
         self.task_id, self.step_id = task_id, step_id
+        self.repository, self.lease, self.authorize = repository, lease, authorize
+        self._call: ContextVar[_LocalOnlyClient._Call | None] = ContextVar("agent_model_call", default=None)
+        self.active = False
         self.calls = 0
 
+    @contextmanager
+    def scope(self):
+        self.active = True
+        try:
+            yield
+        finally:
+            # Child tasks retain this same object after their ContextVar copy.
+            self.active = False
+
+    def _require_active(self):
+        if not self.active:
+            raise AgentDispatchStoppedError("The agent model request has stopped.")
+
+    async def start_event(self):
+        """Called by the generation budget after admission and live checks."""
+        self._require_active()
+        call = self._call.get()
+        if call is None or not call.active or call.seq is not None:
+            raise AgentDispatchStoppedError("The agent model request has stopped.")
+        call.seq = await self.repository.start_event(**self.lease, stage=self.step_id, kind="model")
+        call.started = time.monotonic()
+        self._require_active()
+        if not call.active:
+            raise AgentDispatchStoppedError("The agent model request has stopped.")
+
+    async def _finish_event(self, call, state):
+        if call.seq is None:
+            return
+        if not call.active:
+            raise AgentDispatchStoppedError("The agent model request has stopped.")
+        self._require_active()
+        await self.authorize()
+        self._require_active()
+        await self.repository.finish_event(
+            **self.lease, seq=call.seq, state=state,
+            duration_ms=max(0, int((time.monotonic() - call.started) * 1000)), **call.counts,
+        )
+
     async def chat(self, *, model, **kwargs):
+        self._require_active()
         if model != self.model:
             raise AgentDispatchStoppedError("Agents may only use local qwen3.8.")
+        call = self._Call()
+        token = self._call.set(call)
+        try:
+            response = await self._chat(model=model, **kwargs)
+            await self._finish_event(call, "completed")
+            self._require_active()
+            return response
+        except BaseException:
+            with suppress(Exception):
+                await self._finish_event(call, "failed")
+            raise
+        finally:
+            call.active = False
+            self._call.reset(token)
+
+    async def _chat(self, *, model, **kwargs):
         self.calls += 1
         try:
             response = await self.client.chat(model=model, **kwargs)
@@ -207,6 +275,15 @@ class _LocalOnlyClient:
                 type(error).__name__,
             )
             raise
+        call = self._call.get()
+        # The real client has already accepted terminal usage and performed its
+        # live budget callback. Preserve those measurements even if the report
+        # below is truncated/empty; unmeasured failures remain unknown.
+        if call is not None and response.get("done") is True:
+            for provider, field_name in (("prompt_eval_count", "input_tokens"), ("eval_count", "output_tokens")):
+                value = response.get(provider)
+                if type(value) is int and 0 <= value <= 2**53 - 1:
+                    call.counts[field_name] = value
         message = response.get("message")
         message = message if isinstance(message, dict) else {}
         content, thinking = message.get("content", ""), message.get("thinking", "")
@@ -260,16 +337,20 @@ class ResearchAgentExecutor:
         async def check_title():
             await _verify_local(client, settings.model, self.app.state.cfg.env.ollama_host, policy)
             await authorize()
+            await local.start_event()
             return min(_TITLE_MAX_TOKENS, settings.max_tokens_per_call)
 
         async def record_title(_count):
             await authorize()
 
-        local = _LocalOnlyClient(client, settings.model, task_id=task["id"], step_id="title")
+        local = _LocalOnlyClient(
+            client, settings.model, task_id=task["id"], step_id="title",
+            repository=repository, lease=lease, authorize=authorize,
+        )
         generation_gate = BackgroundGenerationGate(self.app.state.gate, self.app.state.inflight)
         try:
             async with asyncio.timeout(_TITLE_TIMEOUT_SECONDS):
-                with generation_budget(check_title, record_title):
+                with local.scope(), generation_budget(check_title, record_title):
                     async with generation_gate.acquire(
                         settings.model, location="local", user_id=principal.storage_namespace,
                     ):
@@ -363,17 +444,22 @@ class ResearchAgentExecutor:
         client = self.client_factory(endpoint, trust_env=False)
         try:
             policy = await _verify_local(client, settings.model, endpoint)
-            local = _LocalOnlyClient(client, settings.model, task_id=task["id"], step_id=step_id)
 
             async def authorize():
                 await repository.validate_lease(**lease)
                 await research_authority(self.app, task["user_id"])
                 repository.fence_execution(**lease)
 
+            local = _LocalOnlyClient(
+                client, settings.model, task_id=task["id"], step_id=step_id,
+                repository=repository, lease=lease, authorize=authorize,
+            )
+
             async def check_generation():
                 await _verify_local(client, settings.model, endpoint, policy)
                 await authorize()
                 await repository.reserve_operation(**lease, step_id=step_id)
+                await local.start_event()
                 return max_tokens
 
             async def record_generation(_count):
@@ -403,11 +489,26 @@ class ResearchAgentExecutor:
                     raise AgentDispatchStoppedError("This tool is unavailable to the agent.")
                 await repository.reserve_operation(**lease, step_id=step_id)
 
+            async def start_tool(name):
+                local._require_active()
+                await authorize()
+                local._require_active()
+                return await repository.start_event(**lease, stage=step_id, kind="tool", tool=name)
+
+            async def finish_tool(seq, failed, duration_ms):
+                local._require_active()
+                await authorize()
+                local._require_active()
+                await repository.finish_event(
+                    **lease, seq=seq, state="failed" if failed else "completed", duration_ms=duration_ms,
+                )
+
             options = {"num_predict": max_tokens}
             generation_gate = BackgroundGenerationGate(self.app.state.gate, self.app.state.inflight)
             retrieved = []
             with (
-                agent_dispatch_scope(check_tool),
+                local.scope(),
+                agent_dispatch_scope(check_tool, start=start_tool, finish=finish_tool),
                 generation_budget(check_generation, record_generation),
                 agent_file_scope(app=self.app, principal=principal, task=task, files=file_outputs)
                 if native_files else nullcontext(),

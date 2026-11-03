@@ -1441,6 +1441,37 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON app_agent_file_inputs(user_id,task_id);
         """,
     ),
+    (
+        36,
+        """
+        CREATE TABLE IF NOT EXISTS app_agent_events (
+          task_id TEXT NOT NULL REFERENCES app_agent_tasks(task_id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+          seq INTEGER NOT NULL CHECK (typeof(seq)='integer' AND seq>=1),
+          attempt INTEGER NOT NULL CHECK (typeof(attempt)='integer' AND attempt>=1),
+          fence INTEGER NOT NULL CHECK (typeof(fence)='integer' AND fence>=1),
+          stage TEXT NOT NULL CHECK (stage IN ('plan','research','review','title')),
+          kind TEXT NOT NULL CHECK (kind IN ('stage','model','tool')),
+          state TEXT NOT NULL CHECK (state IN ('started','completed','failed','interrupted')),
+          tool TEXT CHECK (tool IN ('web_search','web_fetch','create_file')),
+          created_at TEXT NOT NULL,
+          finished_at TEXT,
+          duration_ms INTEGER CHECK (duration_ms IS NULL OR (typeof(duration_ms)='integer' AND duration_ms>=0)),
+          input_tokens INTEGER CHECK (input_tokens IS NULL OR (typeof(input_tokens)='integer' AND input_tokens>=0)),
+          output_tokens INTEGER CHECK (output_tokens IS NULL OR (typeof(output_tokens)='integer' AND output_tokens>=0)),
+          PRIMARY KEY (task_id,seq),
+          FOREIGN KEY (task_id,user_id) REFERENCES app_agent_tasks(task_id,user_id) ON DELETE CASCADE,
+          CHECK ((kind='tool' AND tool IS NOT NULL AND stage='research') OR (kind!='tool' AND tool IS NULL)),
+          CHECK (stage!='title' OR kind='model'),
+          CHECK (kind='model' OR (input_tokens IS NULL AND output_tokens IS NULL)),
+          CHECK ((state='started' AND finished_at IS NULL AND duration_ms IS NULL
+                    AND input_tokens IS NULL AND output_tokens IS NULL)
+                 OR (state!='started' AND finished_at IS NOT NULL))
+        );
+        CREATE INDEX IF NOT EXISTS idx_app_agent_events_owner
+          ON app_agent_events(user_id,task_id,seq);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

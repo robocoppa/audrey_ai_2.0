@@ -33,6 +33,7 @@ const fileInputs: api.AgentFileInputs = { current: true, files: [{ file_id: sele
 beforeEach(() => {
   vi.spyOn(api, "listProjects").mockResolvedValue({ items: [], next_cursor: null, limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
   vi.spyOn(api, "getActivityUnreadCount").mockResolvedValue({ unread_count: 0 });
+  vi.spyOn(api, "listAgentEvents").mockResolvedValue({ items: [], has_more: false, truncated: false });
   vi.spyOn(api, "listAgentTasks").mockResolvedValue({ items: [] });
   vi.spyOn(api, "getAgentTask").mockResolvedValue(task());
 });

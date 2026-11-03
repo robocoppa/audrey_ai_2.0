@@ -105,6 +105,26 @@ class AgentListResponse(BaseModel):
     items: list[AgentTaskSummaryResponse]
 
 
+class AgentEventResponse(BaseModel):
+    seq: int = Field(ge=1)
+    attempt: int = Field(ge=1)
+    stage: Literal["plan", "research", "review", "title"]
+    kind: Literal["stage", "model", "tool"]
+    state: Literal["started", "completed", "failed", "interrupted"]
+    tool: Literal["web_search", "web_fetch", "create_file"] | None
+    created_at: str
+    finished_at: str | None
+    duration_ms: int | None = Field(ge=0)
+    input_tokens: int | None = Field(ge=0)
+    output_tokens: int | None = Field(ge=0)
+
+
+class AgentEventsResponse(BaseModel):
+    items: list[AgentEventResponse] = Field(max_length=50)
+    has_more: bool
+    truncated: bool
+
+
 class AgentCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     objective: str = Field(min_length=1, max_length=8000)
@@ -305,6 +325,26 @@ async def get_agent(task_id: str, request: Request, response: Response,
         return task
     except AgentTaskError as error:
         raise _error(error) from None
+
+
+@router.get("/agents/{task_id}/events", response_model=AgentEventsResponse)
+async def agent_events(
+    task_id: str, request: Request, response: Response,
+    before: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=50, ge=1, le=50),
+    principal: Principal = Depends(_agents_access),
+):
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        repository = _repository(request)
+        page = await repository.events(user_id=principal.user_id, task_id=task_id, before=before, limit=limit)
+        repository.fence_events_response(user_id=principal.user_id, task_id=task_id, page=page)
+        return page
+    except AgentTaskError as error:
+        raise _error(error) from None
+    except (sqlite3.Error, OSError) as error:
+        logger.warning("Agent events unavailable (%s)", type(error).__name__)
+        raise HTTPException(503, "Agent activity is temporarily unavailable.") from None
 
 
 @router.post("/agents/{task_id}/actions", response_model=AgentTaskResponse)

@@ -29,7 +29,11 @@ from typing import Any
 
 import httpx
 
-from audrey.agent_dispatch import AgentDispatchStoppedError, authorize_agent_tool
+from audrey.agent_dispatch import (
+    AgentDispatchStoppedError,
+    agent_tool_execution,
+    authorize_agent_tool,
+)
 from audrey.metrics import tool_call_seconds, tool_calls_total
 from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
 from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, ToolUserScope
@@ -321,6 +325,21 @@ async def dispatch_one(
             is_error=True,
         )
 
+    async with agent_tool_execution(name) as outcome:
+        result = await _invoke_one(
+            client, spec, name=name, call_id=call_id, args=args, policy=policy,
+            private_handler=private_handler, native_handler=native_handler,
+            max_result_chars=max_result_chars, timeout_s=timeout_s,
+        )
+        outcome(result.is_error)
+        return result
+
+
+async def _invoke_one(
+    client, spec, *, name, call_id, args, policy, private_handler, native_handler,
+    max_result_chars, timeout_s,
+) -> ToolResult:
+    """The guarded invocation shared by ordinary chat, Private and Agents."""
     if policy is not None or native_handler is not None:
         # This is the only protected/native execution path. Missing local bindings
         # already refused before arguments were parsed; no HTTP fallback exists.
