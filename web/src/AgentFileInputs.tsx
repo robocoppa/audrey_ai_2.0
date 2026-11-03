@@ -50,7 +50,7 @@ export function AgentFilePicker({ projectId, selected, onChange, visible, disabl
     </button>
     {!expanded && selected.length ? <p className="agents-file-selection">{selected.map(({ filename }) => filename).join(", ")}</p> : null}
     {expanded ? <div id="agent-project-file-choices">
-      <p id="agent-project-files-help">Choose up to 3 files. Audrey uses their saved text or transcripts. Long extracts are shortened; changed or removed files stop the task from continuing.</p>
+      <p id="agent-project-files-help">Choose up to 3 files. Audrey starts with short extracts and can read more saved text or transcripts when needed. Changed or removed files stop the task from continuing.</p>
       {loading ? <p role="status">Loading Project files…</p> : null}
       {error ? <p role="alert">{error}</p> : null}
       {loaded && !files.length ? <p>No ready files in this Project. Add files from the Project screen.</p> : null}
@@ -75,7 +75,7 @@ export function AgentFileInputsView({ inputs }: { inputs?: AgentFileInputs }) {
   if (!inputs?.files.length) return null;
   return <details className="agents-project-context agents-file-inputs">
     <summary>{inputs.current ? `Input files · ${inputs.files.length}` : "Input files changed"}</summary>
-    <p>This task uses the saved extracts selected when it started.</p>
+    <p>This task starts with the extracts below and can read more of the same saved file versions when needed.</p>
     {!inputs.current ? <p className="agents-project-unavailable">A selected file changed or is unavailable. Start a new agent and choose its files again to continue.</p> : null}
     <ul>{inputs.files.map((file) => <li key={file.file_id}>
       <strong className="agents-file-name">{file.filename}</strong>

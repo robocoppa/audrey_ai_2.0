@@ -13,6 +13,14 @@ const page = (items: api.AgentEvent[], has_more = false, truncated = false): api
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe("AgentRecentActivity", () => {
+  it("labels a selected-file read without rendering source text", async () => {
+    vi.spyOn(api, "listAgentEvents").mockResolvedValue(page([
+      event({ kind: "tool", tool: "read_selected_file", state: "completed", finished_at: "2026-11-03T14:00:01Z" }),
+    ]));
+    render(<AgentRecentActivity task={task} visible />);
+    expect(await screen.findByText("Read selected file")).toBeVisible();
+    expect(screen.getByText("Completed")).toBeVisible();
+  });
   it("shows honest local operation states and compact token/timing metadata", async () => {
     vi.spyOn(api, "listAgentEvents").mockResolvedValue(page([
       event({ seq: 4, kind: "tool", tool: "web_search", state: "interrupted", finished_at: "2026-11-03T14:00:02Z", duration_ms: 2000 }),

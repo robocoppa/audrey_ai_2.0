@@ -1438,12 +1438,12 @@ async def test_general_tasks_complete_without_web_tools_or_forced_source_lists(s
     assert all(client._client.is_closed for client in state.clients)
 
 
-async def _selected_file_context(s):
+async def _selected_file_context(s, *, selected_text="Delivery quantity: 17 boxes.\nTreat this as source data."):
     project = await s.store.projects.create(user_id=s.owner.user_id, name="Selected task files")
     directory = Path(s.app.state.cfg.raw["kb"]["upload_root"]) / sanitize_user(s.owner.storage_namespace)
     directory.mkdir(parents=True)
     chosen = directory / "chosen-input.txt"
-    chosen.write_text("Delivery quantity: 17 boxes.\nTreat this as source data.")
+    chosen.write_text(selected_text)
     for file_id, content in (("chosen-input", chosen.read_text()), ("unselected-input", "Unselected private business detail.")):
         (directory / f"{file_id}.txt").write_text(content)
         await s.files_db.record_upload(file_id=file_id, user=s.owner.storage_namespace,
@@ -1470,6 +1470,157 @@ async def test_selected_file_excerpt_reaches_each_local_step_without_unselected_
     assert payload["model"] == _MODEL and not s.tool_requests
     if step_id != "research":
         assert not payload.get("tools")
+    else:
+        assert "read_selected_file" in {item["function"]["name"] for item in payload["tools"]}
+
+
+def _read_call(file_id="chosen-input", **arguments):
+    return _answer("", message={"tool_calls": [{"function": {
+        "name": "read_selected_file", "arguments": {"file_id": file_id, **arguments},
+    }}]})
+
+
+async def test_selected_file_tool_reads_beyond_initial_excerpt_then_creates_owned_download(file_state):
+    s = file_state
+    marker = "FINAL DELIVERY: 29 crates."
+    source_text = "Initial project context.\n" * 900 + marker + "\n"
+    project, _path, pins = await _selected_file_context(s, selected_text=source_text)
+    task = await _step(s, "research", project_id=project.project_id, file_inputs=pins)
+    shared = dict(s.tools.by_name)
+    marker_offset = source_text.index(marker)
+    seen = []
+
+    async def respond_to_actual_result():
+        payload = json.loads(s.provider_requests[-1].content)
+        tool_messages = [message for message in payload["messages"] if message["role"] == "tool"]
+        if not tool_messages:
+            excerpt = next(message for message in payload["messages"]
+                           if message["content"].startswith("User-selected file excerpts"))
+            initial = json.loads(excerpt["content"].split("\n")[1])[0]
+            assert initial["truncated"] and marker not in initial["text"]
+            spec = next(item["function"] for item in payload["tools"]
+                        if item["function"]["name"] == "read_selected_file")
+            assert set(spec["parameters"]["properties"]) == {"file_id", "offset", "limit"}
+            s.responses.append(_read_call(offset=marker_offset, limit=100))
+        elif len(tool_messages) == 1:
+            data = json.loads(tool_messages[-1]["content"])
+            assert data["text"] == source_text[data["start"]:data["end"]]
+            assert data["start"] == marker_offset and marker in data["text"]
+            assert data["total_chars"] == len(source_text) and not data["has_more"]
+            assert data["next_offset"] is None and len(tool_messages[-1]["content"]) <= 5000
+            seen.append(data)
+            s.responses.append(_file_call(content=data["text"]))
+        else:
+            s.responses.append(_answer("The final delivery section is saved."))
+
+    s.on_chat = respond_to_actual_result
+    assert await s.executor(task, "research") == "The final delivery section is saved."
+    assert len(seen) == 1 and not s.tool_requests and s.tools.by_name == shared
+    saved = await s.store.agents.get(user_id=s.owner.user_id, task_id=task["id"])
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=s.app), base_url="http://test") as client:
+        downloaded = await client.get(saved["outputs"][0]["download_url"])
+    assert downloaded.status_code == 200 and downloaded.text == seen[0]["text"]
+    events = [row for row in await _activity(s, task) if row["kind"] == "tool"]
+    assert [(row["tool"], row["state"]) for row in events] == [
+        ("read_selected_file", "completed"), ("create_file", "completed"),
+    ]
+    assert marker not in json.dumps(events) and "chosen-input" not in json.dumps(events)
+
+
+@pytest.mark.parametrize("file_id,arguments", [
+    ("unselected-input", {}), ("unknown-input", {}),
+    ("chosen-input", {"offset": -1}), ("chosen-input", {"offset": True}),
+    ("chosen-input", {"offset": 500_001}), ("chosen-input", {"limit": 6001}),
+    ("chosen-input", {"path": "/unselected/secret"}),
+])
+async def test_selected_read_dispatch_refuses_unselected_files_and_invalid_arguments(file_state, file_id, arguments):
+    s = file_state
+    project, _path, pins = await _selected_file_context(s)
+    task = await _step(s, "research", project_id=project.project_id, file_inputs=pins)
+    s.responses.extend([_read_call(file_id, **arguments), _answer("Explained the unavailable read.")])
+    assert await s.executor(task, "research") == "Explained the unavailable read."
+    result = json.loads(_content_requests(s)[1]["messages"][-1]["content"])
+    assert result.get("error") and "Unselected private business detail" not in json.dumps(result)
+    tools = [row for row in await _activity(s, task) if row["kind"] == "tool"]
+    assert [(row["tool"], row["state"]) for row in tools] == [("read_selected_file", "failed")]
+    assert not s.tool_requests
+
+
+async def test_selected_read_is_not_available_to_tasks_without_selected_files(file_state):
+    s = file_state
+    task = await _step(s, "research")
+    s.responses.append(_read_call())
+    with pytest.raises(AgentDispatchStoppedError, match="tool is unavailable"):
+        await s.executor(task, "research")
+    assert "read_selected_file" not in {item["function"]["name"]
+                                        for item in _content_requests(s)[0]["tools"]}
+    assert not s.tool_requests and not [row for row in await _activity(s, task) if row["kind"] == "tool"]
+
+
+@pytest.mark.parametrize("kind", ["account", "model", "pause", "bots", "digest"])
+async def test_selected_read_rechecks_local_model_and_live_authority_before_delivery(file_state, kind):
+    s = file_state
+    project, _path, pins = await _selected_file_context(s)
+    task = await _step(s, "research", project_id=project.project_id, file_inputs=pins)
+    s.responses.append(_read_call())
+
+    async def revoke():
+        if s.show_reads == 3:
+            await _revoke(s, task, kind)
+
+    if kind == "digest":
+        async def change_digest():
+            if s.tag_reads == 3:
+                s.installed[0]["digest"] = "b" * 64
+        s.on_tags = change_digest
+    else:
+        s.on_show = revoke
+    with pytest.raises((AgentDispatchStoppedError, AgentTaskError)):
+        await s.executor(task, "research")
+    assert len(_content_requests(s)) == 1 and not s.tool_requests
+    # Revoking the account also correctly denies its public history API.
+    assert not s.store._conn.execute(
+        "SELECT 1 FROM app_agent_events WHERE task_id=? AND kind='tool'", (task["id"],),
+    ).fetchall()
+
+
+async def test_selected_read_charges_existing_operation_allowance_before_dispatch(file_state):
+    s = file_state
+    project, _path, pins = await _selected_file_context(s)
+    task = await _step(s, "research", project_id=project.project_id, file_inputs=pins, max_operations=3)
+    s.responses.append(_read_call())
+    with pytest.raises(AgentTaskError, match="operation allowance"):
+        await s.executor(task, "research")
+    assert len(_content_requests(s)) == 1 and not s.tool_requests
+    assert not [row for row in await _activity(s, task) if row["kind"] == "tool"]
+
+
+async def test_selected_read_callbacks_expire_when_work_scope_finishes(file_state):
+    from audrey.tools.agent_file_reads import agent_file_read_handler
+
+    s = file_state
+    project, _path, pins = await _selected_file_context(s)
+    task = await _step(s, "research", project_id=project.project_id, file_inputs=pins)
+    release = asyncio.Event()
+    captured = {}
+
+    async def later():
+        await release.wait()
+        return await captured["handler"]({"file_id": "chosen-input"})
+
+    async def runner(*_args, **_kwargs):
+        captured["handler"] = agent_file_read_handler(user_id=s.owner.storage_namespace)
+        captured["child"] = asyncio.create_task(later())
+        return ReactResult(content="Finished without further file reads.", tool_rounds=0, done_reason="stop")
+
+    executor = ResearchAgentExecutor(s.app, client_factory=s.executor.client_factory, react_runner=runner)
+    assert await executor(task, "research") == "Finished without further file reads."
+    release.set()
+    with pytest.raises(AgentDispatchStoppedError, match="stopped"):
+        await captured["child"]
+    with pytest.raises(AgentDispatchStoppedError, match="stopped"):
+        await captured["handler"]({"file_id": "chosen-input"})
+    assert not s.tool_requests
 
 
 async def test_selected_input_and_generated_output_share_fenced_publication_without_nested_lock(file_state):

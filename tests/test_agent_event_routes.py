@@ -67,6 +67,19 @@ async def test_invalid_event_pagination_is_rejected(state, query):
     assert (await state.client.get(f"/api/agents/{state.task['id']}/events", params=query)).status_code == 422
 
 
+async def test_selected_file_read_event_is_exposed_without_read_arguments_or_content(state):
+    lease, _seq = await started(state)
+    await state.store.agents.checkpoint(**lease, step_id="plan", result="Read the selected file.")
+    await state.store.agents.reserve_operation(**lease, step_id="research")
+    seq = await state.store.agents.start_event(**lease, stage="research", kind="tool", tool="read_selected_file")
+    await state.store.agents.finish_event(**lease, seq=seq, duration_ms=2)
+    response = await state.client.get(f"/api/agents/{state.task['id']}/events")
+    assert response.status_code == 200
+    event = response.json()["items"][0]
+    assert event["tool"] == "read_selected_file" and event["state"] == "completed"
+    assert not {"text", "file_id", "offset", "filename", "arguments"} & event.keys()
+
+
 async def test_late_event_completion_invalidates_a_captured_response(state, monkeypatch):
     lease, seq = await started(state)
     original = state.store.agents.events

@@ -589,7 +589,7 @@ export interface AgentEvent {
   stage: "plan" | "research" | "review" | "title";
   kind: "stage" | "model" | "tool";
   state: "started" | "completed" | "failed" | "interrupted";
-  tool: "web_search" | "web_fetch" | "create_file" | null;
+  tool: "web_search" | "web_fetch" | "create_file" | "read_selected_file" | null;
   created_at: string;
   finished_at: string | null;
   duration_ms: number | null;
@@ -617,7 +617,7 @@ export async function listAgentEvents(taskId: string, signal?: AbortSignal, befo
       || !["plan", "research", "review", "title"].includes(event.stage)
       || !["stage", "model", "tool"].includes(event.kind)
       || !["started", "completed", "failed", "interrupted"].includes(event.state)
-      || (event.kind === "tool" ? !["web_search", "web_fetch", "create_file"].includes(event.tool ?? "") : event.tool !== null)
+      || (event.kind === "tool" ? !["web_search", "web_fetch", "create_file", "read_selected_file"].includes(event.tool ?? "") : event.tool !== null)
       || !date(event.created_at) || (event.finished_at !== null && !date(event.finished_at))
       || (event.state === "started" ? event.finished_at !== null : event.finished_at === null)
       || !count(event.duration_ms) || !count(event.input_tokens) || !count(event.output_tokens))) {

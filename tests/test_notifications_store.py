@@ -429,7 +429,7 @@ async def test_migration_is_additive_preserves_terminal_task_and_watch_without_b
         state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=30")
     upgraded = ApplicationStore(state.store.path)
     try:
-        assert upgraded.schema_version == 36
+        assert upgraded.schema_version == 37
         assert (await upgraded.agents.get(user_id=state.owner.user_id, task_id=task["id"]))["result"] == task["result"]
         assert (await upgraded.watches.get_run(user_id=state.owner.user_id, watch_id=watch["id"], run_id=run["run_id"]))["status"] == "failed"
         feed = await upgraded.notifications.feed(user_id=state.owner.user_id)

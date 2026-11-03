@@ -111,7 +111,7 @@ class AgentEventResponse(BaseModel):
     stage: Literal["plan", "research", "review", "title"]
     kind: Literal["stage", "model", "tool"]
     state: Literal["started", "completed", "failed", "interrupted"]
-    tool: Literal["web_search", "web_fetch", "create_file"] | None
+    tool: Literal["web_search", "web_fetch", "create_file", "read_selected_file"] | None
     created_at: str
     finished_at: str | None
     duration_ms: int | None = Field(ge=0)

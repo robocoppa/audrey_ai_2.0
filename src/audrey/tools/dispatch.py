@@ -197,6 +197,18 @@ async def dispatch_one(
     policy = current_processing_policy()
     private_handler: PrivateToolHandler | None = None
     native_handler: PrivateToolHandler | None = None
+    if name == "read_selected_file":
+        # This capability has no chat, Private or HTTP fallback. Resolve its
+        # server-owned task binding before parsing or logging source arguments.
+        from audrey.tools.agent_file_reads import agent_file_read_handler
+
+        native_handler = agent_file_read_handler(user_id=user_id)
+        if native_handler is None or policy is not None:
+            tool_calls_total.labels(tool=name, outcome="error").inc()
+            return ToolResult(name=name, call_id=call_id, content=json.dumps({
+                "error": "native_tool_unavailable",
+                "detail": "Selected file reads require an active agent Work step.",
+            }), elapsed_s=0.0, is_error=True)
     if policy is None and name == "create_file":
         # Resolve the owner/run binding before parsing or logging model content.
         try:

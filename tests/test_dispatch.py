@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import json
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 
 import httpx
 import pytest
 
+from audrey.processing_policy import ProcessingPolicy, processing_scope
 from audrey.tools.discovery import (
     TOOL_DECLARATIONS,
     ToolRegistry,
@@ -114,6 +116,26 @@ async def test_dispatch_one_happy_path():
     assert json.loads(result.content) == {"results": ["a", "b"]}
     assert result.name == "web_search"
     assert result.call_id == "call_0"
+
+
+@pytest.mark.parametrize("registered", [False, True])
+@pytest.mark.parametrize("private", [False, True])
+async def test_selected_file_read_cannot_fallback_to_chat_private_or_forged_http(registered, private, caplog):
+    registry = _registry([_spec("read_selected_file")]) if registered else ToolRegistry()
+    requests = []
+
+    def transport(request):
+        requests.append(request)
+        pytest.fail("Selected-file source arguments reached HTTP")
+
+    policy = ProcessingPolicy({"local:latest": "a" * 64}, "http://ollama.test")
+    async with _client(transport) as client:
+        with processing_scope(policy) if private else nullcontext():
+            result = await dispatch_one(client, registry,
+                _call("read_selected_file", "HIDDEN_SOURCE_ARGUMENTS_NOT_JSON"),
+                max_result_chars=6000, timeout_s=2, user_id="owner")
+    assert result.is_error and json.loads(result.content)["error"] == "native_tool_unavailable"
+    assert not requests and "HIDDEN_SOURCE" not in result.content + caplog.text
 
 
 # ─── User-scope invariant ─────────────────────────────────────────────

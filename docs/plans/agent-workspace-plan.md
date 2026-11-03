@@ -41,7 +41,8 @@ steps after interruption; uncommitted model/read work can repeat within the save
 allowance. Every provider/tool dispatch revalidates live task/account/model access.
 Agents offer web search/fetch when needed and native downloadable file creation
 during Work, as described below. Users can explicitly select ordinary Project
-files as bounded local inputs. Automatic personal-memory recall and other write
+files as bounded local inputs and read further pages during Work when needed.
+Automatic personal-memory recall and other write
 tools remain pending. Every model step uses only verified local
 `qwen3.8:latest`, with no classifier, cloud panel or fallback. The worker verifies
 installed local weights before generation and pins their digest within each step;
@@ -568,7 +569,7 @@ transcripts. Retained text can be used when original bytes were reclaimed.
 Generated files are identified as working outputs. Empty, unreadable, protected
 or oversized sources fail without starting a task or silently dropping a file.
 The existing reader bounds disk/expanded inputs to 8 MiB and text to 500,000
-characters. Each selected file supplies at most 1,500 tokens, up to 4,500 total;
+characters. Each selected file initially supplies at most 1,500 tokens, up to 4,500 total;
 the task detail shows the included/full character counts and shortened extracts.
 
 Schema 35 persists only owner/task/Project identities and bounded metadata pins:
@@ -610,7 +611,7 @@ hiding or changing tasks cancels reads, and reopening revalidates. New entries
 preserve the visible history anchor, workflow scroll and keyboard focus.
 
 Application schema 36 stores metadata-only events with per-task sequence numbers.
-Only Plan/Work/Review/Title stages, model/stage/tool kinds and three known tool
+Only Plan/Work/Review/Title stages, model/stage/tool kinds and known allowlisted tool
 names are accepted. There are no event fields for prompts, reasoning, search
 queries, URLs, filenames, source/output bodies, raw exceptions or arbitrary
 provider text. Model usage comes from accepted terminal measurements; missing or
@@ -644,9 +645,60 @@ browser checks at 1,366, 390 and 320 pixels pass. The
 uses real temporary SQLite, owned API routes, task execution and file downloads,
 with scripted local-model replies. Negative checks deliberately remove model
 observations and disable interruption to confirm the probe fails. This is an
-isolated integration check: live worker/browser/Qwen acceptance remains unrun.
+isolated integration check. The owner reports all seven installed Tower event
+checks passed, exit 0; live worker/browser/Qwen acceptance remains unrun.
 Backend/UI rebuilds are required; schema 36 applies automatically, without a
 configuration change. No credentials or upload are required for the smoke.
+
+### Reading further selected-file text
+
+Work now offers a native `read_selected_file` tool when the task has explicit
+ordinary Project file selections. The initial excerpts still guide Plan and
+Review; Work can request additional parts of the same frozen saved text, OCR or
+transcript. Selecting a Project alone grants no file access. The reader accepts
+only a selected file ID, a Unicode character offset and a bounded character limit;
+it accepts no caller-supplied user, Project, path, URL or revision. Private,
+unselected, newly added and newly generated output files are not automatically
+eligible. A generated file explicitly selected before task creation keeps its
+working-output provenance label.
+
+Pages report their actual start/end, full character count, whether more remains
+and the exact next offset. The default request is 3,000 characters, with a maximum
+of 6,000; the complete serialized JSON is limited to 5,000 characters. Escaping
+and metadata can therefore shorten a page. The next offset follows the text
+actually returned, so continuation cannot silently skip a shortened tail. EOF
+has an empty page and null continuation. Invalid offsets and arguments return
+fixed content-free errors. The existing 8 MiB/500,000-character source limits
+and task call/round/time budgets still apply. Availability does not imply that
+the model inspected the whole source; Work instructions require honest coverage.
+
+Each read parses only the requested selected source, checks the full saved-text
+digest and revalidates owner, lease, context, attachment, deletion, local-model
+access and purge state after awaited disk reads. Changed or unavailable inputs
+stop execution before source delivery or a new model request. Read callbacks are
+bound to one Work attempt and expire on scope exit; escaped callbacks, unbound
+chat/Private calls and forged remote specs have no HTTP fallback. The current
+local Qwen weights are checked before dispatch, and reads use the existing
+operation allowance. Page bodies are transient tool replies, with no new task
+input copies or activity-body fields.
+
+Schema 37 adds the read tool to the event allowlist by rebuilding the metadata
+table transactionally, preserving existing sequences, outcomes, timestamps,
+owners, constraints and task links. Upgrade and deliberate rollback tests verify
+saved history remains intact. Recent activity labels reads as Read selected file;
+input help distinguishes initial excerpts from later reads.
+
+Affected service/executor/dispatch tests, migration/response tests and frontend
+tests/typecheck/lint/build pass. The
+[installed file-read smoke](../reference/live-smoke-testing.md#installed-agent-file-read-smoke)
+uses real temporary files, canonical storage, task execution and native tool
+dispatch with scripted local replies. It reads beyond an opening excerpt,
+continues at the actual returned cursor and downloads a generated file containing
+the later text. Negative probes detect omitted pages, broken cursors,
+unselected-file reads and missing read events. This is isolated integration
+evidence; Tower execution and real browser/worker/Qwen acceptance remain pending. Rebuild backend/UI;
+schema 37 applies automatically, with no settings, credentials or upload needed
+for the isolated smoke.
 
 ## Product outcome
 

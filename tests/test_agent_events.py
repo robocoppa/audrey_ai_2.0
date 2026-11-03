@@ -359,11 +359,11 @@ async def test_schema_upgrade_keeps_saved_tasks_and_enforces_owner_foreign_key(s
     task = await _claim(state)
     with state.store._conn:
         state.store._conn.execute("DROP TABLE app_agent_events")
-        state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=36")
+        state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version>=36")
     upgraded = ApplicationStore(state.store.path)
     upgraded.agents._clock = state.clock
     try:
-        assert upgraded.schema_version == 36
+        assert upgraded.schema_version == 37
         assert (await upgraded.agents.get(user_id=state.owner.user_id, task_id=task["id"]))["objective"] == task["objective"]
         assert upgraded._conn.execute("PRAGMA foreign_key_check").fetchall() == []
         with upgraded._conn, pytest.raises(sqlite3.IntegrityError):

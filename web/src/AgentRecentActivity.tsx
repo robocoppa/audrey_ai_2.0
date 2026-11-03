@@ -3,7 +3,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "re
 import { ApiError, listAgentEvents, type AgentEvent, type AgentTask } from "./api";
 
 const STAGES = { plan: "Plan", research: "Work", review: "Review", title: "Title" };
-const TOOLS = { web_search: "Search web", web_fetch: "Read web page", create_file: "Create file" };
+const TOOLS = { web_search: "Search web", web_fetch: "Read web page", create_file: "Create file", read_selected_file: "Read selected file" };
 const STATES = { started: "Started", completed: "Completed", failed: "Failed", interrupted: "Interrupted" };
 
 function mergeEvents(current: AgentEvent[], incoming: AgentEvent[], replace: boolean): AgentEvent[] {

@@ -321,7 +321,7 @@ async def test_additive_migration_preserves_existing_tasks_notices_and_no_input_
         state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=31")
     second = ApplicationStore(state.store.path)
     try:
-        assert second.schema_version == 36
+        assert second.schema_version == 37
         assert await second.agents.get(user_id=state.owner.user_id, task_id=task["id"]) == failed
         assert (await second.notifications.feed(user_id=state.owner.user_id))["unread_count"] == 1
         assert second._conn.execute("SELECT COUNT(*) FROM app_agent_input_requests").fetchone()[0] == 0

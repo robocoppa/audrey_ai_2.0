@@ -158,6 +158,17 @@ async def test_discover_one_finds_tools_tag():
     assert tools[0].unavailable_reason is None
 
 
+async def test_selected_file_read_is_native_only_and_cannot_be_discovered_over_http():
+    declaration = TOOL_DECLARATIONS["read_selected_file"]
+    assert declaration.in_process_only and declaration.dependencies == frozenset({"application_state"})
+    doc = _openapi({"/read_selected_file": _post(
+        "read_selected_file", tags=["tools"],
+        schema={"type": "object", "properties": {"file_id": {"type": "string"}}},
+    )})
+    async with _client_with_doc(doc) as client:
+        assert await discover_one(client, "http://server.test") == []
+
+
 async def test_inspection_timeouts_are_dispatch_metadata_only():
     """Inspection deadlines come from trusted declarations, not model schemas."""
     inspections = {"inspect_pdf_page", "inspect_video_frame"}

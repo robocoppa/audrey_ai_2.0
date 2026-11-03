@@ -60,6 +60,11 @@ describe("Agent activity metadata", () => {
     expect(await listAgentEvents("agent / one", signal, 8)).toEqual({ items: [event], has_more: true, truncated: false });
     expect(fetchMock).toHaveBeenCalledExactlyOnceWith("/api/agents/agent%20%2F%20one/events?limit=50&before=8", expect.objectContaining({ credentials: "same-origin", signal, cache: "no-store" }));
   });
+  it("accepts selected-file reads as metadata-only tool activity", async () => {
+    const read = { ...event, kind: "tool", tool: "read_selected_file", input_tokens: null, output_tokens: null };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ items: [{ ...read, text: "source body must be dropped", offset: 9000 }], has_more: false, truncated: false })));
+    expect(await listAgentEvents("owned")).toEqual({ items: [read], has_more: false, truncated: false });
+  });
   it.each([
     { seq: 0 }, { seq: 1.2 }, { attempt: 0 }, { stage: "prompt body" }, { kind: "reasoning" }, { state: "success" },
     { tool: "web_search" }, { kind: "tool", tool: null }, { kind: "tool", tool: "execute_code" },

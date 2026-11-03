@@ -45,7 +45,7 @@ _EVENT_FIELDS = (
     "seq", "attempt", "stage", "kind", "state", "tool", "created_at", "finished_at",
     "duration_ms", "input_tokens", "output_tokens",
 )
-_EVENT_TOOLS = frozenset({"web_search", "web_fetch", "create_file"})
+_EVENT_TOOLS = frozenset({"web_search", "web_fetch", "create_file", "read_selected_file"})
 _PUBLIC_FIELDS = (
     "objective", "title", "status", "revision", "created_at", "updated_at", "result", "error", "attempts",
 )

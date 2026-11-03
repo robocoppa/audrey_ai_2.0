@@ -21,6 +21,7 @@ English user input only; closed checks do not need another run.
 | Installed Agent file smoke, isolated storage/mocked model | Tower → `tests/smoke/smoke-agent-files-onbox.sh` |
 | Installed Agent file-input smoke, isolated sources/mocked model | Tower → `tests/smoke/smoke-agent-file-inputs-onbox.sh` |
 | Installed Agent event smoke, isolated execution/scripted model | Tower → `tests/smoke/smoke-agent-events-onbox.sh` |
+| Installed Agent file-read smoke, isolated paging/scripted model | Tower → `tests/smoke/smoke-agent-file-reads-onbox.sh` |
 
 Laptop checkout: `/home/bart/Documents/github/audrey/audrey_ai_2.0`.
 Tower checkout: `/mnt/user/appdata/audrey_ai_2.0`.
@@ -419,6 +420,50 @@ Reload the page and confirm saved history remains; Run again should keep the sam
 task and append a new attempt. A completed task alone does not establish useful
 content: inspect the file. This separately checks real local-model/tool choice,
 the running worker and browser/proxy wiring.
+
+## Installed Agent file-read smoke
+
+After pulling selected-file paging, run on Tower:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+tests/smoke/smoke-agent-file-reads-onbox.sh
+```
+
+Application schema 37 applies automatically, preserving existing event history.
+No settings change, credentials, `.env.smoke.local` or upload is needed. The
+wrapper streams the checked-out probe into the backend container's installed
+Python package. It uses a separate ASGI application, synthetic accounts and
+temporary canonical databases/files; it does not open production account data
+or call the running HTTP server. Model metadata and replies are scripted.
+
+Expect seven `PASS` checks and `PASS Agent file read smoke passed` with `(exit 0)`.
+The execution case uses the real runtime, executor and native dispatcher to read
+a marker beyond the 1,500-token opening excerpt, request another page at the
+returned cursor, create a real file and download its exact bytes. Other cases
+check fixed input versions through reopened storage/rerun, selected-owner/Private
+boundaries, source changes and expired callbacks, escaped Unicode/JSON page
+boundaries and EOF, metadata-only read events, and temporary cleanup. Real OCR
+or transcription generation, Docker restart, browser authentication, live worker
+and actual Qwen comprehension are separate acceptance checks.
+
+The smoke normally takes seconds because the fixtures are local and no inference
+runs. `--json` prints a compact receipt; `--timeout-seconds` lowers the ten-second
+per-case deadline. Linux forked cases have parent-enforced deadlines, including
+blocked synchronous work, and children stop before fixture cleanup. Exit codes:
+0 pass, 1 finding/timeout, 2 setup failure, 3 harness crash, 130 interrupted.
+Results print in the launching shell; no notifications or report transfer.
+`AUDREY_SMOKE_APPDATA` (or `APPDATA`) and `AUDREY_SMOKE_CONTAINER` override
+the checkout/container.
+
+For manual live acceptance, select an existing ordinary Project file long enough
+to show a shortened opening excerpt. Assign a task asking for specific information
+near the end of that file, then inspect both its answer and Read selected file
+entries in Recent activity. Confirm the requested information against the source;
+the presence of a tool call alone does not prove useful reading. No upload is
+needed when a suitable file already exists; otherwise add one through the normal
+Project file flow before testing.
 
 ## Service rebuilds
 
