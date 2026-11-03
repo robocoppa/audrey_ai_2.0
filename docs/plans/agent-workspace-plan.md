@@ -63,7 +63,7 @@ This raises the original 2,048-token report allowance after a reported Research
 output-limit failure; live acceptance of the larger allowance remains pending.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
-Adaptive multi-step plans, source-backed Project context for agents, file/Private agent inputs,
+Adaptive multi-step plans, file-backed Project context for agents, file/Private agent inputs,
 semantic search,
 owned-file/Private and multiple-source watches remain implementation work. Existing Private Tax tasks keep
 their current behavior. The remaining sections specify the intended full feature.
@@ -221,9 +221,10 @@ agent. Saved task and Project links resolve current owned targets before navigat
 hidden or superseded reads abort, while mounted conversation and agent drafts stay intact.
 
 Creation freezes up to 2,000 tokens of Project instructions and 1,000 text tokens
-across at most 12 approved notes without source references. Selection prioritizes
-pinned, relevant and open work; newly added notes are not silently adopted. Source-backed
-notes, file contents and Private Projects remain outside this public workflow.
+across at most 12 approved notes. Selection prioritizes
+pinned, relevant and open work; newly added notes are not silently adopted. Current
+message/report-backed notes are supported as described below; file-backed notes,
+file contents and Private Projects remain outside this public workflow.
 Every step receives the selected context as quoted working data under platform
 guidance. Approved notes do not verify truth or authorize new tools or actions.
 All model calls remain verified local Qwen; only Research has the existing public tools.
@@ -406,9 +407,49 @@ Hermetic transport/API/UI checks and mocked responsive browser acceptance verify
 this slice. Its installed-backend [draft smoke](../reference/live-smoke-testing.md#installed-report-suggestion-smoke)
 uses temporary canonical data and a mocked local provider, with no production
 accounts, network or real model generation. The local six-case smoke and its
-negative/cancellation harness pass. Tower smoke and real local-Qwen
-suggestion quality remain pending. Deploy with backend/UI rebuilds; no schema
+negative/cancellation harness pass. The owner reported all six installed Tower
+checks and cleanup passing with exit 0. Real local-Qwen suggestion quality
+remains pending. Deploy with backend/UI rebuilds; no schema
 or configuration change is required.
+
+### Message/report-backed Agent knowledge
+
+Ordinary Project agents can now select approved notes whose references all point
+to current ordinary messages in that Project or completed owned Agent reports.
+This includes an explicitly saved report proposal after separate approval. Pending,
+rejected, superseded, stale, foreign, Private, file-backed and mixed unsupported
+references are excluded. Unattached user notes remain eligible. Report references
+identify generated provenance; approval and a live reference do not verify truth.
+
+Selection keeps the existing pinned/relevant/open-work priorities and limits of
+12 notes and 1,000 note tokens, alongside 2,000 instruction tokens. It examines at
+most 12 source-backed candidates, checking up to eight references each; unsupported
+reference kinds are filtered before that work. Later unattached notes can still
+fill the remaining allowance. Repeated references share a capture-local metadata
+cache. The model receives only the selected note text, never linked message/report
+bodies, reference metadata or file content.
+
+The existing schema32 manifest adds one aggregate source-metadata hash per selected
+source-backed entry, within its existing 4,000-character bound. Canonical source
+revisions are verified during capture; every later dispatch/commit fence compares
+current ownership, scope, privacy, status and metadata against the frozen proof.
+Shared SQLite row/digest helpers preserve Search's canonical revision identities.
+No source body, title or preview is saved in the manifest, and proofs work after
+restart without a resolver cache. Existing sourceless manifests remain compatible;
+old agents do not silently adopt newly approved knowledge.
+
+A changed or deleted selected message, detached conversation, or rerun/deleted
+report invalidates the context and blocks further dispatch, checkpoints, questions,
+completion, Resume and Run again. The agent must be recreated to use current
+knowledge. Project renames, new turns and unrelated notes/files remain safe. Saved
+reports and user-authored/reviewed notes retain their existing read/deletion behavior.
+
+The focused [installed smoke](../reference/live-smoke-testing.md#installed-agent-project-knowledge-smoke)
+uses temporary canonical data with no credentials, network, models or production
+account access. Affected storage/executor/Knowledge/Search tests, UI checks and the
+local six-case smoke pass; the Tower invocation remains unrun. Deployment requires
+backend/UI rebuilds, without schema/configuration changes or an upload. Real-model
+and deployed browser acceptance remain separate.
 
 ## Product outcome
 

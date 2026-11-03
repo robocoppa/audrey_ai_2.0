@@ -7,8 +7,6 @@ here. File I/O is bounded and runs off-loop; authority is checked after it.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import os
 import stat
 import threading
@@ -21,6 +19,8 @@ from typing import Literal
 import anyio
 
 from audrey.app_state.titles import fallback_conversation_title
+from audrey.canonical_db_sources import database_source_rows
+from audrey.canonical_db_sources import source_digest as _digest
 from audrey.content_search import MAX_SOURCE_CHARS, SearchDocument
 from audrey.kb.extract import EmptyExtractionError, extract_text, ocr_text_path
 from audrey.kb.user_store import sanitize_user
@@ -52,12 +52,6 @@ class SearchCoverageIssue:
     updated_at: str
     project_ids: tuple[str, ...] = ()
     archived: bool = False
-
-
-def _digest(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
 
 
 def _identifier(value: str) -> bool:
@@ -204,25 +198,12 @@ class ContentSourceReader:
         with self.store._lock:
             if not self._owner(document.owner_id, namespace):
                 return False
-            if kind == "message":
-                row = self.store._conn.execute(
-                    "SELECT m.message_id,m.conversation_id,m.sequence_no,m.role,m.status,"
-                    "m.updated_at,c.title,c.project_id,c.archived_at,c.private_required "
-                    "FROM app_messages m JOIN app_conversations c "
-                    "ON c.conversation_id=m.conversation_id AND c.user_id=m.user_id "
-                    "WHERE m.user_id=? AND m.message_id=?",
-                    (document.owner_id, expected["message_id"]),
-                ).fetchone()
-            else:
-                row = self.store._conn.execute(
-                    "SELECT t.task_id,t.objective,t.title,t.revision,t.updated_at,p.project_id "
-                    "FROM app_agent_tasks t LEFT JOIN app_agent_project_contexts x "
-                    "ON x.task_id=t.task_id AND x.user_id=t.user_id "
-                    "LEFT JOIN app_projects p ON p.project_id=x.project_id AND p.user_id=t.user_id "
-                    "AND p.private_required=0 WHERE t.user_id=? AND t.task_id=?",
-                    (document.owner_id, expected["task_id"]),
-                ).fetchone()
-            return row is not None and dict(row) == expected
+            rows = database_source_rows(
+                self.store._conn, owner_id=document.owner_id, kind=kind,
+                source_id=expected["message_id" if kind == "message" else "task_id"],
+                include_text=False,
+            )
+            return bool(rows and rows[0] == expected)
 
     async def _disk(self, function, *args):
         if self._limiter is None:
@@ -252,29 +233,10 @@ class ContentSourceReader:
         with self.store._lock:
             if not self._owner(owner_id, namespace):
                 return []
-            if kind == "message":
-                rows = self.store._conn.execute(
-                    "SELECT m.message_id,m.conversation_id,m.sequence_no,m.role,m.status,"
-                    "CASE WHEN length(m.content)<=? THEN m.content ELSE NULL END AS content,"
-                    "m.updated_at,c.title,c.project_id,c.archived_at,c.private_required "
-                    "FROM app_messages m JOIN app_conversations c "
-                    "ON c.conversation_id=m.conversation_id AND c.user_id=m.user_id "
-                    "WHERE m.user_id=? AND m.role IN ('user','assistant') "
-                    "AND m.status IN ('completed','incomplete') AND m.message_id>? "
-                    "AND (? IS NULL OR m.message_id=?) ORDER BY m.message_id LIMIT ?",
-                    (MAX_SOURCE_CHARS, owner_id, after, source_id, source_id, limit),
-                ).fetchall()
-            else:
-                rows = self.store._conn.execute(
-                    "SELECT t.task_id,t.objective,t.title,t.result,t.revision,t.updated_at,p.project_id "
-                    "FROM app_agent_tasks t LEFT JOIN app_agent_project_contexts x "
-                    "ON x.task_id=t.task_id AND x.user_id=t.user_id "
-                    "LEFT JOIN app_projects p ON p.project_id=x.project_id AND p.user_id=t.user_id "
-                    "AND p.private_required=0 WHERE t.user_id=? AND t.result!='' AND t.task_id>? "
-                    "AND (? IS NULL OR t.task_id=?) ORDER BY t.task_id LIMIT ?",
-                    (owner_id, after, source_id, source_id, limit),
-                ).fetchall()
-            return [dict(row) for row in rows]
+            return database_source_rows(
+                self.store._conn, owner_id=owner_id, kind=kind, after=after,
+                limit=limit, source_id=source_id,
+            )
 
     def _document(
         self, owner_id: str, namespace: str, kind: str, row: dict
@@ -306,7 +268,7 @@ class ContentSourceReader:
                 namespace,
                 (kind, {key: value for key, value in row.items() if key != "content"}),
             )
-        if len(row["result"]) > MAX_SOURCE_CHARS:
+        if row["result"] is None:
             return None
         document = SearchDocument(
             owner_id=owner_id,
@@ -495,7 +457,7 @@ class ContentSourceReader:
                         project_ids=(row["project_id"],) if row["project_id"] else (),
                         archived=bool(row["archived_at"]),
                     ))
-                elif kind == "agent" and len(row["result"]) > MAX_SOURCE_CHARS:
+                elif kind == "agent" and row["result"] is None:
                     warnings.append(SearchCoverageIssue(
                         source_id=f"agent:{row['task_id']}:report",
                         kind="agent",

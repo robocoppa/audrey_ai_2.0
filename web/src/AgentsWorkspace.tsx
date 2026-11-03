@@ -30,6 +30,8 @@ const STATUS_LABELS: Record<AgentTaskStatus, string> = {
   cancelled: "Cancelled", failed: "Failed", waiting_for_input: "Waiting for input",
 };
 
+const PROJECT_CONTEXT_HELP = "Uses Project instructions and approved notes. Message and Agent report links are checked for freshness; source bodies and files are not included.";
+
 function isMoving(task: AgentTask) {
   return task.status === "queued" || task.status === "running";
 }
@@ -676,7 +678,7 @@ function AgentTasksWorkspace({
                 {composerProjects.map((project) => <option key={project.id} value={project.id}>{project.name}{project.id === unavailableProjectId ? " (unavailable)" : ""}</option>)}
               </select>
               <p>Public research can use ordinary Projects. Private Projects are unavailable here.</p>
-              {composerProject ? <p>Uses Project instructions and approved notes without source attachments. Files are not included.</p> : null}
+              {composerProject ? <p>{PROJECT_CONTEXT_HELP}</p> : null}
               {projectsLoading ? <p role="status">Loading Projects…</p> : null}
               {projectsError ? <div className="agents-project-error"><p role="alert">{projectsError}</p><button className="agents-secondary" type="button" disabled={projectsLoading} onClick={() => setProjectRefresh((value) => value + 1)}>Retry Projects</button></div> : null}
               {projectsCursor ? <button className="agents-secondary" type="button" disabled={projectsLoading} onClick={() => void loadMoreProjects()}>Load more Projects</button> : null}
@@ -812,7 +814,7 @@ function AgentProjectContextView({ task, onOpenProject }: { task: AgentTask; onO
   const context = task.project_context;
   if (!context) return null;
   return <details className="agents-project-context"><summary>{!context.available ? "Project unavailable" : !context.current ? "Project context changed" : `Project: ${context.project_name ?? "Saved Project"}`}</summary>
-    <p>Uses Project instructions and approved notes without source attachments. Files are not included.</p>
+    <p>{PROJECT_CONTEXT_HELP}</p>
     <p>{context.instructions_included ? "Project instructions included." : "No Project instructions were selected."} {context.knowledge.length} approved note {context.knowledge.length === 1 ? "revision" : "revisions"} pinned for this agent.</p>
     {!context.available ? <p className="agents-project-unavailable">This Project is no longer available. Continuing or running this agent again is unavailable.</p> : !context.current ? <p className="agents-project-unavailable">The Project context has changed. Start a new agent to use its current instructions and approved notes.</p> : null}
     {context.available && onOpenProject ? <button className="agents-secondary" type="button" onClick={() => onOpenProject(context.project_id)}>Open Project</button> : null}

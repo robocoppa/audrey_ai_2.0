@@ -22,6 +22,7 @@ from audrey.agent_executor import AgentSettings, ResearchAgentExecutor
 from audrey.agent_runtime import AgentRuntime
 from audrey.app_state import ApplicationStore
 from audrey.app_state.agents import AgentTaskError
+from audrey.content_sources import ContentSourceReader
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import GenerationUsageError, OllamaClient
 from audrey.pipeline.fair_gate import FairLocalGate
@@ -1021,10 +1022,62 @@ async def test_actual_local_executor_waits_and_then_completes_same_agent_using_s
         ]
 
 
+async def _linked_project_note(state, project, source_kind):
+    body = "Raw provenance body must never enter the Agent model prompt."
+    if source_kind == "message":
+        conversation = await state.store.conversations.create(
+            user_id=state.owner.user_id, project_id=project.project_id,
+        )
+        started = await state.store.conversations.begin_run(
+            user_id=state.owner.user_id, conversation_id=conversation.conversation_id,
+            user_content=body,
+        )
+        await state.store.conversations.finish_run(
+            user_id=state.owner.user_id, run_id=started.run.run_id,
+            outcome="succeeded", assistant_content="Recorded.",
+        )
+        source_id = f"message:{started.user_message.message_id}"
+        source = {"conversation_id": conversation.conversation_id}
+    else:
+        report = await state.store.agents.create(
+            user_id=state.owner.user_id, objective="Save source report.",
+            request_id="provenance-report",
+        )
+
+        async def execute(_task, _step):
+            return body
+
+        assert await AgentRuntime(state.store.agents, execute).run_once()
+        report = await state.store.agents.get(user_id=state.owner.user_id, task_id=report["id"])
+        source_id = f"agent:{report['id']}:report"
+        source = {"task_id": report["id"], "revision": report["revision"]}
+    reader = ContentSourceReader(state.store, None, "/unused")
+    document = await reader.resolve(state.owner.user_id, state.owner.storage_namespace, source_id)
+    assert document is not None
+    options = {} if source_kind == "message" else {
+        "origin": "agent_report", "source_task_id": report["id"],
+        "source_task_revision": report["revision"],
+    }
+    entry = await state.store.knowledge.create(
+        user_id=state.owner.user_id, project_id=project.project_id,
+        kind="decision", text=f"Accepted {source_kind} note: compare stable releases.",
+        sources=[{"source_id": document.source_id, "revision": str(document.revision)}],
+        **options,
+    )
+    if source_kind == "agent":
+        entry = await state.store.knowledge.decide(
+            user_id=state.owner.user_id, project_id=project.project_id,
+            entry_id=entry["id"], expected_revision=entry["revision"], action="approve",
+        )
+    return entry, source, body
+
+
+@pytest.mark.parametrize("source_kind", ["message", "agent"])
 @pytest.mark.parametrize("step_id", ["plan", "research", "review"])
-async def test_project_context_reaches_each_local_step_as_quoted_bounded_working_data(state, step_id):
+async def test_project_context_reaches_each_local_step_as_quoted_bounded_working_data(state, step_id, source_kind):
     project = await state.store.projects.create(user_id=state.owner.user_id, name="Public release scope", instructions="Compare stable releases only.")
     note = await state.store.knowledge.create(user_id=state.owner.user_id, project_id=project.project_id, kind="action", text="Review the stable release policy.")
+    source_note, _source, source_body = await _linked_project_note(state, project, source_kind)
     linked = await state.store.knowledge.create(user_id=state.owner.user_id, project_id=project.project_id, kind="fact", text="Linked file text is excluded.", sources=[{"source_id": "file:missing:text", "revision": "1"}])
     task = await _step(state, step_id, project_id=project.project_id)
     if step_id == "research":
@@ -1034,10 +1087,49 @@ async def test_project_context_reaches_each_local_step_as_quoted_bounded_working
     context = next(message for message in payload["messages"] if "Authenticated user's selected Project context" in message["content"])
     assert context["role"] == "system" and project.instructions in context["content"]
     assert note["text"] in context["content"] and linked["text"] not in context["content"]
+    assert source_note["text"] in context["content"] and source_body not in json.dumps(payload)
+    assert "checked for freshness, not factual accuracy" in context["content"]
     assert "not independently verified evidence" in context["content"] and "No Project files" in context["content"]
     assert payload["model"] == _MODEL
     offered = {tool["function"]["name"] for tool in payload.get("tools", [])}
     assert offered == ({"web_search", "web_fetch"} if step_id == "research" else set())
+
+
+@pytest.mark.parametrize("source_kind", ["message", "agent"])
+@pytest.mark.parametrize("timing", ["metadata", "response", "tool"])
+async def test_selected_knowledge_source_changes_stop_real_model_and_tool_paths(state, source_kind, timing):
+    project = await state.store.projects.create(user_id=state.owner.user_id, name="Frozen source knowledge")
+    _entry, source, _body = await _linked_project_note(state, project, source_kind)
+    task = await _step(state, "research", project_id=project.project_id)
+    state.responses.extend([_search(), _answer()])
+
+    async def change():
+        state.on_show = state.on_chat = state.on_tool = None
+        if source_kind == "message":
+            await state.store.conversations.update(
+                user_id=state.owner.user_id, conversation_id=source["conversation_id"],
+                project_id=None, update_project=True,
+            )
+        else:
+            await state.store.agents.control(
+                user_id=state.owner.user_id, task_id=source["task_id"],
+                expected_revision=source["revision"], action="rerun",
+            )
+
+    if timing == "metadata":
+        state.on_show = change
+    elif timing == "response":
+        state.on_chat = change
+    else:
+        state.on_tool = change
+    with pytest.raises(AgentTaskError, match="Project context changed"):
+        await state.executor(task, "research")
+    assert len(_content_requests(state)) == (timing != "metadata")
+    assert len(state.tool_requests) == (timing == "tool")
+    assert all(client._client.is_closed for client in state.clients)
+    saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert not saved["project_context"]["current"]
+    assert not saved["steps"][1]["result"] and not saved["result"]
 
 
 @pytest.mark.parametrize("timing", ["metadata", "response"])

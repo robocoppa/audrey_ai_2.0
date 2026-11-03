@@ -16,6 +16,7 @@ English user input only; closed checks do not need another run.
 | Installed backend admission smoke, no models | Tower → `tests/smoke/smoke-agent-admission-onbox.sh` |
 | Installed Knowledge source API smoke, isolated data | Tower → `tests/smoke/smoke-knowledge-sources-onbox.sh` |
 | Installed report suggestion smoke, mocked model transport | Tower → `tests/smoke/smoke-agent-knowledge-drafts-onbox.sh` |
+| Installed Agent Project Knowledge smoke, isolated data | Tower → `tests/smoke/smoke-agent-project-knowledge-onbox.sh` |
 
 Laptop checkout: `/home/bart/Documents/github/audrey/audrey_ai_2.0`.
 Tower checkout: `/mnt/user/appdata/audrey_ai_2.0`.
@@ -207,6 +208,40 @@ checkout/container. Real-model browser acceptance uses an existing completed rep
 Propose Project knowledge → Generate suggestions → Use suggestion → review/edit →
 Save proposal. Verify it remains pending until separately approved in Project
 Knowledge. Oversized reports are refused without truncation; manual proposals remain available.
+
+## Installed Agent Project Knowledge smoke
+
+After pulling message/report-backed Agent knowledge, run on Tower:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+tests/smoke/smoke-agent-project-knowledge-onbox.sh
+```
+
+No schema/configuration change, credentials, `.env.smoke.local` or upload is needed.
+The wrapper streams the checked-out probe into the running backend's installed
+Python package. It creates separate temporary canonical accounts, Projects,
+messages, approved notes and saved reports, and removes them afterwards. It never
+opens production account databases or calls a model/network. An older image lacking
+this support reports a failed contract or setup error; rebuild the backend first.
+
+Expect six `PASS` checks and `PASS Agent Project Knowledge smoke passed` with
+`(exit 0)`. They cover approved message/report notes, exclusion of unsupported/stale
+sources, frozen pins after restart, source-change dispatch/commit fences, safe
+unrelated changes and isolated cleanup. The smoke verifies installed repository
+integration; it does not exercise the live HTTP proxy, server process, browser or
+real model output quality.
+
+The smoke normally takes seconds, with a ten-second deadline per case. `--json`
+prints a compact receipt; `--timeout-seconds` can lower the per-case deadline.
+Exit codes: 0 pass, 1 finding/timeout, 2 setup failure, 3 harness crash, 130 interrupted.
+Results print in the launching shell, with no notifications/report transfer.
+`AUDREY_SMOKE_APPDATA` (or `APPDATA`) and `AUDREY_SMOKE_CONTAINER` override the
+checkout/container. Manual browser acceptance uses an existing ordinary Project:
+approve a current report-linked proposal, start a new agent in that Project, and
+expand its Project context to confirm approved notes were selected. A source change
+must block continuation while retaining the saved report. No upload is required.
 
 ## Service rebuilds
 

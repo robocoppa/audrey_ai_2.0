@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
+import json
 import threading
 import uuid
 import zipfile
@@ -428,6 +430,38 @@ async def test_saved_agent_final_report_is_generated_and_revision_fenced(state):
             "UPDATE app_agent_tasks SET revision=revision+1 WHERE task_id=?", (task["id"],)
         )
     assert not state.reader.is_current(docs[0])
+
+
+@pytest.mark.parametrize("kind", ["message", "agent"])
+async def test_shared_db_source_rows_preserve_existing_exact_revision_shape(state, kind):
+    from audrey.canonical_db_sources import database_source_rows
+
+    if kind == "message":
+        mid, _ = await message(state)
+        row = dict(state.store._conn.execute(
+            "SELECT m.message_id,m.conversation_id,m.sequence_no,m.role,m.status,m.content,"
+            "m.updated_at,c.title,c.project_id,c.archived_at,c.private_required "
+            "FROM app_messages m JOIN app_conversations c ON c.conversation_id=m.conversation_id "
+            "AND c.user_id=m.user_id WHERE m.message_id=?", (mid,),
+        ).fetchone())
+        source_id, identifier, body_key = f"message:{mid}", mid, "content"
+    else:
+        task = await state.store.agents.create(user_id=state.owner.user_id, objective="Research stable releases.", request_id="revision-shape")
+        with state.store._lock, state.store._conn:
+            state.store._conn.execute("UPDATE app_agent_tasks SET result='Saved report.',revision=revision+1 WHERE task_id=?", (task["id"],))
+        row = dict(state.store._conn.execute(
+            "SELECT t.task_id,t.objective,t.title,t.result,t.revision,t.updated_at,p.project_id "
+            "FROM app_agent_tasks t LEFT JOIN app_agent_project_contexts x ON x.task_id=t.task_id "
+            "AND x.user_id=t.user_id LEFT JOIN app_projects p ON p.project_id=x.project_id "
+            "AND p.user_id=t.user_id AND p.private_required=0 WHERE t.task_id=?", (task["id"],),
+        ).fetchone())
+        source_id, identifier, body_key = f"agent:{task['id']}:report", task["id"], "result"
+    expected = hashlib.sha256(json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    document = await state.reader.resolve(*args(state), source_id)
+    assert document.revision == expected
+    metadata = database_source_rows(state.store._conn, owner_id=state.owner.user_id, kind=kind, source_id=identifier, include_text=False)
+    assert metadata == [{key: value for key, value in row.items() if key != body_key}]
+    assert state.reader.is_current(document)
 
 
 async def test_disabled_owner_is_fenced_on_resolve_and_final_serialization(state):

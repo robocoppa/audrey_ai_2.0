@@ -13,9 +13,15 @@ import json
 import re
 import sqlite3
 
+from audrey.canonical_db_sources import (
+    database_source_identity,
+    database_source_rows,
+    source_digest,
+)
 from audrey.pipeline.complexity import count_tokens
 
 CONTEXT_CHANGED = "Project context changed. Create a new agent to use its current instructions and knowledge."
+SUPPORTED_KNOWLEDGE_SOURCE_KINDS = frozenset({"message", "agent"})
 
 
 class AgentProjectAccessError(ValueError):
@@ -52,11 +58,23 @@ def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _sourceless(row: sqlite3.Row) -> bool:
+def _source_refs(row: sqlite3.Row) -> list[dict] | None:
     try:
-        return json.loads(row["sources_json"]) == []
+        sources = json.loads(row["sources_json"])
     except (ValueError, TypeError):
-        return False
+        return None
+    if not isinstance(sources, list) or len(sources) > 8:
+        return None
+    seen = set()
+    for source in sources:
+        if not isinstance(source, dict) or set(source) != {"source_id", "revision"}:
+            return None
+        if database_source_identity(source["source_id"]) is None:
+            return None
+        if source["source_id"] in seen or not isinstance(source["revision"], str) or not source["revision"]:
+            return None
+        seen.add(source["source_id"])
+    return sources
 
 
 class AgentProjectContexts:
@@ -79,6 +97,59 @@ class AgentProjectContexts:
             (task_id, user_id),
         ).fetchone()
 
+    def _source_proof(
+        self, row: sqlite3.Row, *, verify_revision: bool,
+        cache: dict | None = None,
+    ) -> str | None:
+        """Freeze provenance metadata without retaining or dispatching its body.
+
+        The pinned Knowledge revision already freezes the canonical source IDs
+        and revisions. A single aggregate metadata hash avoids copying those
+        references into the bounded Agent manifest. Full source revisions are
+        checked at capture only; every later fence rechecks live metadata.
+        """
+        sources = _source_refs(row)
+        if sources is None:
+            return None
+        metadata = []
+        for source in sources:
+            identity = database_source_identity(source["source_id"])
+            assert identity is not None
+            kind, identifier = identity
+            cache_key = (row["user_id"], source["source_id"])
+            if cache is not None and cache_key in cache:
+                saved = cache[cache_key]
+            else:
+                rows = database_source_rows(
+                    self._conn, owner_id=row["user_id"], kind=kind, source_id=identifier,
+                    include_text=verify_revision, completed_report=True,
+                )
+                saved = None
+                if rows:
+                    current = rows[0]
+                    revision = None
+                    if verify_revision:
+                        body_key = "content" if kind == "message" else "result"
+                        body = current[body_key]
+                        if body is not None and body.strip():
+                            revision = source_digest(current)
+                        current.pop(body_key)
+                    saved = (current, revision)
+                if cache is not None:
+                    # Bodies never enter even this capture-local cache.
+                    cache[cache_key] = saved
+            if saved is None:
+                return None
+            current, revision = saved
+            if kind == "message" and (
+                current["private_required"] or current["project_id"] != row["project_id"]
+            ):
+                return None
+            if verify_revision and revision != source["revision"]:
+                return None
+            metadata.append({"source_id": source["source_id"], "metadata": current})
+        return source_digest(metadata)
+
     def capture(self, *, task_id: str, user_id: str, project_id: str, objective: str) -> None:
         project = self._project(user_id, project_id)
         if project is None:
@@ -97,13 +168,30 @@ class AgentProjectContexts:
                     row["kind"] == "decision", row["updated_at"], row["entry_id"])
 
         selected, remaining = [], 1000
-        for row in sorted((row for row in rows if _sourceless(row)), key=rank, reverse=True)[:12]:
+        # Unsupported refs never crowd out notes. Inspect at most twelve sourced
+        # candidates; stale candidates do not prevent later sourceless selection.
+        candidates = (row for row in rows if _source_refs(row) is not None)
+        sourced_candidates, cache = 0, {}
+        for row in sorted(candidates, key=rank, reverse=True):
+            if json.loads(row["sources_json"]):
+                if sourced_candidates >= 12:
+                    continue
+                sourced_candidates += 1
+            proof = self._source_proof(row, verify_revision=True, cache=cache)
+            if proof is None:
+                continue
             text = _prefix(row["text"], remaining)
             used = token_count(text)
             if text and used > 0:
-                selected.append({"id": row["entry_id"], "revision": row["revision"], "chars": len(text)})
+                pin = {"id": row["entry_id"], "revision": row["revision"], "chars": len(text)}
+                if json.loads(row["sources_json"]):
+                    pin["sources_sha256"] = proof
+                # Preserve schema32's bound, including unusual long canonical IDs.
+                if len(json.dumps([*selected, pin], separators=(",", ":"))) > 4000:
+                    continue
+                selected.append(pin)
                 remaining -= used
-            if remaining <= 0:
+            if remaining <= 0 or len(selected) >= 12:
                 break
         instructions = _prefix(project["instructions"], 2000)
         self._conn.execute(
@@ -124,7 +212,13 @@ class AgentProjectContexts:
                 "SELECT * FROM app_project_knowledge WHERE entry_id=? AND user_id=? AND project_id=?",
                 (pin["id"], manifest["user_id"], manifest["project_id"]),
             ).fetchone()
-            if row is None or row["revision"] != pin["revision"] or row["approval_state"] != "approved" or not _sourceless(row):
+            if row is None or row["revision"] != pin["revision"] or row["approval_state"] != "approved":
+                raise AgentProjectChangedError(CONTEXT_CHANGED)
+            proof = self._source_proof(row, verify_revision=False)
+            if proof is None:
+                raise AgentProjectChangedError(CONTEXT_CHANGED)
+            sources = json.loads(row["sources_json"])
+            if sources and proof != pin.get("sources_sha256"):
                 raise AgentProjectChangedError(CONTEXT_CHANGED)
             selected.append({"id": pin["id"], "revision": pin["revision"],
                              **{key: row[key] for key in ("kind", "work_status", "origin")},
