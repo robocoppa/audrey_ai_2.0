@@ -1,6 +1,6 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, November 2, 2026. Public-research Agents, unified lexical
+**Status:** In progress, November 2, 2026. Saved task Agents, unified lexical
 Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner confirms Search
 returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
 
@@ -21,11 +21,11 @@ Two small right-pointing chevrons collapse the panel. Collapse retains search
 state, aborts hidden reads and revalidates the saved query
 on reopening. Source text opens inside the panel with paging and Back to results;
 Project Knowledge's separate source previews retain their modal behavior.
-It has a saved public-source
-research workflow: Plan, Research and Review. Users can create tasks, inspect
+It has a saved task
+workflow: Plan, Work and Review. Users can create tasks, inspect
 saved step results/reports, pause/resume/cancel, rerun the same agent and delete
 terminal history. Run again preserves completed checkpoints on unfinished tasks;
-completed tasks repeat Research/Review using the saved Plan. The agent ID and
+completed tasks repeat Work/Review using the saved Plan. The agent ID and
 selection stay the same. Lists return compact summaries and load the selected report separately.
 Agents has a left sidebar for creation, history and active controls; its workflow
 and sidebar scroll independently. Small screens use a controls drawer. Terminal
@@ -39,7 +39,7 @@ Application schema 26 introduced owner-bound tasks and operation reservations wi
 leases, fenced writes and cumulative limits. The lifecycle worker reuses committed
 steps after interruption; uncommitted model/read work can repeat within the saved
 allowance. Every provider/tool dispatch revalidates live task/account/model access.
-Public agents offer only web search/fetch; automatic personal-memory recall and
+Agents currently offer web search/fetch when needed; automatic personal-memory recall and
 file/write tools are excluded. Every model step uses only verified local
 `qwen3.8:latest`, with no classifier, cloud panel or fallback. The worker verifies
 installed local weights before generation and pins their digest within each step;
@@ -49,7 +49,7 @@ purge removes the new task data and receipts.
 Schema 28 adds persistent agent titles. One bounded local Qwen title call runs
 before the first incomplete step, using the same verified client, model admission,
 lease and cumulative operation allowance. A failed title leaves a short fallback
-and does not block research. Rerun keeps a generated title; untitled legacy agents
+and does not block task execution. Rerun keeps a generated title; untitled legacy agents
 receive a generation attempt on their next explicitly started run. The title call
 has a 64-token allowance, thinking disabled and a ten-second timeout; it uses no
 cloud fallback and does not alter the objective or saved Plan.
@@ -57,7 +57,7 @@ cloud fallback and does not alter the objective or saved Plan.
 Model failures identify the actual stage and distinguish output limits from empty
 report text. Per-call logs retain only stop/usage counts and text lengths;
 report and reasoning bodies are excluded. Truncated tool calls stop before dispatch.
-Research and Review allow up to 8,192 generated tokens per call, including model
+Work and Review allow up to 8,192 generated tokens per call, including model
 reasoning. Plan has a separate 2,048-token cap, bounded by the overall call limit.
 This raises the original 2,048-token report allowance after a reported Research
 output-limit failure; live acceptance of the larger allowance remains pending.
@@ -147,7 +147,7 @@ Schema 29 stores watch definitions, immutable run inputs/source snapshots, basel
 operation receipts and in-app notices. The scheduler coalesces missed occurrences,
 runs repeated DST times once and moves nonexistent wall clocks to the first valid
 minute. Leases, revision fences, cumulative allowances and capped retry/backoff cover
-restarts; research agents and watches share the one-active-task-per-owner boundary.
+restarts; agents and watches share the one-active-task-per-owner boundary.
 Pause/edit/delete revoke earlier work. Owner purge removes all new derivatives.
 
 The guarded fetcher authorizes every network hop and rejects incomplete/oversized
@@ -191,7 +191,7 @@ Schema 31 adds durable planning questions. The same verified local planning call
 can return one bounded question when an essential detail cannot reasonably be
 inferred. A complete, validated request saves the question, releases the lease and
 compute, and exposes Waiting for input plus a deduplicated Activity notice. No
-Research or Review starts while it waits. The stored task remains paused internally;
+Work or Review starts while it waits. The stored task remains paused internally;
 the public waiting state comes from its pending question, avoiding a task-table
 rewrite. Waiting time does not consume active execution allowance.
 
@@ -214,7 +214,7 @@ post-await ownership/deletion/revision fences and plain-text rendering cover sta
 invalid requests. No extra classifier, cloud model, external delivery or additional
 tool authority was added. Rebuild backend and UI; schema 31 applies automatically.
 
-Schema 32 links public-research agents to ordinary Projects. The composer offers
+Schema 32 links agents to ordinary Projects. The composer offers
 an optional Project, and Project home lists its saved agents plus an explicit
 New agent in Project action. Prefill preserves the objective and requires Start
 agent. Saved task and Project links resolve current owned targets before navigating;
@@ -227,7 +227,7 @@ message/report-backed notes are supported as described below; file-backed notes,
 file contents and Private Projects remain outside this public workflow.
 Every step receives the selected context as quoted working data under platform
 guidance. Approved notes do not verify truth or authorize new tools or actions.
-All model calls remain verified local Qwen; only Research has the existing public tools.
+All model calls remain verified local Qwen; only Work offers the available tools.
 
 The additive manifest stores instruction hashes and note IDs/revisions/prefix lengths,
 without copying input bodies or Project names. Canonical rows supply text afresh.
@@ -277,7 +277,7 @@ older background work joins the interactive tier after the configured aging
 threshold. Running generations finish without interruption, and cloud GPU bypass
 and existing total concurrency caps remain unchanged.
 
-Agent titles, Plan, each Research model call, Review and Watch significance checks
+Agent titles, Plan, each Work model call, Review and Watch significance checks
 use the background path. Public tool reads hold neither queue. A background call
 waiting for GPU can give its per-user permit back to later chat, including when
 the per-user cap is one. Handoffs retain the original queue age, preventing chat
@@ -447,16 +447,64 @@ reports and user-authored/reviewed notes retain their existing read/deletion beh
 The focused [installed smoke](../reference/live-smoke-testing.md#installed-agent-project-knowledge-smoke)
 uses temporary canonical data with no credentials, network, models or production
 account access. Affected storage/executor/Knowledge/Search tests, UI checks and the
-local six-case smoke pass; the Tower invocation remains unrun. Deployment requires
-backend/UI rebuilds, without schema/configuration changes or an upload. Real-model
-and deployed browser acceptance remain separate.
+local six-case smoke pass. The owner reported all six installed Tower checks and
+cleanup passing with exit 0. Deployment requires backend/UI rebuilds, without
+schema/configuration changes or an upload. Real-model and deployed browser
+acceptance remain separate.
+
+### Assigning Project actions and questions to Agents
+
+An approved open Action or Question in an ordinary Project can explicitly open
+a task draft through Assign to agent. The browser rereads the canonical
+Project and entry before prefilling the exact entry text and Project. Existing draft text
+requires an explicit choice before replacement. Opening a draft never starts a
+model or changes Knowledge; Start agent remains a separate action. Text is editable,
+and the composer exposes the selected entry revision with an explicit unlink action.
+
+Start supplies the entry identity/revision with the normal Agent creation request.
+The repository atomically requires an owned approved open Action/Question and
+current supported source references, then pins that entry first within the existing
+12-note/1,000-token context allowance. Facts, Decisions, closed or inactive entries,
+Private Projects and unsupported/stale sources cannot start this flow. The manifest
+adds only an origin flag to the entry's existing metadata pin, without copying
+note bodies into the manifest. The reviewed objective remains normal saved task
+text. No new schema, configuration or separate job is introduced. Creation idempotency
+includes the origin identity and revision.
+
+Saved Agents expose the originating entry revision. Knowledge cards can load their
+Assigned agents and open the same saved task. Agent completion and Run again
+preserve the entry's approval/work state; the user still resolves a question or
+completes an action explicitly. Editing, closing or deleting the pinned entry, or
+changing its selected sources, blocks further work through the existing context
+fences. A Project rename or unrelated new note leaves the saved origin intact.
+Execution retains the same verified local Qwen model and available tools.
+
+Agents handle tasks the user assigns, including drafting, planning, analysis and
+tool-assisted work. Research mode remains a separate chat workflow. Generic
+Plan/Work/Review prompts choose tools when useful; work on supplied text does not
+require browsing, citations or an external-source appendix. Missing web tools no
+longer block creating or running a model-only task. Actual tool calls still check
+the live allowlist, endpoint, owner, lease, model and context authority. The current
+tool set remains web search and page reads; arbitrary external effects are not
+newly implemented or authorized. Retained `research` checkpoint IDs keep saved
+Plans/results and Run again compatible while their displayed stage reads Work.
+
+The focused [installed smoke](../reference/live-smoke-testing.md#installed-knowledge-agent-smoke)
+uses a separate ASGI application and temporary canonical data, plus the real task
+runtime/executor with mocked verified local-Qwen replies and no web tools. Its seven
+checks require no credentials, live network/models or production-account writes.
+Affected backend/UI checks and mocked browser acceptance at 1,366, 390 and 320 pixels
+pass, including exact prefill, draft choices, explicit Start, origin payload, Work
+labels and opening the same assigned Agent. Backend/UI rebuilds are required;
+no schema/configuration change or upload is needed. Real-model and deployed
+browser acceptance remain separate.
 
 ## Product outcome
 
 A user can give Audrey an objective, choose its Project and sources, start an
 agent, and return later to its plan, progress, questions and results. The agent
-can perform bounded research and document work, check its progress against the
-objective, and continue from committed steps after a backend restart.
+works on the assigned task within its available tools and context, checks progress
+against the objective, and continues from committed steps after a backend restart.
 
 The same workspace lets users find saved content, maintain approved Project
 knowledge, and schedule recurring checks that produce meaningful change reports.

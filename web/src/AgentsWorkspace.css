@@ -235,3 +235,6 @@
   .agents-welcome { margin: 2rem auto; }
   .agents-composer textarea { min-height: 6rem; }
 }
+.agents-knowledge-confirm, .agents-knowledge-origin { min-width: 0; border: 1px solid var(--border); border-radius: 0.65rem; padding: 0.7rem; }
+.agents-knowledge-confirm blockquote { margin: 0.6rem 0; padding-left: 0.6rem; border-left: 2px solid var(--border); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 10rem; overflow-y: auto; font-size: 0.8rem; }
+.agents-knowledge-confirm > div { display: flex; flex-wrap: wrap; gap: 0.45rem; }

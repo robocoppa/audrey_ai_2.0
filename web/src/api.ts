@@ -527,6 +527,7 @@ export interface AgentProjectContext {
   current: boolean;
   instructions_included: boolean;
   knowledge: Array<{ id: string; revision: number }>;
+  origin_entry?: { id: string; revision: number } | null;
 }
 
 export interface AgentKnowledgeSuggestion {
@@ -589,11 +590,12 @@ export function getAgentTask(taskId: string, signal?: AbortSignal): Promise<Agen
   return apiJson<AgentTask>(`/api/agents/${encodeURIComponent(taskId)}`, { signal, cache: "no-store" });
 }
 
-export function createAgentTask(objective: string, requestId: string, projectId?: string | null): Promise<AgentTask> {
+export function createAgentTask(objective: string, requestId: string, projectId?: string | null, origin?: { id: string; revision: number }): Promise<AgentTask> {
   return apiJson<AgentTask>("/api/agents", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ objective, request_id: requestId, ...(projectId !== undefined ? { project_id: projectId } : {}) }),
+    body: JSON.stringify({ objective, request_id: requestId, ...(projectId !== undefined ? { project_id: projectId } : {}),
+      ...(origin ? { knowledge_entry_id: origin.id, knowledge_entry_revision: origin.revision } : {}) }),
   });
 }
 

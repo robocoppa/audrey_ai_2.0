@@ -44,6 +44,10 @@
 .knowledge-history section + section { border-top: 1px solid var(--border); }
 .knowledge-history h4 { margin: 0; color: var(--text); font-size: 0.75rem; font-weight: 500; }
 .knowledge-history section p { white-space: pre-wrap; line-height: 1.6; overflow-wrap: anywhere; }
+.knowledge-research-agents { display: grid; gap: 0.4rem; margin-top: 0.6rem; }
+.knowledge-research-agents button { display: flex; justify-content: space-between; gap: 0.7rem; text-align: left; min-width: 0; }
+.knowledge-research-agents span { overflow-wrap: anywhere; min-width: 0; }
+.knowledge-research-agents small { color: var(--muted); flex-shrink: 0; }
 @media (max-width: 600px) {
   .knowledge-card, .knowledge-create { padding: 0.75rem; }
   .knowledge-card > header { flex-direction: column; gap: 0.5rem; }

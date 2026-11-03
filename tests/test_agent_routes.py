@@ -159,12 +159,15 @@ async def test_agents_reject_unsupported_scope_and_client_resource_overrides(age
     assert (await agents.client.get("/api/agents")).json() == {"items": []}
 
 
-async def test_disabled_tools_block_new_work_but_preserve_saved_access(agents):
+async def test_missing_web_tools_allow_general_tasks_and_preserve_saved_access(agents):
     task = (await _create(agents)).json()
-    agents.app.state.tools.by_name.pop("web_fetch")
-    assert (await _create(agents, request_id="tools-down")).status_code == 503
+    agents.app.state.tools.by_name.clear()
+    response = await _create(agents, request_id="tools-down", objective="Draft a concise project update.")
+    assert response.status_code == 201, response.text
+    created = response.json()
+    assert created["status"] == "queued" and created["objective"] == "Draft a concise project update."
     assert (await agents.client.get(f"/api/agents/{task['id']}")).status_code == 200
-    assert (await agents.client.get("/api/agents")).json()["items"][0]["id"] == task["id"]
+    assert {item["id"] for item in (await agents.client.get("/api/agents")).json()["items"]} == {task["id"], created["id"]}
 
 
 async def test_bots_group_blocks_new_and_resumed_work_but_preserves_owned_controls(agents):
@@ -269,12 +272,10 @@ async def test_http_completed_rerun_keeps_plan_and_rejects_duplicate_revision(ag
     assert len(agents.wakes) == wakes + 1
 
 
-@pytest.mark.parametrize("revocation", ["tool", "model", "disabled", "bots"])
+@pytest.mark.parametrize("revocation", ["model", "disabled", "bots"])
 async def test_http_rerun_rechecks_authority_and_keeps_the_saved_report(agents, revocation):
     completed = await _complete_task(agents)
-    if revocation == "tool":
-        agents.app.state.tools.by_name.pop("web_fetch")
-    elif revocation == "model":
+    if revocation == "model":
         administrator = await agents.store.resolve_external_identity(
             provider="test", subject="operator", email="operator@example.com", display_name="Operator",
             role="admin", auth_method="test",
@@ -291,6 +292,18 @@ async def test_http_rerun_rechecks_authority_and_keeps_the_saved_report(agents, 
     assert response.status_code == 503, response.text
     assert (await agents.client.get(f"/api/agents/{completed['id']}")).json() == completed
     assert len(agents.wakes) == wakes
+
+
+async def test_missing_web_tools_allow_rerun_of_same_agent_with_saved_plan(agents):
+    completed = await _complete_task(agents)
+    agents.app.state.tools.by_name.clear()
+    response = await _rerun(agents, completed)
+    assert response.status_code == 200, response.text
+    queued = response.json()
+    assert queued["id"] == completed["id"] and queued["status"] == "queued"
+    assert queued["steps"][0] == completed["steps"][0]
+    assert queued["attempts"] == completed["attempts"]
+    assert queued["steps"][1]["label"] == "Work"
 
 
 @pytest.mark.parametrize("cap", ["max_queued_per_user", "max_queued_global", "max_attempts"])
@@ -499,3 +512,126 @@ async def test_project_metadata_is_fenced_if_project_is_deleted_after_task_read(
     monkeypatch.setattr(agents.store.agents, "get", removed_after_read)
     response = await agents.client.get(f"/api/agents/{task['id']}")
     assert response.status_code == 409 and project.name not in response.text
+
+
+async def _knowledge_work(state, *, owner=None, private=False, kind="action"):
+    owner = owner or state.owners[0]
+    project = await state.store.projects.create(user_id=owner.user_id, name="Release work", private_required=private)
+    entry = await state.store.knowledge.create(
+        user_id=owner.user_id, project_id=project.project_id, kind=kind,
+        text="Determine the supported public stable release.",
+    )
+    return project, entry
+
+
+@pytest.mark.parametrize("kind", ["action", "question"])
+async def test_knowledge_work_creates_explicit_project_origin_and_replays_same_agent(agents, kind):
+    project, entry = await _knowledge_work(agents, kind=kind)
+    body = {"project_id": project.project_id, "knowledge_entry_id": entry["id"], "knowledge_entry_revision": entry["revision"]}
+    response = await _create(agents, **body)
+    assert response.status_code == 201, response.text
+    task = response.json()
+    assert task["project_context"]["origin_entry"] == {"id": entry["id"], "revision": 1}
+    assert task["project_context"]["knowledge"][0] == task["project_context"]["origin_entry"]
+    assert entry["text"] not in response.text and response.headers["cache-control"] == "private, no-store"
+    listing = (await agents.client.get("/api/agents", params={"project_id": project.project_id})).json()["items"]
+    assert listing[0]["project_context"]["origin_entry"] == task["project_context"]["origin_entry"]
+    updated = await agents.store.knowledge.update(
+        user_id=agents.owners[0].user_id, project_id=project.project_id, entry_id=entry["id"], expected_revision=1,
+        work_status="completed" if kind == "action" else "resolved",
+    )
+    replay = await _create(agents, **body)
+    assert replay.status_code == 201 and replay.json()["id"] == task["id"]
+    assert not replay.json()["project_context"]["current"]
+    assert (await _create(agents, **{**body, "knowledge_entry_revision": updated["revision"]})).status_code == 409
+    assert len(listing) == 1
+
+
+@pytest.mark.parametrize("extra", [
+    {"knowledge_entry_id": "entry"}, {"knowledge_entry_revision": 1},
+    {"knowledge_entry_id": "entry", "knowledge_entry_revision": None},
+    {"knowledge_entry_id": "entry", "knowledge_entry_revision": True},
+    {"knowledge_entry_id": "entry", "knowledge_entry_revision": "1"},
+    {"knowledge_entry_id": "entry", "knowledge_entry_revision": 1.0},
+    {"knowledge_entry_id": "entry", "knowledge_entry_revision": 0},
+    {"knowledge_entry_id": "entry", "knowledge_entry_revision": -1},
+    {"knowledge_entry_id": 42, "knowledge_entry_revision": 1},
+    {"knowledge_entry_id": " ", "knowledge_entry_revision": 1},
+    {"knowledge_entry_id": "x" * 301, "knowledge_entry_revision": 1},
+])
+async def test_knowledge_work_api_pair_is_strict_before_creating_or_waking(agents, extra):
+    project, _ = await _knowledge_work(agents)
+    response = await _create(agents, project_id=project.project_id, **extra)
+    assert response.status_code == 422, response.text
+    assert (await agents.client.get("/api/agents")).json() == {"items": []}
+    assert agents.wakes == []
+
+
+async def test_knowledge_work_api_requires_project_and_preserves_plain_creation_contract(agents):
+    project, entry = await _knowledge_work(agents)
+    pair = {"knowledge_entry_id": entry["id"], "knowledge_entry_revision": 1}
+    assert (await _create(agents, **pair)).status_code == 422
+    ordinary = await _create(agents, project_id=project.project_id)
+    assert ordinary.status_code == 201 and "origin_entry" not in ordinary.json()["project_context"]
+    assert (await _create(agents, project_id=project.project_id, **pair)).status_code == 409
+
+
+@pytest.mark.parametrize("invalid", ["missing", "foreign", "private", "closed", "fact", "stale_revision", "file"])
+async def test_knowledge_work_api_rejects_unavailable_or_changed_origins(agents, invalid):
+    project, entry = await _knowledge_work(agents, private=invalid == "private", kind="fact" if invalid == "fact" else "action")
+    body = {"project_id": project.project_id, "knowledge_entry_id": entry["id"], "knowledge_entry_revision": 1}
+    if invalid == "missing":
+        body["knowledge_entry_id"] = "missing"
+    elif invalid == "foreign":
+        _, foreign_entry = await _knowledge_work(agents, owner=agents.owners[1])
+        body["knowledge_entry_id"] = foreign_entry["id"]
+    elif invalid in {"closed", "stale_revision", "file"}:
+        changes = {
+            "closed": {"work_status": "completed"},
+            "stale_revision": {"text": "A changed research question."},
+            "file": {"sources": [{"source_id": "file:missing:text", "revision": "old"}]},
+        }[invalid]
+        current = await agents.store.knowledge.update(
+            user_id=agents.owners[0].user_id, project_id=project.project_id, entry_id=entry["id"], expected_revision=1,
+            **changes,
+        )
+        if invalid != "stale_revision":
+            body["knowledge_entry_revision"] = current["revision"]
+    response = await _create(agents, **body)
+    assert response.status_code == (409 if invalid == "stale_revision" else 404), response.text
+    assert entry["text"] not in response.text
+    assert (await agents.client.get("/api/agents")).json() == {"items": []}
+    assert agents.wakes == []
+
+
+async def test_knowledge_edit_before_create_commit_rejects_stale_draft_without_waking(agents, monkeypatch):
+    project, entry = await _knowledge_work(agents)
+    create = agents.store.agents.create
+
+    async def changed_before_create(**kwargs):
+        await agents.store.knowledge.update(
+            user_id=agents.owners[0].user_id, project_id=project.project_id, entry_id=entry["id"], expected_revision=1,
+            text="A changed research question before task creation.",
+        )
+        return await create(**kwargs)
+
+    monkeypatch.setattr(agents.store.agents, "create", changed_before_create)
+    response = await _create(agents, project_id=project.project_id, knowledge_entry_id=entry["id"], knowledge_entry_revision=1)
+    assert response.status_code == 409 and "Project knowledge changed" in response.text
+    assert (await agents.client.get("/api/agents")).json() == {"items": []} and agents.wakes == []
+
+
+async def test_origin_deletion_after_create_is_fenced_before_http_response(agents, monkeypatch):
+    project, entry = await _knowledge_work(agents)
+    create = agents.store.agents.create
+
+    async def deleted_after_create(**kwargs):
+        result = await create(**kwargs)
+        await agents.store.knowledge.delete(
+            user_id=agents.owners[0].user_id, project_id=project.project_id, entry_id=entry["id"], expected_revision=1,
+        )
+        return result
+
+    monkeypatch.setattr(agents.store.agents, "create", deleted_after_create)
+    response = await _create(agents, project_id=project.project_id, knowledge_entry_id=entry["id"], knowledge_entry_revision=1)
+    assert response.status_code == 409 and entry["text"] not in response.text and agents.wakes == []

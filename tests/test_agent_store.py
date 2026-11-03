@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import json
 import sqlite3
 from types import SimpleNamespace
 
@@ -201,13 +202,34 @@ async def test_summary_listing_omits_all_report_bodies_but_preserves_public_step
     assert summary[0]["status"] == "completed"
     assert summary[0]["steps"] == [
         {"id": "plan", "label": "Plan", "status": "completed", "result": ""},
-        {"id": "research", "label": "Research", "status": "completed", "result": ""},
+        {"id": "research", "label": "Work", "status": "completed", "result": ""},
         {"id": "review", "label": "Review", "status": "completed", "result": ""},
     ]
     assert full[0]["result"] == "Saved final report body."
     assert full[0]["steps"][0]["result"] == "Saved plan report body."
     assert "report body" not in repr(summary)
     assert await state.store.agents.list(user_id=state.other.user_id, summary=True) == []
+
+
+async def test_legacy_research_label_reads_as_work_without_rewriting_saved_plan_or_storage(state):
+    await _create(state)
+    task = await state.store.agents.claim()
+    task = await _step(state, task, "plan", result="Preserve this exact committed Plan.")
+    legacy_steps = task["steps"]
+    legacy_steps[1]["label"] = "Research"
+    stored = json.dumps(legacy_steps)
+    with state.store._lock, state.store._conn:
+        state.store._conn.execute("UPDATE app_agent_tasks SET steps_json=? WHERE task_id=?", (stored, task["id"]))
+    current = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    summary = (await state.store.agents.list(user_id=state.owner.user_id, summary=True))[0]
+    assert current["steps"][1]["id"] == summary["steps"][1]["id"] == "research"
+    assert current["steps"][1]["label"] == summary["steps"][1]["label"] == "Work"
+    assert current["steps"][0] == legacy_steps[0] and current["revision"] == task["revision"]
+    assert state.store._conn.execute("SELECT steps_json FROM app_agent_tasks WHERE task_id=?", (task["id"],)).fetchone()[0] == stored
+    cancelled = await _control(state, current, "cancel")
+    queued = await _control(state, cancelled, "rerun")
+    assert queued["id"] == task["id"] and queued["steps"][0] == legacy_steps[0]
+    assert queued["steps"][1]["label"] == "Work"
 
 
 async def test_active_owner_required_on_create_read_control_and_dispatch(state):

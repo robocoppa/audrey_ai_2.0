@@ -1,4 +1,4 @@
-"""Native owner-bound saved research agents and lifecycle controls."""
+"""Native owner-bound saved agents and lifecycle controls."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from collections.abc import Coroutine
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from audrey.agent_dispatch import AgentDispatchStoppedError
 from audrey.agent_executor import agent_settings, research_authority
@@ -51,6 +51,7 @@ class AgentProjectContextResponse(BaseModel):
     current: bool
     instructions_included: bool
     knowledge: list[AgentKnowledgePinResponse]
+    origin_entry: AgentKnowledgePinResponse | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class AgentTaskResponse(BaseModel):
@@ -82,6 +83,16 @@ class AgentCreateRequest(BaseModel):
     objective: str = Field(min_length=1, max_length=8000)
     request_id: str = Field(min_length=1, max_length=200)
     project_id: str | None = Field(default=None, min_length=1, max_length=300)
+    knowledge_entry_id: str | None = Field(default=None, min_length=1, max_length=300)
+    knowledge_entry_revision: int | None = Field(default=None, ge=1, le=2**63 - 1, strict=True)
+
+    @model_validator(mode="after")
+    def validate_knowledge_origin(self):
+        if (self.knowledge_entry_id is None) != (self.knowledge_entry_revision is None):
+            raise ValueError("Project knowledge identity and revision must be supplied together.")
+        if self.knowledge_entry_id is not None and self.project_id is None:
+            raise ValueError("Project knowledge tasks require a Project.")
+        return self
 
 
 class AgentActionRequest(BaseModel):
@@ -156,7 +167,9 @@ async def create_agent(body: AgentCreateRequest, request: Request, response: Res
         await research_authority(request.app, principal.user_id)
         settings = agent_settings(request.app)
         task = await repository.create(user_id=principal.user_id, objective=body.objective,
-                                       request_id=body.request_id, limits=settings.task_limits(), project_id=body.project_id)
+                                       request_id=body.request_id, limits=settings.task_limits(), project_id=body.project_id,
+                                       knowledge_entry_id=body.knowledge_entry_id,
+                                       knowledge_entry_revision=body.knowledge_entry_revision)
         repository.fence_response(user_id=principal.user_id, tasks=[task])
     except AgentDispatchStoppedError as error:
         raise HTTPException(status_code=503, detail=str(error)) from None

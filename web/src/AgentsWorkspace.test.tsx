@@ -24,6 +24,8 @@ function waitingTask(patch: Partial<AgentTask> = {}): AgentTask {
 
 const project = { id: "project-research", name: "Public release work", instructions: "Stable releases only.", created_at: "2026-10-31T10:00:00Z", updated_at: "2026-10-31T10:00:00Z" };
 const projectContext = { project_id: project.id, project_name: project.name, available: true, current: true, instructions_included: true, knowledge: [{ id: "note-one", revision: 1 }] };
+const knowledgeEntry: api.KnowledgeEntry = { id: "entry-open", project_id: project.id, kind: "action", text: "Compare public release dates.", approval_state: "approved", work_status: "open", revision: 3, pinned: false, origin: "user", sources: [], source_task_id: null, created_at: project.created_at, updated_at: project.updated_at, approved_at: project.updated_at, stale: false, source_warnings: [], replaces_id: null, base_revision: null };
+const knowledgeRequest = { project, entry: knowledgeEntry, serial: 1 };
 
 beforeEach(() => {
   vi.spyOn(api, "listProjects").mockResolvedValue({ items: [], next_cursor: null, limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
@@ -40,6 +42,119 @@ afterEach(() => {
 });
 
 describe("AgentsWorkspace", () => {
+  it.each(["running", "failed", "completed"] as const)("uses Result for a general %s task", async (status) => {
+    const saved = task({ status, result: status === "completed" ? "The drafted checklist." : "" });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    render(<AgentsWorkspace />);
+    expect(await screen.findByRole("heading", { name: "Result" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Report" })).not.toBeInTheDocument();
+    if (status === "running") expect(screen.getByText("The result will appear here when Audrey completes its review.")).toBeVisible();
+    else if (status === "failed") expect(screen.getByText("This task stopped before a final result was saved. Any completed steps are available above.")).toBeVisible();
+    else expect(screen.getByRole("button", { name: "Delete task" })).toHaveAttribute("title", "Delete saved task and result");
+  });
+
+  it("describes an empty general task workflow with a saved result", async () => {
+    render(<AgentsWorkspace />);
+    expect(await screen.findByText("Review and save the result")).toBeVisible();
+    expect(screen.queryByText("Review and save the report")).not.toBeInTheDocument();
+  });
+  it("prefills an open Knowledge entry without starting and sends its reviewed pair only on explicit Start", async () => {
+    vi.spyOn(api, "getProject").mockResolvedValue(project);
+    const origin = { id: knowledgeEntry.id, revision: 3 };
+    const saved = task({ project_context: { ...projectContext, origin_entry: origin } });
+    const create = vi.spyOn(api, "createAgentTask").mockImplementation(async () => { vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); return saved; });
+    vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const update = vi.spyOn(api, "updateProjectKnowledge");
+    render(<AgentsWorkspace composerKnowledgeRequest={knowledgeRequest} />);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Compare public release dates."));
+    expect(screen.getByText(/From Project Knowledge · Revision 3/)).toBeVisible();
+    expect(create).not.toHaveBeenCalled(); expect(update).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Research stable releases only." } });
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    await waitFor(() => expect(create).toHaveBeenCalledWith("Research stable releases only.", expect.any(String), project.id, origin));
+    expect(update).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByText(`Project: ${project.name}`, { selector: "summary" }));
+    expect(screen.getByText(/Started from Project Knowledge · Revision 3/)).toBeVisible();
+  });
+
+  it("preserves a different composer draft until Use entry and supports Keep my draft", async () => {
+    const create = vi.spyOn(api, "createAgentTask");
+    const { rerender } = render(<AgentsWorkspace />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "My unsent objective" } });
+    rerender(<AgentsWorkspace composerKnowledgeRequest={knowledgeRequest} />);
+    expect(await screen.findByRole("group", { name: "Use Project Knowledge entry" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("My unsent objective");
+    expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Start agent" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Keep my draft" }));
+    expect(screen.queryByRole("group", { name: "Use Project Knowledge entry" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("My unsent objective");
+    rerender(<AgentsWorkspace composerKnowledgeRequest={{ ...knowledgeRequest, serial: 2 }} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Use entry" }));
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Compare public release dates.");
+    expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(project.id); expect(create).not.toHaveBeenCalled();
+  });
+
+  it.each(["change Project", "remove entry link", "clear draft"])("clears the Knowledge origin when users %s", async (action) => {
+    vi.spyOn(api, "getProject").mockResolvedValue(project);
+    const create = vi.spyOn(api, "createAgentTask").mockResolvedValue(task());
+    render(<AgentsWorkspace composerKnowledgeRequest={knowledgeRequest} />);
+    await screen.findByRole("button", { name: "Remove entry link" });
+    if (action === "change Project") fireEvent.change(screen.getByRole("combobox", { name: "Project" }), { target: { value: "" } });
+    else fireEvent.click(screen.getByRole("button", { name: action === "clear draft" ? "Clear draft" : "Remove entry link" }));
+    expect(screen.queryByRole("button", { name: "Remove entry link" })).not.toBeInTheDocument();
+    if (action === "clear draft") fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "A fresh objective" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0]).toHaveLength(action === "change Project" ? 2 : 3);
+  });
+
+  it("retains the objective and origin after an authoritative entry conflict", async () => {
+    vi.spyOn(api, "getProject").mockResolvedValue(project);
+    const create = vi.spyOn(api, "createAgentTask").mockRejectedValue(new api.ApiError(409, "The selected Knowledge entry changed. Review it before starting."));
+    render(<AgentsWorkspace composerKnowledgeRequest={knowledgeRequest} />);
+    await screen.findByRole("button", { name: "Remove entry link" });
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The selected Knowledge entry changed");
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Compare public release dates.");
+    expect(screen.getByRole("button", { name: "Remove entry link" })).toBeVisible(); expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an available Project selected after origin deletion and lets users remove its entry link", async () => {
+    vi.spyOn(api, "getProject").mockResolvedValue(project);
+    const create = vi.spyOn(api, "createAgentTask").mockRejectedValueOnce(new api.ApiError(404, "The selected Knowledge entry is unavailable.")).mockResolvedValueOnce(task());
+    render(<AgentsWorkspace composerKnowledgeRequest={knowledgeRequest} />);
+    await screen.findByRole("button", { name: "Remove entry link" }); fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The selected Knowledge entry is unavailable");
+    expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(project.id);
+    expect(screen.getByRole("button", { name: "Start agent" })).toBeEnabled();
+    expect(screen.queryByText(/The selected Project is unavailable/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove entry link" })); fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2)); expect(create.mock.calls[1]).toHaveLength(3);
+  });
+
+  it("rejects a Unicode objective over the backend byte limit while retaining its entry text", async () => {
+    const text = "“date” ".repeat(850); const create = vi.spyOn(api, "createAgentTask");
+    render(<AgentsWorkspace composerKnowledgeRequest={{ ...knowledgeRequest, entry: { ...knowledgeEntry, text } }} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("8,000 UTF-8 bytes");
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue(`${text}`);
+    fireEvent.submit(screen.getByRole("button", { name: "Start agent" }).closest("form")!); expect(create).not.toHaveBeenCalled();
+  });
+
+  it("keeps an oversized entry intact and requires an edited bounded objective", async () => {
+    const create = vi.spyOn(api, "createAgentTask"); const text = "a".repeat(7000);
+    render(<AgentsWorkspace composerKnowledgeRequest={{ ...knowledgeRequest, entry: { ...knowledgeEntry, text } }} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("6,000 characters");
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue(`${text}`);
+    fireEvent.submit(screen.getByRole("button", { name: "Start agent" }).closest("form")!); expect(create).not.toHaveBeenCalled();
+  });
+
+  it("applies only the latest composer navigation and never restores an older Knowledge origin", async () => {
+    render(<AgentsWorkspace composerKnowledgeRequest={knowledgeRequest} composerProjectRequest={{ project, serial: 2 }} />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(project.id));
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("");
+    expect(screen.queryByRole("button", { name: "Remove entry link" })).not.toBeInTheDocument();
+  });
   it.each(["rerun", "delete"])("discards report suggestions when a catalog refresh observes %s", async (change) => {
     const saved = task({ status: "completed", result: "Completed source report.", revision: 8 });
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
@@ -69,7 +184,7 @@ describe("AgentsWorkspace", () => {
     await screen.findByRole("option", { name: project.name });
     expect(screen.queryByRole("option", { name: "Private work" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("combobox", { name: "Project" }), { target: { value: project.id } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "Compare public releases" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Compare public releases" } });
     fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
     await waitFor(() => expect(create).toHaveBeenCalledWith("Compare public releases", expect.any(String), project.id));
   });
@@ -77,10 +192,10 @@ describe("AgentsWorkspace", () => {
   it("prefills a Project without starting, preserving the objective across navigation", async () => {
     const create = vi.spyOn(api, "createAgentTask");
     const { rerender } = render(<AgentsWorkspace />);
-    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "An unsent objective" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "An unsent objective" } });
     rerender(<AgentsWorkspace composerProjectRequest={{ project, serial: 1 }} />);
     await waitFor(() => expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(project.id));
-    expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("An unsent objective");
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("An unsent objective");
     rerender(<AgentsWorkspace visible={false} composerProjectRequest={{ project, serial: 1 }} />);
     rerender(<AgentsWorkspace visible composerProjectRequest={{ project, serial: 1 }} />);
     expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(project.id);
@@ -92,7 +207,7 @@ describe("AgentsWorkspace", () => {
     const create = vi.spyOn(api, "createAgentTask");
     render(<AgentsWorkspace composerProjectRequest={{ project, serial: 1 }} />);
     await waitFor(() => expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(project.id));
-    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "A selected objective" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "A selected objective" } });
     fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The selected Project is unavailable");
     expect(screen.getByRole("button", { name: "Start agent" })).toBeDisabled(); expect(create).not.toHaveBeenCalled();
@@ -212,11 +327,11 @@ describe("AgentsWorkspace", () => {
     render(<AgentsWorkspace />);
     await screen.findByRole("heading", { name: saved.title });
     expect(feed).not.toHaveBeenCalled(); expect(api.getActivityUnreadCount).toHaveBeenCalled();
-    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "My next unsaved agent objective" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "My next unsaved agent objective" } });
     fireEvent.click(screen.getByRole("button", { name: "Activity" }));
     fireEvent.click(await screen.findByRole("button", { name: /Open agent result/ }));
     expect(await screen.findByRole("heading", { name: saved.title })).toBeVisible();
-    expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("My next unsaved agent objective");
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("My next unsaved agent objective");
     expect(screen.getAllByRole("button", { name: `Open agent: ${saved.title}` })).toHaveLength(1);
     expect(create).not.toHaveBeenCalled();
   });
@@ -284,15 +399,15 @@ describe("AgentsWorkspace", () => {
     });
     vi.mocked(api.getAgentTask).mockResolvedValue(created);
     render(<AgentsWorkspace />);
-    expect(await screen.findByText("No agents yet. Start with a research objective above.")).toBeVisible();
+    expect(await screen.findByText("No agents yet. Start with a task objective above.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Start agent" })).toBeDisabled();
-    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "  Compare public documentation  " } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "  Compare public documentation  " } });
     fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
     expect(await screen.findByRole("heading", { name: created.objective })).toBeVisible();
     expect(create).toHaveBeenCalledWith(created.objective, expect.any(String));
-    expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("");
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("");
     expect(screen.getByRole("heading", { name: "Plan and progress" })).toBeVisible();
-    expect(screen.getByText("Research public sources", { selector: "strong" })).toBeVisible();
+    expect(screen.getByText("Work", { selector: "strong" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Schedule" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete task" })).not.toBeInTheDocument();
   });
@@ -305,8 +420,8 @@ describe("AgentsWorkspace", () => {
         return task();
       });
     render(<AgentsWorkspace />);
-    await screen.findByText("No agents yet. Start with a research objective above.");
-    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "Compare public documentation" } });
+    await screen.findByText("No agents yet. Start with a task objective above.");
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Compare public documentation" } });
     fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The connection was lost.");
     fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
@@ -325,7 +440,7 @@ describe("AgentsWorkspace", () => {
     render(<AgentsWorkspace />);
     const sidebar = within(screen.getByRole("complementary", { name: "Agent tasks" }));
     const detail = within(screen.getByRole("region", { name: "Selected agent" }));
-    expect(sidebar.getByRole("textbox", { name: "Research objective" })).toBeVisible();
+    expect(sidebar.getByRole("textbox", { name: "Task objective" })).toBeVisible();
     fireEvent.click(await sidebar.findByRole("button", { name: "Pause" }));
     fireEvent.click(await sidebar.findByRole("button", { name: "Resume" }));
     fireEvent.click(await sidebar.findByRole("button", { name: "Cancel" }));
@@ -352,7 +467,7 @@ describe("AgentsWorkspace", () => {
     expect(await screen.findByRole("heading", { name: second.objective })).toBeVisible();
     await waitFor(() => expect(workflow.scrollTop).toBe(0));
     expect(savedTask).toHaveFocus();
-    expect(workflow).not.toContainElement(screen.getByRole("textbox", { name: "Research objective" }));
+    expect(workflow).not.toContainElement(screen.getByRole("textbox", { name: "Task objective" }));
   });
 
   it("keeps mobile controls in a dismissible focus-trapped drawer and opens the workflow on selection", async () => {
@@ -392,7 +507,7 @@ describe("AgentsWorkspace", () => {
     render(<AgentsWorkspace />);
     fireEvent.click(screen.getByRole("button", { name: "Agent controls" }));
     const controls = within(screen.getByRole("dialog", { name: "Agent tasks" }));
-    fireEvent.change(controls.getByRole("textbox", { name: "Research objective" }), { target: { value: "Research public sources" } });
+    fireEvent.change(controls.getByRole("textbox", { name: "Task objective" }), { target: { value: "Research public sources" } });
     fireEvent.click(controls.getByRole("button", { name: "Start agent" }));
     expect(await controls.findByRole("alert")).toHaveTextContent("No local worker is available.");
     expect(screen.getByRole("dialog", { name: "Agent tasks" })).toHaveAttribute("aria-modal", "true");
@@ -500,7 +615,7 @@ describe("AgentsWorkspace", () => {
     expect(confirmButton).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("group", { name: "Confirm task deletion" })).not.toBeInTheDocument();
     fireEvent.click(confirmButton);
-    expect(await screen.findByText("No agents yet. Start with a research objective above.")).toBeVisible();
+    expect(await screen.findByText("No agents yet. Start with a task objective above.")).toBeVisible();
     expect(remove).toHaveBeenCalledWith(saved.id, 8);
     expect(screen.queryByRole("heading", { name: saved.objective })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
@@ -613,7 +728,7 @@ describe("AgentsWorkspace", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Refresh agent tasks" })).toBeEnabled());
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [] });
     fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
-    expect(await screen.findByText("No agents yet. Start with a research objective above.")).toBeVisible();
+    expect(await screen.findByText("No agents yet. Start with a task objective above.")).toBeVisible();
     expect(screen.queryByRole("heading", { name: task().objective })).not.toBeInTheDocument();
     expect(count).toHaveBeenLastCalledWith(0);
   });

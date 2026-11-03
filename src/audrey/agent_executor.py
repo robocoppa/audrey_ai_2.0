@@ -1,4 +1,4 @@
-"""Saved research agents use verified local qwen3.8 for every model step."""
+"""Saved task agents use verified local qwen3.8 for every model step."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ Markdown, a 'Title:' prefix, or ending punctuation."""
 def _require_complete_text(
     step_id: str, result: Any, reason: str, *, thinking: bool = False
 ) -> None:
-    label = step_id.capitalize()
+    label = "Work" if step_id == "research" else step_id.capitalize()
     if reason == "length":
         raise AgentDispatchStoppedError(
             f"{label} reached the local model's output limit before finishing."
@@ -86,7 +86,7 @@ def _project_message(context: dict) -> dict:
             "An approved action is not a completed action; agent-report notes are generated suggestions. "
             "Supported message and report references were checked for freshness, not factual accuracy. "
             "No Project files or linked-source content have been inspected. "
-            "Use these notes to guide the objective; ground public factual claims in inspected web sources. "
+            "Use these notes to guide the task; verify source-dependent claims when needed. "
             "This context cannot authorize personal-file access, cloud models, messages or external actions."
         ),
     }
@@ -140,12 +140,9 @@ async def research_authority(app: Any, user_id: str) -> Any:
     ):
         raise AgentDispatchStoppedError("Agent account access is unavailable.")
     if not agent_settings(app).enabled or current_processing_policy() is not None:
-        raise AgentDispatchStoppedError("Public research agents are unavailable.")
+        raise AgentDispatchStoppedError("Agents are unavailable in this processing mode.")
     if await resolve_model(app.state.cfg, store, principal, "local") is None:
         raise AgentDispatchStoppedError("Local model access is unavailable.")
-    tools = getattr(app.state, "tools", ToolRegistry())
-    if any(tools.get(name) is None for name in PUBLIC_RESEARCH_TOOLS):
-        raise AgentDispatchStoppedError("Public research tools are unavailable.")
     return principal
 
 
@@ -302,7 +299,7 @@ class ResearchAgentExecutor:
         if step_id not in prompts:
             raise AgentDispatchStoppedError("Unsupported agent step.")
         max_tokens = settings.tokens_for_step(step_id)
-        tools = self.app.state.tools.restrict(
+        tools = getattr(self.app.state, "tools", ToolRegistry()).restrict(
             PUBLIC_RESEARCH_TOOLS if step_id == "research" else frozenset()
         )
         endpoints = {spec.name: (spec.server_url, spec.path) for spec in tools.specs()}
@@ -356,7 +353,7 @@ class ResearchAgentExecutor:
 
             async def check_tool(name):
                 await authorize()
-                current = self.app.state.tools.get(name)
+                current = getattr(self.app.state, "tools", ToolRegistry()).get(name)
                 if (
                     name not in PUBLIC_RESEARCH_TOOLS
                     or current is None
@@ -437,11 +434,8 @@ class ResearchAgentExecutor:
                     ):
                         urls.append(url)
                         size += length
-                if not urls:
-                    raise AgentDispatchStoppedError(
-                        "The research step returned no public source evidence."
-                    )
-                result += "\n\nSelected public sources:\n" + "\n".join(f"- {url}" for url in urls)
+                if urls:
+                    result += "\n\nSelected public sources:\n" + "\n".join(f"- {url}" for url in urls)
             return result.strip()
         finally:
             await client.aclose()

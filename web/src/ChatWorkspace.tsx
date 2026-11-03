@@ -82,6 +82,7 @@ import {
   type AudreyProject,
   type AudreyProjectFile,
   type AgentTask,
+  type KnowledgeEntry,
   type PublicWatch,
   type Conversation,
   type ConversationMessage,
@@ -237,6 +238,7 @@ export function ChatWorkspace({
   projectOpenRequest,
   conversationOpenRequest,
   onNewProjectAgent,
+  onResearchProjectKnowledge,
   onOpenProjectAgent,
   onNewProjectWatch,
   onOpenProjectWatch,
@@ -255,6 +257,7 @@ export function ChatWorkspace({
   projectOpenRequest?: { project: AudreyProject; serial: number };
   conversationOpenRequest?: { conversation: Conversation; messageId: string; serial: number };
   onNewProjectAgent?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
+  onResearchProjectKnowledge?: (project: AudreyProject, entry: KnowledgeEntry, signal?: AbortSignal) => void | Promise<void>;
   onOpenProjectAgent?: (task: AgentTask, signal?: AbortSignal) => void | Promise<void>;
   onNewProjectWatch?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
   onOpenProjectWatch?: (watch: PublicWatch, signal?: AbortSignal) => void | Promise<void>;
@@ -1284,6 +1287,7 @@ export function ChatWorkspace({
             onConversationSelected={openConversation}
             onFilesChange={setProjectFiles}
             onNewProjectAgent={onNewProjectAgent}
+            onResearchProjectKnowledge={onResearchProjectKnowledge}
             onOpenProjectAgent={onOpenProjectAgent}
             onNewProjectWatch={onNewProjectWatch}
             onOpenProjectWatch={onOpenProjectWatch}

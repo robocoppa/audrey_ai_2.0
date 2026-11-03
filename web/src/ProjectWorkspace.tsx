@@ -178,6 +178,7 @@ export function ProjectHome({
   onConversationSelected,
   onFilesChange,
   onNewProjectAgent,
+  onResearchProjectKnowledge,
   onOpenProjectAgent,
   onNewProjectWatch,
   onOpenProjectWatch,
@@ -195,6 +196,7 @@ export function ProjectHome({
   onConversationSelected: (conversation: Conversation) => void;
   onFilesChange: (files: AudreyProjectFile[]) => void;
   onNewProjectAgent?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
+  onResearchProjectKnowledge?: (project: AudreyProject, entry: KnowledgeEntry, signal?: AbortSignal) => void | Promise<void>;
   onOpenProjectAgent?: (task: AgentTask, signal?: AbortSignal) => void | Promise<void>;
   onNewProjectWatch?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
   onOpenProjectWatch?: (watch: PublicWatch, signal?: AbortSignal) => void | Promise<void>;
@@ -580,7 +582,7 @@ export function ProjectHome({
       </div>
 
       <div className="project-home-grid project-home-details">
-        <ProjectKnowledgeSection project={project} visible={visible} onOpenSource={(_source, entry, index) => { void openKnowledgeSource(entry, index); }} />
+        <ProjectKnowledgeSection project={project} visible={visible} onResearch={onResearchProjectKnowledge} onOpenAgent={onOpenProjectAgent} onOpenSource={(_source, entry, index) => { void openKnowledgeSource(entry, index); }} />
         {!isPrivate && (onNewProjectAgent || onOpenProjectAgent) ? <ProjectAgents
           key={project.id} project={project} visible={visible}
           onNew={onNewProjectAgent} onOpen={onOpenProjectAgent} /> : null}
@@ -641,13 +643,13 @@ function ProjectAgents({ project, visible, onNew, onOpen }: {
   }
 
   return <section className="project-panel project-agents" aria-labelledby="project-agents-title">
-    <header><div><span>Background research</span><h2 id="project-agents-title">Project agents</h2></div>
+    <header><div><span>Background tasks</span><h2 id="project-agents-title">Project agents</h2></div>
       {onNew ? <button className="project-primary-button" type="button" disabled={opening} onClick={() => void follow()}>New agent in Project</button> : null}
     </header>
     {error ? <p className="project-error" role="alert">{error}</p> : null}
     {loading ? <p role="status">Loading Project agents…</p> : items.length ? <ul className="project-home-conversations">{items.map((task) => <li key={task.id} className="conversation-row">
       <button className="conversation project-home-conversation" type="button" disabled={opening || !onOpen} onClick={() => void follow(task)}><span>{task.title || task.objective}</span><small>{task.status.replaceAll("_", " ")}</small></button>
-    </li>)}</ul> : <p className="project-empty">No agents in this Project yet. Start one to research with its instructions and approved working notes.</p>}
+    </li>)}</ul> : <p className="project-empty">No agents in this Project yet. Start one with its instructions and approved working notes.</p>}
     <button type="button" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>Refresh Project agents</button>
   </section>;
 }

@@ -60,6 +60,13 @@ describe("Project agent requests", () => {
     await createAgentTask("Legacy", "old-key");
     expect(fetchMock).toHaveBeenLastCalledWith("/api/agents", expect.objectContaining({ body: JSON.stringify({ objective: "Legacy", request_id: "old-key" }) }));
   });
+  it("sends the reviewed Knowledge entry pair only when explicitly supplied", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({})); vi.stubGlobal("fetch", fetchMock);
+    await createAgentTask("Research this action", "entry-key", "project-one", { id: "note-one", revision: 7 });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({ objective: "Research this action", request_id: "entry-key", project_id: "project-one", knowledge_entry_id: "note-one", knowledge_entry_revision: 7 });
+    await createAgentTask("Another objective", "plain-key", "project-one");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({ objective: "Another objective", request_id: "plain-key", project_id: "project-one" });
+  });
 });
 
 describe("unified Activity requests", () => {

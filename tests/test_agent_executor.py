@@ -183,13 +183,14 @@ async def state(tmp_path, monkeypatch):
     store.close()
 
 
-async def _step(state, step_id="plan", *, max_operations=96, generated_title=True, project_id=None):
+async def _step(state, step_id="plan", *, max_operations=96, generated_title=True, project_id=None, knowledge_entry=None):
     task = await state.store.agents.create(
         user_id=state.owner.user_id,
         objective="Compare the public release notes.",
         request_id=f"request-{step_id}",
         limits={"max_operations": max_operations},
         project_id=project_id,
+        **({"knowledge_entry_id": knowledge_entry["id"], "knowledge_entry_revision": knowledge_entry["revision"]} if knowledge_entry else {}),
     )
     claimed = await state.store.agents.claim()
     assert claimed["id"] == task["id"]
@@ -532,7 +533,7 @@ async def _revoke(state, task, kind):
             actor_user_id=state.owner.user_id, model_id="local", enabled=False, audience="users"
         )
     elif kind == "tool":
-        state.tools.by_name["web_fetch"].available = False
+        state.tools.by_name["web_search"].available = False
     elif kind == "bots":
         await state.store.admin_update_user(
             actor_user_id=state.owner.user_id,
@@ -561,7 +562,7 @@ async def test_canonical_bots_group_stops_before_any_local_model_request(state, 
 
 
 @pytest.mark.parametrize("metadata_read", [1, 2])
-@pytest.mark.parametrize("kind", ["account", "model", "tool", "pause", "bots"])
+@pytest.mark.parametrize("kind", ["account", "model", "pause", "bots"])
 async def test_live_authority_revocation_before_generation_prevents_content(
     state, kind, metadata_read
 ):
@@ -635,7 +636,8 @@ async def test_truncated_or_empty_outputs_identify_the_actual_stage(
 ):
     task = await _step(state, step_id)
     state.responses.append(_answer(content, done_reason=reason))
-    with pytest.raises(AgentDispatchStoppedError, match=f"{step_id.capitalize()} {detail}"):
+    label = "Work" if step_id == "research" else step_id.capitalize()
+    with pytest.raises(AgentDispatchStoppedError, match=f"{label} {detail}"):
         await state.executor(task, step_id)
     assert not state.tool_requests
 
@@ -660,7 +662,7 @@ async def test_truncated_tool_call_does_not_dispatch_partial_arguments(state):
     task = await _step(state, "research")
     state.responses.append({**_search(), "done_reason": "length"})
     with pytest.raises(
-        AgentDispatchStoppedError, match="Research reached the local model's output limit"
+        AgentDispatchStoppedError, match="Work reached the local model's output limit"
     ):
         await state.executor(task, "research")
     assert not state.tool_requests
@@ -690,7 +692,7 @@ async def test_larger_research_limit_reruns_the_same_agent_with_its_saved_plan_a
     assert failed["status"] == "failed" and failed["attempts"] == 1
     assert failed["steps"][0]["result"] == "Saved work plan"
     assert failed["steps"][1]["result"] == "" and failed["result"] == ""
-    assert failed["error"].startswith("Research reached the local model's output limit")
+    assert failed["error"].startswith("Work reached the local model's output limit")
     failed_usage = dict(
         state.store._conn.execute(
             "SELECT attempts,operations,active_seconds FROM app_agent_tasks WHERE task_id=?",
@@ -778,7 +780,7 @@ async def test_utf8_output_limit_is_checked_in_bytes(state):
         "https://example.com/" + "x" * 2049,
     ],
 )
-async def test_research_requires_usable_public_source_evidence(state, url):
+async def test_work_discards_unusable_source_links_without_requiring_sources(state, url):
     task = await _step(state, "research")
 
     async def report(client, _health, _tools, **kwargs):
@@ -788,8 +790,8 @@ async def test_research_requires_usable_public_source_evidence(state, url):
         )
 
     state.executor.react_runner = report
-    with pytest.raises(AgentDispatchStoppedError, match="no public source evidence"):
-        await state.executor(task, "research")
+    assert await state.executor(task, "research") == "Grounded report."
+    assert not state.tool_requests
 
 
 async def test_runner_cannot_change_the_pinned_model(state):
@@ -1150,3 +1152,110 @@ async def test_project_changes_during_transport_prevent_dispatch_or_checkpoint(s
     assert not state.tool_requests and all(client._client.is_closed for client in state.clients)
     saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
     assert not saved["steps"][0]["result"] and not saved["project_context"]["current"]
+
+
+@pytest.mark.parametrize("kind", ["action", "question"])
+async def test_knowledge_research_agent_runs_locally_and_reruns_without_completing_entry(state, kind):
+    project = await state.store.projects.create(user_id=state.owner.user_id, name="Release decisions")
+    entry = await state.store.knowledge.create(
+        user_id=state.owner.user_id, project_id=project.project_id,
+        kind=kind, text="Compare stable public release support windows.",
+    )
+    created = await state.store.agents.create(
+        user_id=state.owner.user_id, objective="Research public release support windows.",
+        request_id="entry-research", project_id=project.project_id,
+        knowledge_entry_id=entry["id"], knowledge_entry_revision=entry["revision"],
+    )
+    state.responses.extend([
+        _answer("Saved release research plan."), _search(),
+        _answer("Inspected public release sources."), _answer("Reviewed release report."),
+    ])
+    runtime = AgentRuntime(state.store.agents, state.executor)
+    assert await runtime.run_once()
+    completed = await state.store.agents.get(user_id=state.owner.user_id, task_id=created["id"])
+    assert completed["status"] == "completed"
+    assert completed["project_context"]["origin_entry"] == {"id": entry["id"], "revision": 1}
+    current = await state.store.knowledge.get(
+        user_id=state.owner.user_id, project_id=project.project_id, entry_id=entry["id"],
+    )
+    assert current == entry and current["work_status"] == "open"
+    for payload in _content_requests(state):
+        assert payload["model"] == _MODEL and entry["text"] in json.dumps(payload["messages"])
+        offered = {tool["function"]["name"] for tool in payload.get("tools", [])}
+        assert offered <= {"web_search", "web_fetch"}
+    queued = await state.store.agents.control(
+        user_id=state.owner.user_id, task_id=created["id"],
+        expected_revision=completed["revision"], action="rerun",
+    )
+    assert queued["id"] == created["id"] and queued["steps"][0] == completed["steps"][0]
+    state.responses.extend([_search(), _answer("Fresh release research."), _answer("Fresh reviewed report.")])
+    assert await runtime.run_once()
+    refreshed = await state.store.agents.get(user_id=state.owner.user_id, task_id=created["id"])
+    assert refreshed["id"] == created["id"] and refreshed["status"] == "completed"
+    assert refreshed["project_context"]["origin_entry"] == completed["project_context"]["origin_entry"]
+    assert refreshed["steps"][0] == completed["steps"][0]
+    assert refreshed["result"] == "Fresh reviewed report."
+    assert await state.store.knowledge.get(
+        user_id=state.owner.user_id, project_id=project.project_id, entry_id=entry["id"],
+    ) == entry
+
+
+@pytest.mark.parametrize("timing", ["metadata", "response", "tool"])
+async def test_origin_action_completion_during_transport_blocks_agent_work(state, timing):
+    project = await state.store.projects.create(user_id=state.owner.user_id, name="Open research actions")
+    entry = await state.store.knowledge.create(
+        user_id=state.owner.user_id, project_id=project.project_id,
+        kind="action", text="Compare stable public release policies.",
+    )
+    task = await _step(state, "research", project_id=project.project_id, knowledge_entry=entry)
+    state.responses.extend([_search(), _answer()])
+
+    async def change():
+        state.on_show = state.on_chat = state.on_tool = None
+        await state.store.knowledge.update(
+            user_id=state.owner.user_id, project_id=project.project_id,
+            entry_id=entry["id"], expected_revision=entry["revision"], work_status="completed",
+        )
+
+    if timing == "metadata":
+        state.on_show = change
+    elif timing == "response":
+        state.on_chat = change
+    else:
+        state.on_tool = change
+    with pytest.raises(AgentTaskError, match="Project context changed"):
+        await state.executor(task, "research")
+    assert len(_content_requests(state)) == (timing != "metadata")
+    assert len(state.tool_requests) == (timing == "tool")
+    assert all(client._client.is_closed for client in state.clients)
+    saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert not saved["project_context"]["current"] and not saved["steps"][1]["result"]
+
+
+@pytest.mark.parametrize("objective", [
+    "Draft a polite invitation to a neighborhood picnic.",
+    "Write a Python function that sorts records by date.",
+    "Make a weekend garden task checklist.",
+])
+async def test_general_tasks_complete_without_web_tools_or_forced_source_lists(state, objective):
+    state.app.state.tools = ToolRegistry()
+    created = await state.store.agents.create(
+        user_id=state.owner.user_id, objective=objective, request_id="general-task",
+    )
+    state.responses.extend([
+        _answer("Plan the requested deliverable."),
+        _answer("Saved requested deliverable."),
+        _answer("Finished requested deliverable."),
+    ])
+    assert await AgentRuntime(state.store.agents, state.executor).run_once()
+    saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=created["id"])
+    assert saved["status"] == "completed" and saved["result"] == "Finished requested deliverable."
+    assert [step["label"] for step in saved["steps"]] == ["Plan", "Work", "Review"]
+    assert saved["steps"][1]["result"] == "Saved requested deliverable."
+    assert not state.tool_requests
+    calls = _content_requests(state)
+    assert len(calls) == 3
+    for call in calls:
+        assert call["model"] == _MODEL and not call.get("tools")
+        assert json.loads(next(message["content"] for message in call["messages"] if message["role"] == "user"))["objective"] == objective
+    assert all(client._client.is_closed for client in state.clients)

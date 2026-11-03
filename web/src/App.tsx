@@ -17,12 +17,14 @@ import {
   getCurrentUserPreferences,
   getAgentTask,
   getProject,
+  getProjectKnowledge,
   getWatch,
   listModels,
   listSkills,
   type AudreyModel,
   type AudreyProject,
   type AgentTask,
+  type KnowledgeEntry,
   type PublicWatch,
   type Conversation,
   type SearchResult,
@@ -31,6 +33,7 @@ import {
   type SkillSummary,
   type UserPreferences,
 } from "./api";
+import { canAssignKnowledge, type KnowledgeAgentRequest } from "./knowledgeAgents";
 
 const ChatWorkspace = lazy(() =>
   import("./ChatWorkspace").then((module) => ({ default: module.ChatWorkspace })),
@@ -106,6 +109,7 @@ export function App() {
   const [showAccessHandoff, setShowAccessHandoff] = useState(true);
   const [projectLinkError, setProjectLinkError] = useState("");
   const [composerProjectRequest, setComposerProjectRequest] = useState<{ project: AudreyProject; serial: number; owner: string }>();
+  const [composerKnowledgeRequest, setComposerKnowledgeRequest] = useState<KnowledgeAgentRequest & { owner: string }>();
   const [externalAgentRequest, setExternalAgentRequest] = useState<{ task: AgentTask; serial: number; owner: string }>();
   const [composerWatchProjectRequest, setComposerWatchProjectRequest] = useState<{ project: AudreyProject; serial: number; owner: string }>();
   const [externalWatchRequest, setExternalWatchRequest] = useState<{ watch: PublicWatch; serial: number; owner: string }>();
@@ -149,8 +153,23 @@ export function App() {
     await readProjectLink(async (currentSignal, serial) => {
       const current = await getProject(project.id, currentSignal);
       if (currentSignal.aborted || projectNavigation.current.serial !== serial) return;
-      if (current.id !== project.id || current.private_required) throw new Error("Public research agents are unavailable for this Project.");
+      if (current.id !== project.id || current.private_required) throw new Error("Agent tasks are unavailable for this Project.");
       setComposerProjectRequest({ project: current, serial, owner: workspaceOwner });
+      setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("agents");
+    }, signal);
+  }
+
+  async function researchProjectKnowledge(project: AudreyProject, entry: KnowledgeEntry, signal?: AbortSignal) {
+    await readProjectLink(async (currentSignal, serial) => {
+      const [currentProject, currentEntry] = await Promise.all([
+        getProject(project.id, currentSignal), getProjectKnowledge(project.id, entry.id, currentSignal),
+      ]);
+      if (currentSignal.aborted || projectNavigation.current.serial !== serial) return;
+      if (currentProject.id !== project.id || currentEntry.id !== entry.id || currentEntry.revision !== entry.revision
+        || !canAssignKnowledge(currentProject, currentEntry)) {
+        throw new Error("This entry changed or is unavailable for an agent task. Refresh and review it before trying again.");
+      }
+      setComposerKnowledgeRequest({ project: currentProject, entry: currentEntry, serial, owner: workspaceOwner });
       setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("agents");
     }, signal);
   }
@@ -465,6 +484,7 @@ export function App() {
               projectOpenRequest={projectOpenRequest?.owner === workspaceOwner ? projectOpenRequest : undefined}
               conversationOpenRequest={conversationOpenRequest?.owner === workspaceOwner ? conversationOpenRequest : undefined}
               onNewProjectAgent={newProjectAgent}
+              onResearchProjectKnowledge={researchProjectKnowledge}
               onOpenProjectAgent={openProjectAgent}
               onNewProjectWatch={newProjectWatch}
               onOpenProjectWatch={openProjectWatch}
@@ -474,6 +494,7 @@ export function App() {
         <div className="app-workspace-view" hidden={activeWorkspace !== "agents"} inert={activeWorkspace !== "agents" ? true : undefined}>
           <AgentsWorkspace key={`${session.user.id}:${workspaceRevision}`} visible={activeWorkspace === "agents" && !(searchOpen && compactSearch)} timezone={session.preferences.timezone} onActiveCountChange={setActiveAgentCount} navigationOpen={navigationOpen} onNavigationOpenChange={changeNavigation}
             composerProjectRequest={composerProjectRequest?.owner === workspaceOwner ? composerProjectRequest : undefined}
+            composerKnowledgeRequest={composerKnowledgeRequest?.owner === workspaceOwner ? composerKnowledgeRequest : undefined}
             externalAgentRequest={externalAgentRequest?.owner === workspaceOwner ? externalAgentRequest : undefined}
             composerWatchProjectRequest={composerWatchProjectRequest?.owner === workspaceOwner ? composerWatchProjectRequest : undefined}
             externalWatchRequest={externalWatchRequest?.owner === workspaceOwner ? externalWatchRequest : undefined}

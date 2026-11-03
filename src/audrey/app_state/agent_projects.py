@@ -1,4 +1,4 @@
-"""Frozen Project manifests for ordinary public-research agents.
+"""Frozen Project manifests for ordinary agents.
 
 Only hashes, revision identities and prefix lengths are persisted here. Canonical
 Project/knowledge rows remain the sole authority for context bodies. A deleted
@@ -25,7 +25,7 @@ SUPPORTED_KNOWLEDGE_SOURCE_KINDS = frozenset({"message", "agent"})
 
 
 class AgentProjectAccessError(ValueError):
-    """Only an owned ordinary Project can supply public research context."""
+    """Only an owned ordinary Project can supply agent context."""
 
 
 class AgentProjectChangedError(ValueError):
@@ -89,7 +89,7 @@ class AgentProjectContexts:
 
     def require_project(self, user_id: str, project_id: str) -> None:
         if self._project(user_id, project_id) is None:
-            raise AgentProjectAccessError("Project research context is unavailable.")
+            raise AgentProjectAccessError("Project context is unavailable.")
 
     def _manifest(self, task_id: str, user_id: str):
         return self._conn.execute(
@@ -150,10 +150,13 @@ class AgentProjectContexts:
             metadata.append({"source_id": source["source_id"], "metadata": current})
         return source_digest(metadata)
 
-    def capture(self, *, task_id: str, user_id: str, project_id: str, objective: str) -> None:
+    def capture(
+        self, *, task_id: str, user_id: str, project_id: str, objective: str,
+        knowledge_entry_id: str | None = None, knowledge_entry_revision: int | None = None,
+    ) -> None:
         project = self._project(user_id, project_id)
         if project is None:
-            raise AgentProjectAccessError("Project research context is unavailable.")
+            raise AgentProjectAccessError("Project context is unavailable.")
         terms = set(re.findall(r"\w+", objective.casefold()))
         rows = self._conn.execute(
             "SELECT * FROM app_project_knowledge WHERE user_id=? AND project_id=? "
@@ -168,11 +171,30 @@ class AgentProjectContexts:
                     row["kind"] == "decision", row["updated_at"], row["entry_id"])
 
         selected, remaining = [], 1000
+        cache = {}
+        origin = None
+        if knowledge_entry_id is not None:
+            origin = self._conn.execute(
+                "SELECT * FROM app_project_knowledge WHERE entry_id=? AND user_id=? AND project_id=?",
+                (knowledge_entry_id, user_id, project_id),
+            ).fetchone()
+            if (
+                origin is None or origin["approval_state"] != "approved"
+                or origin["kind"] not in {"action", "question"} or origin["work_status"] != "open"
+            ):
+                raise AgentProjectAccessError("Project knowledge is unavailable for this agent.")
+            if origin["revision"] != knowledge_entry_revision:
+                raise AgentProjectChangedError("Project knowledge changed. Refresh before starting the agent.")
+            if self._source_proof(origin, verify_revision=True, cache=cache) is None:
+                raise AgentProjectAccessError("Project knowledge is unavailable for this agent.")
         # Unsupported refs never crowd out notes. Inspect at most twelve sourced
         # candidates; stale candidates do not prevent later sourceless selection.
-        candidates = (row for row in rows if _source_refs(row) is not None)
-        sourced_candidates, cache = 0, {}
-        for row in sorted(candidates, key=rank, reverse=True):
+        candidates = (row for row in rows if row["entry_id"] != knowledge_entry_id and _source_refs(row) is not None)
+        ranked = sorted(candidates, key=rank, reverse=True)
+        if origin is not None:
+            ranked.insert(0, origin)
+        sourced_candidates = 0
+        for row in ranked:
             if json.loads(row["sources_json"]):
                 if sourced_candidates >= 12:
                     continue
@@ -184,6 +206,8 @@ class AgentProjectContexts:
             used = token_count(text)
             if text and used > 0:
                 pin = {"id": row["entry_id"], "revision": row["revision"], "chars": len(text)}
+                if row["entry_id"] == knowledge_entry_id:
+                    pin["origin"] = True
                 if json.loads(row["sources_json"]):
                     pin["sources_sha256"] = proof
                 # Preserve schema32's bound, including unusual long canonical IDs.
@@ -193,6 +217,8 @@ class AgentProjectContexts:
                 remaining -= used
             if remaining <= 0 or len(selected) >= 12:
                 break
+        if origin is not None and (not selected or selected[0]["id"] != knowledge_entry_id):
+            raise AgentProjectAccessError("Project knowledge is unavailable for this agent.")
         instructions = _prefix(project["instructions"], 2000)
         self._conn.execute(
             "INSERT INTO app_agent_project_contexts "
@@ -236,11 +262,16 @@ class AgentProjectContexts:
             current = True
         except AgentProjectChangedError:
             current = False
-        return {"project_id": manifest["project_id"], "project_name": project["name"] if project else None,
+        pins = json.loads(manifest["knowledge_json"])
+        result = {"project_id": manifest["project_id"], "project_name": project["name"] if project else None,
                 "available": project is not None, "current": current,
                 "instructions_included": manifest["instructions_chars"] > 0,
                 "knowledge": [{"id": pin["id"], "revision": pin["revision"]}
-                              for pin in json.loads(manifest["knowledge_json"])]}
+                              for pin in pins]}
+        origin = next((pin for pin in pins if pin.get("origin") is True), None)
+        if origin is not None:
+            result["origin_entry"] = {"id": origin["id"], "revision": origin["revision"]}
+        return result
 
     def resolve(self, *, task_id: str, user_id: str) -> dict | None:
         manifest = self._manifest(task_id, user_id)

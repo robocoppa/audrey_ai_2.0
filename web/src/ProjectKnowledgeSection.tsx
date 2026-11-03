@@ -7,14 +7,17 @@ import {
   deleteProjectKnowledge,
   getProjectKnowledgeHistory,
   listProjectKnowledge,
+  listAgentTasks,
   updateProjectKnowledge,
   type AudreyProject,
+  type AgentTask,
   type KnowledgeEntry,
   type KnowledgeKind,
   type KnowledgeSourceRef,
   type ProjectKnowledgeList,
 } from "./api";
 import { KnowledgeSourcePicker } from "./KnowledgeSourcePicker";
+import { canAssignKnowledge } from "./knowledgeAgents";
 import "./ProjectKnowledgeSection.css";
 
 type Props = {
@@ -22,6 +25,8 @@ type Props = {
   visible?: boolean;
   onChanged?: () => void;
   onOpenSource?: (source: KnowledgeSourceRef, entry: KnowledgeEntry, index: number) => void;
+  onResearch?: (project: AudreyProject, entry: KnowledgeEntry, signal?: AbortSignal) => void | Promise<void>;
+  onOpenAgent?: (task: AgentTask, signal?: AbortSignal) => void | Promise<void>;
 };
 const KINDS: ReadonlyArray<{ value: KnowledgeKind; label: string }> = [
   { value: "fact", label: "Fact" }, { value: "decision", label: "Decision" },
@@ -32,7 +37,7 @@ export function ProjectKnowledgeSection(props: Props) {
   return <ProjectKnowledge key={props.project.id} {...props} />;
 }
 
-function ProjectKnowledge({ project, visible = true, onChanged, onOpenSource }: Props) {
+function ProjectKnowledge({ project, visible = true, onChanged, onOpenSource, onResearch, onOpenAgent }: Props) {
   const headingId = useId();
   const active = useRef(true);
   const loadGeneration = useRef(0);
@@ -177,11 +182,12 @@ function ProjectKnowledge({ project, visible = true, onChanged, onOpenSource }: 
     <div className="knowledge-entries">{entries.map((entry) => <KnowledgeCard key={entry.id} entry={entry} visible={visible} maxTextChars={loaded?.limits.max_text_chars ?? 8000}
       replacement={entry.replaces_id ? loaded?.items.find((item) => item.id === entry.replaces_id) : undefined}
       onChanged={changed} onConflict={refresh} onOpenSource={onOpenSource}
+      project={project} onResearch={onResearch} onOpenAgent={onOpenAgent}
       onEditingChange={(editing) => setEditingIds((current) => { const next = new Set(current); if (editing) next.add(entry.id); else next.delete(entry.id); return next; })} />)}</div>
   </section>;
 }
 
-function KnowledgeCard({ entry, replacement, visible, maxTextChars, onChanged, onConflict, onOpenSource, onEditingChange }: {
+function KnowledgeCard({ entry, replacement, visible, maxTextChars, onChanged, onConflict, onOpenSource, onEditingChange, project, onResearch, onOpenAgent }: {
   entry: KnowledgeEntry;
   replacement?: KnowledgeEntry;
   visible: boolean;
@@ -190,6 +196,9 @@ function KnowledgeCard({ entry, replacement, visible, maxTextChars, onChanged, o
   onConflict: () => void;
   onOpenSource?: (source: KnowledgeSourceRef, entry: KnowledgeEntry, index: number) => void;
   onEditingChange: (editing: boolean) => void;
+  project: AudreyProject;
+  onResearch?: Props["onResearch"];
+  onOpenAgent?: Props["onOpenAgent"];
 }) {
   const active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
@@ -299,6 +308,7 @@ function KnowledgeCard({ entry, replacement, visible, maxTextChars, onChanged, o
       </li>)}</ul></details> : entry.origin === "agent_report" ? <p className="knowledge-note">No inspected evidence is attached. The report identifies the origin of this suggestion.</p> : null}
     {entry.source_warnings.length ? <ul className="knowledge-warnings">{entry.source_warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul> : null}
     {error ? <p className="knowledge-error" role="alert">{error}</p> : null}
+    {!project.private_required && (onResearch || onOpenAgent) ? <KnowledgeResearchLinks key={`${entry.revision}:${visible}`} project={project} entry={entry} visible={visible} disabled={busy || editing} onResearch={onResearch} onOpenAgent={onOpenAgent} /> : null}
     <div className="knowledge-actions">
       {entry.approval_state === "proposed" ? <><button type="button" disabled={busy || editing} onClick={() => void mutate(() => decideProjectKnowledge(entry.project_id, entry.id, "approve", entry.revision))}>Approve proposal</button>
         <button type="button" disabled={busy || editing} onClick={() => void mutate(() => decideProjectKnowledge(entry.project_id, entry.id, "reject", entry.revision))}>Reject proposal</button></> : null}
@@ -321,6 +331,52 @@ function KnowledgeCard({ entry, replacement, visible, maxTextChars, onChanged, o
       {!historyLoading && !history?.items.length ? <p>No earlier revisions are available.</p> : null}
     </div> : null}
   </article>;
+}
+
+function KnowledgeResearchLinks({ project, entry, visible, disabled, onResearch, onOpenAgent }: {
+  project: AudreyProject; entry: KnowledgeEntry; visible: boolean; disabled: boolean;
+  onResearch?: Props["onResearch"]; onOpenAgent?: Props["onOpenAgent"];
+}) {
+  const controller = useRef<AbortController | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState<AgentTask[]>([]);
+  const [error, setError] = useState("");
+  useEffect(() => () => controller.current?.abort(), []);
+  async function follow(task?: AgentTask) {
+    if (opening || !visible) return;
+    controller.current?.abort();
+    const current = new AbortController(); controller.current = current;
+    setOpening(true); setLoading(false); setError("");
+    try { if (task) await onOpenAgent?.(task, current.signal); else await onResearch?.(project, entry, current.signal); }
+    catch (reason) { if (!current.signal.aborted) setError(messageOf(reason)); }
+    finally { if (!current.signal.aborted) setOpening(false); }
+  }
+  async function showAgents() {
+    if (expanded) { controller.current?.abort(); setExpanded(false); setLoading(false); return; }
+    if (!visible || opening) return;
+    controller.current?.abort();
+    const current = new AbortController(); controller.current = current;
+    setExpanded(true); setLoading(true); setItems([]); setError("");
+    try {
+      const result = await listAgentTasks(current.signal, project.id);
+      if (!current.signal.aborted) setItems(result.items.slice(0, 200).filter((task) => task.project_context?.project_id === project.id && task.project_context.origin_entry?.id === entry.id));
+    } catch (reason) { if (!current.signal.aborted) setError(messageOf(reason)); }
+    finally { if (!current.signal.aborted) setLoading(false); }
+  }
+  if (!visible) return null;
+  return <div className="knowledge-research">
+    {onResearch && canAssignKnowledge(project, entry) ? <p className="knowledge-note">Agent work keeps this entry open. Updating, closing or deleting it stops linked agents from continuing.</p> : null}
+    <div className="knowledge-actions">
+      {onResearch && canAssignKnowledge(project, entry) ? <button type="button" disabled={disabled || opening} onClick={() => void follow()}>{opening ? "Opening…" : "Assign to agent"}</button> : null}
+      {onOpenAgent ? <button type="button" disabled={disabled || opening} aria-expanded={expanded} onClick={() => void showAgents()}>Assigned agents</button> : null}
+    </div>
+    {error ? <p className="knowledge-error" role="alert">{error}</p> : null}
+    {expanded ? <div className="knowledge-research-agents" aria-label="Agents assigned to this entry">
+      {loading ? <p className="knowledge-note" role="status">Loading assigned agents…</p> : items.length ? items.map((task) => <button key={task.id} type="button" aria-label={`Open agent: ${task.title || task.objective}`} disabled={opening || disabled} onClick={() => void follow(task)}><span>{task.title || task.objective}</span><small>{task.status.replaceAll("_", " ")}</small></button>) : !error ? <p className="knowledge-note">No agents have been assigned to this entry.</p> : null}
+    </div> : null}
+  </div>;
 }
 
 function kindLabel(kind: KnowledgeKind) { return KINDS.find((item) => item.value === kind)?.label ?? kind; }

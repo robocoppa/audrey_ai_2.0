@@ -24,6 +24,7 @@ import "./AgentsWorkspace.css";
 import { AgentKnowledgeDialog } from "./AgentKnowledgeDialog";
 import { WatchesWorkspace } from "./WatchesWorkspace";
 import { ActivityWorkspace } from "./ActivityWorkspace";
+import { canAssignKnowledge, knowledgeTaskObjective, type KnowledgeAgentRequest } from "./knowledgeAgents";
 
 const STATUS_LABELS: Record<AgentTaskStatus, string> = {
   queued: "Queued", running: "Running", paused: "Paused", completed: "Completed",
@@ -31,6 +32,10 @@ const STATUS_LABELS: Record<AgentTaskStatus, string> = {
 };
 
 const PROJECT_CONTEXT_HELP = "Uses Project instructions and approved notes. Message and Agent report links are checked for freshness; source bodies and files are not included.";
+
+function stepLabel(step: AgentTask["steps"][number] | undefined): string | undefined {
+  return step ? ({ plan: "Plan", research: "Work", review: "Review" }[step.id]) : undefined;
+}
 
 function isMoving(task: AgentTask) {
   return task.status === "queued" || task.status === "running";
@@ -72,6 +77,11 @@ function messageOf(reason: unknown): string {
   return reason instanceof Error ? reason.message : "The request could not be completed.";
 }
 
+function objectiveTooLong(value: string): boolean {
+  const text = value.trim();
+  return Array.from(text).length > 6000 || new TextEncoder().encode(text).byteLength > 8000;
+}
+
 function newRequestId(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
   const values = crypto.getRandomValues(new Uint32Array(4));
@@ -85,6 +95,7 @@ interface AgentsWorkspaceProps {
   navigationOpen?: boolean;
   onNavigationOpenChange?: (open: boolean) => void;
   composerProjectRequest?: { project: AudreyProject; serial: number };
+  composerKnowledgeRequest?: KnowledgeAgentRequest;
   externalAgentRequest?: { task: AgentTask; serial: number };
   composerWatchProjectRequest?: { project: AudreyProject; serial: number };
   externalWatchRequest?: { watch: PublicWatch; serial: number };
@@ -128,13 +139,14 @@ export function AgentsWorkspace(props: AgentsWorkspaceProps) {
     return () => { current = false; };
   }, [props.externalAgentRequest]);
   useEffect(() => {
-    const request = props.composerProjectRequest;
+    const request = !props.composerKnowledgeRequest || (props.composerProjectRequest?.serial ?? -1) > props.composerKnowledgeRequest.serial
+      ? props.composerProjectRequest : props.composerKnowledgeRequest;
     if (!request || composerSerial.current === request.serial) return;
     composerSerial.current = request.serial;
     let current = true;
     queueMicrotask(() => { if (current) setView("tasks"); });
     return () => { current = false; };
-  }, [props.composerProjectRequest]);
+  }, [props.composerProjectRequest, props.composerKnowledgeRequest]);
   useEffect(() => {
     const request = props.composerWatchProjectRequest;
     if (!request || watchComposerSerial.current === request.serial) return;
@@ -217,6 +229,7 @@ function AgentTasksWorkspace({
   openRequest,
   onTasksChange,
   composerProjectRequest,
+  composerKnowledgeRequest,
   onOpenProject,
 }: AgentsWorkspaceProps & { openRequest?: { task: AgentTask; serial: number }; onTasksChange: (tasks: AgentTask[]) => void }) {
   const [compactNavigation, setCompactNavigation] = useState(() =>
@@ -240,6 +253,8 @@ function AgentTasksWorkspace({
   const [projectsError, setProjectsError] = useState("");
   const [projectRefresh, setProjectRefresh] = useState(0);
   const [composerProject, setComposerProject] = useState<AudreyProject | null>(null);
+  const [composerOrigin, setComposerOrigin] = useState<{ id: string; revision: number } | null>(null);
+  const [pendingKnowledgeRequest, setPendingKnowledgeRequest] = useState<KnowledgeAgentRequest | null>(null);
   const [unavailableProjectId, setUnavailableProjectId] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "active" | "finished">("all");
   const deletedIds = useRef(new Set<string>());
@@ -340,18 +355,36 @@ function AgentTasksWorkspace({
   }, [visible, projectRefresh]);
 
   useEffect(() => {
-    if (!visible || !composerProjectRequest || openedComposerRequest.current === composerProjectRequest.serial) return;
-    openedComposerRequest.current = composerProjectRequest.serial;
+    const knowledgeRequest = composerKnowledgeRequest && composerKnowledgeRequest.serial >= (composerProjectRequest?.serial ?? -1) ? composerKnowledgeRequest : undefined;
+    const request = knowledgeRequest ?? composerProjectRequest;
+    if (!visible || !request || (openedComposerRequest.current ?? -1) >= request.serial) return;
     let current = true;
     queueMicrotask(() => {
       if (!current) return;
-      if (composerProjectRequest.project.private_required) { setError("Private Projects are not available for public research agents."); return; }
-      setComposerProject(composerProjectRequest.project); setUnavailableProjectId(null);
+      openedComposerRequest.current = request.serial;
+      let needsChoice = false;
+      if (request.project.private_required) { setError("Private Projects are not available for agent tasks."); return; }
+      if (knowledgeRequest) {
+        if (!canAssignKnowledge(knowledgeRequest.project, knowledgeRequest.entry)) { setError("This entry is unavailable for an agent task. Refresh and review it before trying again."); return; }
+        const nextObjective = knowledgeTaskObjective(knowledgeRequest.entry);
+        if (objective.trim() && (objective !== nextObjective || composerProject?.id !== request.project.id)) {
+          setPendingKnowledgeRequest(knowledgeRequest);
+          needsChoice = true;
+        } else {
+          setObjective(nextObjective); setComposerProject(request.project); setUnavailableProjectId(null);
+          setComposerOrigin({ id: knowledgeRequest.entry.id, revision: knowledgeRequest.entry.revision }); setPendingKnowledgeRequest(null);
+        }
+      } else {
+        setComposerProject(request.project); setUnavailableProjectId(null); setComposerOrigin(null); setPendingKnowledgeRequest(null);
+      }
       if (compactNavigation) setSidebarOpen(true);
-      window.requestAnimationFrame(() => objectiveRef.current?.focus({ preventScroll: true }));
+      window.requestAnimationFrame(() => {
+        const target = needsChoice ? sidebarRef.current?.querySelector<HTMLButtonElement>(".agents-knowledge-confirm button") : objectiveRef.current;
+        target?.focus({ preventScroll: true });
+      });
     });
     return () => { current = false; };
-  }, [visible, composerProjectRequest, compactNavigation, setSidebarOpen]);
+  }, [visible, composerProjectRequest, composerKnowledgeRequest, compactNavigation, setSidebarOpen, objective, composerProject?.id]);
 
   useEffect(() => {
     if (!visible || !openRequest || openedRequest.current === openRequest.serial) return;
@@ -472,13 +505,15 @@ function AgentTasksWorkspace({
   }
 
   async function startTask(text: string, key: string) {
-    if (busyRef.current || !text.trim() || composerProject?.id === unavailableProjectId) return;
+    if (busyRef.current || !text.trim() || objectiveTooLong(text) || pendingKnowledgeRequest || composerProject?.id === unavailableProjectId) return;
     const requestedProject = composerProject;
+    const requestedOrigin = composerOrigin;
     busyRef.current = true;
     mutationGeneration.current += 1;
     setBusy(true);
     setError("");
     setNotice("");
+    let projectVerified = false;
     // Retain this identity after a lost response so Retry does not create duplicates.
     try {
       if (createRequest.current?.key !== key) {
@@ -489,12 +524,15 @@ function AgentTasksWorkspace({
         if (!mounted.current) return;
         if (current.private_required) {
           setUnavailableProjectId(requestedProject.id);
-          throw new ApiError(422, "This Project is Private. Choose another Project or None before starting public research.");
+          throw new ApiError(422, "This Project is Private. Choose another Project or None before starting an agent task.");
         }
         setComposerProject(current);
+        projectVerified = true;
       }
       const task = requestedProject
-        ? await createAgentTask(text.trim(), createRequest.current.requestId, requestedProject.id)
+        ? requestedOrigin
+          ? await createAgentTask(text.trim(), createRequest.current.requestId, requestedProject.id, requestedOrigin)
+          : await createAgentTask(text.trim(), createRequest.current.requestId, requestedProject.id)
         : await createAgentTask(text.trim(), createRequest.current.requestId);
       if (!mounted.current) return;
       createRequest.current = null;
@@ -503,10 +541,10 @@ function AgentTasksWorkspace({
       setSelectedId(task.id);
       showWorkflow();
       setFilter("all");
-      if (key.startsWith("new:")) setObjective("");
+      if (key.startsWith("new:")) { setObjective(""); setComposerOrigin(null); }
     } catch (reason) {
       if (mounted.current) {
-        if (requestedProject && reason instanceof ApiError && reason.status === 404) {
+        if (requestedProject && !projectVerified && reason instanceof ApiError && reason.status === 404) {
           setUnavailableProjectId(requestedProject.id);
           setError("The selected Project is unavailable. Choose another Project or None before starting.");
         } else setError(messageOf(reason));
@@ -519,7 +557,7 @@ function AgentTasksWorkspace({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void startTask(objective, `new:${JSON.stringify([objective.trim(), composerProject?.id ?? null])}`);
+    void startTask(objective, `new:${JSON.stringify([objective.trim(), composerProject?.id ?? null, composerOrigin])}`);
   }
 
   async function act(task: AgentTask, action: "pause" | "resume" | "cancel" | "rerun") {
@@ -659,12 +697,12 @@ function AgentTasksWorkspace({
         >
           <header className="agents-header">
             <div>
-              <p className="agents-eyebrow">Your research, in progress</p>
+              <p className="agents-eyebrow">Your tasks, in progress</p>
               <h1 id="agents-title">Agents</h1>
             </div>
             {compactNavigation
               ? <button type="button" className="agents-secondary agents-sidebar-close" aria-label="Close agent controls" onClick={closeSidebar}>✕</button>
-              : <button type="button" className="agents-secondary" onClick={() => objectiveRef.current?.focus()}>New agent</button>}
+              : <button type="button" className="agents-secondary" onClick={() => objectiveRef.current?.focus()}>New agent task</button>}
           </header>
           <div className="agents-sidebar-scroll">
             {sidebarOpen && error ? <p className="agents-error" role="alert">{error}</p> : null}
@@ -673,17 +711,29 @@ function AgentTasksWorkspace({
               <label htmlFor="agent-project">Project <span className="agents-optional">Optional</span></label>
               <select id="agent-project" aria-label="Project" value={composerProject?.id ?? ""} disabled={busy} onChange={(event) => {
                 setComposerProject(composerProjects.find((project) => project.id === event.target.value) ?? null); setUnavailableProjectId(null);
+                setComposerOrigin(null); setPendingKnowledgeRequest(null);
               }}>
                 <option value="">None</option>
                 {composerProjects.map((project) => <option key={project.id} value={project.id}>{project.name}{project.id === unavailableProjectId ? " (unavailable)" : ""}</option>)}
               </select>
-              <p>Public research can use ordinary Projects. Private Projects are unavailable here.</p>
+              <p>Agent tasks can use ordinary Projects. Private Projects are unavailable here.</p>
               {composerProject ? <p>{PROJECT_CONTEXT_HELP}</p> : null}
               {projectsLoading ? <p role="status">Loading Projects…</p> : null}
               {projectsError ? <div className="agents-project-error"><p role="alert">{projectsError}</p><button className="agents-secondary" type="button" disabled={projectsLoading} onClick={() => setProjectRefresh((value) => value + 1)}>Retry Projects</button></div> : null}
               {projectsCursor ? <button className="agents-secondary" type="button" disabled={projectsLoading} onClick={() => void loadMoreProjects()}>Load more Projects</button> : null}
               {composerProject?.id === unavailableProjectId ? <p className="agents-project-unavailable">The selected Project is unavailable. Choose another Project or None.</p> : null}
-              <label htmlFor="agent-objective">Research objective</label>
+              {pendingKnowledgeRequest ? <div className="agents-knowledge-confirm" role="group" aria-label="Use Project Knowledge entry">
+                <p>Your task draft is kept. Use this Project {pendingKnowledgeRequest.entry.kind} instead?</p>
+                <blockquote>{pendingKnowledgeRequest.entry.text}</blockquote>
+                <div><button className="agents-secondary" type="button" disabled={busy} onClick={() => {
+                  setObjective(knowledgeTaskObjective(pendingKnowledgeRequest.entry)); setComposerProject(pendingKnowledgeRequest.project);
+                  setComposerOrigin({ id: pendingKnowledgeRequest.entry.id, revision: pendingKnowledgeRequest.entry.revision });
+                  setUnavailableProjectId(null); setPendingKnowledgeRequest(null); setError(""); objectiveRef.current?.focus();
+                }}>Use entry</button><button className="agents-secondary" type="button" disabled={busy} onClick={() => { setPendingKnowledgeRequest(null); objectiveRef.current?.focus(); }}>Keep my draft</button></div>
+              </div> : null}
+              {composerOrigin ? <div className="agents-knowledge-origin"><p>From Project Knowledge · Revision {composerOrigin.revision}. Agent work keeps the entry open. Updating, closing or deleting it stops linked agents from continuing.</p>
+                <button className="agents-secondary" type="button" disabled={busy} onClick={() => { setComposerOrigin(null); objectiveRef.current?.focus(); }}>Remove entry link</button></div> : null}
+              <label htmlFor="agent-objective">Task objective</label>
               <textarea
                 id="agent-objective"
                 ref={objectiveRef}
@@ -691,13 +741,15 @@ function AgentTasksWorkspace({
                 maxLength={6000}
                 value={objective}
                 onChange={(event) => setObjective(event.target.value)}
-                placeholder="Compare the current public documentation for…"
+                placeholder="Describe the task and desired result."
                 aria-describedby="agent-objective-help"
                 required
                 disabled={busy}
               />
-              <p id="agent-objective-help">All agent steps use local models with no cloud fallback. Research uses public web sources. You can leave this page and return to the saved progress and report.</p>
-              <button className="agents-primary" type="submit" disabled={busy || !objective.trim() || composerProject?.id === unavailableProjectId}>{busy ? "Saving…" : "Start agent"}</button>
+              <p id="agent-objective-help">All agent steps use local models with no cloud fallback. You can leave this page and return to the saved progress and result.</p>
+              {objectiveTooLong(objective) ? <p role="alert" className="agents-error">Shorten the task objective to 6,000 characters and 8,000 UTF-8 bytes before starting. {composerOrigin ? "Your full entry remains saved in Project Knowledge." : "Your draft is kept."}</p> : null}
+              <button className="agents-primary" type="submit" disabled={busy || !objective.trim() || objectiveTooLong(objective) || Boolean(pendingKnowledgeRequest) || composerProject?.id === unavailableProjectId}>{busy ? "Saving…" : "Start agent"}</button>
+              {objective || composerOrigin ? <button className="agents-secondary" type="button" disabled={busy} onClick={() => { setObjective(""); setComposerOrigin(null); setPendingKnowledgeRequest(null); createRequest.current = null; objectiveRef.current?.focus(); }}>Clear draft</button> : null}
             </form>
 
             {selected && !isFinished(selected) ? (
@@ -724,7 +776,7 @@ function AgentTasksWorkspace({
               ))}
             </div>
             {loading ? <p className="agents-empty" role="status">Loading your agents…</p> : !shownTasks.length ? (
-              <p className="agents-empty">{tasks.length ? "No tasks in this view." : "No agents yet. Start with a research objective above."}</p>
+              <p className="agents-empty">{tasks.length ? "No tasks in this view." : "No agents yet. Start with a task objective above."}</p>
             ) : (
               <ul className="agents-task-list">
                 {shownTasks.map((task) => (
@@ -733,7 +785,7 @@ function AgentTasksWorkspace({
                       <span className={`agents-status agents-status-${task.status}`}>{STATUS_LABELS[task.status]}</span>
                       <strong>{agentTitle(task)}</strong>
                       {task.project_context ? <span className="agents-project-badge">Project: {task.project_context.project_name ?? "Unavailable"}</span> : null}
-                      <span className="agents-task-stage">{task.status === "waiting_for_input" ? "Your answer is needed to continue" : task.steps.find((step) => step.status === "running")?.label ?? (task.status === "paused" ? "Completed steps saved" : task.status === "queued" ? "Waiting to start" : "Saved progress")}</span>
+                      <span className="agents-task-stage">{task.status === "waiting_for_input" ? "Your answer is needed to continue" : stepLabel(task.steps.find((step) => step.status === "running")) ?? (task.status === "paused" ? "Completed steps saved" : task.status === "queued" ? "Waiting to start" : "Saved progress")}</span>
                       <time dateTime={task.updated_at}>Last activity {timestamp(task.updated_at)}</time>
                     </button>
                   </li>
@@ -780,26 +832,26 @@ function AgentTasksWorkspace({
                       <li key={step.id} className={`agents-step agents-step-${step.status}`}>
                         <span className="agents-step-mark" aria-hidden="true">{step.status === "completed" ? "✓" : step.status === "running" ? "●" : "○"}</span>
                         <div>
-                          <strong>{step.label}</strong>
+                          <strong>{stepLabel(step)}</strong>
                           <span className="agents-step-status">{step.status === "completed" ? "Completed" : step.status === "running" ? "In progress" : "Pending"}</span>
-                          {step.result ? <details><summary>View saved {step.id === "plan" ? "plan" : step.id === "research" ? "research" : "review"}</summary><AgentMarkdown text={step.result} /></details> : null}
+                          {step.result ? <details><summary>View saved {step.id === "plan" ? "plan" : step.id === "research" ? "work" : "review"}</summary><AgentMarkdown text={step.result} /></details> : null}
                         </div>
                       </li>
                     ))}
                   </ol>
                 </section>
                 <section className="agents-result" aria-labelledby="agent-result-title">
-                  <h3 id="agent-result-title">Report</h3>
+                  <h3 id="agent-result-title">Result</h3>
                   {selected.status === "completed" && selected.result ? <button className="agents-secondary" type="button" onClick={() => setKnowledgeTask(selected)}>Propose Project knowledge</button> : null}
-                  {selected.result ? <AgentMarkdown text={selected.result} /> : <p>{selected.summary && selected.status === "completed" ? "Loading the saved report…" : selected.status === "failed" ? "This task stopped before a final report was saved. Any completed steps are available above." : selected.status === "cancelled" ? "This task was cancelled. Any completed steps are available above." : "The report will appear here when Audrey completes its review."}</p>}
+                  {selected.result ? <AgentMarkdown text={selected.result} /> : <p>{selected.summary && selected.status === "completed" ? "Loading the saved result…" : selected.status === "failed" ? "This task stopped before a final result was saved. Any completed steps are available above." : selected.status === "cancelled" ? "This task was cancelled. Any completed steps are available above." : "The result will appear here when Audrey completes its review."}</p>}
                 </section>
               </>
             ) : (
               <div className="agents-welcome">
                 <span className="agents-welcome-mark" aria-hidden="true">✦</span>
                 <h2>Work that continues while you’re away</h2>
-                <p>Start a research task or select a saved agent to see its objective, completed steps, and report.</p>
-                <ol><li>Plan the work</li><li>Research public sources</li><li>Review and save the report</li></ol>
+                <p>Start a task or select a saved agent to see its objective, completed steps and result.</p>
+                <ol><li>Plan the work</li><li>Work on the task</li><li>Review and save the result</li></ol>
               </div>
             )}
           </div>
@@ -815,6 +867,7 @@ function AgentProjectContextView({ task, onOpenProject }: { task: AgentTask; onO
   if (!context) return null;
   return <details className="agents-project-context"><summary>{!context.available ? "Project unavailable" : !context.current ? "Project context changed" : `Project: ${context.project_name ?? "Saved Project"}`}</summary>
     <p>{PROJECT_CONTEXT_HELP}</p>
+    {context.origin_entry ? <p>Started from Project Knowledge · Revision {context.origin_entry.revision}. Agent work does not complete or resolve the entry.</p> : null}
     <p>{context.instructions_included ? "Project instructions included." : "No Project instructions were selected."} {context.knowledge.length} approved note {context.knowledge.length === 1 ? "revision" : "revisions"} pinned for this agent.</p>
     {!context.available ? <p className="agents-project-unavailable">This Project is no longer available. Continuing or running this agent again is unavailable.</p> : !context.current ? <p className="agents-project-unavailable">The Project context has changed. Start a new agent to use its current instructions and approved notes.</p> : null}
     {context.available && onOpenProject ? <button className="agents-secondary" type="button" onClick={() => onOpenProject(context.project_id)}>Open Project</button> : null}
@@ -881,7 +934,7 @@ function AgentTaskControls({ task, busy, onAction, onDelete }: {
           className={`agents-secondary danger-button${confirmingDelete ? " confirming-delete" : ""}`}
           aria-label={confirmingDelete ? "Confirm delete task" : "Delete task"}
           aria-pressed={confirmingDelete}
-          title={confirmingDelete ? "Click again to delete this saved task and its report." : "Delete saved task and report"}
+          title={confirmingDelete ? "Click again to delete this saved task and its result." : "Delete saved task and result"}
           disabled={busy}
           onClick={() => {
             if (confirmingDelete) {

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, expect, it, vi } from "vitest";
 
 import { ProjectKnowledgeSection } from "./ProjectKnowledgeSection";
-import { type AudreyProject, type KnowledgeEntry } from "./api";
+import { type AudreyProject, type KnowledgeEntry, type AgentTask } from "./api";
 
 const project: AudreyProject = { id: "project-1", name: "Research", instructions: "", created_at: "2026-10-29T10:00:00Z", updated_at: "2026-10-29T10:00:00Z" };
 function entry(patch: Partial<KnowledgeEntry> = {}): KnowledgeEntry {
@@ -23,6 +23,62 @@ async function attachSource() {
   fireEvent.click(await screen.findByRole("button", { name: "Preview Project source" }));
   fireEvent.click(await screen.findByRole("button", { name: "Attach reference" }));
 }
+
+it("offers explicit research only for current approved open actions and questions with supported sources", async () => {
+  const entries = [
+    entry({ id: "action", kind: "action", text: "Open action" }),
+    entry({ id: "question", kind: "question", text: "Open question", sources: [{ source_id: "agent:owned:report", revision: "2" }] }),
+    entry({ id: "closed", kind: "action", text: "Closed action", work_status: "completed" }),
+    entry({ id: "file", kind: "action", text: "File-backed action", sources: [reference] }),
+    entry({ id: "stale", kind: "action", text: "Stale action", stale: true }),
+    entry({ id: "fact", kind: "fact", text: "Fact entry" }),
+    entry({ id: "pending", kind: "question", text: "Pending question", approval_state: "proposed" }),
+  ];
+  const fetchMock = vi.fn().mockResolvedValue(json(listing(entries))); vi.stubGlobal("fetch", fetchMock);
+  const onResearch = vi.fn(); render(<ProjectKnowledgeSection project={project} onResearch={onResearch} />);
+  expect(await screen.findAllByRole("button", { name: "Assign to agent" })).toHaveLength(2);
+  fireEvent.click(within(screen.getByRole("article", { name: "Action: Open action" })).getByRole("button", { name: "Assign to agent" }));
+  await waitFor(() => expect(onResearch).toHaveBeenCalledWith(project, entries[0], expect.any(AbortSignal)));
+  expect(fetchMock.mock.calls).toHaveLength(1);
+});
+
+it("does not offer public research in Private Projects and cancels a hidden prefill", async () => {
+  const saved = entry({ kind: "action" });
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json(listing([saved]))));
+  let finish!: () => void; const onResearch = vi.fn().mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+  const { rerender } = render(<ProjectKnowledgeSection project={project} onResearch={onResearch} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Assign to agent" }));
+  const signal = onResearch.mock.calls[0][2] as AbortSignal;
+  rerender(<ProjectKnowledgeSection project={project} visible={false} onResearch={onResearch} />);
+  expect(signal.aborted).toBe(true); finish();
+  rerender(<ProjectKnowledgeSection project={{ ...project, private_required: true }} onResearch={onResearch} />);
+  expect(screen.queryByRole("button", { name: "Assign to agent" })).not.toBeInTheDocument();
+});
+
+it("lazily lists only agents linked to this entry and opens the same saved task", async () => {
+  const saved = entry({ kind: "action" });
+  const linked: AgentTask = { id: "agent-linked", title: "Existing entry research", objective: "Research entry", status: "completed", revision: 8, created_at: project.created_at, updated_at: project.updated_at, steps: [], result: "Report", error: "", attempts: 1, project_context: { project_id: project.id, project_name: project.name, available: true, current: true, instructions_included: false, knowledge: [], origin_entry: { id: saved.id, revision: saved.revision } } };
+  const other = { ...linked, id: "agent-other", title: "Unrelated research", project_context: { ...linked.project_context!, origin_entry: { id: "another-entry", revision: 1 } } };
+  const fetchMock = vi.fn((path: string) => Promise.resolve(json(path.startsWith("/api/agents") ? { items: [linked, other] } : listing([saved])))); vi.stubGlobal("fetch", fetchMock);
+  const open = vi.fn(); render(<ProjectKnowledgeSection project={project} onOpenAgent={open} />);
+  await screen.findByRole("button", { name: "Assigned agents" }); expect(fetchMock.mock.calls).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Assigned agents" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Open agent: Existing entry research" }));
+  expect(open).toHaveBeenCalledWith(linked, expect.any(AbortSignal)); expect(screen.queryByText("Unrelated research")).not.toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledWith("/api/agents?project_id=project-1", expect.objectContaining({ cache: "no-store", signal: expect.any(AbortSignal) }));
+  expect(fetchMock.mock.calls).toHaveLength(2);
+});
+
+it("discards late linked-agent lists after hiding the Project", async () => {
+  let finish!: (response: Response) => void;
+  const fetchMock = vi.fn<(path: string, options?: RequestInit) => Promise<Response>>((path: string) => path.startsWith("/api/agents") ? new Promise<Response>((resolve) => { finish = resolve; }) : Promise.resolve(json(listing([entry({ kind: "action" })]))));
+  vi.stubGlobal("fetch", fetchMock); const open = vi.fn();
+  const { rerender } = render(<ProjectKnowledgeSection project={project} onOpenAgent={open} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Assigned agents" }));
+  const signal = (fetchMock.mock.calls.find(([path]) => path.startsWith("/api/agents"))![1] as RequestInit).signal;
+  rerender(<ProjectKnowledgeSection project={project} visible={false} onOpenAgent={open} />); expect(signal?.aborted).toBe(true);
+  finish(json({ items: [] })); expect(screen.queryByText("No agents have been assigned to this entry.")).not.toBeInTheDocument();
+});
 
 it("saves explicitly inspected references and preserves a new entry draft when closed", async () => {
   const saved = entry({ text: "Use the inspected date.", sources: [reference] });

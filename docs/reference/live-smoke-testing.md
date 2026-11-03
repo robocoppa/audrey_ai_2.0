@@ -17,6 +17,7 @@ English user input only; closed checks do not need another run.
 | Installed Knowledge source API smoke, isolated data | Tower → `tests/smoke/smoke-knowledge-sources-onbox.sh` |
 | Installed report suggestion smoke, mocked model transport | Tower → `tests/smoke/smoke-agent-knowledge-drafts-onbox.sh` |
 | Installed Agent Project Knowledge smoke, isolated data | Tower → `tests/smoke/smoke-agent-project-knowledge-onbox.sh` |
+| Installed Knowledge Agent smoke, isolated data/mocked model | Tower → `tests/smoke/smoke-knowledge-agents-onbox.sh` |
 
 Laptop checkout: `/home/bart/Documents/github/audrey/audrey_ai_2.0`.
 Tower checkout: `/mnt/user/appdata/audrey_ai_2.0`.
@@ -242,6 +243,45 @@ checkout/container. Manual browser acceptance uses an existing ordinary Project:
 approve a current report-linked proposal, start a new agent in that Project, and
 expand its Project context to confirm approved notes were selected. A source change
 must block continuation while retaining the saved report. No upload is required.
+
+## Installed Knowledge Agent smoke
+
+After pulling the Knowledge action/question assignment flow, run on Tower:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+tests/smoke/smoke-knowledge-agents-onbox.sh
+```
+
+No schema/configuration change, credentials, `.env.smoke.local` or upload is needed.
+The wrapper streams the checked-out probe into the running backend's installed
+Python package. It uses a separate ASGI application and temporary canonical accounts,
+Projects, Knowledge entries and Agents, then removes them. Authentication is
+overridden only in that isolated application. One case runs the real Agent runtime,
+executor, ReAct loop and local-model client with mocked verified-Qwen replies and
+no registered tools. It never opens production databases, contacts a live network
+or starts a real model. Missing installed support exits 2; rebuild
+the backend first.
+
+Expect seven `PASS` checks and exit 0. They verify explicit creation without changing
+the entry's open state, origin selection and metadata-only storage, input/access
+boundaries, idempotency and canonical Project renaming, saved-origin restart/rerun
+and change fences, a general task completing without web tools or forced sources,
+and isolated cleanup. This verifies installed API/repository/executor
+contracts; live Cloudflare/proxy wiring, the running worker and real model output
+quality remain separate.
+
+The smoke normally takes seconds, with a ten-second deadline per case. `--json`
+prints a compact receipt; `--timeout-seconds` can lower the per-case deadline.
+Exit codes: 0 pass, 1 finding/timeout, 2 setup failure, 3 harness crash, 130 interrupted.
+Results print in the launching shell, with no notifications/report transfer.
+`AUDREY_SMOKE_APPDATA` (or `APPDATA`) and `AUDREY_SMOKE_CONTAINER` override the
+checkout/container. Manual browser acceptance uses an existing ordinary Project:
+open an approved open Action/Question, select Assign to agent, review the
+draft and press Start agent. Confirm the saved agent's origin revision and that
+Knowledge still shows the entry as Open after the task completes. Assigned agents
+opens the same saved agent. No upload is required.
 
 ## Service rebuilds
 

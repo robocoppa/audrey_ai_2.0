@@ -1,4 +1,4 @@
-"""Owner-bound research tasks with durable step boundaries and fenced leases.
+"""Owner-bound agent tasks with durable step boundaries and fenced leases.
 
 Reservations charge uncertain model work before dispatch. Recovery reuses committed
 steps and charges expired leases; it cannot promise exactly-once model billing.
@@ -38,7 +38,7 @@ _LIMIT_BOUNDS = {
     "max_queued_per_user": (1, 20),
     "max_queued_global": (1, 1000),
 }
-_STEP_LABELS = (("plan", "Plan"), ("research", "Research"), ("review", "Review"))
+_STEP_LABELS = (("plan", "Plan"), ("research", "Work"), ("review", "Review"))
 _PUBLIC_FIELDS = (
     "objective", "title", "status", "revision", "created_at", "updated_at", "result", "error", "attempts",
 )
@@ -129,6 +129,10 @@ class AgentsRepository:
     def _record(self, row: sqlite3.Row) -> dict:
         record = dict(row)
         record["steps"] = json.loads(record.pop("steps_json"))
+        # Stage identities/checkpoints survive presentation-label changes.
+        labels = dict(_STEP_LABELS)
+        for step in record["steps"]:
+            step["label"] = labels.get(step["id"], step["label"])
         record["limits"] = json.loads(record.pop("limits_json"))
         record["input_requests"] = self._input_requests(record["task_id"])
         record["project_context"] = self._project_contexts.public(task_id=record["task_id"], user_id=record["user_id"])
@@ -257,12 +261,20 @@ class AgentsRepository:
     async def create(
         self, *, user_id: str, objective: str, request_id: str, limits: dict | None = None,
         project_id: str | None = None,
+        knowledge_entry_id: str | None = None, knowledge_entry_revision: int | None = None,
     ) -> dict:
         objective = _text(objective, maximum=8000, name="objective")
         request_id = _text(request_id, maximum=200, name="request identity")
         limits = _limits(limits)
         if project_id is not None:
             project_id = _text(project_id, maximum=300, name="Project identity")
+        if (knowledge_entry_id is None) != (knowledge_entry_revision is None):
+            raise AgentTaskError("Project knowledge identity and revision must be supplied together.")
+        if knowledge_entry_id is not None:
+            knowledge_entry_id = _text(knowledge_entry_id, maximum=300, name="Project knowledge identity")
+            _integer(knowledge_entry_revision, 1, 2**63 - 1)
+            if project_id is None:
+                raise AgentTaskError("Project knowledge tasks require a Project.")
 
         def work() -> dict:
             self._owner(user_id)
@@ -273,8 +285,10 @@ class AgentsRepository:
             if existing is not None:
                 record = self._record(existing)
                 saved_project = record["project_context"]["project_id"] if record["project_context"] else None
-                if record["objective"] != objective or saved_project != project_id:
-                    raise AgentTaskConflictError("Request identity already used for another objective or Project.")
+                saved_origin = record["project_context"].get("origin_entry") if record["project_context"] else None
+                requested_origin = {"id": knowledge_entry_id, "revision": knowledge_entry_revision} if knowledge_entry_id is not None else None
+                if record["objective"] != objective or saved_project != project_id or saved_origin != requested_origin:
+                    raise AgentTaskConflictError("Request identity already used for another objective, Project or knowledge entry.")
                 return self._public(record)
             self._queue_capacity(user_id, limits)
             saved = self._conn.execute(
@@ -293,9 +307,14 @@ class AgentsRepository:
             )
             if project_id is not None:
                 try:
-                    self._project_contexts.capture(task_id=task_id, user_id=user_id, project_id=project_id, objective=objective)
+                    self._project_contexts.capture(
+                        task_id=task_id, user_id=user_id, project_id=project_id, objective=objective,
+                        knowledge_entry_id=knowledge_entry_id, knowledge_entry_revision=knowledge_entry_revision,
+                    )
                 except AgentProjectAccessError:
-                    raise AgentTaskAccessError("Project research context is unavailable.") from None
+                    raise AgentTaskAccessError("Project context is unavailable.") from None
+                except AgentProjectChangedError as error:
+                    raise AgentTaskConflictError(str(error)) from None
             return self._public(self._load(task_id, user_id))
 
         return await asyncio.to_thread(self._transaction, work)
@@ -314,7 +333,7 @@ class AgentsRepository:
                     try:
                         self._project_contexts.require_project(user_id, project_id)
                     except AgentProjectAccessError:
-                        raise AgentTaskAccessError("Project research context is unavailable.") from None
+                        raise AgentTaskAccessError("Project context is unavailable.") from None
                 if summary:
                     rows = self._conn.execute(
                         "SELECT task_id,objective,title,status,revision,created_at,updated_at,"
@@ -756,7 +775,7 @@ class AgentsRepository:
                 if record["operations"] >= record["limits"]["max_operations"]:
                     raise AgentTaskError("Agent operation allowance exhausted.")
                 # Continue unfinished work; a fully finished report gets fresh
-                # Research/Review while its committed Plan remains reusable.
+                # Work/Review while its committed Plan remains reusable.
                 if all(step["status"] == "completed" for step in record["steps"]):
                     for step in record["steps"]:
                         if step["id"] != "plan":

@@ -81,7 +81,7 @@ content_search:
   enabled: true
   sqlite_path: "/data/content-search/index.sqlite"
 
-# Saved public-source research agents use verified local Qwen only, without fallback.
+# Saved task agents use verified local Qwen only, without fallback.
 # They share Audrey's model/tool admission.
 # Limits persist with each task; retries and resume retain consumed allowance.
 agent_tasks:
@@ -95,7 +95,7 @@ agent_tasks:
   max_active_seconds: 1800
   max_queued_per_user: 5
   max_queued_global: 50
-  # Research and Review need room for report text as well as model reasoning.
+  # Work and Review need room for task results as well as model reasoning.
   max_tokens_per_call: 8192
   # A saved Plan is concise and reused when the same agent runs again.
   plan_max_tokens_per_call: 2048

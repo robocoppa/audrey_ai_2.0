@@ -4,7 +4,7 @@ import type { ComponentProps } from "react";
 
 import { App } from "./App";
 import { latestActionFetch } from "./agentTransport";
-import type { PublicWatch, SearchTarget } from "./api";
+import type { KnowledgeEntry, PublicWatch, SearchTarget } from "./api";
 
 const workspaceMock = vi.hoisted(() => ({ enabled: false, projectBridge: false }));
 
@@ -18,6 +18,7 @@ vi.mock("./ChatWorkspace", async (importOriginal) => {
         {props.conversationOpenRequest ? <span>Opened conversation {props.conversationOpenRequest.conversation.id} at {props.conversationOpenRequest.messageId}</span> : null}
         {workspaceMock.projectBridge ? <>
           <button onClick={() => void props.onNewProjectAgent?.(BRIDGE_PROJECT)}>Prefill Project agent</button>
+          <button onClick={() => void props.onResearchProjectKnowledge?.(BRIDGE_PROJECT, BRIDGE_KNOWLEDGE)}>Research saved Project entry</button>
           <button onClick={() => void props.onOpenProjectAgent?.(BRIDGE_AGENT)}>Open saved Project agent</button>
           <button onClick={() => void props.onNewProjectWatch?.(BRIDGE_PROJECT)}>Prefill Project watch</button>
           <button onClick={() => void props.onOpenProjectWatch?.(BRIDGE_WATCH)}>Open saved Project watch</button>
@@ -41,6 +42,7 @@ const DEFAULT_PREFERENCES = {
 } as const;
 
 const BRIDGE_PROJECT = { id: "project-bridge", name: "Public releases", instructions: "Stable only.", created_at: "2026-10-31T10:00:00Z", updated_at: "2026-10-31T10:00:00Z" };
+const BRIDGE_KNOWLEDGE: KnowledgeEntry = { id: "entry-bridge", project_id: BRIDGE_PROJECT.id, kind: "question", text: "What changed in public releases?", approval_state: "approved", work_status: "open", revision: 4, pinned: false, origin: "user", sources: [], source_task_id: null, created_at: BRIDGE_PROJECT.created_at, updated_at: BRIDGE_PROJECT.updated_at, approved_at: BRIDGE_PROJECT.updated_at, stale: false, source_warnings: [], replaces_id: null, base_revision: null };
 const BRIDGE_AGENT = { id: "agent-bridge", objective: "Compare public releases", title: "Release comparison", status: "completed" as const, revision: 8, created_at: BRIDGE_PROJECT.created_at, updated_at: BRIDGE_PROJECT.updated_at, steps: [], result: "A saved report.", error: "", attempts: 1, project_context: { project_id: BRIDGE_PROJECT.id, project_name: BRIDGE_PROJECT.name, available: true, current: true, instructions_included: true, knowledge: [] } };
 
 const BRIDGE_WATCH: PublicWatch = { id: "watch-bridge", title: "Release monitoring", url: "https://example.com/releases", criterion: "New stable releases", schedule: { kind: "daily", time: "09:00", timezone: "UTC" }, enabled: true, revision: 1, next_run_at: "2026-11-02T09:00:00Z", active_run_id: null, latest_run: null, created_at: BRIDGE_PROJECT.created_at, updated_at: BRIDGE_PROJECT.updated_at, project: { id: BRIDGE_PROJECT.id, name: BRIDGE_PROJECT.name, available: true } };
@@ -112,6 +114,57 @@ describe("App", () => {
     window.history.replaceState({}, "", "/");
   });
 
+  it("re-reads the canonical Project and Knowledge entry before an explicit research prefill without writes", async () => {
+    workspaceMock.enabled = workspaceMock.projectBridge = true;
+    const base = mockCapabilitySession("degraded").getMockImplementation()!;
+    const fetchMock = vi.fn<(path: string, options?: RequestInit) => Promise<Response>>((path: string) => {
+      const payload = path === `/api/projects/${BRIDGE_PROJECT.id}` ? { ...BRIDGE_PROJECT, name: "Renamed public releases" }
+        : path === `/api/projects/${BRIDGE_PROJECT.id}/knowledge/${BRIDGE_KNOWLEDGE.id}` ? BRIDGE_KNOWLEDGE : null;
+      return payload ? Promise.resolve(new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } })) : base(path);
+    }); vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Research saved Project entry" }, { timeout: 5000 }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("What changed in public releases?"));
+    expect(screen.getByRole("option", { name: "Renamed public releases" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(`/api/projects/${BRIDGE_PROJECT.id}/knowledge/${BRIDGE_KNOWLEDGE.id}`, expect.objectContaining({ cache: "no-store", signal: expect.any(AbortSignal) }));
+    expect(fetchMock.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false);
+  });
+
+  it.each(["revision", "closed", "Private", "file", "stale"])("rejects a canonical %s Knowledge change without overwriting the composer", async (change) => {
+    workspaceMock.enabled = workspaceMock.projectBridge = true;
+    const base = mockCapabilitySession("degraded").getMockImplementation()!;
+    const changed = { ...BRIDGE_KNOWLEDGE,
+      ...(change === "revision" ? { revision: 5 } : {}), ...(change === "closed" ? { work_status: "resolved" } : {}),
+      ...(change === "file" ? { sources: [{ source_id: "file:owned:text", revision: "1" }] } : {}), ...(change === "stale" ? { stale: true } : {}),
+    };
+    vi.stubGlobal("fetch", vi.fn((path: string) => {
+      const payload = path === `/api/projects/${BRIDGE_PROJECT.id}` ? { ...BRIDGE_PROJECT, private_required: change === "Private" }
+        : path === `/api/projects/${BRIDGE_PROJECT.id}/knowledge/${BRIDGE_KNOWLEDGE.id}` ? changed : null;
+      return payload ? Promise.resolve(new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } })) : base(path);
+    })); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Research saved Project entry" }));
+    expect(await screen.findByText("This entry changed or is unavailable for an agent task. Refresh and review it before trying again.")).toBeVisible();
+    const navigation = within(screen.getByRole("navigation", { name: "Workspaces" }));
+    expect(navigation.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("");
+  });
+
+  it("ignores a late Knowledge prefill after another navigation", async () => {
+    workspaceMock.enabled = workspaceMock.projectBridge = true;
+    let finish!: (response: Response) => void;
+    const base = mockCapabilitySession("degraded").getMockImplementation()!;
+    vi.stubGlobal("fetch", vi.fn((path: string) => path.endsWith(`/knowledge/${BRIDGE_KNOWLEDGE.id}`)
+      ? new Promise<Response>((resolve) => { finish = resolve; }) : path === `/api/projects/${BRIDGE_PROJECT.id}`
+        ? Promise.resolve(new Response(JSON.stringify(BRIDGE_PROJECT), { headers: { "Content-Type": "application/json" } })) : base(path)));
+    render(<App />); fireEvent.click(await screen.findByRole("button", { name: "Research saved Project entry" }));
+    const navigation = within(screen.getByRole("navigation", { name: "Workspaces" }));
+    fireEvent.click(navigation.getByRole("button", { name: "Agents" })); fireEvent.click(navigation.getByRole("button", { name: "Chat" }));
+    await act(async () => finish(new Response(JSON.stringify(BRIDGE_KNOWLEDGE), { headers: { "Content-Type": "application/json" } })));
+    expect(navigation.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("");
+  });
+
   it("prefills a canonical Project without creating and opens the existing agent and Project", async () => {
     workspaceMock.enabled = workspaceMock.projectBridge = true;
     const base = mockCapabilitySession("degraded").getMockImplementation()!;
@@ -122,7 +175,7 @@ describe("App", () => {
     }); vi.stubGlobal("fetch", fetchMock); render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Prefill Project agent" }, { timeout: 5000 }));
     await waitFor(() => expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(BRIDGE_PROJECT.id));
-    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "Preserved Project draft" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Preserved Project draft" } });
     const navigation = within(screen.getByRole("navigation", { name: "Workspaces" })); fireEvent.click(navigation.getByRole("button", { name: "Chat" }));
     fireEvent.click(screen.getByRole("button", { name: "Open saved Project agent" }));
     expect(await screen.findByRole("heading", { name: BRIDGE_AGENT.title })).toBeVisible();
@@ -130,7 +183,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open Project" }));
     expect(await screen.findByText(`Opened Project ${BRIDGE_PROJECT.name}`)).toBeVisible();
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
-    expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("Preserved Project draft");
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Preserved Project draft");
     expect(fetchMock.mock.calls.some(([, options]) => (options as RequestInit | undefined)?.method === "POST")).toBe(false);
   });
 
@@ -275,12 +328,12 @@ describe("App", () => {
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
     expect(screen.getByRole("heading", { name: "Agents", level: 1 })).toBeVisible();
     expect(chat).not.toBeVisible();
-    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "Keep this research draft" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Keep this research draft" } });
     fireEvent.click(navigation.getByRole("button", { name: "Chat" }));
     expect(screen.getByText("Workspace ready")).toBe(chat);
     expect(chat).toBeVisible();
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
-    expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("Keep this research draft");
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Keep this research draft");
   });
 
   it("opens a Search sidebar beside Chat and reads the matching source inside it", async () => {
@@ -350,7 +403,7 @@ describe("App", () => {
     await screen.findByText("Workspace ready", {}, { timeout: 5000 });
     const navigation = within(screen.getByRole("navigation", { name: "Workspaces" }));
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Research objective" }), { target: { value: "Keep this agent draft" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Keep this agent draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Open Search" }));
     const panel = screen.getByRole("complementary", { name: "Search" });
     fireEvent.change(within(panel).getByRole("searchbox"), { target: { value: "  trees in Minecraft  " } });
@@ -359,9 +412,9 @@ describe("App", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("q=trees+in+Minecraft"), expect.anything()));
     expect(screen.getByRole("searchbox", { name: "Search your content" })).toHaveValue("  trees in Minecraft  ");
     expect(navigation.getByRole("button", { name: "Agents" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("Keep this agent draft");
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Keep this agent draft");
     fireEvent.click(within(panel).getByRole("button", { name: "Collapse Search" }));
-    expect(screen.getByRole("textbox", { name: "Research objective" })).toHaveValue("Keep this agent draft");
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Keep this agent draft");
   });
 
   it("uses a modal Search drawer on narrow screens and restores launcher focus after dismissal", async () => {
