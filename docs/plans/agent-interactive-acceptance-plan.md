@@ -1,8 +1,14 @@
 # Interactive acceptance for the last ten Agent workspace changes
 
-Prepared November 3, 2026. **Not run.** These are owner-operated browser tests
+Prepared November 3, 2026. **In progress; full acceptance pending.** These are owner-operated browser tests
 against Audrey's running UI, worker, local models and real downloads. Internal
 scripted checks remain regression evidence; they do not close these cases.
+
+November 4 update: the owner supplied a Fern Circle result and requested layout
+cleanup; its download checks have not been reported. Case 2 failed during Plan
+with a local-model output-limit error before Work began. A concise, nonthinking
+Plan fix is prepared; retry that same Agent after rebuilding backend/UI. Neither
+the file-reading capability nor the full case is accepted by this failed run.
 
 Use the latest deployed build containing `a463b16`. The laptop's `main` and its
 local `origin/main` reference both point there at preparation time; Tower's live
@@ -76,6 +82,19 @@ Agent asking for the same two-row table in TXT, JSON, DOCX and XLSX. Download an
 open all four; JSON must parse and Office files must open as native documents.
 Mark any format you cannot inspect NOT RUN. One working Markdown file does not
 establish that all six formats work.
+
+**Layout and Project creation follow-up:** reopen the existing Fern Circle task
+on a laptop. Plan/progress and Recent activity should be symmetrical side by side.
+Expand saved Work and Show more activity; scroll either card with the pointer or
+keyboard and check that its neighbor stays still. The Result title and smaller
+Knowledge action should share a header, and report headings/code should remain
+readable. Open Search or narrow the window: cards should stack without page overflow.
+In the Agent composer, enter a draft objective, choose New project and create a
+disposable ordinary Project. It should become selected, preserve the objective,
+and start no Agent. Also try Cancel and a narrow/mobile drawer. On the Project
+page, shrink the window and check that New conversation, Edit and Delete stay
+together and Upload file remains on one line. No upload or new model call is
+needed to inspect the existing result layout.
 
 ## 2. Selected files, later pages and answer quality
 

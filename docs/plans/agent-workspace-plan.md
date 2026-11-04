@@ -1,6 +1,6 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, November 3, 2026. Saved task Agents, unified lexical
+**Status:** In progress, November 4, 2026. Saved task Agents, unified lexical
 Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner confirms Search
 returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
 
@@ -13,7 +13,7 @@ part of the requested background execution capability.
 Interactive acceptance now takes priority over another feature slice. The owner
 will exercise the [last ten changes](agent-interactive-acceptance-plan.md) through
 the real UI, worker, local models and downloads. Scripted smoke receipts remain
-regression evidence; these live capability checks have not yet run. The unfinished
+regression evidence; full live acceptance remains pending. The unfinished
 Work-question changes were set aside before this handoff.
 
 ## Current implementation slice
@@ -40,6 +40,20 @@ Top-bar hover uses the filled, soft glow of My Files, with distinct keyboard foc
 retained. Agent headings/history use a saved
 short title, and the unchanged original objective is available in an expandable
 Original prompt section.
+Plan and progress and Recent activity share equal-width, equal-height cards when
+the workflow has enough width. Both have fixed headings and independent scrolling;
+narrow workspaces, including Search-open views, stack them. Result uses a compact
+header with the Knowledge action alongside its title, restrained report headings
+and bounded, labeled code blocks. Saved report text is preserved.
+The Agent composer offers New project through the existing ordinary Project
+dialog. Creating selects the new Project and preserves the objective; it does
+not start an Agent. Cancel and failure preserve the previous selection and draft.
+Project headers keep New conversation, Edit and Delete in one row at narrow
+widths, using shorter visible labels. Upload file stays on one line.
+Local UI/executor tests, typecheck, lint and the production build pass. Chromium
+fixture checks cover independent panel scrolling, narrow Project controls and
+Project creation without automatic task execution at desktop and mobile widths;
+these supplement the owner-operated checks, without proving live model behavior.
 
 Application schema 26 introduced owner-bound tasks and operation reservations with
 leases, fenced writes and cumulative limits. The lifecycle worker reuses committed
@@ -70,6 +84,12 @@ Work and Review allow up to 8,192 generated tokens per call, including model
 reasoning. Plan has a separate 2,048-token cap, bounded by the overall call limit.
 This raises the original 2,048-token report allowance after a reported Research
 output-limit failure; live acceptance of the larger allowance remains pending.
+After the owner encountered the Plan limit during interactive file-input testing,
+Plan now explicitly disables thinking and asks for at most six short steps and
+200 words. Work and Review keep their previous reasoning policy. Length stops
+still fail without saving a partial Plan. Local request-policy/executor checks
+pass; rerunning the same failed Agent with its frozen inputs remains the real
+model acceptance check.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
 Adaptive multi-step plans, Private agent inputs,
@@ -610,7 +630,8 @@ No settings, credentials or upload are required for the isolated smoke.
 
 ### Observed Agent execution history
 
-Each task now has Recent activity below Plan and progress. It shows actual local
+Each task now has Recent activity beside Plan and progress on wide workspaces,
+stacking below it when space is narrow. Matching cards scroll independently. It shows actual local
 model requests, allowed tool invocations and stage checkpoints, with attempt,
 timestamp, outcome and measured duration/token counts when available. The compact
 view shows six entries; users can expand its independently scrolling list and

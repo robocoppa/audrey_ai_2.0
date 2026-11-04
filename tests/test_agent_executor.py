@@ -470,6 +470,12 @@ async def test_step_output_limits_are_serialized_on_every_local_model_call(
     assert len(requests) == (2 if step_id == "research" else 1)
     assert all(request["options"]["num_predict"] == expected[step_id] for request in requests)
     assert all(request["model"] == _MODEL for request in requests)
+    if step_id == "plan":
+        assert all(request["think"] is False for request in requests)
+    else:
+        # The narrow planner fix must not disable reasoning for task execution
+        # or Review, including later Work calls after a real tool result.
+        assert all("think" not in request for request in requests)
 
 
 @pytest.mark.parametrize("step_id,expected", [("plan", 1024), ("research", 4096), ("review", 4096)])
@@ -1453,6 +1459,75 @@ async def _selected_file_context(s, *, selected_text="Delivery quantity: 17 boxe
     service = get_agent_file_inputs(s.app)
     pins = await service.capture(s.owner, project.project_id, ["chosen-input"])
     return project, chosen, pins
+
+
+async def test_failed_plan_keeps_selected_inputs_and_reruns_without_accepting_truncated_work(file_state):
+    s = file_state
+    s.app.state.cfg.raw["agent_tasks"] = {}
+    source_text = "Garden purchasing context.\n" * 1900 + "FINAL REQUIREMENT: 29 crates.\n"
+    project, chosen, _pins = await _selected_file_context(s, selected_text=source_text)
+    csv_text = "item,quantity\nseed_trays,3\ngloves,2\n"
+    (chosen.parent / "supplies.csv").write_text(csv_text)
+    await s.files_db.record_upload(
+        file_id="supplies", user=s.owner.storage_namespace, filename="supplies.csv",
+        mime="text/csv", bytes_=len(csv_text.encode()), kind="text", collection="", chunks=0,
+        uploaded_at="2026-11-04T12:00:00+00:00",
+    )
+    await s.store.projects.add_file(
+        user_id=s.owner.user_id, project_id=project.project_id, file_id="supplies",
+    )
+    pins = await get_agent_file_inputs(s.app).capture(
+        s.owner, project.project_id, ["chosen-input", "supplies"],
+    )
+    created = await s.store.agents.create(
+        user_id=s.owner.user_id, objective="Use the two selected files to prepare a short purchasing summary.",
+        request_id="selected-plan-output-limit", project_id=project.project_id, file_inputs=pins,
+    )
+    # Even if a provider disregards the non-thinking request, a length-stopped
+    # outline is a real failure. It must never become the saved Plan or enter Work.
+    s.responses.append(_answer(
+        "Incomplete plan must not be saved", done_reason="length", eval_count=2048,
+        prompt_eval_count=2454, message={"content": "Incomplete plan must not be saved", "thinking": "Hidden partial reasoning"},
+    ))
+    runtime = AgentRuntime(s.store.agents, s.executor)
+    assert await runtime.run_once()
+    failed = await s.store.agents.get(user_id=s.owner.user_id, task_id=created["id"])
+    assert failed["status"] == "failed"
+    assert failed["error"].startswith("Plan reached the local model's output limit")
+    assert all(not step["result"] for step in failed["steps"]) and not failed["result"]
+    first_plan = _content_requests(s)
+    assert len(first_plan) == 1
+    assert first_plan[0]["think"] is False
+    assert first_plan[0]["options"]["num_predict"] == 2048
+    excerpts_message = next(message for message in first_plan[0]["messages"]
+                            if message["content"].startswith("User-selected file excerpts"))
+    excerpts = json.loads(excerpts_message["content"].split("\n")[1])
+    assert len(excerpts) == 2 and excerpts[0]["truncated"]
+    assert source_text.startswith(excerpts[0]["text"])
+    assert excerpts[0]["total_chars"] == len(source_text) and excerpts[1]["text"] == csv_text
+    models = [event for event in await _activity(s, created)
+              if event["kind"] == "model" and event["stage"] == "plan"]
+    assert len(models) == 1 and models[0]["state"] == "failed"
+    assert models[0]["input_tokens"] == 2454 and models[0]["output_tokens"] == 2048
+
+    queued = await s.store.agents.control(
+        user_id=s.owner.user_id, task_id=created["id"],
+        expected_revision=failed["revision"], action="rerun",
+    )
+    assert queued["id"] == created["id"] and queued["file_inputs"] == failed["file_inputs"]
+    plan = "1. Inspect the selected purchasing requirements.\n2. Prepare the requested concise summary."
+    s.responses.extend([_answer(plan), _answer("Prepared summary."), _answer("Finished summary.")])
+    assert await runtime.run_once()
+    saved = await s.store.agents.get(user_id=s.owner.user_id, task_id=created["id"])
+    assert saved["id"] == created["id"] and saved["status"] == "completed"
+    assert saved["steps"][0]["result"] == plan and saved["result"] == "Finished summary."
+    assert saved["file_inputs"] == queued["file_inputs"] and saved["attempts"] == 2
+    requests = _content_requests(s)
+    assert [request["options"]["num_predict"] for request in requests] == [2048, 2048, 8192, 8192]
+    assert [request.get("think") for request in requests] == [False, False, None, None]
+    assert "Incomplete plan" not in json.dumps(requests[1:])
+    assert not s.responses and not s.tool_requests
+    assert len(await s.store.agents.list(user_id=s.owner.user_id)) == 1
 
 
 @pytest.mark.parametrize("step_id", ["plan", "research", "review"])

@@ -45,6 +45,8 @@ log = logging.getLogger(__name__)
 AGENT_PLAN_SYSTEM = (
     "Plan how to complete the user's assigned task. "
     "State the concrete steps and expected result, keeping the plan proportionate to the task. "
+    "Keep the whole plan under 200 words, with at most six short numbered steps "
+    "and a brief expected result. Do not recap source text or draft the deliverable. "
     "Tasks can involve writing, analysis, planning, comparisons or other work. "
     "Choose tools only when the task needs them; do not turn every task into web research. "
     "Do not perform the task yet or claim actions or source reads that have not happened. "

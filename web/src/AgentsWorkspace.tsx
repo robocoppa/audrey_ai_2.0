@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Children, isValidElement, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -20,6 +20,7 @@ import {
   type AudreyProjectFile,
   type PublicWatch,
   type WatchRun,
+  type ProjectLimits,
 } from "./api";
 import "./AgentsWorkspace.css";
 import { AgentKnowledgeDialog } from "./AgentKnowledgeDialog";
@@ -29,6 +30,7 @@ import { AgentFileInputsView, AgentFilePicker } from "./AgentFileInputs";
 import { WatchesWorkspace } from "./WatchesWorkspace";
 import { ActivityWorkspace } from "./ActivityWorkspace";
 import { canAssignKnowledge, knowledgeTaskObjective, type KnowledgeAgentRequest } from "./knowledgeAgents";
+import { NewProjectDialog } from "./ProjectWorkspace";
 
 const STATUS_LABELS: Record<AgentTaskStatus, string> = {
   queued: "Queued", running: "Running", paused: "Paused", completed: "Completed",
@@ -259,6 +261,8 @@ function AgentTasksWorkspace({
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState("");
   const [projectRefresh, setProjectRefresh] = useState(0);
+  const [projectLimits, setProjectLimits] = useState<ProjectLimits>({ max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 });
+  const [creatingProject, setCreatingProject] = useState(false);
   const [composerProject, setComposerProject] = useState<AudreyProject | null>(null);
   const [composerFiles, setComposerFiles] = useState<{ projectId: string; files: AudreyProjectFile[] } | null>(null);
   const [composerOrigin, setComposerOrigin] = useState<{ id: string; revision: number } | null>(null);
@@ -270,6 +274,7 @@ function AgentTasksWorkspace({
   const mutationGeneration = useRef(0);
   const busyRef = useRef(false);
   const objectiveRef = useRef<HTMLTextAreaElement>(null);
+  const newProjectRef = useRef<HTMLButtonElement>(null);
   const detailRef = useRef<HTMLElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
@@ -317,7 +322,7 @@ function AgentTasksWorkspace({
   }, [setSidebarOpen, visible]);
 
   useEffect(() => {
-    if (!sidebarOpen) return;
+    if (!sidebarOpen || creatingProject) return;
     sidebarRef.current?.querySelector<HTMLButtonElement>(".agents-sidebar-close")?.focus({ preventScroll: true });
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -340,7 +345,11 @@ function AgentTasksWorkspace({
     };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [closeSidebar, sidebarOpen]);
+  }, [closeSidebar, sidebarOpen, creatingProject]);
+
+  useEffect(() => {
+    if (!visible) queueMicrotask(() => setCreatingProject(false));
+  }, [visible]);
 
   useEffect(() => {
     mounted.current = true;
@@ -355,7 +364,7 @@ function AgentTasksWorkspace({
     const controller = new AbortController(); projectsRequest.current?.abort(); projectsRequest.current = controller;
     queueMicrotask(() => { if (!controller.signal.aborted) { setProjectsLoading(true); setProjectsError(""); } });
     void listProjects(undefined, controller.signal).then((page) => {
-      if (!controller.signal.aborted) { setProjects(page.items.filter((project) => !project.private_required)); setProjectsCursor(page.next_cursor); }
+      if (!controller.signal.aborted) { setProjects(page.items.filter((project) => !project.private_required)); setProjectsCursor(page.next_cursor); setProjectLimits(page.limits); }
     }).catch((reason: unknown) => {
       if (!controller.signal.aborted) setProjectsError(`Could not load Projects. ${messageOf(reason)}`);
     }).finally(() => { if (!controller.signal.aborted) setProjectsLoading(false); });
@@ -698,7 +707,7 @@ function AgentTasksWorkspace({
         <span>Workflow</span>
       </div> : null}
       {sidebarOpen ? <button type="button" className="agents-sidebar-backdrop" tabIndex={-1} aria-label="Dismiss agent controls" onClick={closeSidebar} /> : null}
-      <div className="agents-columns">
+      <div className="agents-columns" inert={creatingProject ? true : undefined}>
         <aside
           className="agents-sidebar"
           id="agents-navigation"
@@ -722,7 +731,10 @@ function AgentTasksWorkspace({
             {sidebarOpen && error ? <p className="agents-error" role="alert">{error}</p> : null}
             {sidebarOpen && notice ? <p className="agents-notice" role="status">{notice}</p> : null}
             <form className="agents-composer" onSubmit={submit}>
-              <label htmlFor="agent-project">Project <span className="agents-optional">Optional</span></label>
+              <div className="agents-project-heading">
+                <label htmlFor="agent-project">Project <span className="agents-optional">Optional</span></label>
+                <button ref={newProjectRef} className="agents-refresh agents-create-project" type="button" disabled={busy} onClick={() => setCreatingProject(true)}>New project</button>
+              </div>
               <select id="agent-project" aria-label="Project" value={composerProject?.id ?? ""} disabled={busy} onChange={(event) => {
                 setComposerProject(composerProjects.find((project) => project.id === event.target.value) ?? null); setUnavailableProjectId(null);
                 setComposerOrigin(null); setPendingKnowledgeRequest(null); setComposerFiles(null);
@@ -845,27 +857,35 @@ function AgentTasksWorkspace({
                   onAnswer={() => void answerInput(selected, selectedInput, selectedInputDraft)} />
                   : <p className="agents-notice" role="status">{selected.summary ? "Loading the saved question…" : "The saved question is unavailable. Refresh this agent before answering."}</p> : null}
                 {selected.input_requests?.some((request) => request.answer !== null) ? <details className="agents-input-history"><summary>Questions and answers</summary><ol>{selected.input_requests.filter((request) => request.answer !== null).map((request) => <li key={request.id}><h3>Planning question</h3><p>{request.question}</p><h4>Your answer</h4><p>{request.answer}</p></li>)}</ol></details> : null}
-                <section className="agents-plan" aria-labelledby="agent-plan-title">
-                  <h3 id="agent-plan-title">Plan and progress</h3>
-                  <ol>
-                    {selected.steps.map((step) => (
-                      <li key={step.id} className={`agents-step agents-step-${step.status}`}>
-                        <span className="agents-step-mark" aria-hidden="true">{step.status === "completed" ? "✓" : step.status === "running" ? "●" : "○"}</span>
-                        <div>
-                          <strong>{stepLabel(step)}</strong>
-                          <span className="agents-step-status">{step.status === "completed" ? "Completed" : step.status === "running" ? "In progress" : "Pending"}</span>
-                          {step.result ? <details><summary>View saved {step.id === "plan" ? "plan" : step.id === "research" ? "work" : "review"}</summary><AgentMarkdown text={step.result} /></details> : null}
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                </section>
-                <AgentRecentActivity key={selected.id} task={selected} visible={visible && !sidebarOpen} timezone={timezone} />
+                <div className="agents-progress-panels">
+                  <section className="agents-plan agents-progress-panel" aria-labelledby="agent-plan-title">
+                    <header className="agents-panel-header"><h3 id="agent-plan-title">Plan and progress</h3></header>
+                    <div className="agents-plan-scroll" role="region" aria-label="Saved plan and progress" tabIndex={0}>
+                      <ol className="agents-step-list">
+                        {selected.steps.map((step) => (
+                          <li key={step.id} className={`agents-step agents-step-${step.status}`}>
+                            <span className="agents-step-mark" aria-hidden="true">{step.status === "completed" ? "✓" : step.status === "running" ? "●" : "○"}</span>
+                            <div>
+                              <strong>{stepLabel(step)}</strong>
+                              <span className="agents-step-status">{step.status === "completed" ? "Completed" : step.status === "running" ? "In progress" : "Pending"}</span>
+                              {step.result ? <details><summary>View saved {step.id === "plan" ? "plan" : step.id === "research" ? "work" : "review"}</summary><AgentMarkdown text={step.result} /></details> : null}
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  </section>
+                  <AgentRecentActivity key={selected.id} task={selected} visible={visible && !sidebarOpen} timezone={timezone} />
+                </div>
                 <AgentOutputs key={`${selected.id}:${visible}`} outputs={selected.outputs} />
                 <section className="agents-result" aria-labelledby="agent-result-title">
-                  <h3 id="agent-result-title">Result</h3>
-                  {selected.status === "completed" && selected.result ? <button className="agents-secondary" type="button" onClick={() => setKnowledgeTask(selected)}>Propose Project knowledge</button> : null}
-                  {selected.result ? <AgentMarkdown text={selected.result} /> : <p>{selected.summary && selected.status === "completed" ? "Loading the saved result…" : selected.status === "failed" ? "This task stopped before a final result was saved. Any completed steps are available above." : selected.status === "cancelled" ? "This task was cancelled. Any completed steps are available above." : "The result will appear here when Audrey completes its review."}</p>}
+                  <header className="agents-result-header">
+                    <h3 id="agent-result-title">Result</h3>
+                    {selected.status === "completed" && selected.result ? <button className="agents-secondary" type="button" onClick={() => setKnowledgeTask(selected)}>Propose Project knowledge</button> : null}
+                  </header>
+                  <div className="agents-result-body">
+                    {selected.result ? <AgentMarkdown text={selected.result} /> : <p className="agents-result-empty">{selected.summary && selected.status === "completed" ? "Loading the saved result…" : selected.status === "failed" ? "This task stopped before a final result was saved. Any completed steps are available above." : selected.status === "cancelled" ? "This task was cancelled. Any completed steps are available above." : "The result will appear here when Audrey completes its review."}</p>}
+                  </div>
                 </section>
               </>
             ) : (
@@ -880,6 +900,16 @@ function AgentTasksWorkspace({
         </section>
       </div>
       {knowledgeTask && proposalReportCurrent && visible ? <AgentKnowledgeDialog task={knowledgeTask} onClose={() => setKnowledgeTask(null)} /> : null}
+      {creatingProject && visible ? <NewProjectDialog limits={projectLimits} privateAvailable={false}
+        onClose={() => { setCreatingProject(false); window.requestAnimationFrame(() => newProjectRef.current?.focus()); }}
+        onCreated={(project) => {
+          projectsRequest.current?.abort();
+          setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
+          setProjectsLoading(false); setProjectsError(""); setProjectRefresh((value) => value + 1);
+          setComposerProject(project); setComposerFiles(null); setComposerOrigin(null); setPendingKnowledgeRequest(null); setUnavailableProjectId(null);
+          setCreatingProject(false); setNotice("Project created and selected. Your task draft is kept.");
+          window.requestAnimationFrame(() => objectiveRef.current?.focus());
+        }} /> : null}
     </section>
   );
 }
@@ -977,6 +1007,15 @@ function AgentTaskControls({ task, busy, onAction, onDelete }: {
 function AgentMarkdown({ text }: { text: string }) {
   return <div className="markdown-content agents-markdown"><Markdown remarkPlugins={[remarkGfm]} skipHtml components={{
     a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
+    pre: ({ children }) => {
+      const code = Children.toArray(children).find((child) => isValidElement(child));
+      const language = isValidElement<{ className?: string }>(code)
+        ? code.props.className?.match(/language-(\S+)/)?.[1]?.slice(0, 40) : undefined;
+      return <div className="agents-code-block" data-language={language}>
+        <div className="agents-code-header">{language || "Text"}</div>
+        <pre tabIndex={0} aria-label={`${language || "Text"} code block`}>{children}</pre>
+      </div>;
+    },
     // A source can contain tracking images; reports show text and source links.
     img: ({ alt }) => <span>{alt}</span>,
   }}>{text}</Markdown></div>;

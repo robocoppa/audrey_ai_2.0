@@ -127,14 +127,14 @@ export function AgentRecentActivity({ task, visible, timezone }: { task: Pick<Ag
     }
   }
 
-  return <section className="agents-recent-activity" aria-label="Recent activity">
-    <h3><button type="button" className="agents-activity-toggle" aria-expanded={open} aria-controls={contentId} onClick={() => setOpen((value) => !value)}>
+  return <section className="agents-recent-activity agents-progress-panel" aria-label="Recent activity">
+    <header className="agents-panel-header"><h3><button type="button" className="agents-activity-toggle" aria-expanded={open} aria-controls={contentId} onClick={() => setOpen((value) => !value)}>
       <span aria-hidden="true">{open ? "⌄" : "›"}</span>Recent activity
-    </button></h3>
-    {open ? <div id={contentId}>
+    </button></h3></header>
+    {open ? <div id={contentId} className="agents-activity-content">
       {session.ready && error ? <p className="agents-event-error" role="alert">{error} <button type="button" className="agents-secondary" onClick={() => setRetry((value) => value + 1)}>Retry activity</button></p> : null}
       {!rows.length ? !error || loading ? <p className="agents-event-empty">{!session.ready || loading ? "Loading activity…" : "No saved activity yet. Older tasks may not have activity history."}</p> : null : <>
-        <ol className="agents-event-list" aria-label="Agent operations" ref={list} tabIndex={expanded ? 0 : undefined}>
+        <ol className="agents-event-list" aria-label="Agent operations" ref={list} tabIndex={0}>
           {(expanded ? rows : rows.slice(0, 6)).map((event) => <li key={event.seq} data-seq={event.seq} className={`agents-event-${event.state}`}>
             <div className="agents-event-line"><strong>{event.kind === "tool" && event.tool ? TOOLS[event.tool] : event.kind === "model" ? "Local model" : `${STAGES[event.stage]} stage`}</strong><span>{STATES[event.state]}</span></div>
             <div className="agents-event-meta">{STAGES[event.stage]} · Attempt {event.attempt} · <time dateTime={event.created_at}>{time(event.created_at)}</time></div>

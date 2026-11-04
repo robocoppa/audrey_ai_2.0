@@ -46,6 +46,51 @@ afterEach(() => {
 });
 
 describe("AgentsWorkspace", () => {
+  it("creates and selects an ordinary Project without losing the task draft or starting an agent", async () => {
+    const created = { ...project, id: "project-created", name: "Garden preparations" };
+    const createProject = vi.spyOn(api, "createProject").mockResolvedValue(created);
+    vi.spyOn(api, "getProject").mockResolvedValue(created);
+    const saved = task({ project_context: { ...projectContext, project_id: created.id, project_name: created.name } });
+    vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const start = vi.spyOn(api, "createAgentTask").mockImplementation(async () => { vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); return saved; });
+    render(<AgentsWorkspace />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Prepare my garden checklist" } });
+    fireEvent.click(screen.getByRole("button", { name: "New project" }));
+    const dialog = await screen.findByRole("dialog", { name: "New project" });
+    expect(within(dialog).queryByRole("button", { name: /Private/ })).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Project name" }), { target: { value: "Garden preparations" } });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Project instructions Optional" }), { target: { value: "Keep the checklist short." } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create project" }));
+    await waitFor(() => expect(createProject).toHaveBeenCalledWith(created.name, "Keep the checklist short.", "auto"));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "New project" })).not.toBeInTheDocument());
+    expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(created.id);
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Prepare my garden checklist");
+    expect(start).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    await waitFor(() => expect(start).toHaveBeenCalledWith("Prepare my garden checklist", expect.any(String), created.id));
+  });
+
+  it("keeps the existing Project, selected files and objective after a failed or cancelled Project creation", async () => {
+    vi.spyOn(api, "listProjectFiles").mockResolvedValue({ items: [selectedProjectFile], limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
+    const createProject = vi.spyOn(api, "createProject").mockRejectedValue(new api.ApiError(503, "Project creation unavailable"));
+    const start = vi.spyOn(api, "createAgentTask");
+    render(<AgentsWorkspace composerProjectRequest={{ project, serial: 1 }} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Project files Optional" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: selectedProjectFile.filename }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Keep my existing task" } });
+    fireEvent.click(screen.getByRole("button", { name: "New project" }));
+    const dialog = await screen.findByRole("dialog", { name: "New project" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Project name" }), { target: { value: "Another Project" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create project" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Project creation unavailable");
+    expect(within(dialog).getByRole("textbox", { name: "Project name" })).toHaveValue("Another Project");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Keep my existing task");
+    expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(project.id);
+    expect(screen.getByRole("checkbox", { name: selectedProjectFile.filename })).toBeChecked();
+    expect(createProject).toHaveBeenCalledTimes(1); expect(start).not.toHaveBeenCalled();
+  });
+
   it("starts only with explicitly selected Project files, keeps selections across navigation, then clears them on success", async () => {
     vi.spyOn(api, "listProjectFiles").mockResolvedValue({ items: [selectedProjectFile], limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
     vi.spyOn(api, "getProject").mockResolvedValue(project);

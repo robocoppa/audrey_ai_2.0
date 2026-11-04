@@ -555,6 +555,11 @@ class ResearchAgentExecutor:
                             model=settings.model,
                             messages=messages,
                             options=options,
+                            # Plan is a small saved outline, not the task itself.
+                            # Qwen's default reasoning can exhaust the default
+                            # 2,048-token allowance before an outline. Keep Work
+                            # and Review on their existing reasoning policy.
+                            think=False if step_id == "plan" else None,
                             timeout_s=settings.step_timeout_seconds,
                         )
                     result = (response.get("message") or {}).get("content") or ""

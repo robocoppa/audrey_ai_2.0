@@ -1092,7 +1092,7 @@ test("opens mobile history on demand and keeps chat and project navigation reach
   await drawer.getByRole("button", { name: "Mobile project", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Mobile project", exact: true })).toBeVisible();
   await expect(page.locator(".sidebar")).toBeHidden();
-  for (const action of ["Upload file to project", "Choose from My Files"]) {
+  for (const action of ["Upload file", "Choose from My Files"]) {
     const button = page.getByRole("button", { name: action });
     await button.scrollIntoViewIfNeeded();
     await expectInViewport(page, button);

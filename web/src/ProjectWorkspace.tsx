@@ -64,34 +64,68 @@ export function NewProjectDialog({
   const [instructions, setInstructions] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const dialog = useRef<HTMLElement | null>(null);
+  const returnTo = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  const lifetime = useRef(0);
+  const pending = useRef(false);
 
   useEffect(() => {
-    const returnTo = document.activeElement;
+    const generation = ++lifetime.current;
+    const launcher = returnTo.current;
+    if (!dialog.current?.contains(document.activeElement)) dialog.current?.querySelector<HTMLInputElement>("input")?.focus();
     return () => {
-      if (returnTo instanceof HTMLElement) returnTo.focus();
+      lifetime.current = generation + 1;
+      if (launcher?.isConnected) launcher.focus();
     };
   }, []);
 
   useEffect(() => {
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape" && !saving) onClose();
+    function keepFocus(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!saving) onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !dialog.current) return;
+      const controls = Array.from(dialog.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+      ));
+      const first = controls[0];
+      const last = controls.at(-1);
+      if (!first || !last) {
+        event.preventDefault();
+        dialog.current.focus();
+      } else if (event.shiftKey && (document.activeElement === first || !dialog.current.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !dialog.current.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
     }
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
+    window.addEventListener("keydown", keepFocus, true);
+    return () => window.removeEventListener("keydown", keepFocus, true);
   }, [onClose, saving]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const projectName = name.trim();
-    if (!projectName || saving) return;
+    if (!projectName || pending.current) return;
+    const generation = lifetime.current;
+    pending.current = true;
     setSaving(true);
     setError("");
     try {
-      onCreated(await createProject(projectName, instructions.trim(), modelId));
+      const project = await createProject(projectName, instructions.trim(), modelId);
+      if (lifetime.current === generation) onCreated(project);
     } catch (reason) {
-      setError(messageOf(reason));
+      if (lifetime.current === generation) setError(messageOf(reason));
     } finally {
-      setSaving(false);
+      if (lifetime.current === generation) {
+        pending.current = false;
+        setSaving(false);
+      }
     }
   }
 
@@ -104,10 +138,12 @@ export function NewProjectDialog({
       }}
     >
       <section
+        ref={dialog}
         className="project-editor-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="new-project-title"
+        tabIndex={-1}
       >
         <header>
           <div>
@@ -405,14 +441,15 @@ export function ProjectHome({
           <button
             className="project-primary-button"
             type="button"
+            aria-label={creatingConversation ? "Creating…" : "New conversation in project"}
             onClick={() => void startConversation()}
             disabled={creatingConversation || deleting}
           >
-            {creatingConversation ? "Creating…" : "New conversation in project"}
+            {creatingConversation ? "Creating…" : <><span className="project-action-label-full">New conversation in project</span><span className="project-action-label-compact" aria-hidden="true">New conversation</span></>}
           </button>
           <div className="project-management-actions">
-            <button type="button" onClick={() => setEditing((current) => !current)} disabled={deleting}>
-              {editing ? "Close edit" : "Edit project"}
+            <button type="button" aria-label={editing ? "Close edit" : "Edit project"} onClick={() => setEditing((current) => !current)} disabled={deleting}>
+              {editing ? "Close edit" : <><span className="project-action-label-full">Edit project</span><span className="project-action-label-compact" aria-hidden="true">Edit</span></>}
             </button>
             <button
               className={confirmingDelete ? "danger-button confirming-delete" : "danger-button"}
@@ -439,7 +476,7 @@ export function ProjectHome({
               }}
               disabled={deleting}
             >
-              {deleting ? "Deleting…" : confirmingDelete ? "✓" : "Delete project"}
+              {deleting ? "Deleting…" : confirmingDelete ? "✓" : <><span className="project-action-label-full">Delete project</span><span className="project-action-label-compact" aria-hidden="true">Delete</span></>}
             </button>
           </div>
         </div>
@@ -541,7 +578,7 @@ export function ProjectHome({
               disabled={uploadingFiles || files.length >= limits.max_files}
             >
               <span aria-hidden="true">＋</span>
-              {uploadingFiles ? (uploadProgress >= 1 ? "Processing…" : "Uploading…") : "Upload file to project"}
+              {uploadingFiles ? (uploadProgress >= 1 ? "Processing…" : "Uploading…") : "Upload file"}
             </button>
             <button className="project-manage-files" type="button" onClick={() => setFilesOpen(true)} disabled={uploadingFiles}>
               Choose from My Files

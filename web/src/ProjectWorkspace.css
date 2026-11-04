@@ -30,21 +30,33 @@
 }
 
 .project-home .project-home-actions {
-  max-width: 52%;
+  max-width: 100%;
+  flex-wrap: nowrap;
   gap: 0.4rem;
 }
 
 .project-home .project-management-actions {
+  width: auto;
   gap: 0.4rem;
+}
+
+.project-home .project-home-actions > button {
+  width: auto;
+}
+
+.project-action-label-compact {
+  display: none;
 }
 
 .project-home .project-home-actions button {
   min-height: 2.2rem;
   padding: 0.45rem 0.65rem;
   font-size: 0.75rem;
+  white-space: nowrap;
 }
 
 .project-home .project-management-actions button {
+  flex: none;
   min-width: 6.3rem;
 }
 
@@ -108,6 +120,10 @@
   min-height: 2.2rem;
   padding: 0.45rem 0.55rem;
   font-size: 0.75rem;
+}
+
+.project-home .project-upload-files {
+  white-space: nowrap;
 }
 
 .project-home .project-file-summary li {
@@ -176,6 +192,18 @@
     width: 100%;
     max-width: none;
     justify-content: flex-start;
+  }
+
+  .project-home .project-home-actions button {
+    min-width: 0;
+  }
+
+  .project-action-label-full {
+    display: none;
+  }
+
+  .project-action-label-compact {
+    display: inline;
   }
 
   .project-home .project-home-grid {
