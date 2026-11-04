@@ -4,6 +4,7 @@
 | --- | --- |
 | Current application and architecture | [Project README](../README.md) |
 | Agents, unified search, Project knowledge and watches | [Implementation plan](plans/agent-workspace-plan.md) |
+| Interactive acceptance of recent Agent workspace changes | [Owner-operated test plan](plans/agent-interactive-acceptance-plan.md) |
 | Maintainer lessons | [AI/codebase course](lesson-ai/README.md) |
 | Python companion course | [Python course](lesson-python/README.md) |
 | Deployment and live checks | [Live smoke testing](reference/live-smoke-testing.md), [testing protocol](reference/testing-protocol.md) |

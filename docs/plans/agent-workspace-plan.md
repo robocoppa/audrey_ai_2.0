@@ -10,6 +10,12 @@ architecture: Agents should be a prominent part of Audrey's native UI.
 Backups and disaster recovery are outside this plan. Agent restart recovery is
 part of the requested background execution capability.
 
+Interactive acceptance now takes priority over another feature slice. The owner
+will exercise the [last ten changes](agent-interactive-acceptance-plan.md) through
+the real UI, worker, local models and downloads. Scripted smoke receipts remain
+regression evidence; these live capability checks have not yet run. The unfinished
+Work-question changes were set aside before this handoff.
+
 ## Current implementation slice
 
 The native app has centered Chat, Agents and text-only Search buttons in the top
@@ -743,8 +749,9 @@ publication and owned download derived from the approved note. Its temporary
 canonical storage, ASGI routes and local transport use scripted model replies;
 there are no production accounts, network calls or live inference. Injected
 failures verify detection of omitted notes and disabled file freshness checks.
-Tower execution and live browser/worker/Qwen acceptance remain pending. Rebuild
-backend/UI; no schema/settings change, credentials or upload is needed for the smoke.
+The owner reports all seven installed Tower checks passed, exit 0. Live
+browser/worker/Qwen acceptance remains pending. Rebuild backend/UI; no schema/settings
+change, credentials or upload is needed for the smoke.
 
 ## Product outcome
 

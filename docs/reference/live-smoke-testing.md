@@ -53,6 +53,14 @@ Never print credentials, commit them, or paste them into chat.
 
 ## Choosing a check
 
+For user-facing capabilities, hand off an owner-operated interactive test in the
+real browser with exact actions, prompts and visible pass criteria. Exercise the
+running worker and local model, inspect actual content and open real downloads.
+The [last ten workspace changes](../plans/agent-interactive-acceptance-plan.md)
+have a prepared interactive acceptance plan and known-answer input files.
+Scripted/isolated smokes below are supplemental regression tools and do not
+close live feature acceptance.
+
 Test the changed feature and its direct failure boundary. Inspect the real
 script's environment names and arguments before handing off a command.
 Prefer one targeted protocol case over a broad suite. Native upload/Files/chat

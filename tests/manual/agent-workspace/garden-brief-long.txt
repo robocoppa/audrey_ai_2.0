@@ -1,0 +1,301 @@
+FERN CIRCLE — COMMUNITY GARDEN WORK PACKET
+
+This is a fictional project document for manual acceptance testing.
+Reference index: FINAL APPENDIX begins at Unicode character offset 40000
+(zero-based) and continues through the end of this file. Its opening and
+closing paragraphs contain the approved decisions. Inspect that full appendix
+when the task asks for approved budget, delivery day, kit code or review date.
+The following background reference pages do not contain those decisions.
+
+Reference 0001: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0002: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0003: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0004: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0005: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0006: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0007: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0008: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0009: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0010: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0011: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0012: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0013: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0014: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0015: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0016: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0017: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0018: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0019: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0020: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0021: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0022: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0023: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0024: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0025: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0026: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0027: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0028: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0029: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0030: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0031: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0032: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0033: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0034: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0035: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0036: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0037: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0038: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0039: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0040: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0041: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0042: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0043: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0044: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0045: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0046: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0047: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0048: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0049: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0050: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0051: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0052: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0053: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0054: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0055: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0056: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0057: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0058: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0059: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0060: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0061: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0062: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0063: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0064: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0065: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0066: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0067: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0068: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0069: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0070: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0071: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0072: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0073: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0074: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0075: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0076: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0077: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0078: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0079: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0080: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0081: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0082: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0083: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0084: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0085: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0086: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0087: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0088: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0089: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0090: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0091: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0092: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0093: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0094: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0095: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0096: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0097: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0098: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0099: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0100: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0101: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0102: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0103: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0104: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0105: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0106: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0107: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0108: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0109: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0110: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0111: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0112: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0113: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0114: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0115: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0116: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0117: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0118: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0119: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0120: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0121: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0122: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0123: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0124: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0125: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0126: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0127: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0128: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0129: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0130: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0131: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0132: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0133: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0134: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0135: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0136: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0137: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0138: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0139: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0140: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0141: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0142: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0143: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0144: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0145: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0146: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0147: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0148: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0149: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0150: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0151: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0152: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0153: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0154: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0155: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0156: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0157: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0158: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0159: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0160: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0161: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0162: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0163: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0164: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0165: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0166: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0167: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0168: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0169: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0170: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0171: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0172: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0173: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0174: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0175: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0176: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0177: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0178: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0179: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0180: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0181: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0182: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0183: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0184: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0185: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0186: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0187: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0188: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0189: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0190: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0191: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0192: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0193: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0194: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0195: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0196: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0197: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0198: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0199: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0200: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0201: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0202: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0203: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0204: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0205: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0206: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0207: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0208: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0209: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0210: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0211: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0212: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0213: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0214: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0215: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0216: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0217: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0218: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0219: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0220: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0221: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared checklist.
+Reference 0222: Label seed trays, check tool storage, arrange volunteer pairs, and leave clear paths between growing beds. Record completed preparations in the shared check
+FINAL APPENDIX — APPROVED DECISIONS
+Approved spending ceiling: USD 472.35.
+
+Appendix reminder 001: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 002: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 003: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 004: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 005: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 006: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 007: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 008: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 009: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 010: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 011: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 012: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 013: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 014: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 015: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 016: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 017: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 018: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 019: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 020: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 021: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 022: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 023: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 024: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 025: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 026: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 027: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 028: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 029: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 030: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 031: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 032: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 033: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 034: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 035: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 036: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 037: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 038: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 039: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 040: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 041: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 042: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 043: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 044: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 045: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 046: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 047: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 048: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 049: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 050: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 051: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 052: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 053: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 054: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 055: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 056: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 057: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 058: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 059: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 060: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 061: Check drainage, keep pathways clear, label stored equipment, and confirm that each preparation has an assigned volunteer.
+Appendix reminder 062: Check drainage, keep pathways clear, label stored equip
+FINAL APPENDIX — CLOSING APPROVAL
+Delivery day: Wednesday.
+Starter kit approval code: MOSS-7Q4-RIVER.
+Next review date: 2026-11-23.
+These closing decisions complete the appendix. Keep the approval code exactly as written.
