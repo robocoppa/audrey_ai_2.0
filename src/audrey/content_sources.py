@@ -301,7 +301,8 @@ class ContentSourceReader:
             return None
         return [row[0] for row in rows]
 
-    def _read_file(self, namespace: str, row: dict, artifact: str):
+    def _file_paths(self, namespace: str, row: dict, artifact: str):
+        """Choose canonical saved-text paths without opening source bodies."""
         file_id = row["file_id"]
         if not _identifier(file_id):
             raise _UnavailableSourceError
@@ -324,11 +325,28 @@ class ContentSourceReader:
                 paths = (source,)
                 text_path = None
         else:
+            if artifact not in _ARTIFACTS:
+                raise _UnavailableSourceError
             paths = (directory / f"{file_id}.{_ARTIFACTS[artifact]}",)
             text_path = paths[0]
+        return source, paths, text_path
+
+    @staticmethod
+    def _file_path_pins(source, paths):
         pins = tuple((path, _pin(path)) for path in paths)
         if source not in paths:
             pins += ((source, _presence_pin(source)),)
+        return pins
+
+    def file_proof_metadata(self, namespace: str, row: dict, artifact: str) -> list:
+        """Reconstruct bounded relative path/stat proof without parsing a file."""
+        source, paths, _text_path = self._file_paths(namespace, row, artifact)
+        return [[path.name, list(pin) if pin is not None else None]
+                for path, pin in self._file_path_pins(source, paths)]
+
+    def _read_file(self, namespace: str, row: dict, artifact: str):
+        source, paths, text_path = self._file_paths(namespace, row, artifact)
+        pins = self._file_path_pins(source, paths)
         text = (
             _read_text(text_path, dict(pins)[text_path])
             if text_path is not None

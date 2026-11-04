@@ -35,7 +35,7 @@ const STATUS_LABELS: Record<AgentTaskStatus, string> = {
   cancelled: "Cancelled", failed: "Failed", waiting_for_input: "Waiting for input",
 };
 
-const PROJECT_CONTEXT_HELP = "Uses Project instructions and approved notes. Message and Agent report links are checked for freshness. Files are included only when you select them.";
+const PROJECT_CONTEXT_HELP = "Uses Project instructions and approved notes, with linked sources checked for freshness. Select files separately when the agent needs to read their text.";
 
 function stepLabel(step: AgentTask["steps"][number] | undefined): string | undefined {
   return step ? ({ plan: "Plan", research: "Work", review: "Review" }[step.id]) : undefined;

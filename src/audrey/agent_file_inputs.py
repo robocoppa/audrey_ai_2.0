@@ -287,4 +287,7 @@ def get_agent_file_inputs(app) -> AgentFileInputs | None:
             or service.uploads is not app.state.uploads_db):
         service = AgentFileInputs(app)
         app.state.agent_file_inputs = service
+    from audrey.agent_knowledge_files import get_agent_knowledge_files
+
+    get_agent_knowledge_files(app, inputs=service)
     return service

@@ -35,7 +35,7 @@ def load_runtime():
         from audrey.content_sources import ContentSourceReader
     except ImportError as error:
         raise SmokeSetupError("Installed backend lacks Agent Project source pins; rebuild audrey.") from error
-    if getattr(agent_projects, "SUPPORTED_KNOWLEDGE_SOURCE_KINDS", None) != frozenset({"message", "agent"}):
+    if not {"message", "agent"}.issubset(getattr(agent_projects, "SUPPORTED_KNOWLEDGE_SOURCE_KINDS", ())):
         raise SmokeSetupError("Installed backend lacks Agent Project source pins; rebuild audrey.")
     return SimpleNamespace(
         ApplicationStore=ApplicationStore, AgentTaskContextError=AgentTaskContextError,

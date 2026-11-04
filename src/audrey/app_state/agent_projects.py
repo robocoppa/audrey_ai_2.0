@@ -21,7 +21,7 @@ from audrey.canonical_db_sources import (
 from audrey.pipeline.complexity import count_tokens
 
 CONTEXT_CHANGED = "Project context changed. Create a new agent to use its current instructions and knowledge."
-SUPPORTED_KNOWLEDGE_SOURCE_KINDS = frozenset({"message", "agent"})
+SUPPORTED_KNOWLEDGE_SOURCE_KINDS = frozenset({"message", "agent", "file"})
 
 
 class AgentProjectAccessError(ValueError):
@@ -58,6 +58,25 @@ def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def knowledge_source_identity(source_id: object) -> tuple[str, str] | None:
+    """Accept supported provenance identities without allowing arbitrary reads."""
+    identity = database_source_identity(source_id)
+    if identity is not None:
+        return identity
+    if not isinstance(source_id, str) or len(source_id) > 256:
+        return None
+    parts = source_id.split(":")
+    if (len(parts) != 3 or parts[0] != "file" or parts[2] not in {"text", "transcript", "visual", "summary"}
+            or not 0 < len(parts[1]) <= 200 or parts[1] in {".", ".."}
+            or any(char in parts[1] for char in ("/", "\\", "\x00"))):
+        return None
+    try:
+        source_id.encode("utf-8")
+    except UnicodeError:
+        return None
+    return "file", ":".join(parts[1:])
+
+
 def _source_refs(row: sqlite3.Row) -> list[dict] | None:
     try:
         sources = json.loads(row["sources_json"])
@@ -69,7 +88,7 @@ def _source_refs(row: sqlite3.Row) -> list[dict] | None:
     for source in sources:
         if not isinstance(source, dict) or set(source) != {"source_id", "revision"}:
             return None
-        if database_source_identity(source["source_id"]) is None:
+        if knowledge_source_identity(source["source_id"]) is None:
             return None
         if source["source_id"] in seen or not isinstance(source["revision"], str) or not source["revision"]:
             return None
@@ -80,6 +99,7 @@ def _source_refs(row: sqlite3.Row) -> list[dict] | None:
 class AgentProjectContexts:
     def __init__(self, connection: sqlite3.Connection):
         self._conn = connection
+        self.file_sources = None
 
     def _project(self, user_id: str, project_id: str):
         return self._conn.execute(
@@ -99,7 +119,7 @@ class AgentProjectContexts:
 
     def _source_proof(
         self, row: sqlite3.Row, *, verify_revision: bool,
-        cache: dict | None = None,
+        cache: dict | None = None, file_sources=None,
     ) -> str | None:
         """Freeze provenance metadata without retaining or dispatching its body.
 
@@ -113,9 +133,24 @@ class AgentProjectContexts:
             return None
         metadata = []
         for source in sources:
-            identity = database_source_identity(source["source_id"])
+            identity = knowledge_source_identity(source["source_id"])
             assert identity is not None
             kind, identifier = identity
+            if kind == "file":
+                cache_key = ("file", row["user_id"], row["project_id"], source["source_id"], source["revision"])
+                if cache is not None and cache_key in cache:
+                    proof = cache[cache_key]
+                else:
+                    proof = (self.file_sources.proof(row, source, verify_revision=verify_revision, captured=file_sources)
+                             if self.file_sources is not None else None)
+                    if cache is not None:
+                        # One no-await boundary only; never reuse a source proof
+                        # across dispatches, writes, controls or API responses.
+                        cache[cache_key] = proof
+                if proof is None:
+                    return None
+                metadata.append({"source_id": source["source_id"], "metadata": {"file_sha256": proof}})
+                continue
             cache_key = (row["user_id"], source["source_id"])
             if cache is not None and cache_key in cache:
                 saved = cache[cache_key]
@@ -150,10 +185,10 @@ class AgentProjectContexts:
             metadata.append({"source_id": source["source_id"], "metadata": current})
         return source_digest(metadata)
 
-    def capture(
-        self, *, task_id: str, user_id: str, project_id: str, objective: str,
+    def _candidates(
+        self, *, user_id: str, project_id: str, objective: str,
         knowledge_entry_id: str | None = None, knowledge_entry_revision: int | None = None,
-    ) -> None:
+    ):
         project = self._project(user_id, project_id)
         if project is None:
             raise AgentProjectAccessError("Project context is unavailable.")
@@ -170,8 +205,6 @@ class AgentProjectContexts:
                     row["kind"] in {"question", "action"} and row["work_status"] == "open",
                     row["kind"] == "decision", row["updated_at"], row["entry_id"])
 
-        selected, remaining = [], 1000
-        cache = {}
         origin = None
         if knowledge_entry_id is not None:
             origin = self._conn.execute(
@@ -185,21 +218,46 @@ class AgentProjectContexts:
                 raise AgentProjectAccessError("Project knowledge is unavailable for this agent.")
             if origin["revision"] != knowledge_entry_revision:
                 raise AgentProjectChangedError("Project knowledge changed. Refresh before starting the agent.")
-            if self._source_proof(origin, verify_revision=True, cache=cache) is None:
-                raise AgentProjectAccessError("Project knowledge is unavailable for this agent.")
         # Unsupported refs never crowd out notes. Inspect at most twelve sourced
         # candidates; stale candidates do not prevent later sourceless selection.
         candidates = (row for row in rows if row["entry_id"] != knowledge_entry_id and _source_refs(row) is not None)
         ranked = sorted(candidates, key=rank, reverse=True)
         if origin is not None:
             ranked.insert(0, origin)
+        return project, ranked, origin
+
+    def file_source_candidates(self, **selection) -> list[dict]:
+        """Prepare the same bounded sourced candidates later checked at commit."""
+        _project, ranked, _origin = self._candidates(**selection)
+        sources, count = {}, 0
+        for row in ranked:
+            refs = _source_refs(row)
+            if refs:
+                if count >= 12:
+                    break
+                count += 1
+                for source in refs:
+                    if source["source_id"].startswith("file:"):
+                        sources[(source["source_id"], source["revision"])] = source
+        return list(sources.values())
+
+    def capture(
+        self, *, task_id: str, user_id: str, project_id: str, objective: str,
+        knowledge_entry_id: str | None = None, knowledge_entry_revision: int | None = None,
+        file_sources=None,
+    ) -> None:
+        project, ranked, origin = self._candidates(user_id=user_id, project_id=project_id, objective=objective,
+            knowledge_entry_id=knowledge_entry_id, knowledge_entry_revision=knowledge_entry_revision)
+        selected, remaining, cache = [], 1000, {}
+        if origin is not None and self._source_proof(origin, verify_revision=True, cache=cache, file_sources=file_sources) is None:
+            raise AgentProjectAccessError("Project knowledge is unavailable for this agent.")
         sourced_candidates = 0
         for row in ranked:
             if json.loads(row["sources_json"]):
                 if sourced_candidates >= 12:
                     continue
                 sourced_candidates += 1
-            proof = self._source_proof(row, verify_revision=True, cache=cache)
+            proof = self._source_proof(row, verify_revision=True, cache=cache, file_sources=file_sources)
             if proof is None:
                 continue
             text = _prefix(row["text"], remaining)
@@ -232,7 +290,7 @@ class AgentProjectContexts:
         project = self._project(manifest["user_id"], manifest["project_id"])
         if project is None or _digest(project["instructions"]) != manifest["instructions_sha256"]:
             raise AgentProjectChangedError(CONTEXT_CHANGED)
-        selected = []
+        selected, cache = [], {}
         for pin in json.loads(manifest["knowledge_json"]):
             row = self._conn.execute(
                 "SELECT * FROM app_project_knowledge WHERE entry_id=? AND user_id=? AND project_id=?",
@@ -240,7 +298,7 @@ class AgentProjectContexts:
             ).fetchone()
             if row is None or row["revision"] != pin["revision"] or row["approval_state"] != "approved":
                 raise AgentProjectChangedError(CONTEXT_CHANGED)
-            proof = self._source_proof(row, verify_revision=False)
+            proof = self._source_proof(row, verify_revision=False, cache=cache)
             if proof is None:
                 raise AgentProjectChangedError(CONTEXT_CHANGED)
             sources = json.loads(row["sources_json"])

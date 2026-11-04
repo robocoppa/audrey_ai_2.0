@@ -114,12 +114,14 @@ describe("App", () => {
     window.history.replaceState({}, "", "/");
   });
 
-  it("re-reads the canonical Project and Knowledge entry before an explicit research prefill without writes", async () => {
+  it.each(["note", "file-backed note"])("re-reads the canonical Project and %s before an explicit agent prefill without writes", async (kind) => {
     workspaceMock.enabled = workspaceMock.projectBridge = true;
     const base = mockCapabilitySession("degraded").getMockImplementation()!;
     const fetchMock = vi.fn<(path: string, options?: RequestInit) => Promise<Response>>((path: string) => {
       const payload = path === `/api/projects/${BRIDGE_PROJECT.id}` ? { ...BRIDGE_PROJECT, name: "Renamed public releases" }
-        : path === `/api/projects/${BRIDGE_PROJECT.id}/knowledge/${BRIDGE_KNOWLEDGE.id}` ? BRIDGE_KNOWLEDGE : null;
+        : path === `/api/projects/${BRIDGE_PROJECT.id}/knowledge/${BRIDGE_KNOWLEDGE.id}` ? { ...BRIDGE_KNOWLEDGE,
+          ...(kind === "file-backed note" ? { sources: [{ source_id: "file:owned:text", revision: "1" }] } : {}),
+        } : null;
       return payload ? Promise.resolve(new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } })) : base(path);
     }); vi.stubGlobal("fetch", fetchMock); render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Research saved Project entry" }, { timeout: 5000 }));
@@ -129,12 +131,12 @@ describe("App", () => {
     expect(fetchMock.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false);
   });
 
-  it.each(["revision", "closed", "Private", "file", "stale"])("rejects a canonical %s Knowledge change without overwriting the composer", async (change) => {
+  it.each(["revision", "closed", "Private", "unsupported source", "stale"])("rejects a canonical %s Knowledge change without overwriting the composer", async (change) => {
     workspaceMock.enabled = workspaceMock.projectBridge = true;
     const base = mockCapabilitySession("degraded").getMockImplementation()!;
     const changed = { ...BRIDGE_KNOWLEDGE,
       ...(change === "revision" ? { revision: 5 } : {}), ...(change === "closed" ? { work_status: "resolved" } : {}),
-      ...(change === "file" ? { sources: [{ source_id: "file:owned:text", revision: "1" }] } : {}), ...(change === "stale" ? { stale: true } : {}),
+      ...(change === "unsupported source" ? { sources: [{ source_id: "file:owned:original", revision: "1" }] } : {}), ...(change === "stale" ? { stale: true } : {}),
     };
     vi.stubGlobal("fetch", vi.fn((path: string) => {
       const payload = path === `/api/projects/${BRIDGE_PROJECT.id}` ? { ...BRIDGE_PROJECT, private_required: change === "Private" }

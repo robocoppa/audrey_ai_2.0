@@ -229,10 +229,19 @@ async def create_agent(body: AgentCreateRequest, request: Request, response: Res
         if body.file_ids and inputs is None:
             raise HTTPException(status_code=503, detail="Agent file inputs are unavailable.")
         pins = await inputs.capture(principal, body.project_id, body.file_ids) if body.file_ids else None
+        from audrey.agent_knowledge_files import get_agent_knowledge_files
+
+        knowledge_files = get_agent_knowledge_files(request.app, inputs=inputs)
+        knowledge_sources = await knowledge_files.prepare(
+            user_id=principal.user_id, project_id=body.project_id, objective=body.objective,
+            knowledge_entry_id=body.knowledge_entry_id,
+            knowledge_entry_revision=body.knowledge_entry_revision,
+        ) if knowledge_files is not None and body.project_id else None
         task = await repository.create(user_id=principal.user_id, objective=body.objective,
                                        request_id=body.request_id, limits=settings.task_limits(), project_id=body.project_id,
                                        knowledge_entry_id=body.knowledge_entry_id,
-                                       knowledge_entry_revision=body.knowledge_entry_revision, file_inputs=pins)
+                                       knowledge_entry_revision=body.knowledge_entry_revision, file_inputs=pins,
+                                       knowledge_file_sources=knowledge_sources)
         repository.fence_response(user_id=principal.user_id, tasks=[task])
     except AgentDispatchStoppedError as error:
         raise HTTPException(status_code=503, detail=str(error)) from None

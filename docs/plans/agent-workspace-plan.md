@@ -66,7 +66,7 @@ This raises the original 2,048-token report allowance after a reported Research
 output-limit failure; live acceptance of the larger allowance remains pending.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
-Adaptive multi-step plans, file-backed Knowledge context for agents, Private agent inputs,
+Adaptive multi-step plans, Private agent inputs,
 semantic search,
 owned-file/Private and multiple-source watches remain implementation work. Existing Private Tax tasks keep
 their current behavior. The remaining sections specify the intended full feature.
@@ -227,8 +227,8 @@ hidden or superseded reads abort, while mounted conversation and agent drafts st
 Creation freezes up to 2,000 tokens of Project instructions and 1,000 text tokens
 across at most 12 approved notes. Selection prioritizes
 pinned, relevant and open work; newly added notes are not silently adopted. Current
-message/report-backed notes are supported as described below; file-backed notes
-and Private Projects remain outside automatic context. File excerpts require
+message/report-backed and ordinary file-backed notes are supported as described
+below; Private Projects remain outside automatic context. File excerpts require
 the separate explicit selection described below.
 Every step receives the selected context as quoted working data under platform
 guidance. Approved notes do not verify truth or authorize new tools or actions.
@@ -419,10 +419,11 @@ or configuration change is required.
 
 ### Message/report-backed Agent knowledge
 
-Ordinary Project agents can now select approved notes whose references all point
+The initial source-backed Agent context slice supports approved notes linked
 to current ordinary messages in that Project or completed owned Agent reports.
+Ordinary file-backed notes are supported by the further slice below.
 This includes an explicitly saved report proposal after separate approval. Pending,
-rejected, superseded, stale, foreign, Private, file-backed and mixed unsupported
+rejected, superseded, stale, foreign, Private and mixed unsupported
 references are excluded. Unattached user notes remain eligible. Report references
 identify generated provenance; approval and a live reference do not verify truth.
 
@@ -588,8 +589,9 @@ file changes and membership in other Projects do not change the input selection.
 Metadata remains visible with a stale-input notice; Resume, Run again and input
 answers are blocked. Saved reports retain their normal history behavior. Task or
 account deletion cascades input pins; this introduces no retained source-body copy.
-Project Knowledge's automatic file-backed references and Private Agent inputs
-remain later work. File excerpts are quoted data and confer no new tool authority.
+Approved file-backed Knowledge notes use the separate provenance checks below.
+Private Agent inputs remain later work. File excerpts are quoted data and confer
+no new tool authority.
 
 Affected backend tests, frontend tests/typecheck/lint/build and mocked Chromium
 checks at 1,366, 390 and 320 pixels pass. The
@@ -696,9 +698,53 @@ dispatch with scripted local replies. It reads beyond an opening excerpt,
 continues at the actual returned cursor and downloads a generated file containing
 the later text. Negative probes detect omitted pages, broken cursors,
 unselected-file reads and missing read events. This is isolated integration
-evidence; Tower execution and real browser/worker/Qwen acceptance remain pending. Rebuild backend/UI;
+evidence. The owner reports all seven installed Tower checks passed, exit 0;
+real browser/worker/Qwen acceptance remains pending. Rebuild backend/UI;
 schema 37 applies automatically, with no settings, credentials or upload needed
 for the isolated smoke.
+
+### File-backed approved Agent knowledge
+
+Ordinary Project agents can now select approved notes linked to current saved
+file text, image OCR, media transcripts, visual notes or summaries. Mixed notes
+with supported file/message/report references qualify too. The model receives
+the approved note text within the existing 12-note/1,000-token allowance; source
+bodies are not added to context. Reading a file still requires the separate
+explicit file selection. Approval accepts the note as working data, and fresh
+references do not establish factual accuracy or independent evidence.
+
+Before creation, a bounded local preparation reads canonical saved text to verify
+the exact reference revisions for up to 12 sourced candidates and 96 references.
+Repeated references share one read. The creation transaction verifies those
+prepared proofs against current owner, namespace, ordinary Project attachment,
+catalog metadata and canonical source/artifact stat pins. File parsing remains
+outside the application transaction. Existing source size limits apply; no new
+OCR, transcription, inference or network requests are introduced.
+
+The existing manifest stores only an aggregate source-metadata hash per selected
+note, within its 4,000-character bound. Later dispatch and commit fences rebuild
+the same metadata proof without reading source bodies. Membership identity catches
+detach/reattach, and canonical path selection catches an appearing or disappearing
+OCR sidecar. Deleted, changed, foreign, Private, unavailable, unsupported and stale
+file references cannot ground a new task. A selected source change blocks further
+work, answers, Resume and Run again; saved reports and notes retain their existing
+read/delete behavior. Runtime bindings are restored before worker startup, and a
+missing binding fails closed after database reopening. No schema change is needed.
+
+Eligible file-backed Actions and Questions offer the same explicit Assign to agent
+flow, preserving drafts and requiring Start. Completion keeps the entry open;
+editing, closing or deleting the entry or its pinned sources blocks later work.
+Older tasks keep their original selected notes and never adopt newly eligible ones.
+
+Affected service/store/API/executor tests and frontend tests/typecheck/lint/build
+pass. The [installed Knowledge file smoke](../reference/live-smoke-testing.md#installed-agent-file-backed-knowledge-smoke)
+passes locally through its exact stdin entry point, including a real native file
+publication and owned download derived from the approved note. Its temporary
+canonical storage, ASGI routes and local transport use scripted model replies;
+there are no production accounts, network calls or live inference. Injected
+failures verify detection of omitted notes and disabled file freshness checks.
+Tower execution and live browser/worker/Qwen acceptance remain pending. Rebuild
+backend/UI; no schema/settings change, credentials or upload is needed for the smoke.
 
 ## Product outcome
 
@@ -723,7 +769,7 @@ decision; then schedule a weekly check of a selected public release page.
 | Resource admission | Interactive preference, aged background fairness, cooperative queued handoffs and generation-boundary release | Live concurrent-chat/model acceptance and broader checkpoint-age monitoring |
 | Private tasks | Leases, revisions, source/model pins, budgets and committed-result delivery for Private tax reviews | General agent contracts and adapters; existing Private recovery currently pauses work |
 | Search | Local lexical API/sidebar, canonical reader and workspace links, exact message focus, bounded projection, approved notes and Project report filters | Semantic candidates and expanded native previews for retained text |
-| Projects | Compact overview with Knowledge/Agents below and a Watch row; approved knowledge in native chat and ordinary agents; selected ordinary file inputs, fixed context, Project links and saved-work lists | File-backed Knowledge and Private agent context, automatic proposals |
+| Projects | Compact overview with Knowledge/Agents below and a Watch row; approved knowledge in native chat and ordinary agents; selected ordinary file inputs, fixed context, Project links and saved-work lists | Private agent context, automatic proposals |
 | Scheduling | Explicit public-page schedules, Project organization/navigation, snapshots/diffs, baselines and Activity alerts | Owned-file/Private and multiple-source watches |
 
 Code anchors:

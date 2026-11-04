@@ -513,7 +513,7 @@ class AgentsRepository:
         self, *, user_id: str, objective: str, request_id: str, limits: dict | None = None,
         project_id: str | None = None,
         knowledge_entry_id: str | None = None, knowledge_entry_revision: int | None = None,
-        file_inputs=None,
+        file_inputs=None, knowledge_file_sources=None,
     ) -> dict:
         objective = _text(objective, maximum=8000, name="objective")
         request_id = _text(request_id, maximum=200, name="request identity")
@@ -526,6 +526,14 @@ class AgentsRepository:
         ):
             raise AgentTaskError("Invalid selected Project files.")
         selected_pins = file_inputs.pins if file_inputs is not None else ()
+        if knowledge_file_sources is not None:
+            from audrey.agent_knowledge_files import CapturedKnowledgeFileSources
+
+            if (not isinstance(knowledge_file_sources, CapturedKnowledgeFileSources)
+                    or knowledge_file_sources.owner_id != user_id
+                    or knowledge_file_sources.project_id != project_id
+                    or len(knowledge_file_sources.proofs) > 96):
+                raise AgentTaskError("Invalid Project knowledge sources.")
         if project_id is not None:
             project_id = _text(project_id, maximum=300, name="Project identity")
         if (knowledge_entry_id is None) != (knowledge_entry_revision is None):
@@ -573,6 +581,7 @@ class AgentsRepository:
                     self._project_contexts.capture(
                         task_id=task_id, user_id=user_id, project_id=project_id, objective=objective,
                         knowledge_entry_id=knowledge_entry_id, knowledge_entry_revision=knowledge_entry_revision,
+                        file_sources=knowledge_file_sources,
                     )
                 except AgentProjectAccessError:
                     raise AgentTaskAccessError("Project context is unavailable.") from None

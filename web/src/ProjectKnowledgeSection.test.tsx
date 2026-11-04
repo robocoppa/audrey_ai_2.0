@@ -24,21 +24,24 @@ async function attachSource() {
   fireEvent.click(await screen.findByRole("button", { name: "Attach reference" }));
 }
 
-it("offers explicit research only for current approved open actions and questions with supported sources", async () => {
+it("offers agent assignment for current approved open actions and questions including saved file sources", async () => {
   const entries = [
     entry({ id: "action", kind: "action", text: "Open action" }),
     entry({ id: "question", kind: "question", text: "Open question", sources: [{ source_id: "agent:owned:report", revision: "2" }] }),
     entry({ id: "closed", kind: "action", text: "Closed action", work_status: "completed" }),
     entry({ id: "file", kind: "action", text: "File-backed action", sources: [reference] }),
+    entry({ id: "unsupported", kind: "action", text: "Unsupported source action", sources: [{ source_id: "file:owned:original", revision: "1" }] }),
     entry({ id: "stale", kind: "action", text: "Stale action", stale: true }),
     entry({ id: "fact", kind: "fact", text: "Fact entry" }),
     entry({ id: "pending", kind: "question", text: "Pending question", approval_state: "proposed" }),
   ];
   const fetchMock = vi.fn().mockResolvedValue(json(listing(entries))); vi.stubGlobal("fetch", fetchMock);
   const onResearch = vi.fn(); render(<ProjectKnowledgeSection project={project} onResearch={onResearch} />);
-  expect(await screen.findAllByRole("button", { name: "Assign to agent" })).toHaveLength(2);
+  expect(await screen.findAllByRole("button", { name: "Assign to agent" })).toHaveLength(3);
   fireEvent.click(within(screen.getByRole("article", { name: "Action: Open action" })).getByRole("button", { name: "Assign to agent" }));
   await waitFor(() => expect(onResearch).toHaveBeenCalledWith(project, entries[0], expect.any(AbortSignal)));
+  fireEvent.click(within(screen.getByRole("article", { name: "Action: File-backed action" })).getByRole("button", { name: "Assign to agent" }));
+  await waitFor(() => expect(onResearch).toHaveBeenCalledWith(project, entries[3], expect.any(AbortSignal)));
   expect(fetchMock.mock.calls).toHaveLength(1);
 });
 
