@@ -28,8 +28,7 @@ import {
 import { UploadProgress } from "./UploadProgress";
 import { TaxProjectSection } from "./TaxProjectSection";
 import { ProjectKnowledgeSection } from "./ProjectKnowledgeSection";
-import { SearchSourceViewer } from "./SearchSourceViewer";
-import { getKnowledgeSource, type KnowledgeEntry, type SearchResult, type SearchSource } from "./api";
+import { type KnowledgeEntry } from "./api";
 import { ProjectWatches } from "./ProjectWatches";
 import "./ProjectAgents.css";
 import "./ProjectWorkspace.css";
@@ -214,7 +213,6 @@ export function ProjectHome({
   onConversationSelected,
   onFilesChange,
   onNewProjectAgent,
-  onResearchProjectKnowledge,
   onOpenProjectAgent,
   onNewProjectWatch,
   onOpenProjectWatch,
@@ -252,16 +250,12 @@ export function ProjectHome({
   const [uploadNotice, setUploadNotice] = useState("");
   const [error, setError] = useState("");
   const projectUploadRef = useRef<HTMLInputElement>(null);
-  const [knowledgeSource, setKnowledgeSource] = useState<{ result: SearchResult; load: (offset: number, signal: AbortSignal) => Promise<SearchSource> } | null>(null);
-  const sourceGeneration = useRef(0);
   const isPrivate = project.private_required === true;
 
   useEffect(() => {
-    sourceGeneration.current += 1;
     let current = true;
     queueMicrotask(() => {
       if (!current) return;
-      setKnowledgeSource(null);
       setName(project.name);
       setInstructions(project.instructions);
       setEditing(false);
@@ -271,24 +265,6 @@ export function ProjectHome({
     });
     return () => { current = false; };
   }, [project.id, project.instructions, project.name]);
-
-  useEffect(() => () => { sourceGeneration.current += 1; }, []);
-
-  async function openKnowledgeSource(entry: KnowledgeEntry, index: number) {
-    const generation = ++sourceGeneration.current;
-    try {
-      const source = await getKnowledgeSource(project.id, entry, index);
-      if (generation !== sourceGeneration.current) return;
-      const result: SearchResult = { id: source.source_id, source_id: source.source_id,
-        kind: source.kind, revision: source.revision, title: source.title,
-        excerpt: source.text, offset: source.offset, highlights: [], updated_at: entry.updated_at,
-        project_id: project.id, private_required: source.private_required,
-        availability: source.availability, target: source.target };
-      setKnowledgeSource({ result, load: (offset, signal) => getKnowledgeSource(project.id, entry, index, offset, signal) });
-    } catch (reason) {
-      if (generation === sourceGeneration.current) setError(messageOf(reason));
-    }
-  }
 
   const hasProcessingFiles = files.some(({ status }) =>
     status === "pending" || status === "processing",
@@ -438,15 +414,6 @@ export function ProjectHome({
           <p>{project.instructions || "No project instructions yet."}</p>
         </div>
         <div className="project-home-actions">
-          <button
-            className="project-primary-button"
-            type="button"
-            aria-label={creatingConversation ? "Creating…" : "New conversation in project"}
-            onClick={() => void startConversation()}
-            disabled={creatingConversation || deleting}
-          >
-            {creatingConversation ? "Creating…" : <><span className="project-action-label-full">New conversation in project</span><span className="project-action-label-compact" aria-hidden="true">New conversation</span></>}
-          </button>
           <div className="project-management-actions">
             <button type="button" aria-label={editing ? "Close edit" : "Edit project"} onClick={() => setEditing((current) => !current)} disabled={deleting}>
               {editing ? "Close edit" : <><span className="project-action-label-full">Edit project</span><span className="project-action-label-compact" aria-hidden="true">Edit</span></>}
@@ -518,13 +485,22 @@ export function ProjectHome({
       {error ? <p className="project-error" role="alert">{error}</p> : null}
 
       <div className="project-home-grid project-home-overview">
-        <section className="project-panel" aria-labelledby="project-conversations-title">
+        <section className="project-panel project-conversations" aria-labelledby="project-conversations-title">
           <header>
             <div>
               <span>Conversations</span>
               <h2 id="project-conversations-title">Project conversations</h2>
             </div>
-            <small>{conversations.length}</small>
+            <div className="project-conversation-actions">
+              <small>{conversations.length}</small>
+              <button
+                className="project-primary-button"
+                type="button"
+                aria-label={creatingConversation ? "Creating…" : "New conversation in project"}
+                onClick={() => void startConversation()}
+                disabled={creatingConversation || deleting}
+              >{creatingConversation ? "Creating…" : "New conversation"}</button>
+            </div>
           </header>
           {conversations.length ? (
             <ul className="project-home-conversations">
@@ -619,7 +595,7 @@ export function ProjectHome({
       </div>
 
       <div className="project-home-grid project-home-details">
-        <ProjectKnowledgeSection project={project} visible={visible} onResearch={onResearchProjectKnowledge} onOpenAgent={onOpenProjectAgent} onOpenSource={(_source, entry, index) => { void openKnowledgeSource(entry, index); }} />
+        <ProjectKnowledgeSection project={project} visible={visible} />
         {!isPrivate && (onNewProjectAgent || onOpenProjectAgent) ? <ProjectAgents
           key={project.id} project={project} visible={visible}
           onNew={onNewProjectAgent} onOpen={onOpenProjectAgent} /> : null}
@@ -628,7 +604,6 @@ export function ProjectHome({
         key={project.id} project={project} visible={visible}
         onNew={onNewProjectWatch} onOpen={onOpenProjectWatch} /> : null}
       {isPrivate ? <TaxProjectSection projectId={project.id} onConversationSelected={onConversationSelected} /> : null}
-      {knowledgeSource ? <SearchSourceViewer result={knowledgeSource.result} loadSource={knowledgeSource.load} onClose={() => setKnowledgeSource(null)} /> : null}
 
       {filesOpen ? (
         <ProjectFilePicker
@@ -686,7 +661,7 @@ function ProjectAgents({ project, visible, onNew, onOpen }: {
     {error ? <p className="project-error" role="alert">{error}</p> : null}
     {loading ? <p role="status">Loading Project agents…</p> : items.length ? <ul className="project-home-conversations">{items.map((task) => <li key={task.id} className="conversation-row">
       <button className="conversation project-home-conversation" type="button" disabled={opening || !onOpen} onClick={() => void follow(task)}><span>{task.title || task.objective}</span><small>{task.status.replaceAll("_", " ")}</small></button>
-    </li>)}</ul> : <p className="project-empty">No agents in this Project yet. Start one with its instructions and approved working notes.</p>}
+    </li>)}</ul> : <p className="project-empty">No agents in this Project yet. Start one with its instructions and knowledge.</p>}
     <button type="button" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>Refresh Project agents</button>
   </section>;
 }

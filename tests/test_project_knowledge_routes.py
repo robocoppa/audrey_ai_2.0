@@ -150,6 +150,111 @@ async def _report(state, **changes):
     return task, payload
 
 
+async def test_plain_text_document_routes_need_no_artifact_or_search_services(state):
+    del state.app.state.knowledge_source_resolver
+    response = await state.client.get(f"{state.path}/text")
+    assert response.status_code == 200 and response.headers["cache-control"] == "private, no-store"
+    initial = response.json()
+    assert initial["text"] == "" and initial["max_text_chars"] == 8000
+    saved = await state.client.put(f"{state.path}/text", json={
+        "text": "The garden label is Fern Circle.\n", "expected_revision": initial["revision"],
+    })
+    assert saved.status_code == 200, saved.text
+    assert set(saved.json()) == {"text", "revision", "max_text_chars"}
+    assert saved.json()["text"] == "The garden label is Fern Circle.\n"
+    assert (await state.client.get(f"{state.path}/text")).json() == saved.json()
+    assert state.sources.calls == []
+
+
+async def test_plain_text_save_conflict_retry_clear_and_search_refresh(state):
+    initial = (await state.client.get(f"{state.path}/text")).json()
+    calls = []
+
+    async def refresh(*args):
+        calls.append(args)
+
+    state.app.state.content_search = SimpleNamespace(refresh_knowledge=refresh)
+    body = {"text": "The accepted user note.", "expected_revision": initial["revision"]}
+    first = await state.client.put(f"{state.path}/text", json=body)
+    assert first.status_code == 200 and len(calls) == 1
+    retry = await state.client.put(f"{state.path}/text", json=body)
+    assert retry.status_code == 200 and retry.json() == first.json() and len(calls) == 1
+    changed = await state.client.put(f"{state.path}/text", json={
+        "text": "A newer saved note.", "expected_revision": first.json()["revision"],
+    })
+    assert changed.status_code == 200
+    assert (await state.client.put(f"{state.path}/text", json=body)).status_code == 409
+    assert (await state.client.get(f"{state.path}/text")).json() == changed.json()
+    cleared = await state.client.put(f"{state.path}/text", json={
+        "text": "", "expected_revision": changed.json()["revision"],
+    })
+    assert cleared.status_code == 200 and cleared.json()["text"] == ""
+    assert len(calls) == 3
+
+
+async def test_plain_text_get_returns_all_legacy_approved_notes_without_mutating_them(state):
+    first = (await _create(state, text="a" * 6000)).json()
+    second = (await _create(state, text="b" * 6000)).json()
+    _task, payload = await _report(state)
+    proposal = (await state.client.post(f"{state.path}/proposals", json=payload)).json()
+    snapshot = (await state.client.get(f"{state.path}/text")).json()
+    assert snapshot["text"] == first["text"] + "\n\n" + second["text"]
+    assert len(snapshot["text"]) > snapshot["max_text_chars"]
+    assert (await state.client.put(f"{state.path}/text", json={
+        "text": snapshot["text"], "expected_revision": snapshot["revision"],
+    })).status_code == 422
+    assert (await state.client.get(f"{state.path}/{proposal['id']}")).json() == proposal
+    assert (await state.client.get(f"{state.path}/{first['id']}")).json() == first
+
+
+@pytest.mark.parametrize("body", [
+    {"text": "x" * 8001, "expected_revision": "a" * 64},
+    {"text": 42, "expected_revision": "a" * 64},
+    {"text": None, "expected_revision": "a" * 64},
+    {"text": "note", "expected_revision": "wrong"},
+    {"text": "note", "expected_revision": "a" * 64, "sources": []},
+])
+async def test_plain_text_route_rejects_malformed_bodies(state, body):
+    assert (await state.client.put(f"{state.path}/text", json=body)).status_code == 422
+    assert (await state.client.get(f"{state.path}/text")).json()["text"] == ""
+
+
+async def test_plain_text_routes_enforce_auth_scope_and_owner_fences(state):
+    initial = (await state.client.get(f"{state.path}/text")).json()
+    body = {"text": "Unauthorized text", "expected_revision": initial["revision"]}
+    for principal, status in (
+        (None, 401),
+        (replace(state.owners[0], auth_method="personal_token", scopes=frozenset()), 403),
+        (state.owners[1], 404),
+    ):
+        state.current[0] = principal
+        assert (await state.client.get(f"{state.path}/text")).status_code == status
+        assert (await state.client.put(f"{state.path}/text", json=body)).status_code == status
+
+
+@pytest.mark.parametrize("change,status", [("delete", 404), ("edit", 409), ("account", 404)])
+async def test_plain_text_response_revalidates_after_search_refresh(state, change, status):
+    initial = (await state.client.get(f"{state.path}/text")).json()
+
+    async def changed_during_refresh(*_args):
+        args = {"user_id": state.owners[0].user_id, "project_id": state.projects[0].project_id}
+        if change == "delete":
+            await state.store.projects.delete(**args)
+        elif change == "edit":
+            current = await state.store.knowledge.get_text(**args)
+            await state.store.knowledge.save_text(**args, text="A later note.", expected_revision=current["revision"])
+        else:
+            with state.store._lock, state.store._conn:
+                state.store._conn.execute("UPDATE app_users SET status='disabled' WHERE user_id=?", (args["user_id"],))
+
+    state.app.state.content_search = SimpleNamespace(refresh_knowledge=changed_during_refresh)
+    response = await state.client.put(f"{state.path}/text", json={
+        "text": "This text must not be returned late.", "expected_revision": initial["revision"],
+    })
+    assert response.status_code == status
+    assert "This text must not be returned late." not in response.text
+
+
 async def test_manual_crud_history_explicit_states_and_deletion(state):
     response = await _create(state, kind="action", pinned=True)
     assert response.status_code == 201, response.text

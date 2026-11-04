@@ -9,6 +9,9 @@ cleanup; its download checks have not been reported. Case 2 failed during Plan
 with a local-model output-limit error before Work began. A concise, nonthinking
 Plan fix is prepared; retry that same Agent after rebuilding backend/UI. Neither
 the file-reading capability nor the full case is accepted by this failed run.
+The owner then replaced structured Knowledge with a plain Project knowledge
+textbox. Cases 3–5 and 7 below now test that simpler workflow; the previous source
+attachment, assignment and proposal UI cases are superseded, not accepted.
 
 Use the latest deployed build containing `a463b16`. The laptop's `main` and its
 local `origin/main` reference both point there at preparation time; Tower's live
@@ -21,15 +24,15 @@ capability in this test target.
 | Commit, oldest first | Capability | Cases |
 | --- | --- | --- |
 | `6e202b4` | Watches linked to Projects | 8 |
-| `65d5b39` | Browse, preview, attach and refresh Knowledge sources | 3, 7 |
-| `0109754` | Generate report suggestions, then separately save/approve | 5 |
-| `83db67e` | Approved message/report-backed notes in Agent context | 3, 4, 7 |
-| `5053194` | General tasks and Assign to agent | 1, 4 |
+| `65d5b39` | Legacy source references retained internally; structured UI superseded | — |
+| `0109754` | Proposal UI superseded by owner; old records retained | — |
+| `83db67e` | Saved Project notes in Agent context | 3, 7 |
+| `5053194` | General tasks; structured assignment UI superseded | 1 |
 | `995866d` | Downloadable Agent files | 1, 2, 6 |
 | `a1642f8` | Explicit Project file inputs | 2, 6, 7 |
 | `3364fac` | Observed, durable Recent activity | 1, 2, 6 |
 | `c98a6ac` | Read further selected-file pages | 2 |
-| `a463b16` | Approved file-backed Knowledge | 3, 4, 6, 7 |
+| `a463b16` | Legacy file-backed notes retained; use explicit files for reads | 2, 6, 7 |
 
 Run one case at a time and report its result before moving on. Stop at the first
 failure that blocks a dependent case. A completed status with wrong content,
@@ -55,7 +58,8 @@ locally as the answer key.
 
 If the deployed build needs updating, rebuild `audrey` and `audrey-ui` on Tower
 from `/mnt/user/appdata/audrey_ai_2.0` through the normal deployment workflow.
-This plan introduces no runtime or configuration changes.
+Backend startup applies schema 38 automatically. No configuration edit or new
+upload is required for the Knowledge and layout checks.
 
 ## 1. General task, usable files and real activity
 
@@ -86,14 +90,16 @@ establish that all six formats work.
 **Layout and Project creation follow-up:** reopen the existing Fern Circle task
 on a laptop. Plan/progress and Recent activity should be symmetrical side by side.
 Expand saved Work and Show more activity; scroll either card with the pointer or
-keyboard and check that its neighbor stays still. The Result title and smaller
-Knowledge action should share a header, and report headings/code should remain
-readable. Open Search or narrow the window: cards should stack without page overflow.
+keyboard and check that its neighbor stays still. The Result should have a compact
+header and readable report headings/code, with no proposal controls. The Project
+badge should appear beside the task status and open that Project when available.
+Open Search or narrow the window: cards should stack without page overflow.
 In the Agent composer, enter a draft objective, choose New project and create a
 disposable ordinary Project. It should become selected, preserve the objective,
 and start no Agent. Also try Cancel and a narrow/mobile drawer. On the Project
-page, shrink the window and check that New conversation, Edit and Delete stay
-together and Upload file remains on one line. No upload or new model call is
+page, find New conversation inside Project conversations. Shrink the window and
+check that Edit/Delete stay together and Upload file remains on one line.
+No upload or new model call is
 needed to inspect the existing result layout.
 
 ## 2. Selected files, later pages and answer quality
@@ -130,79 +136,60 @@ After this works, repeat the source-reading portion with a real PDF and a saved
 OCR or media transcript whose contents you can verify. Track those source types
 separately. The TXT/CSV case does not establish PDF/OCR/media acceptance.
 
-## 3. Source browsing and approved notes from all three source types
+## 3. Plain Project knowledge, persistence and real reuse
 
-Create a conversation in the test Project. Send:
+On the disposable Project, enter the following in the single **Project knowledge**
+textbox and press **Save**:
 
-> For this acceptance project, the launch week starts on 2026-11-16.
+> The pilot project label is Fern Circle. Launch week starts on 2026-11-16.
+> The approved supply estimate is USD 260.30 across six rows.
+> The review label is FERN-REVIEW-31.
 
-Add these Knowledge Facts through **Add entry → Source references**. Choose the
-source type, preview the actual text, explicitly **Attach reference**, then save:
+Reload Audrey and reopen the Project. Check that the exact notes remain and that
+there are no entry types, source selectors, approval controls or assignment buttons.
+If this Project already had approved notes, verify they appeared in full before
+editing. Older unapproved proposals must not appear as accepted text.
 
-- **Chat messages:** “Launch week starts on 2026-11-16.” Reference your message.
-- **Agent reports:** “The pilot project label is Fern Circle.” Reference the
-  completed report from case 1.
-- **Files:** “The approved supply estimate is USD 260.30 across six rows.”
-  Reference `supply-list.csv`.
+Click **New conversation** inside **Project conversations**, then ask:
 
-Open each saved reference with **View source**. Edit a note, remove its reference
-and cancel; reopen to verify cancellation retained the saved reference. Then
-explicitly save a removal and reattach the inspected source.
+> Using this Project's saved knowledge, state the pilot label, launch week,
+> supply estimate and row count, and review label. Do not browse.
 
-**Pass:** all three source types preview real owned content; explicit attachment,
-save, removal and cancellation behave correctly; references survive reload;
-reference selection does not silently rewrite the note. The source-free version
-of a note is not evidence that its source-backed version qualified.
+Start a fresh Agent in the same Project, with **no file inputs selected**, using
+that same prompt. Verify the Project badge is beside its status.
 
-## 4. Knowledge reuse and explicit assignment
+**Pass:** notes survive reload and both real chat and Agent answers give Fern
+Circle, 2026-11-16, USD 260.30, six rows and FERN-REVIEW-31. They do not claim to
+have inspected source files or independently verified these user-written notes.
 
-Start a fresh Agent in the Project with **no file inputs selected**:
+## 4. Draft protection and concurrent edits
 
-> Using approved Project Knowledge, tell me the pilot project label, launch week
-> and supply estimate with its row count. Write a short preparation memo. Explain
-> the limits of what these approved notes establish. Do not browse.
+Open the disposable Project in two browser tabs. In tab A, change Knowledge text
+without saving. In tab B, change it differently and Save. Now Save tab A.
 
-**Pass:** it uses Fern Circle, 2026-11-16, USD 260.30 and six rows; it does not
-present generated reports or approval as independent verification.
+**Pass:** tab A keeps its draft, reports the conflict and shows the latest saved
+text. **Use saved text** adopts tab B without writing. Repeat once, then choose
+**Keep my edits** and Save; reload to verify the explicitly chosen draft persisted.
+A failed save or a hidden/reopened Project must not silently replace local edits.
 
-Now add an approved open **Action**, backed by the CSV reference:
+## 5. Explicit clearing and file access
 
-> Create a short volunteer preparation checklist using the approved supply estimate.
+Clear the Knowledge textbox, Save and reload. Start a new Agent in this Project,
+without selecting files, and ask:
 
-Leave a different unsent Agent objective in the composer. Choose **Assign to
-agent** on this Action. Verify the draft-replacement choice, select the intended
-replacement, review the Project/origin, and press **Start agent** yourself.
-After completion, use **Assigned agents** to reopen it.
+> What review label is saved in Project knowledge? Do not browse or guess.
 
-**Pass:** opening a draft did not start work; Start creates one Agent; reopening
-uses that same task; completion keeps the Action open. Repeat with an approved
-open Question, then resolve it explicitly yourself.
+**Pass:** the textbox stays empty; the new Agent does not claim the old review
+label is still saved. Existing completed reports remain readable. Restore the
+case-3 notes explicitly before continuing the reuse checks.
 
-For an access check, start a separate Project Agent with no selected inputs and ask:
+For a separate access check, start another Project Agent with no selected files:
 
 > Read unselected-control.txt and give its control phrase.
 
 **Pass:** it explains that the file is not supplied/selected and does not disclose
-or invent the phrase. Correctly reusing approved note text does not grant the
-ability to read linked files. This single-account check does not establish
-cross-account isolation.
-
-## 5. Real report suggestions and separate approval
-
-Open a completed report and choose **Propose Project knowledge**. Select the test
-Project, type a recognizable draft into Proposed text, then **Generate suggestions**.
-
-Check that the suggestions are useful, supported by that report and preserve its
-uncertainty. Choose **Use suggestion**; verify the typed draft survives until you
-explicitly choose **Replace draft**. Edit the statement, append “For this memo I
-choose review label FERN-REVIEW-31,” then **Save proposal**.
-
-**Pass:** generation alone saves no Knowledge. The saved proposal remains pending
-and is excluded from a new Agent's approved notes: ask a fresh Project Agent what
-review label has been approved and check that it does not know the label. After
-you separately approve the proposal, a fresh Agent should supply FERN-REVIEW-31.
-A successful generation with false or unusable
-suggestions fails the quality check. Cancelled drafts remain unsaved.
+or invent the phrase. Saved plain notes do not grant access to Project file text.
+This single-account check does not establish cross-account isolation.
 
 ## 6. Same-Agent rerun, actual restart and file lifetime
 
@@ -214,7 +201,7 @@ Review occur; prior activity remains. Previously downloaded files keep their
 original bytes. Changed generated content may legitimately create another file.
 
 For a real restart check, create a separate Project Agent with the two selected
-files, approved notes and the case-2 prompt. After its Plan is saved and Work has started, restart
+files, saved knowledge and the case-2 prompt. After its Plan is saved and Work has started, restart
 only the backend on Tower during a quiet test window:
 
 ```bash
@@ -235,29 +222,27 @@ check, then press it again. Its independently saved My Files outputs must remain
 Delete a disposable output in My Files and confirm its old task download no longer
 works. If rerun produces the exact same output identity, deletion must not be undone.
 
-## 7. Real source revocation and explicit refresh
+## 7. Saved knowledge changes and selected-file revocation
 
-Use disposable Agents so these checks do not invalidate unfinished earlier cases.
+Use disposable Agents so these checks do not invalidate earlier unfinished work.
 
-1. Start a Project Agent using the approved file-backed note, with no file input
-   selected. After Plan completes, Pause. Remove `supply-list.csv` from the Project.
-   Reopen the task and try to continue it.
-2. Reattach the file. In Knowledge, inspect the current source revision and choose
-   **Use current revision**, then save. Start a fresh Agent and verify the refreshed
-   note qualifies. The old Agent must keep its old frozen input proof.
-3. Repeat the paused-source removal with a different Agent that explicitly selected
-   the CSV. Also try deleting only the disposable source file in My Files.
-4. Repeat with a selected approved note changed or closed while its Agent is paused.
+1. Start an Agent with case-3 saved knowledge. After Plan completes, Pause it.
+   Change the Knowledge textbox and Save. Reopen the task and try to continue.
+2. Start a new Agent in that Project. Verify it uses the edited text; the old
+   task must keep its original pins and remain blocked rather than silently update.
+3. Start a different Agent with the CSV explicitly selected. Pause after Plan,
+   remove the CSV from the Project, then try to continue. Reattaching must not
+   silently replace the old Agent's frozen input. Also try deleting a disposable
+   selected source in My Files.
 
-**Pass:** changed/unavailable inputs visibly block old tasks from continuing or
-rerunning; saved Plans and reports remain readable; reattaching or refreshing does
-not silently update an existing Agent. A newly started Agent uses the reviewed
-current version. Source deletion does not recreate bytes.
+**Pass:** saved Knowledge edits and selected-file changes visibly block old tasks
+that used them; saved Plans/reports stay readable. A newly started Agent uses
+current inputs. Plain user-written notes remain saved when a file is removed;
+only selecting files gives the Agent permission to read their text.
 
-After deterministic paused checks pass, try one removal while Recent activity
-shows a model call in progress. No late result or new file may publish after the
-source-change acknowledgement. If work finished before removal, that timing is
-inconclusive; do not record it as a fence pass or failure.
+After the paused checks pass, try changing Knowledge during a model call.
+No late result or new file may publish after the change is acknowledged. If work
+finished first, that timing is inconclusive rather than a fence pass or failure.
 
 ## 8. Project Watches through the real UI and fetcher
 

@@ -85,6 +85,18 @@ class DecideEntry(BaseModel):
     expected_revision: int = Field(ge=1, strict=True)
 
 
+class KnowledgeText(BaseModel):
+    text: str
+    revision: str
+    max_text_chars: int
+
+
+class ReplaceKnowledgeText(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(max_length=MAX_ENTRY_CHARS, strict=True)
+    expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$", strict=True)
+
+
 def _error(error: KnowledgeError) -> HTTPException:
     code = (
         404
@@ -199,7 +211,10 @@ async def _refresh_search(request, principal, entry_ids):
     if refresh is None:
         return
     try:
-        await refresh(principal.user_id, principal.storage_namespace, entry_ids)
+        # A text Save may supersede every old approved entry. Keep each refresh
+        # within the projection service's existing two-entry operation bound.
+        for offset in range(0, len(entry_ids), 2):
+            await refresh(principal.user_id, principal.storage_namespace, entry_ids[offset:offset + 2])
     except (ContentSearchError, OSError, sqlite3.Error):
         # Canonical edits remain successful; the bounded indexer repairs Search.
         # Exception messages may contain private source paths or content.
@@ -223,6 +238,57 @@ async def _inspect_refs(principal, project, resolver, refs):
         not resolver.reader.is_current(document) for document in documents
     ):
         raise HTTPException(409, "A source changed while it was being read.")
+
+
+def _text_store(request):
+    # Plain user notes need canonical state only. Artifact/index availability
+    # must not prevent reading or saving the Project's own text.
+    store = getattr(request.app.state, "application_store", None)
+    if store is None or not hasattr(store, "knowledge"):
+        raise HTTPException(503, "Project knowledge is unavailable.")
+    return store
+
+
+@router.get("/text", response_model=KnowledgeText)
+async def get_knowledge_text(
+    request: Request,
+    response: Response,
+    project_id: str,
+    principal: Principal = Depends(_access),
+):
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        return await _text_store(request).knowledge.get_text(
+            user_id=principal.user_id, project_id=project_id,
+        )
+    except KnowledgeError as error:
+        raise _error(error) from None
+
+
+@router.put("/text", response_model=KnowledgeText)
+async def replace_knowledge_text(
+    body: ReplaceKnowledgeText,
+    request: Request,
+    response: Response,
+    project_id: str,
+    principal: Principal = Depends(_access),
+):
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        result, changed = await _text_store(request).knowledge.save_text(
+            user_id=principal.user_id, project_id=project_id, text=body.text,
+            expected_revision=body.expected_revision,
+        )
+        if changed:
+            await _refresh_search(request, principal, changed)
+            current = await _text_store(request).knowledge.get_text(
+                user_id=principal.user_id, project_id=project_id,
+            )
+            if current["revision"] != result["revision"]:
+                raise KnowledgeConflictError("Project knowledge changed after saving. Reload it to see the current text.")
+        return result
+    except KnowledgeError as error:
+        raise _error(error) from None
 
 
 @router.get("")

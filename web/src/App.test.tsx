@@ -181,8 +181,7 @@ describe("App", () => {
     const navigation = within(screen.getByRole("navigation", { name: "Workspaces" })); fireEvent.click(navigation.getByRole("button", { name: "Chat" }));
     fireEvent.click(screen.getByRole("button", { name: "Open saved Project agent" }));
     expect(await screen.findByRole("heading", { name: BRIDGE_AGENT.title })).toBeVisible();
-    fireEvent.click(screen.getByText(`Project: ${BRIDGE_PROJECT.name}`, { selector: "summary" }));
-    fireEvent.click(screen.getByRole("button", { name: "Open Project" }));
+    fireEvent.click(screen.getByRole("button", { name: `Open Project: ${BRIDGE_PROJECT.name}` }));
     expect(await screen.findByText(`Opened Project ${BRIDGE_PROJECT.name}`)).toBeVisible();
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
     expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Preserved Project draft");

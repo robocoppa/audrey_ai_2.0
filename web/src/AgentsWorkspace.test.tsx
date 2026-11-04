@@ -229,8 +229,7 @@ describe("AgentsWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
     await waitFor(() => expect(create).toHaveBeenCalledWith("Research stable releases only.", expect.any(String), project.id, origin));
     expect(update).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByText(`Project: ${project.name}`, { selector: "summary" }));
-    expect(screen.getByText(/Started from Project Knowledge · Revision 3/)).toBeVisible();
+    expect(await screen.findByLabelText(`Project: ${project.name}`)).toHaveAttribute("title", expect.stringContaining("Started from Project Knowledge · Revision 3"));
   });
 
   it("preserves a different composer draft until Use entry and supports Keep my draft", async () => {
@@ -311,25 +310,16 @@ describe("AgentsWorkspace", () => {
     expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("");
     expect(screen.queryByRole("button", { name: "Remove entry link" })).not.toBeInTheDocument();
   });
-  it.each(["rerun", "delete"])("discards report suggestions when a catalog refresh observes %s", async (change) => {
+  it("keeps completed results free of Project Knowledge proposal controls", async () => {
     const saved = task({ status: "completed", result: "Completed source report.", revision: 8 });
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
     vi.mocked(api.getAgentTask).mockResolvedValue(saved);
-    let finish!: (value: api.AgentKnowledgeDrafts) => void;
-    const generate = vi.spyOn(api, "generateAgentKnowledgeDrafts").mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const generate = vi.spyOn(api, "generateAgentKnowledgeDrafts"), propose = vi.spyOn(api, "createProjectKnowledge");
     render(<AgentsWorkspace />);
-    fireEvent.click(await screen.findByRole("button", { name: "Propose Project knowledge" }));
-    fireEvent.click(screen.getByRole("button", { name: "Generate suggestions" }));
-    await waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
-    const signal = generate.mock.calls[0][2];
-    const updated = { ...saved, revision: 9, status: "queued" as const, result: "" };
-    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: change === "delete" ? [] : [updated] });
-    vi.mocked(api.getAgentTask).mockResolvedValue(updated);
-    fireEvent(window, new Event("focus"));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Propose from this report" })).not.toBeInTheDocument());
-    expect(signal?.aborted).toBe(true);
-    await act(async () => { finish({ task_id: saved.id, task_revision: 8, suggestions: [{ kind: "fact", text: "Late generated suggestion." }] }); });
-    expect(screen.queryByText("Late generated suggestion.")).not.toBeInTheDocument();
+    expect(await screen.findByText(saved.result)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Propose Project knowledge" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Propose from this report" })).not.toBeInTheDocument();
+    expect(generate).not.toHaveBeenCalled(); expect(propose).not.toHaveBeenCalled();
   });
 
   it("creates an explicitly selected ordinary Project agent and excludes Private choices", async () => {
@@ -373,9 +363,35 @@ describe("AgentsWorkspace", () => {
     const saved = task({ status: "completed", result: "Saved report", project_context: { ...projectContext, current: false } });
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
     const open = vi.fn(), control = vi.spyOn(api, "actOnAgentTask"); render(<AgentsWorkspace onOpenProject={open} />);
-    fireEvent.click(await screen.findByText("Project context changed", { selector: "summary" }));
-    fireEvent.click(screen.getByRole("button", { name: "Open Project" })); expect(open).toHaveBeenCalledWith(project.id);
+    fireEvent.click(await screen.findByRole("button", { name: `Open Project: ${project.name}` })); expect(open).toHaveBeenCalledWith(project.id);
+    expect(screen.getByText("Changed")).toBeVisible();
+    expect(screen.getByText("The Project context has changed. Start a new agent to use its current instructions and knowledge.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Run again" })).toBeDisabled(); expect(control).not.toHaveBeenCalled();
+  });
+
+  it("places the saved Project beside the running status without a detail dropdown", async () => {
+    const saved = task({ project_context: projectContext });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    const open = vi.fn(); render(<AgentsWorkspace onOpenProject={open} />);
+    const badge = await screen.findByRole("button", { name: `Open Project: ${project.name}` });
+    const toolbar = badge.closest(".agents-detail-toolbar")!;
+    expect(within(toolbar as HTMLElement).getByText("Running")).toBeVisible();
+    expect(badge).toHaveAccessibleDescription(expect.stringContaining("1 saved knowledge revision pinned for this agent."));
+    const detail = screen.getByRole("region", { name: "Selected agent" });
+    expect(within(detail).queryByRole("combobox", { name: "Project" })).not.toBeInTheDocument();
+    expect(detail.querySelector(".agents-project-context")).toBeNull();
+    fireEvent.click(badge); expect(open).toHaveBeenCalledExactlyOnceWith(project.id);
+    expect(screen.getByRole("combobox", { name: "Project" })).toBeVisible();
+  });
+
+  it("keeps an unavailable saved Project visible and continuation blocked", async () => {
+    const saved = task({ status: "completed", project_context: { ...projectContext, available: false, project_name: null } });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    render(<AgentsWorkspace onOpenProject={vi.fn()} />);
+    expect(await screen.findByLabelText("Project: Saved Project · Unavailable")).toBeVisible();
+    expect(screen.getByText("This Project is no longer available. Continuing or running this agent again is unavailable.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Open Project:/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run again" })).toBeDisabled();
   });
 
   it("opens a Project's existing agent without creating another task", async () => {

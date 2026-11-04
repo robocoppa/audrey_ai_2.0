@@ -46,7 +46,7 @@ async def test_schema37_preserves_schema36_events_and_allows_selected_file_reads
         assert not connection.execute("SELECT name FROM sqlite_master WHERE name='app_agent_events_v37'").fetchone()
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 37
+        assert upgraded.schema_version == 38
         assert await upgraded.agents.events(user_id=owner.user_id, task_id=task["id"]) == before
         assert await upgraded.agents.get(user_id=owner.user_id, task_id=task["id"]) == before_task
         seq = await upgraded.agents.start_event(**lease, stage="research", kind="tool", tool="read_selected_file")

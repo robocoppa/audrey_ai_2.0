@@ -354,6 +354,12 @@ export interface ProjectKnowledgeList {
   limits: { max_entries: number; max_text_chars: number; max_sources: number };
 }
 
+export interface ProjectKnowledgeText {
+  text: string;
+  revision: string;
+  max_text_chars: number;
+}
+
 export interface KnowledgeUpdate {
   expected_revision: number;
   kind?: KnowledgeKind;
@@ -1315,6 +1321,18 @@ export function listProjectKnowledge(projectId: string, cursor?: string, signal?
 
 export function getProjectKnowledge(projectId: string, entryId: string, signal?: AbortSignal): Promise<KnowledgeEntry> {
   return apiJson<KnowledgeEntry>(projectKnowledgePath(projectId, entryId), { signal, cache: "no-store" });
+}
+
+export function getProjectKnowledgeText(projectId: string, signal?: AbortSignal): Promise<ProjectKnowledgeText> {
+  return apiJson<ProjectKnowledgeText>(`${projectKnowledgePath(projectId)}/text`, { signal, cache: "no-store" });
+}
+
+export function saveProjectKnowledgeText(projectId: string, text: string, expectedRevision: string, signal?: AbortSignal): Promise<ProjectKnowledgeText> {
+  return apiJson<ProjectKnowledgeText>(`${projectKnowledgePath(projectId)}/text`, {
+    method: "PUT", signal,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, expected_revision: expectedRevision }),
+  });
 }
 
 export function listKnowledgeSourceCandidates(projectId: string, kind: KnowledgeSourceCandidate["kind"], cursor?: string, signal?: AbortSignal): Promise<KnowledgeSourceCandidateList> {

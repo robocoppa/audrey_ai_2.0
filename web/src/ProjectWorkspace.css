@@ -60,6 +60,30 @@
   min-width: 6.3rem;
 }
 
+.project-home .project-conversations > header {
+  flex-wrap: wrap;
+}
+
+.project-conversation-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-left: auto;
+}
+
+.project-conversation-actions > small {
+  color: var(--accent);
+  font-size: 0.72rem;
+}
+
+.project-conversation-actions > button {
+  min-height: 2.2rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.6rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
 .project-home .project-home-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
@@ -132,44 +156,37 @@
 }
 
 .project-home-details > .project-panel {
-  max-height: clamp(12rem, 28vh, 20rem);
+  max-height: clamp(16rem, 34dvh, 20rem);
   overflow-y: auto;
   margin-top: 0;
   scrollbar-width: thin;
 }
 
+.project-home-details > .project-knowledge {
+  display: flex;
+  flex-direction: column;
+  height: clamp(16rem, 34dvh, 20rem);
+}
+
+.project-home-details > .project-knowledge > header {
+  flex: none;
+}
+
+.project-home-details .project-knowledge-form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.project-home-details .project-knowledge-form > textarea {
+  flex: 1;
+  min-height: 4rem;
+  resize: none;
+}
+
 .project-home-details > .project-panel:only-child {
   grid-column: 1 / -1;
-}
-
-.project-home-details .knowledge-filters {
-  gap: 0.45rem;
-  margin: 0.65rem 0;
-}
-
-.project-home-details .knowledge-filters label {
-  min-width: 0;
-  flex: 1 1 7rem;
-}
-
-.project-home-details .knowledge-filters select {
-  width: 100%;
-  padding: 0.45rem;
-}
-
-.project-home-details .knowledge-card,
-.project-home-details .knowledge-create {
-  padding: 0.7rem;
-}
-
-.project-home-details .knowledge-entries {
-  gap: 0.6rem;
-}
-
-.project-home-details .knowledge-text {
-  margin: 0.65rem 0;
-  font-size: 0.8rem;
-  line-height: 1.5;
 }
 
 .project-home-details .project-agents > header > button,
@@ -217,6 +234,15 @@
   .project-home-details > .project-panel {
     max-height: none;
     overflow-y: visible;
+  }
+
+  .project-home-details > .project-knowledge {
+    height: auto;
+  }
+
+  .project-home-details .project-knowledge-form > textarea {
+    min-height: 9rem;
+    resize: vertical;
   }
 }
 

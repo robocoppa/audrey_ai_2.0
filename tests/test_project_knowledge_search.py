@@ -269,6 +269,34 @@ async def test_create_edit_and_delete_refresh_recent_completed_search_immediatel
     assert (await state.client.get("/api/search", params={"q": "orchid"})).json()["items"] == []
 
 
+async def test_plain_document_consolidation_refreshes_more_than_two_legacy_notes_immediately(state):
+    owner = state.owners[0]
+    for index in range(5):
+        await state.store.knowledge.create(
+            user_id=owner.user_id, project_id=state.project.project_id,
+            kind="fact", text=f"Legacy heliotrope note {index}.",
+        )
+    original = await state.client.get("/api/search", params={"q": "heliotrope", "kind": "knowledge"})
+    assert len(original.json()["items"]) == 5
+    scan = state.service._owners[owner.user_id]
+    completed_at = scan.completed_at
+    path = f"/api/projects/{state.project.project_id}/knowledge/text"
+    before = (await state.client.get(path)).json()
+    saved = await state.client.put(path, json={
+        "text": "The reviewed orchid buying list.", "expected_revision": before["revision"],
+    })
+    assert saved.status_code == 200, saved.text
+    assert scan.completed_at == completed_at
+    assert (await state.client.get("/api/search", params={"q": "heliotrope"})).json()["items"] == []
+    found = (await state.client.get("/api/search", params={"q": "orchid", "kind": "knowledge"})).json()["items"]
+    assert len(found) == 1 and found[0]["excerpt"] == "The reviewed orchid buying list."
+    assert len(await state.index.list_sources(owner.user_id)) == 1
+    cleared = await state.client.put(path, json={"text": "", "expected_revision": saved.json()["revision"]})
+    assert cleared.status_code == 200
+    assert (await state.client.get("/api/search", params={"q": "orchid"})).json()["items"] == []
+    assert await state.index.list_sources(owner.user_id) == []
+
+
 async def test_async_refresh_started_before_purge_cannot_restore_note_body(state, monkeypatch):
     owner = state.owners[0]
     entry = await state.store.knowledge.create(

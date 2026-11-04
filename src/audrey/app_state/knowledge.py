@@ -20,7 +20,9 @@ from audrey.app_state.transactions import write_transaction
 
 MAX_PROJECT_ENTRIES = 200
 MAX_ENTRY_CHARS = 8_000
-MAX_ENTRY_REVISIONS = 100
+MAX_ENTRY_REVISIONS = 2**53 - 1
+MAX_LEGACY_ENTRY_REVISIONS = 100
+MAX_TEXT_DOCUMENT_HISTORY = 100
 MAX_SOURCES = 8
 _KINDS = frozenset({"fact", "decision", "question", "action"})
 _APPROVAL_STATES = frozenset({"approved", "proposed", "rejected", "superseded"})
@@ -75,6 +77,11 @@ def _status(kind: str, value: str) -> str:
     if value not in allowed:
         raise KnowledgeError("Work status does not apply to this knowledge kind.")
     return value
+
+
+def _text_document_id(user_id: str, project_id: str) -> str:
+    digest = hashlib.sha256(json.dumps([user_id, project_id]).encode()).hexdigest()
+    return f"kn_text_{digest}"
 
 
 def _sources(value: Sequence[dict]) -> list[dict]:
@@ -145,8 +152,15 @@ class KnowledgeRepository:
         if record["revision"] != revision:
             raise KnowledgeConflictError("Knowledge changed. Refresh before trying again.")
 
-    def _save(self, user_id: str, record: dict) -> dict:
-        if record["revision"] >= MAX_ENTRY_REVISIONS:
+    def _save(self, user_id: str, record: dict, *, allow_legacy_supersede: bool = False) -> dict:
+        document = record["id"] == _text_document_id(user_id, record["project_id"])
+        final_legacy_transition = (
+            allow_legacy_supersede and record["approval_state"] == "superseded"
+            and record["revision"] == MAX_LEGACY_ENTRY_REVISIONS
+        )
+        if (record["revision"] >= MAX_ENTRY_REVISIONS
+                or (not document and record["revision"] >= MAX_LEGACY_ENTRY_REVISIONS
+                    and not final_legacy_transition)):
             raise KnowledgeLimitError("This entry has reached its revision allowance.")
         record["revision"] += 1
         record["updated_at"] = dt.datetime.now(dt.UTC).isoformat()
@@ -158,6 +172,15 @@ class KnowledgeRepository:
              record["updated_at"], record["approved_at"], record["id"]),
         )
         self._snapshot(user_id, record)
+        if document:
+            # Revision identities always advance, including past 100. Only the
+            # new plain document has rolling history; legacy history is retained.
+            self._conn.execute(
+                "DELETE FROM app_project_knowledge_revisions WHERE entry_id=? AND revision NOT IN "
+                "(SELECT revision FROM app_project_knowledge_revisions WHERE entry_id=? "
+                "ORDER BY revision DESC LIMIT ?)",
+                (record["id"], record["id"], MAX_TEXT_DOCUMENT_HISTORY),
+            )
         return record
 
     def _snapshot(self, user_id: str, record: dict) -> None:
@@ -230,7 +253,8 @@ class KnowledgeRepository:
                 if target["approval_state"] != "approved":
                     raise KnowledgeConflictError("Only current approved entries can be replaced.")
             count = self._conn.execute(
-                "SELECT COUNT(*) FROM app_project_knowledge WHERE project_id=?", (project_id,),
+                "SELECT COUNT(*) FROM app_project_knowledge WHERE project_id=? AND entry_id!=?",
+                (project_id, _text_document_id(user_id, project_id)),
             ).fetchone()[0]
             if count >= MAX_PROJECT_ENTRIES:
                 raise KnowledgeLimitError("This Project has reached its knowledge entry allowance.")
@@ -256,6 +280,105 @@ class KnowledgeRepository:
             )
             self._snapshot(user_id, record)
             return record
+
+        return await asyncio.to_thread(self._transaction, work)
+
+    def _text_snapshot(self, user_id: str, project_id: str) -> tuple[dict, list[dict], dict | None]:
+        """Read every approved legacy note without source reads or truncation."""
+        self._project(user_id, project_id)
+        document_id = _text_document_id(user_id, project_id)
+        rows = self._conn.execute(
+            "SELECT * FROM app_project_knowledge WHERE user_id=? AND project_id=? "
+            "AND (approval_state='approved' OR entry_id=?) ORDER BY created_at,entry_id",
+            (user_id, project_id, document_id),
+        ).fetchall()
+        records = [self._record(row) for row in rows]
+        approved = [record for record in records if record["approval_state"] == "approved"]
+        document = next((record for record in records if record["id"] == document_id), None)
+        revision = hashlib.sha256(json.dumps(
+            [user_id, project_id, records], sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+        ).encode()).hexdigest()
+        return {
+            "text": "\n\n".join(record["text"] for record in approved),
+            "revision": revision,
+            "max_text_chars": MAX_ENTRY_CHARS,
+        }, approved, document
+
+    async def get_text(self, *, user_id: str, project_id: str) -> dict:
+        def work():
+            return self._text_snapshot(user_id, project_id)[0]
+        # Match the Save snapshot across separate application connections too;
+        # ownership and approved rows are observed at one transaction boundary.
+        return await asyncio.to_thread(self._transaction, work)
+
+    async def save_text(
+        self, *, user_id: str, project_id: str, text: str, expected_revision: str,
+    ) -> tuple[dict, list[str]]:
+        """Explicitly replace approved notes with one user-authored plain document.
+
+        Existing rows, provenance and history remain available through the legacy
+        read API. Pending/rejected suggestions are never imported or promoted.
+        The transaction's revision comparison covers all currently approved rows.
+        """
+        if not isinstance(text, str) or len(text) > MAX_ENTRY_CHARS:
+            raise KnowledgeError(f"Project knowledge supports at most {MAX_ENTRY_CHARS} characters.")
+        try:
+            text.encode("utf-8")
+        except UnicodeError:
+            raise KnowledgeError("Project knowledge contains invalid text.") from None
+        if not text.strip():
+            text = ""
+        if (not isinstance(expected_revision, str) or len(expected_revision) != 64
+                or any(char not in "0123456789abcdef" for char in expected_revision)):
+            raise KnowledgeError("Invalid Project knowledge revision.")
+
+        def work():
+            current, approved, document = self._text_snapshot(user_id, project_id)
+            canonical = (
+                not approved if not text else len(approved) == 1 and document is not None
+                and approved[0]["id"] == document["id"] and document["kind"] == "fact"
+                and document["pinned"] and document["work_status"] == "open"
+                and document["origin"] == "user" and not document["sources"]
+            )
+            # A lost response may be retried with its old version only while the
+            # exact requested text is already canonical. This cannot overwrite a
+            # different intervening edit. Identical saves never fence active work.
+            if canonical and current["text"] == text:
+                return current, []
+            if current["revision"] != expected_revision:
+                raise KnowledgeConflictError("Project knowledge changed. Reload it before saving your draft.")
+            changed = []
+            for record in approved:
+                if text and document is not None and record["id"] == document["id"]:
+                    continue
+                record["approval_state"] = "superseded"
+                self._save(user_id, record, allow_legacy_supersede=True)
+                changed.append(record["id"])
+            if text:
+                stamp = dt.datetime.now(dt.UTC).isoformat()
+                if document is None:
+                    document = {
+                        "id": _text_document_id(user_id, project_id), "project_id": project_id,
+                        "kind": "fact", "text": text, "approval_state": "approved",
+                        "work_status": "open", "revision": 1, "pinned": True, "origin": "user",
+                        "sources": [], "created_at": stamp, "updated_at": stamp, "approved_at": stamp,
+                        "source_task_id": None, "replaces_id": None, "base_revision": None,
+                    }
+                    self._conn.execute(
+                        "INSERT INTO app_project_knowledge "
+                        "(entry_id,project_id,user_id,kind,text,approval_state,work_status,revision,pinned,"
+                        "origin,sources_json,created_at,updated_at,approved_at,request_digest) "
+                        "VALUES (?,?,?,'fact',?,'approved','open',1,1,'user','[]',?,?,?,?)",
+                        (document["id"], project_id, user_id, text, stamp, stamp, stamp,
+                         hashlib.sha256(text.encode()).hexdigest()),
+                    )
+                    self._snapshot(user_id, document)
+                else:
+                    document.update(kind="fact", text=text, approval_state="approved", work_status="open",
+                                    pinned=True, sources=[], approved_at=stamp)
+                    self._save(user_id, document)
+                changed.append(document["id"])
+            return self._text_snapshot(user_id, project_id)[0], changed
 
         return await asyncio.to_thread(self._transaction, work)
 

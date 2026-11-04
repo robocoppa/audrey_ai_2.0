@@ -1506,6 +1506,95 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX idx_app_agent_events_owner ON app_agent_events(user_id,task_id,seq);
         """,
     ),
+    (
+        38,
+        """
+        CREATE TABLE app_project_knowledge_v38 (
+          entry_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('fact','decision','question','action')),
+          text TEXT NOT NULL CHECK (length(text) BETWEEN 1 AND 8000),
+          approval_state TEXT NOT NULL CHECK (approval_state IN
+            ('approved','proposed','rejected','superseded')),
+          work_status TEXT NOT NULL CHECK (work_status IN ('open','resolved','completed')),
+          revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 9007199254740991),
+          pinned INTEGER NOT NULL CHECK (typeof(pinned)='integer' AND pinned IN (0,1)),
+          origin TEXT NOT NULL CHECK (origin IN ('user','agent_report')),
+          sources_json TEXT NOT NULL CHECK (length(sources_json)<=12000),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          approved_at TEXT,
+          source_task_id TEXT,
+          replaces_id TEXT,
+          base_revision INTEGER CHECK (base_revision BETWEEN 1 AND 9007199254740991),
+          request_id TEXT,
+          request_digest TEXT NOT NULL CHECK (length(request_digest)=64),
+          UNIQUE (entry_id,user_id,project_id),
+          UNIQUE (user_id,project_id,request_id),
+          FOREIGN KEY (project_id,user_id)
+            REFERENCES app_projects(project_id,user_id) ON DELETE CASCADE,
+          CHECK (work_status='open' OR (kind='question' AND work_status='resolved')
+            OR (kind='action' AND work_status='completed')),
+          CHECK ((replaces_id IS NULL AND base_revision IS NULL)
+            OR (replaces_id IS NOT NULL AND base_revision IS NOT NULL))
+        );
+        CREATE TABLE app_project_knowledge_revisions_v38 (
+          entry_id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 9007199254740991),
+          user_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          record_json TEXT NOT NULL CHECK (length(CAST(record_json AS BLOB))<=100000),
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (entry_id,revision),
+          FOREIGN KEY (entry_id,user_id,project_id)
+            REFERENCES app_project_knowledge_v38(entry_id,user_id,project_id) ON DELETE CASCADE
+        );
+        CREATE TABLE app_run_project_knowledge_v38 (
+          run_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          entry_id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 9007199254740991),
+          PRIMARY KEY (run_id,entry_id),
+          FOREIGN KEY (run_id) REFERENCES app_runs(run_id) ON DELETE CASCADE,
+          FOREIGN KEY (project_id,user_id)
+            REFERENCES app_projects(project_id,user_id) ON DELETE CASCADE,
+          FOREIGN KEY (entry_id,user_id,project_id)
+            REFERENCES app_project_knowledge_v38(entry_id,user_id,project_id) ON DELETE CASCADE
+        );
+        INSERT INTO app_project_knowledge_v38
+          (entry_id,project_id,user_id,kind,text,approval_state,work_status,revision,pinned,origin,
+           sources_json,created_at,updated_at,approved_at,source_task_id,replaces_id,base_revision,
+           request_id,request_digest)
+          SELECT entry_id,project_id,user_id,kind,text,approval_state,work_status,revision,pinned,origin,
+           sources_json,created_at,updated_at,approved_at,source_task_id,replaces_id,base_revision,
+           request_id,request_digest FROM app_project_knowledge;
+        INSERT INTO app_project_knowledge_revisions_v38
+          (entry_id,revision,user_id,project_id,record_json,created_at)
+          SELECT entry_id,revision,user_id,project_id,record_json,created_at FROM app_project_knowledge_revisions;
+        INSERT INTO app_run_project_knowledge_v38 (run_id,user_id,project_id,entry_id,revision)
+          SELECT run_id,user_id,project_id,entry_id,revision FROM app_run_project_knowledge;
+        DROP TABLE app_run_project_knowledge;
+        DROP TABLE app_project_knowledge_revisions;
+        DROP TABLE app_project_knowledge;
+        ALTER TABLE app_project_knowledge_v38 RENAME TO app_project_knowledge;
+        ALTER TABLE app_project_knowledge_revisions_v38 RENAME TO app_project_knowledge_revisions;
+        ALTER TABLE app_run_project_knowledge_v38 RENAME TO app_run_project_knowledge;
+        CREATE INDEX idx_app_project_knowledge_owner_updated
+          ON app_project_knowledge(user_id,project_id,updated_at DESC,entry_id DESC);
+        CREATE TRIGGER trg_app_project_knowledge_revision_immutable
+        BEFORE UPDATE ON app_project_knowledge_revisions
+        BEGIN
+          SELECT RAISE(ABORT,'Project knowledge revisions are immutable');
+        END;
+        CREATE TRIGGER trg_app_run_project_knowledge_immutable
+        BEFORE UPDATE ON app_run_project_knowledge
+        BEGIN
+          SELECT RAISE(ABORT,'Run knowledge snapshots are immutable');
+        END;
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

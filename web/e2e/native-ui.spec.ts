@@ -4305,6 +4305,9 @@ test("creates and manages a personal project without losing conversations or fil
       projectFiles.set(String(project.id), []);
       return json(route, project, 201);
     }
+    if (/^\/api\/projects\/[^/]+\/knowledge\/text$/u.test(url.pathname)) {
+      return json(route, { text: "", revision: "0".repeat(64), max_text_chars: 8000 });
+    }
     const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/u);
     if (projectMatch) {
       const projectId = decodeURIComponent(projectMatch[1]);
@@ -4422,11 +4425,11 @@ test("creates and manages a personal project without losing conversations or fil
   await expect(page.getByText("operations.md")).toBeVisible();
   await expect(page.getByText("support.md")).toBeVisible();
 
-  await page.getByRole("button", { name: "New conversation in project" }).click();
+  await page.getByRole("region", { name: "Project conversations" }).getByRole("button", { name: "New conversation in project" }).click();
   await expect(page.getByRole("navigation", { name: "Project breadcrumb" })).toContainText("Renamed launch");
   await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toBeFocused();
   await page.getByRole("navigation", { name: "Project breadcrumb" }).getByRole("button", { name: "Renamed launch" }).click();
-  await page.getByRole("button", { name: "New conversation in project" }).click();
+  await page.getByRole("region", { name: "Project conversations" }).getByRole("button", { name: "New conversation in project" }).click();
   await page.getByRole("navigation", { name: "Project breadcrumb" }).getByRole("button", { name: "Renamed launch" }).click();
   await expect(page.getByRole("region", { name: "Project conversations" }).getByText("New conversation")).toHaveCount(2);
 

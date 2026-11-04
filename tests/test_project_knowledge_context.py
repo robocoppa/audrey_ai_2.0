@@ -92,6 +92,37 @@ async def test_approved_notes_are_quoted_with_revision_and_combined_budget(state
     assert used + sum(_token_count(item.text) for item in passages) <= PROJECT_RETRIEVAL_MAX_TOKENS
 
 
+async def test_plain_text_document_is_real_chat_context_and_edits_invalidate_its_proof(state):
+    args = {"user_id": state.owner.user_id, "project_id": state.project.project_id}
+    initial = await state.store.knowledge.get_text(**args)
+    document, _ = await state.store.knowledge.save_text(
+        **args, text="The Project garden label is Fern Circle.", expected_revision=initial["revision"],
+    )
+    snapshot = await context(state, query="What is the Project garden label?")
+    assert len(snapshot.knowledge) == 1
+    entry = snapshot.knowledge[0]
+    assert entry.text == document["text"] and entry.kind == "fact" and entry.pinned
+    assert document["text"] in project_context_system_message(snapshot)["content"]
+    assert_project_knowledge_current(state.app, snapshot)
+    # Saving identical text does not invalidate admitted context.
+    assert await state.store.knowledge.save_text(
+        **args, text=document["text"], expected_revision=initial["revision"],
+    ) == (document, [])
+    assert_project_knowledge_current(state.app, snapshot)
+    changed, _ = await state.store.knowledge.save_text(
+        **args, text="The Project garden label is Moss Circle.", expected_revision=document["revision"],
+    )
+    with pytest.raises(ProjectContextUnavailableError):
+        assert_project_knowledge_current(state.app, snapshot)
+    updated = await context(state, query="What is the Project garden label?")
+    assert updated.knowledge[0].text == changed["text"]
+    assert updated.knowledge[0].revision > entry.revision
+    await state.store.knowledge.save_text(**args, text="", expected_revision=changed["revision"])
+    with pytest.raises(ProjectContextUnavailableError):
+        assert_project_knowledge_current(state.app, updated)
+    assert (await context(state)).knowledge == ()
+
+
 async def test_changed_or_deleted_entry_cannot_keep_grounding_from_old_snapshot(state):
     entry = await note(state)
     snapshot = await context(state)

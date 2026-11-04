@@ -25,8 +25,7 @@ and drafts. The panel shares Chat's 17rem (272px) sidebar width. At 1,280 pixels
 is docked beside the workspace; smaller screens use an accessible overlay drawer.
 Two small right-pointing chevrons collapse the panel. Collapse retains search
 state, aborts hidden reads and revalidates the saved query
-on reopening. Source text opens inside the panel with paging and Back to results;
-Project Knowledge's separate source previews retain their modal behavior.
+on reopening. Source text opens inside the panel with paging and Back to results.
 It has a saved task
 workflow: Plan, Work and Review. Users can create tasks, inspect
 saved step results/reports, pause/resume/cancel, rerun the same agent and delete
@@ -43,17 +42,32 @@ Original prompt section.
 Plan and progress and Recent activity share equal-width, equal-height cards when
 the workflow has enough width. Both have fixed headings and independent scrolling;
 narrow workspaces, including Search-open views, stack them. Result uses a compact
-header with the Knowledge action alongside its title, restrained report headings
-and bounded, labeled code blocks. Saved report text is preserved.
+header, restrained report headings and bounded, labeled code blocks. Saved report
+text is preserved. The saved Agent's Project is a compact badge beside its status,
+with visible changed/unavailable warnings instead of an expanded context dropdown.
 The Agent composer offers New project through the existing ordinary Project
 dialog. Creating selects the new Project and preserves the objective; it does
 not start an Agent. Cancel and failure preserve the previous selection and draft.
-Project headers keep New conversation, Edit and Delete in one row at narrow
-widths, using shorter visible labels. Upload file stays on one line.
-Local UI/executor tests, typecheck, lint and the production build pass. Chromium
-fixture checks cover independent panel scrolling, narrow Project controls and
-Project creation without automatic task execution at desktop and mobile widths;
-these supplement the owner-operated checks, without proving live model behavior.
+Project headers keep Edit and Delete together. New conversation belongs inside
+the Project conversations box; Upload file stays on one line.
+
+Project knowledge is now one plain editable textbox with explicit Save. The entry
+types, pin/approval/source controls, assignment buttons and Agent report proposal
+UI have been removed. Existing approved notes appear in full as plain text; Save
+consolidates them into one user-authored pinned note through the existing context
+pipeline. Previous entries/history remain stored, and unapproved suggestions are
+never imported. The 8,000-character editor permits clearing; longer legacy text
+is shown without clipping and must be shortened before saving. Optimistic revision
+checks preserve drafts on conflicts. Chats and newly started Agents reuse the saved
+text within their existing bounded context; editing it fences previously pinned
+work. Schema 38 widens revision identities so the document can be edited beyond
+100 saves while keeping its latest 100 revisions. The older structured Knowledge
+sections below describe retained compatibility behavior, not controls to restore.
+Local UI/backend tests, typecheck, lint and the production build pass. Populated
+upgrade tests retain saved notes, history, run pins and immutable triggers. Chromium
+fixture checks cover independent panel scrolling, narrow Project controls, Project
+creation and plain Knowledge save/conflict/clear behavior at desktop/mobile widths.
+These supplement the owner-operated checks, without proving live model behavior.
 
 Application schema 26 introduced owner-bound tasks and operation reservations with
 leases, fenced writes and cumulative limits. The lifecycle worker reuses committed

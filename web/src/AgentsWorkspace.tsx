@@ -23,7 +23,6 @@ import {
   type ProjectLimits,
 } from "./api";
 import "./AgentsWorkspace.css";
-import { AgentKnowledgeDialog } from "./AgentKnowledgeDialog";
 import { AgentOutputs } from "./AgentOutputs";
 import { AgentRecentActivity } from "./AgentRecentActivity";
 import { AgentFileInputsView, AgentFilePicker } from "./AgentFileInputs";
@@ -37,7 +36,7 @@ const STATUS_LABELS: Record<AgentTaskStatus, string> = {
   cancelled: "Cancelled", failed: "Failed", waiting_for_input: "Waiting for input",
 };
 
-const PROJECT_CONTEXT_HELP = "Uses Project instructions and approved notes, with linked sources checked for freshness. Select files separately when the agent needs to read their text.";
+const PROJECT_CONTEXT_HELP = "Uses Project instructions and knowledge. Select files separately when the agent needs to read their text.";
 
 function stepLabel(step: AgentTask["steps"][number] | undefined): string | undefined {
   return step ? ({ plan: "Plan", research: "Work", review: "Review" }[step.id]) : undefined;
@@ -254,7 +253,6 @@ function AgentTasksWorkspace({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [knowledgeTask, setKnowledgeTask] = useState<AgentTask | null>(null);
   const [answerDrafts, setAnswerDrafts] = useState<Record<string, AnswerDraft>>({});
   const [projects, setProjects] = useState<AudreyProject[]>([]);
   const [projectsCursor, setProjectsCursor] = useState<string | null>(null);
@@ -285,8 +283,6 @@ function AgentTasksWorkspace({
   const projectsRequest = useRef<AbortController | null>(null);
   const activeCount = tasks.filter(isMoving).length;
   const hasActive = activeCount > 0;
-  const proposalTask = knowledgeTask ? tasks.find((task) => task.id === knowledgeTask.id) : undefined;
-  const proposalReportCurrent = proposalTask?.status === "completed" && proposalTask.revision === knowledgeTask?.revision;
   const sidebarOpen = visible && compactNavigation && (navigationOpen ?? internalNavigationOpen);
 
   const setSidebarOpen = useCallback((open: boolean) => {
@@ -834,7 +830,10 @@ function AgentTasksWorkspace({
               <>
                 <header className="agents-detail-header">
                   <div className="agents-detail-toolbar">
-                    <span className={`agents-status agents-status-${selected.status}`}>{STATUS_LABELS[selected.status]}</span>
+                    <div className="agents-detail-meta">
+                      <span className={`agents-status agents-status-${selected.status}`}>{STATUS_LABELS[selected.status]}</span>
+                      {selected.project_context ? <AgentProjectContextBadge task={selected} onOpenProject={onOpenProject} /> : null}
+                    </div>
                     {isFinished(selected) ? <AgentTaskControls
                       key={`${selected.id}:${isFinished(selected) ? selected.revision : "active"}:${visible}`}
                       task={selected}
@@ -847,7 +846,9 @@ function AgentTasksWorkspace({
                   <details className="agents-original-prompt"><summary>Original prompt</summary><p>{selected.objective}</p></details>
                   <p>Last activity <time dateTime={selected.updated_at}>{timestamp(selected.updated_at)}</time></p>
                 </header>
-                {selected.project_context ? <AgentProjectContextView task={selected} onOpenProject={onOpenProject} /> : null}
+                {selected.project_context && (!selected.project_context.available || !selected.project_context.current) ? <p className="agents-project-context-notice">
+                  {!selected.project_context.available ? "This Project is no longer available. Continuing or running this agent again is unavailable." : "The Project context has changed. Start a new agent to use its current instructions and knowledge."}
+                </p> : null}
                 <AgentFileInputsView inputs={selected.file_inputs} />
                 {selected.status === "paused" ? <p className="agents-notice">Completed steps are saved. Resume to continue from the next unfinished step.</p> : null}
                 {selected.error ? <p className="agents-error" role="alert">{selected.error}</p> : null}
@@ -881,7 +882,6 @@ function AgentTasksWorkspace({
                 <section className="agents-result" aria-labelledby="agent-result-title">
                   <header className="agents-result-header">
                     <h3 id="agent-result-title">Result</h3>
-                    {selected.status === "completed" && selected.result ? <button className="agents-secondary" type="button" onClick={() => setKnowledgeTask(selected)}>Propose Project knowledge</button> : null}
                   </header>
                   <div className="agents-result-body">
                     {selected.result ? <AgentMarkdown text={selected.result} /> : <p className="agents-result-empty">{selected.summary && selected.status === "completed" ? "Loading the saved result…" : selected.status === "failed" ? "This task stopped before a final result was saved. Any completed steps are available above." : selected.status === "cancelled" ? "This task was cancelled. Any completed steps are available above." : "The result will appear here when Audrey completes its review."}</p>}
@@ -899,7 +899,6 @@ function AgentTasksWorkspace({
           </div>
         </section>
       </div>
-      {knowledgeTask && proposalReportCurrent && visible ? <AgentKnowledgeDialog task={knowledgeTask} onClose={() => setKnowledgeTask(null)} /> : null}
       {creatingProject && visible ? <NewProjectDialog limits={projectLimits} privateAvailable={false}
         onClose={() => { setCreatingProject(false); window.requestAnimationFrame(() => newProjectRef.current?.focus()); }}
         onCreated={(project) => {
@@ -914,16 +913,23 @@ function AgentTasksWorkspace({
   );
 }
 
-function AgentProjectContextView({ task, onOpenProject }: { task: AgentTask; onOpenProject?: (projectId: string) => void }) {
+function AgentProjectContextBadge({ task, onOpenProject }: { task: AgentTask; onOpenProject?: (projectId: string) => void }) {
   const context = task.project_context;
   if (!context) return null;
-  return <details className="agents-project-context"><summary>{!context.available ? "Project unavailable" : !context.current ? "Project context changed" : `Project: ${context.project_name ?? "Saved Project"}`}</summary>
-    <p>{PROJECT_CONTEXT_HELP}</p>
-    {context.origin_entry ? <p>Started from Project Knowledge · Revision {context.origin_entry.revision}. Agent work does not complete or resolve the entry.</p> : null}
-    <p>{context.instructions_included ? "Project instructions included." : "No Project instructions were selected."} {context.knowledge.length} approved note {context.knowledge.length === 1 ? "revision" : "revisions"} pinned for this agent.</p>
-    {!context.available ? <p className="agents-project-unavailable">This Project is no longer available. Continuing or running this agent again is unavailable.</p> : !context.current ? <p className="agents-project-unavailable">The Project context has changed. Start a new agent to use its current instructions and approved notes.</p> : null}
-    {context.available && onOpenProject ? <button className="agents-secondary" type="button" onClick={() => onOpenProject(context.project_id)}>Open Project</button> : null}
-  </details>;
+  const name = context.project_name ?? "Saved Project";
+  const state = !context.available ? "Unavailable" : !context.current ? "Changed" : "";
+  const description = [
+    `Project: ${name}.`,
+    state ? `Project context ${state.toLowerCase()}.` : "",
+    context.instructions_included ? "Project instructions included." : "No Project instructions were selected.",
+    `${context.knowledge.length} saved knowledge ${context.knowledge.length === 1 ? "revision" : "revisions"} pinned for this agent.`,
+    context.origin_entry ? `Started from Project Knowledge · Revision ${context.origin_entry.revision}. Agent work does not complete or resolve the entry.` : "",
+  ].filter(Boolean).join(" ");
+  const contents = <><span className="agents-context-project-label">Project:</span><span className="agents-context-project-name">{name}</span>{state ? <span className="agents-context-project-state">{state}</span> : null}</>;
+  const className = `agents-context-project${state ? " agents-context-project-changed" : ""}`;
+  return context.available && onOpenProject
+    ? <button type="button" className={className} title={description} aria-label={`Open Project: ${name}`} onClick={() => onOpenProject(context.project_id)}>{contents}</button>
+    : <span className={className} title={description} aria-label={`Project: ${name}${state ? ` · ${state}` : ""}`}>{contents}</span>;
 }
 
 function AgentInputPanel({ request, revision, draft, busy, contextBlocked, onChange, onUseLatest, onAnswer }: {
