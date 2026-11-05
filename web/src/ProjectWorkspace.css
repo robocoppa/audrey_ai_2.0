@@ -193,6 +193,20 @@
   min-height: 0;
 }
 
+.project-home .project-knowledge:has(.knowledge-error, .knowledge-conflict) {
+  height: auto;
+  min-height: clamp(14rem, 32dvh, 18rem);
+}
+
+.project-home .project-knowledge:has(.knowledge-error, .knowledge-conflict) .project-knowledge-form {
+  flex: none;
+  min-height: auto;
+}
+
+.project-home .project-knowledge-form > :not(textarea) {
+  flex-shrink: 0;
+}
+
 .project-home .project-knowledge-form > textarea {
   flex: 1;
   min-height: 4rem;

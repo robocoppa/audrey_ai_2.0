@@ -214,6 +214,16 @@ that same prompt. Verify the Project badge is beside its status.
 Circle, 2026-11-16, USD 260.30, six rows and FERN-REVIEW-31. They do not claim to
 have inspected source files or independently verified these user-written notes.
 
+**Owner result, November 5:** both supplied knowledge answers match all five
+expected values. The Agent's Plan, Work and Review completed on attempt 1, and its
+saved Result attributes the facts to Project knowledge. The answer-content/reuse
+portion passes. Reload persistence, the Project badge and absence of selected file
+inputs were not explicitly reported, so this receipt does not close those checks.
+The optional Title model entry failed after 9.6 seconds; useful task execution
+continued. Its configured 10-second deadline is consistent with the timing, but
+the event does not establish the failure cause. Keep that naming issue separate
+from knowledge reuse; no runtime setting was changed from this receipt.
+
 ## 4. Draft protection and concurrent edits
 
 Open the disposable Project in two browser tabs. In tab A, change Knowledge text
@@ -223,6 +233,15 @@ without saving. In tab B, change it differently and Save. Now Save tab A.
 text. **Use saved text** adopts tab B without writing. Repeat once, then choose
 **Keep my edits** and Save; reload to verify the explicitly chosen draft persisted.
 A failed save or a hidden/reopened Project must not silently replace local edits.
+
+**Owner result, November 5:** conflict handling worked, but the fixed-height
+Knowledge card cut off the conflict controls. The functional portion passes.
+The UI correction lets the card grow naturally for errors/conflicts and returns
+it to its compact height when resolved; the saved-text preview stays scrollable.
+Local browser checks at 320–1,366 pixels contain both choices and the Save footer
+inside the card without overlap. After rebuilding `audrey-ui`, repeat the two-tab
+conflict and check both choices/Save are fully visible. No upload or Agent call
+is needed for this layout recheck.
 
 ## 5. Explicit clearing and file access
 
@@ -242,6 +261,13 @@ For a separate access check, start another Project Agent with no selected files:
 **Pass:** it explains that the file is not supplied/selected and does not disclose
 or invent the phrase. Saved plain notes do not grant access to Project file text.
 This single-account check does not establish cross-account isolation.
+
+**Owner results, November 5:** the cleared-knowledge Agent reported that no review
+label was saved, citing its empty Project knowledge context. The unselected-file
+Agent said no file text/tool was supplied and disclosed no control phrase. Both
+answer-behavior portions pass. These reports do not independently confirm the
+textbox after reload, retained previous reports, restored notes or cross-account
+isolation; keep those distinctions when recording the remaining checks.
 
 ## 6. Same-Agent rerun, actual restart and file lifetime
 

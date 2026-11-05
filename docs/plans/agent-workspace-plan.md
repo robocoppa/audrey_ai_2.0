@@ -88,6 +88,16 @@ upgrade tests retain saved notes, history, run pins and immutable triggers. Chro
 fixture checks cover independent panel scrolling, narrow Project controls, Project
 creation and plain Knowledge save/conflict/clear behavior at desktop/mobile widths.
 These supplement the owner-operated checks, without proving live model behavior.
+Knowledge cards now grow for conflict/error controls, then return to compact
+height on resolution. The latest saved-text preview remains bounded and scrollable;
+both resolution choices and Save stay inside the card at laptop/mobile widths.
+The November 5 owner receipt now confirms both supplied chat/Agent answers reused
+the expected Fern Circle label, launch date, supply estimate, row count and review
+label; the Agent completed Plan/Work/Review. The owner also confirms conflict
+handling works and supplied correct empty-knowledge/unselected-file refusals.
+The clipping correction needs an owner layout recheck; other live checks remain
+unconfirmed. Its optional Title failed independently;
+the raw cause is unverified, and no model/timeout change is inferred.
 
 Application schema 26 introduced owner-bound tasks and operation reservations with
 leases, fenced writes and cumulative limits. The lifecycle worker reuses committed
