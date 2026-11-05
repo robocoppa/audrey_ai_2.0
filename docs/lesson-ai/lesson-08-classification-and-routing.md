@@ -475,7 +475,7 @@ replace the specific, correct fact with a generic answer.
 
 ## When you're ready for the next lesson
 
-[Lesson 9 — Deep mode and research mode](lesson-09-deep-mode.md) opens the
-deep path this lesson routes into: the planner, the panel of workers, the
-synthesizer and reflect, and research mode, which checks claims before one
-writer answers.
+[Lesson 8b — Fair scheduling: how Audrey shares one GPU](lesson-08b-fair-scheduling.md)
+covers what happens once a routed request starts calling local models: who gets
+the GPU next when several requests want it, and how chat stays ahead of agents
+and watches working in the background.

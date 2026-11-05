@@ -646,3 +646,95 @@ async def test_origin_deletion_after_create_is_fenced_before_http_response(agent
     monkeypatch.setattr(agents.store.agents, "create", deleted_after_create)
     response = await _create(agents, project_id=project.project_id, knowledge_entry_id=entry["id"], knowledge_entry_revision=1)
     assert response.status_code == 409 and entry["text"] not in response.text and agents.wakes == []
+
+
+async def test_create_returns_current_owned_task_if_worker_starts_before_response(agents, monkeypatch):
+    original = agents.store.agents.create
+    claimed = []
+
+    async def started_after_create(**kwargs):
+        created = await original(**kwargs)
+        active = await agents.store.agents.claim()
+        claimed.append(active)
+        lease = {key: active[key] for key in ("lease_token", "fence")}
+        await agents.store.agents.reserve_operation(task_id=active["id"], step_id="plan", **lease)
+        return created
+
+    monkeypatch.setattr(agents.store.agents, "create", started_after_create)
+    response = await _create(agents)
+    assert response.status_code == 201, response.text
+    current = response.json()
+    assert current["id"] == claimed[0]["id"] and current["status"] == "running"
+    assert current["revision"] > 1 and current["steps"][0]["status"] == "running"
+    assert not {"lease_token", "lease_expires_at", "fence", "user_id", "limits"} & current.keys()
+    monkeypatch.setattr(agents.store.agents, "create", original)
+    repeated = await _create(agents)
+    assert repeated.status_code == 201 and repeated.json()["id"] == current["id"]
+    assert len(await agents.store.agents.list(user_id=agents.owners[0].user_id)) == 1
+
+
+@pytest.mark.parametrize("operation", ["get", "list"])
+async def test_task_reads_refresh_normal_worker_progress_before_response(agents, monkeypatch, operation):
+    created = (await _create(agents)).json()
+    original = getattr(agents.store.agents, operation)
+
+    async def advanced_after_read(**kwargs):
+        snapshot = await original(**kwargs)
+        active = await agents.store.agents.claim()
+        lease = {"task_id": active["id"], "lease_token": active["lease_token"], "fence": active["fence"]}
+        await agents.store.agents.reserve_operation(**lease, step_id="plan")
+        await agents.store.agents.checkpoint(**lease, step_id="plan", result="A real saved plan body.")
+        return snapshot
+
+    monkeypatch.setattr(agents.store.agents, operation, advanced_after_read)
+    response = await agents.client.get("/api/agents" if operation == "list" else f"/api/agents/{created['id']}")
+    assert response.status_code == 200, response.text
+    current = response.json()["items"][0] if operation == "list" else response.json()
+    assert current["id"] == created["id"] and current["status"] == "running"
+    assert current["steps"][0]["status"] == "completed" and current["revision"] > created["revision"]
+    if operation == "list":
+        assert current["summary"] is True and current["result"] == ""
+        assert all(step["result"] == "" for step in current["steps"])
+        assert current["input_requests"] == [] and "A real saved plan body." not in response.text
+    else:
+        assert current["steps"][0]["result"] == "A real saved plan body."
+
+
+@pytest.mark.parametrize("operation", ["control", "answer_input"])
+async def test_successful_task_mutations_do_not_conflict_with_immediate_worker_progress(agents, monkeypatch, operation):
+    task = await _waiting_task(agents) if operation == "answer_input" else await _complete_task(agents)
+    original = getattr(agents.store.agents, operation)
+
+    async def progressed_after_commit(**kwargs):
+        committed = await original(**kwargs)
+        active = await agents.store.agents.claim()
+        assert active["id"] == committed["id"]
+        return committed
+
+    monkeypatch.setattr(agents.store.agents, operation, progressed_after_commit)
+    response = await agents.client.post(_answer_path(task), json={
+        "expected_revision": task["revision"], "answer": "Use the selected source text.",
+    }) if operation == "answer_input" else await _rerun(agents, task)
+    assert response.status_code == 200, response.text
+    current = response.json()
+    assert current["id"] == task["id"] and current["status"] == "running"
+    assert current["revision"] > task["revision"]
+    if operation == "answer_input":
+        assert current["input_requests"][0]["answer"] == "Use the selected source text."
+    else:
+        assert current["steps"][0] == task["steps"][0]
+
+
+async def test_create_still_fences_owner_revocation_after_commit(agents, monkeypatch):
+    original = agents.store.agents.create
+
+    async def revoked_after_create(**kwargs):
+        result = await original(**kwargs)
+        with agents.store._lock, agents.store._conn:
+            agents.store._conn.execute("UPDATE app_users SET status='disabled' WHERE user_id=?", (agents.owners[0].user_id,))
+        return result
+
+    monkeypatch.setattr(agents.store.agents, "create", revoked_after_create)
+    response = await _create(agents)
+    assert response.status_code == 404 and "Compare the public" not in response.text
+    assert not agents.wakes

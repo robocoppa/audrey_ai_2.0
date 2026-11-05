@@ -77,20 +77,21 @@ content belongs; they do not authorize new writing or immediate file removal.
 | `lesson-06c-the-model-layer.md` | 8: Choosing a model; renamed from 06b (2026-10-30) to keep reading order |
 | `lesson-07-calling-models.md` | 9: Calling models, including a high-level Private explanation |
 | `lesson-08-classification-and-routing.md` | 7: Routing; move model-access detail to 6 |
+| `lesson-08b-fair-scheduling.md` | 10: Fair scheduling; refreshed and moved from 15 (2026-11-04) to keep reading order |
 | `lesson-09-deep-mode.md` | 11: Deep and research together |
 | `lesson-10-tool-use-and-react.md` | 12: Tools and the ReAct loop |
 | `lesson-11-how-function-calling-works.md` | 12: Protocol essentials; 25: Caller-executed tools; cut vendor tour; then retire source |
 | `lesson-12-kb-ingest-and-search.md` | 13: Hybrid retrieval, ingest and search |
 | `lesson-13-kb-lifecycle.md` | 13: Watcher/reconcile; 19: Uploads; then retire source |
 | `lesson-14-memory-and-context-injection.md` | 14: Memory/history; identity becomes a recap of 6; delivery detail belongs in 18 |
-| `lesson-15-fair-scheduling.md` | 10: Fair scheduling |
 | `lesson-16-openai-routes.md` | 16: Streaming internals; 24: API routes; then retire source |
 | `lesson-17-custom-tools-sidecar.md` | 15: Sidecar; archive delivery detail belongs in 18, scoped file tools in 22 |
 
 Two scripted renumbers implement this design when lesson work resumes:
 
 1. **Number the database and identity lessons.** Both are already published,
-   as 6a and 6b, and the model layer's file became 06c to keep reading order.
+   as 6a and 6b, and the model layer's file became 06c to keep reading order;
+   refreshed fair scheduling became 08b for the same reason.
    Give them 6 and 7 after configuration, and put the pipeline in request
    order. Keep the four source lessons awaiting merges beside their
    destination area. Interim order:

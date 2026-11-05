@@ -209,7 +209,7 @@ async def list_agents(request: Request, response: Response,
     try:
         repository = _repository(request)
         tasks = await repository.list(user_id=principal.user_id, limit=200, summary=True, project_id=project_id)
-        repository.fence_response(user_id=principal.user_id, tasks=tasks)
+        tasks = repository.response_snapshot(user_id=principal.user_id, tasks=tasks)
         return {"items": tasks}
     except AgentTaskError as error:
         raise _error(error) from None
@@ -242,7 +242,7 @@ async def create_agent(body: AgentCreateRequest, request: Request, response: Res
                                        knowledge_entry_id=body.knowledge_entry_id,
                                        knowledge_entry_revision=body.knowledge_entry_revision, file_inputs=pins,
                                        knowledge_file_sources=knowledge_sources)
-        repository.fence_response(user_id=principal.user_id, tasks=[task])
+        [task] = repository.response_snapshot(user_id=principal.user_id, tasks=[task])
     except AgentDispatchStoppedError as error:
         raise HTTPException(status_code=503, detail=str(error)) from None
     except AgentTaskError as error:
@@ -330,7 +330,7 @@ async def get_agent(task_id: str, request: Request, response: Response,
     try:
         repository = _repository(request)
         task = await repository.get(user_id=principal.user_id, task_id=task_id)
-        repository.fence_response(user_id=principal.user_id, tasks=[task])
+        [task] = repository.response_snapshot(user_id=principal.user_id, tasks=[task])
         return task
     except AgentTaskError as error:
         raise _error(error) from None
@@ -385,7 +385,7 @@ async def agent_action(
             action=body.action,
             **options,
         )
-        repository.fence_response(user_id=principal.user_id, tasks=[task])
+        [task] = repository.response_snapshot(user_id=principal.user_id, tasks=[task])
     except AgentDispatchStoppedError as error:
         raise HTTPException(status_code=503, detail=str(error)) from None
     except AgentTaskError as error:
@@ -414,7 +414,7 @@ async def answer_agent_input(
             expected_revision=body.expected_revision, answer=body.answer,
             max_attempts=settings.max_attempts, admission_limits=settings.task_limits(),
         )
-        repository.fence_response(user_id=principal.user_id, tasks=[task])
+        [task] = repository.response_snapshot(user_id=principal.user_id, tasks=[task])
     except AgentDispatchStoppedError as error:
         raise HTTPException(status_code=503, detail=str(error)) from None
     except AgentTaskError as error:

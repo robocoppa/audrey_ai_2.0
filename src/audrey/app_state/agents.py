@@ -626,19 +626,7 @@ class AgentsRepository:
                         "(SELECT 1 FROM app_agent_project_contexts c WHERE c.task_id=app_agent_tasks.task_id AND c.project_id=?)) "
                         "ORDER BY created_at DESC,task_id DESC LIMIT ?", (user_id, project_id, project_id, limit),
                     ).fetchall()
-                    return [{
-                        "id": row["task_id"],
-                        **{key: row[key] for key in _PUBLIC_FIELDS},
-                        "title": row["title"] or fallback_conversation_title(row["objective"]),
-                        "status": "waiting_for_input" if row["status"] == "paused" and row["has_pending_input"] else row["status"],
-                        "summary": True,
-                        "input_requests": [],
-                        "project_context": self._project_contexts.public(task_id=row["task_id"], user_id=user_id),
-                        **({"file_inputs": selected} if (selected := self._file_inputs_public(row["task_id"], user_id)) is not None else {}),
-                        "steps": [{
-                            "id": key, "label": label, "status": row[f"{key}_status"], "result": "",
-                        } for key, label in _STEP_LABELS],
-                    } for row in rows]
+                    return [self._summary_payload(row, user_id) for row in rows]
                 return [self._public(self._record(row)) for row in self._conn.execute(
                     "SELECT * FROM app_agent_tasks WHERE user_id=? AND (? IS NULL OR EXISTS "
                     "(SELECT 1 FROM app_agent_project_contexts c WHERE c.task_id=app_agent_tasks.task_id AND c.project_id=?)) "
@@ -647,12 +635,71 @@ class AgentsRepository:
 
         return await asyncio.to_thread(work)
 
+    def _summary_payload(self, row: sqlite3.Row, user_id: str) -> dict:
+        return {
+            "id": row["task_id"],
+            **{key: row[key] for key in _PUBLIC_FIELDS},
+            "title": row["title"] or fallback_conversation_title(row["objective"]),
+            "status": "waiting_for_input" if row["status"] == "paused" and row["has_pending_input"] else row["status"],
+            "summary": True,
+            "input_requests": [],
+            "project_context": self._project_contexts.public(task_id=row["task_id"], user_id=user_id),
+            **({"file_inputs": selected} if (selected := self._file_inputs_public(row["task_id"], user_id)) is not None else {}),
+            "steps": [{
+                "id": key, "label": label, "status": row[f"{key}_status"], "result": "",
+            } for key, label in _STEP_LABELS],
+        }
+
     async def get(self, *, user_id: str, task_id: str) -> dict:
         def work() -> dict:
             with self._lock:
                 return self._public(self._load(task_id, user_id))
 
         return await asyncio.to_thread(work)
+
+    def response_snapshot(self, *, user_id: str, tasks: list[dict]) -> list[dict]:
+        """Refresh normal progress after the last await, without replaying an action.
+
+        The worker may claim or checkpoint between an asynchronous read/commit and
+        its HTTP response. Read current bodies at one serialized boundary instead
+        of treating that successful progress as an optimistic-write conflict.
+        Erased owners/tasks and changed input metadata retain the strict fence.
+        """
+        if len(tasks) > 200:
+            raise AgentTaskError("Agent response exceeds its allowance.")
+
+        def work() -> list[dict]:
+            self._owner(user_id)
+            values = []
+            for payload in tasks:
+                try:
+                    self.fence_response(user_id=user_id, tasks=[payload])
+                except AgentTaskConflictError:
+                    if payload.get("summary"):
+                        row = self._conn.execute(
+                            "SELECT task_id,objective,title,status,revision,created_at,updated_at,"
+                            "'' AS result,error,attempts,"
+                            "json_extract(steps_json,'$[0].status') AS plan_status,"
+                            "json_extract(steps_json,'$[1].status') AS research_status,"
+                            "json_extract(steps_json,'$[2].status') AS review_status,"
+                            "EXISTS(SELECT 1 FROM app_agent_input_requests q WHERE q.task_id=t.task_id "
+                            "AND q.answer IS NULL AND q.dismissed_at IS NULL) AS has_pending_input "
+                            "FROM app_agent_tasks t WHERE user_id=? AND task_id=?",
+                            (user_id, payload["id"]),
+                        ).fetchone()
+                        if row is None:
+                            raise AgentTaskAccessError("Agent task is unavailable.") from None
+                        current = self._summary_payload(row, user_id)
+                    else:
+                        current = self._public(self._load(payload["id"], user_id))
+                    if any(current.get(key) != payload.get(key) for key in ("project_context", "file_inputs")):
+                        raise AgentTaskConflictError("Agent task changed. Refresh before trying again.") from None
+                    values.append(current)
+                else:
+                    values.append(payload)
+            return values
+
+        return self._transaction(work)
 
     def fence_response(self, *, user_id: str, tasks: list[dict] | tuple = ()) -> None:
         """Reject erased/revised task bodies synchronously after a route's last await."""

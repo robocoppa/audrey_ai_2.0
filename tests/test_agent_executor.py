@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -34,6 +35,12 @@ from audrey.kb.user_store import sanitize_user
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import GenerationUsageError, OllamaClient, OllamaError
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.prompts import (
+    AGENT_PLAN_FILE_READS_SYSTEM,
+    AGENT_PLAN_SYSTEM,
+    AGENT_RESEARCH_SYSTEM,
+    AGENT_REVIEW_SYSTEM,
+)
 from audrey.pipeline.react import ReactResult
 from audrey.routes.app import router as app_router
 from audrey.routes.inflight import UserInflightRegistry
@@ -423,6 +430,8 @@ async def test_every_step_uses_only_local_qwen_and_only_research_has_public_tool
     assert len(requests) == (2 if step_id == "research" else 1)
     for payload in requests:
         assert payload["model"] == _MODEL and payload["options"]["num_predict"] == 128
+        assert not any(AGENT_PLAN_FILE_READS_SYSTEM in message["content"]
+                       for message in payload["messages"])
         offered = {tool["function"]["name"] for tool in payload.get("tools", [])}
         assert offered == ({"web_search", "web_fetch"} if step_id == "research" else set())
     supplied = json.loads(
@@ -1543,6 +1552,15 @@ async def test_selected_file_excerpt_reaches_each_local_step_without_unselected_
     assert "untrusted data" in source["content"] and "not independent evidence" in source["content"]
     assert "Unselected private business detail" not in json.dumps(payload)
     assert payload["model"] == _MODEL and not s.tool_requests
+    capabilities = [message for message in payload["messages"]
+                    if AGENT_PLAN_FILE_READS_SYSTEM in message["content"]]
+    if step_id == "plan":
+        assert len(capabilities) == 1 and capabilities[0]["role"] == "system"
+        metadata = json.JSONDecoder().raw_decode(capabilities[0]["content"].split(AGENT_PLAN_FILE_READS_SYSTEM, 1)[1])[0]
+        assert metadata == [{"file_id": "chosen-input", "chars": len(path.read_text()),
+                             "total_chars": len(path.read_text()), "truncated": False}]
+    else:
+        assert capabilities == []
     if step_id != "research":
         assert not payload.get("tools")
     else:
@@ -1553,6 +1571,119 @@ def _read_call(file_id="chosen-input", **arguments):
     return _answer("", message={"tool_calls": [{"function": {
         "name": "read_selected_file", "arguments": {"file_id": file_id, **arguments},
     }}]})
+
+
+async def test_selected_files_do_not_suppress_a_genuinely_missing_user_choice(file_state):
+    s = file_state
+    project, _path, pins = await _selected_file_context(s)
+    task = await _step(s, project_id=project.project_id, file_inputs=pins)
+    question = "Which of the two garden locations should this purchasing task cover?"
+    s.responses.append(_answer(json.dumps({"input_request": question})))
+    assert await s.executor(task, "plan") == AgentInputRequest(question)
+    payload = _content_requests(s)[0]
+    assert any(AGENT_PLAN_FILE_READS_SYSTEM in message["content"]
+               for message in payload["messages"])
+    assert not payload.get("tools") and not s.tool_requests
+
+
+@pytest.mark.parametrize("recovery", ["answer", "rerun"])
+async def test_existing_excerpt_question_can_recover_same_agent_and_read_real_appendix_in_work(file_state, recovery):
+    s = file_state
+    s.app.state.cfg.raw["agent_tasks"] = {}
+    input_root = Path(__file__).parent / "manual" / "agent-workspace"
+    brief = (input_root / "garden-brief-long.txt").read_text()
+    csv_text = (input_root / "supply-list.csv").read_text()
+    project, chosen, _pins = await _selected_file_context(s, selected_text=brief)
+    (chosen.parent / "supplies.csv").write_text(csv_text)
+    await s.files_db.record_upload(
+        file_id="supplies", user=s.owner.storage_namespace, filename="supply-list.csv",
+        mime="text/csv", bytes_=len(csv_text.encode()), kind="text", collection="", chunks=0,
+        uploaded_at="2026-11-04T12:00:00+00:00",
+    )
+    await s.store.projects.add_file(user_id=s.owner.user_id, project_id=project.project_id, file_id="supplies")
+    pins = await get_agent_file_inputs(s.app).capture(s.owner, project.project_id, ["chosen-input", "supplies"])
+    task = await s.store.agents.create(
+        user_id=s.owner.user_id, project_id=project.project_id, file_inputs=pins,
+        objective="Inspect the complete FINAL APPENDIX, including its closing approval, and save a garden checklist. Do not browse.",
+        request_id="recover-excerpt-question",
+    )
+    claimed = await s.store.agents.claim()
+    lease = {"task_id": task["id"], "lease_token": claimed["lease_token"], "fence": claimed["fence"]}
+    await s.store.agents.reserve_operation(**lease, step_id="plan")
+    # Represent a question already saved by an older planner; no synthetic
+    # assertion here claims that the live model follows the corrected prompt.
+    waiting = await s.store.agents.request_input(**lease,
+        question="Please provide the approved spending ceiling and closing approval from the truncated appendix.")
+    assert waiting["status"] == "waiting_for_input"
+    if recovery == "answer":
+        queued = await s.store.agents.answer_input(user_id=s.owner.user_id, task_id=task["id"],
+            request_id=waiting["input_requests"][0]["id"], expected_revision=waiting["revision"],
+            answer="Read those details from the selected file's FINAL APPENDIX during Work.")
+        assert queued["input_requests"][0]["answer"]
+    else:
+        cancelled = await s.store.agents.control(user_id=s.owner.user_id, task_id=task["id"],
+            expected_revision=waiting["revision"], action="cancel")
+        queued = await s.store.agents.control(user_id=s.owner.user_id, task_id=task["id"],
+            expected_revision=cancelled["revision"], action="rerun")
+        assert queued["input_requests"] == []
+    assert queued["id"] == task["id"] and queued["file_inputs"] == task["file_inputs"]
+    pages = []
+    plan = "1. Read the selected brief's FINAL APPENDIX in Work.\n2. Prepare and save the requested checklist."
+
+    async def respond():
+        payload = json.loads(s.provider_requests[-1].content)
+        system = payload["messages"][0]["content"]
+        if system.startswith("You create concise agent titles."):
+            return
+        capabilities = [message for message in payload["messages"]
+                        if AGENT_PLAN_FILE_READS_SYSTEM in message["content"]]
+        if system.startswith(AGENT_PLAN_SYSTEM):
+            assert payload["think"] is False and not payload.get("tools")
+            assert len(capabilities) == 1 and capabilities[0]["role"] == "system"
+            metadata = json.JSONDecoder().raw_decode(capabilities[0]["content"].split(AGENT_PLAN_FILE_READS_SYSTEM, 1)[1])[0]
+            assert [item["file_id"] for item in metadata] == ["chosen-input", "supplies"]
+            assert metadata[0]["truncated"] and metadata[0]["total_chars"] == 49222
+            assert metadata[0]["chars"] < 40000 and not metadata[1]["truncated"]
+            assert "MOSS-7Q4-RIVER" not in json.dumps(payload)
+            s.responses.append(_answer(plan))
+        elif system.startswith(AGENT_RESEARCH_SYSTEM):
+            assert capabilities == [] and "think" not in payload
+            assert "read_selected_file" in {item["function"]["name"] for item in payload["tools"]}
+            messages = [message for message in payload["messages"] if message["role"] == "tool"]
+            if not messages:
+                s.responses.append(_read_call(offset=40000, limit=6000))
+                return
+            result = json.loads(messages[-1]["content"])
+            if "start" in result:
+                assert result["text"] == brief[result["start"]:result["end"]]
+                pages.append(result)
+                if result["has_more"]:
+                    s.responses.append(_read_call(offset=result["next_offset"], limit=6000))
+                else:
+                    text = "".join(page["text"] for page in pages)
+                    for fact in ("472.35", "Wednesday", "MOSS-7Q4-RIVER", "2026-11-23"):
+                        assert fact in text
+                    s.responses.append(_file_call(filename="garden-checklist.md", content=text))
+            else:
+                s.responses.append(_answer("Saved the inspected appendix checklist: " + result["download_url"]))
+        else:
+            assert system.startswith(AGENT_REVIEW_SYSTEM) and capabilities == [] and not payload.get("tools")
+            objective = json.loads(next(message["content"] for message in reversed(payload["messages"])
+                                        if message["role"] == "user"))
+            s.responses.append(_answer(objective["saved_work"]["research"]))
+
+    s.on_chat = respond
+    assert await AgentRuntime(s.store.agents, s.executor).run_once()
+    saved = await s.store.agents.get(user_id=s.owner.user_id, task_id=task["id"])
+    assert saved["status"] == "completed" and saved["id"] == task["id"]
+    assert saved["steps"][0]["result"] == plan and saved["file_inputs"] == task["file_inputs"]
+    assert len(pages) >= 2 and pages[0]["start"] == 40000 and pages[-1]["end"] == len(brief)
+    assert all(before["next_offset"] == after["start"] for before, after in pairwise(pages))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=s.app), base_url="http://test") as client:
+        downloaded = await client.get(saved["outputs"][0]["download_url"])
+    assert downloaded.status_code == 200 and downloaded.text == brief[40000:]
+    assert not s.tool_requests and not s.responses
+    assert len(await s.store.agents.list(user_id=s.owner.user_id)) == 1
 
 
 async def test_selected_file_tool_reads_beyond_initial_excerpt_then_creates_owned_download(file_state):

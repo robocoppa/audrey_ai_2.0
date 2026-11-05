@@ -607,7 +607,7 @@ retries run out.
 This is the last lesson published so far, and the sidecar is a fitting place
 to pause: It's the far end of the request path. You've followed a message from
 the browser and the `/v1` door (Lessons 4 and 16), through routing (Lesson 8),
-the model layer (Lessons 6 and 7), deep and research modes (Lesson 9), the
-tool loop (Lessons 10 and 11), the knowledge base and per-user context
-(Lessons 12–14) and fair scheduling (Lesson 15), out to the tools this lesson
-read. Lessons on the application around the pipeline are on the way.
+the model layer (Lessons 6 and 7), fair scheduling (Lesson 8b), deep and
+research modes (Lesson 9), the tool loop (Lessons 10 and 11), and the knowledge
+base and per-user context (Lessons 12–14), out to the tools this lesson read.
+Lessons on the application around the pipeline are on the way.

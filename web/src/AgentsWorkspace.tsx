@@ -442,7 +442,9 @@ function AgentTasksWorkspace({
         }
         setDetailRefreshToken((value) => value + 1);
       } catch (reason) {
-        if (!controller.signal.aborted) setError(`Could not refresh agents. ${messageOf(reason)}`);
+        if (!controller.signal.aborted && generation === mutationGeneration.current && !busyRef.current) {
+          setError(`Could not refresh agents. ${messageOf(reason)}`);
+        }
       } finally {
         inFlight = false;
         if (!controller.signal.aborted) {
@@ -467,12 +469,16 @@ function AgentTasksWorkspace({
   useEffect(() => {
     if (!selectedId || !visible) return;
     const controller = new AbortController();
+    const generation = mutationGeneration.current;
     void getAgentTask(selectedId, controller.signal).then((task) => {
       if (!controller.signal.aborted && (!knownIds.current || knownIds.current.has(task.id))) {
         setTasks((current) => mergeTasks(current, [task], deletedIds.current));
       }
     }).catch((reason: unknown) => {
-      if (!controller.signal.aborted) setError(messageOf(reason));
+      if (!controller.signal.aborted && generation === mutationGeneration.current && !busyRef.current
+        && !deletedIds.current.has(selectedId) && (!knownIds.current || knownIds.current.has(selectedId))) {
+        setError(messageOf(reason));
+      }
     });
     return () => controller.abort();
   }, [selectedId, visible, detailRefreshToken]);
@@ -502,6 +508,7 @@ function AgentTasksWorkspace({
 
   function selectTask(id: string) {
     setSelectedId(id);
+    setError("");
     setNotice("");
     showWorkflow();
   }
@@ -843,8 +850,10 @@ function AgentTasksWorkspace({
                     /> : null}
                   </div>
                   <h2>{agentTitle(selected)}</h2>
-                  <details className="agents-original-prompt"><summary>Original prompt</summary><p>{selected.objective}</p></details>
-                  <p>Last activity <time dateTime={selected.updated_at}>{timestamp(selected.updated_at)}</time></p>
+                  <div className="agents-detail-disclosures">
+                    <details className="agents-original-prompt"><summary>Original prompt</summary><p>{selected.objective}</p></details>
+                    {selected.input_requests?.some((request) => request.answer !== null) ? <details className="agents-input-history"><summary aria-label="Questions and answers">Questions / answers</summary><ol>{selected.input_requests.filter((request) => request.answer !== null).map((request) => <li key={request.id}><h3>Planning question</h3><p>{request.question}</p><h4>Your answer</h4><p>{request.answer}</p></li>)}</ol></details> : null}
+                  </div>
                 </header>
                 {selected.project_context && (!selected.project_context.available || !selected.project_context.current) ? <p className="agents-project-context-notice">
                   {!selected.project_context.available ? "This Project is no longer available. Continuing or running this agent again is unavailable." : "The Project context has changed. Start a new agent to use its current instructions and knowledge."}
@@ -857,22 +866,12 @@ function AgentTasksWorkspace({
                   onUseLatest={() => setAnswerDrafts((current) => ({ ...current, [selectedInputKey]: { text: current[selectedInputKey]?.text ?? "", revision: selected.revision } }))}
                   onAnswer={() => void answerInput(selected, selectedInput, selectedInputDraft)} />
                   : <p className="agents-notice" role="status">{selected.summary ? "Loading the saved question…" : "The saved question is unavailable. Refresh this agent before answering."}</p> : null}
-                {selected.input_requests?.some((request) => request.answer !== null) ? <details className="agents-input-history"><summary>Questions and answers</summary><ol>{selected.input_requests.filter((request) => request.answer !== null).map((request) => <li key={request.id}><h3>Planning question</h3><p>{request.question}</p><h4>Your answer</h4><p>{request.answer}</p></li>)}</ol></details> : null}
                 <div className="agents-progress-panels">
                   <section className="agents-plan agents-progress-panel" aria-labelledby="agent-plan-title">
                     <header className="agents-panel-header"><h3 id="agent-plan-title">Plan and progress</h3></header>
                     <div className="agents-plan-scroll" role="region" aria-label="Saved plan and progress" tabIndex={0}>
                       <ol className="agents-step-list">
-                        {selected.steps.map((step) => (
-                          <li key={step.id} className={`agents-step agents-step-${step.status}`}>
-                            <span className="agents-step-mark" aria-hidden="true">{step.status === "completed" ? "✓" : step.status === "running" ? "●" : "○"}</span>
-                            <div>
-                              <strong>{stepLabel(step)}</strong>
-                              <span className="agents-step-status">{step.status === "completed" ? "Completed" : step.status === "running" ? "In progress" : "Pending"}</span>
-                              {step.result ? <details><summary>View saved {step.id === "plan" ? "plan" : step.id === "research" ? "work" : "review"}</summary><AgentMarkdown text={step.result} /></details> : null}
-                            </div>
-                          </li>
-                        ))}
+                        {selected.steps.map((step) => <AgentStepProgress key={step.id} step={step} />)}
                       </ol>
                     </div>
                   </section>
@@ -913,6 +912,19 @@ function AgentTasksWorkspace({
   );
 }
 
+function AgentStepProgress({ step }: { step: AgentTask["steps"][number] }) {
+  const label = stepLabel(step);
+  const status = step.status === "completed" ? "Completed" : step.status === "running" ? "In progress" : "Pending";
+  const saved = step.id === "plan" ? "plan" : step.id === "research" ? "work" : "review";
+  const progress = <><span className="agents-step-mark" aria-hidden="true">{step.status === "completed" ? "✓" : step.status === "running" ? "●" : "○"}</span><strong>{label}</strong><span className="agents-step-status">{status}</span></>;
+  return <li className={`agents-step agents-step-${step.status}`}>
+    {step.result ? <details className="agents-step-details">
+      <summary className="agents-step-summary" aria-label={`View saved ${saved}`} aria-description={`${label} · ${status}`}>{progress}<span className="agents-step-save-action">View</span></summary>
+      <div className="agents-step-saved-text"><AgentMarkdown text={step.result} /></div>
+    </details> : <div className="agents-step-summary">{progress}</div>}
+  </li>;
+}
+
 function AgentProjectContextBadge({ task, onOpenProject }: { task: AgentTask; onOpenProject?: (projectId: string) => void }) {
   const context = task.project_context;
   if (!context) return null;
@@ -947,14 +959,15 @@ function AgentInputPanel({ request, revision, draft, busy, contextBlocked, onCha
   return <section className="agents-input-panel" aria-labelledby="agent-input-title">
     <h3 id="agent-input-title">Agent needs your input</h3>
     <p className="agents-input-question" id="agent-input-question">{request.question}</p>
-    <p className="agents-input-help">This agent is waiting. Answer the planning question to continue the same saved task.</p>
     <form aria-label="Answer agent question" onSubmit={(event) => { event.preventDefault(); if (!busy && !contextBlocked && !changed && bytes > 0 && bytes <= 8000) onAnswer(); }}>
       <label htmlFor="agent-input-answer">Your answer</label>
-      <textarea id="agent-input-answer" rows={4} maxLength={8000} aria-describedby="agent-input-question agent-input-size" value={draft.text} disabled={busy} onChange={(event) => onChange(event.target.value)} />
-      <p id="agent-input-size" className="agents-input-help">{bytes.toLocaleString()} / 8,000 UTF-8 bytes</p>
+      <textarea id="agent-input-answer" rows={2} maxLength={8000} aria-describedby="agent-input-question agent-input-size" value={draft.text} disabled={busy} onChange={(event) => onChange(event.target.value)} />
       {bytes > 8000 ? <p className="agents-error" role="alert">Your answer exceeds the 8,000-byte limit. Shorten it before continuing.</p> : null}
       {changed ? <div className="agents-input-conflict"><p>This agent changed while you were answering. Review the current question before using your saved draft.</p><button className="agents-secondary" type="button" disabled={busy} onClick={onUseLatest}>Use my answer with this revision</button></div> : null}
-      <button className="agents-primary" type="submit" disabled={busy || contextBlocked || changed || bytes === 0 || bytes > 8000}>{busy ? "Saving answer…" : "Answer and continue"}</button>
+      <div className="agents-input-footer">
+        <p id="agent-input-size" className="agents-input-help">{bytes.toLocaleString()} / 8,000 UTF-8 bytes</p>
+        <button className="agents-primary" type="submit" disabled={busy || contextBlocked || changed || bytes === 0 || bytes > 8000}>{busy ? "Saving answer…" : "Answer and continue"}</button>
+      </div>
     </form>
   </section>;
 }

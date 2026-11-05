@@ -40,17 +40,17 @@ plan.
 - [Lesson 6 — The model layer I: choosing a model](lesson-06c-the-model-layer.md)
 - [Lesson 7 — The model layer II: calling models](lesson-07-calling-models.md)
 - [Lesson 8 — Classification and routing](lesson-08-classification-and-routing.md)
+- [Lesson 8b — Fair scheduling: how Audrey shares one GPU](lesson-08b-fair-scheduling.md)
 - [Lesson 9 — Deep mode and research mode](lesson-09-deep-mode.md)
 - [Lesson 10 — Tool use and the ReAct loop](lesson-10-tool-use-and-react.md)
 - [Lesson 11 — How function calling actually works](lesson-11-how-function-calling-works.md)
 - [Lesson 12 — The knowledge base: ingest and search](lesson-12-kb-ingest-and-search.md)
 - [Lesson 13 — The KB lifecycle: watcher, reconcile, uploads](lesson-13-kb-lifecycle.md)
 - [Lesson 14 — Per-user context: identity, memory, and history](lesson-14-memory-and-context-injection.md)
-- [Lesson 15 — Fair scheduling: how Audrey shares one GPU](lesson-15-fair-scheduling.md)
 - [Lesson 16 — The OpenAI routes, end-to-end](lesson-16-openai-routes.md)
 - [Lesson 17 — The custom-tools sidecar](lesson-17-custom-tools-sidecar.md)
 
-Lessons 11–16 are being brought up to date one at a time. Until a
+Lessons 11–14 and 16 are being brought up to date one at a time. Until a
 lesson's refresh lands, parts of it may describe an earlier version of Audrey.
 
 **Lesson numbers changed on 2026-10-23,** when the model layer became two
@@ -65,7 +65,9 @@ application database moved into the platform part. The
 [plan](../plans/lesson-catch-up-plan.md#the-course-structure-revised-2026-10-23)
 has the table. The application database and identity lessons are published
 early as Lessons 6a and 6b, and the model layer's file is
-`lesson-06c-the-model-layer.md`, so the files sort in reading order. The other
+`lesson-06c-the-model-layer.md`, so the files sort in reading order. Fair
+scheduling, brought up to date, became Lesson 8b for the same reason: It sits
+between routing and deep mode, where the new structure places it. The other
 files keep their current numbers until the renumber, which gives every lesson its
 final number and puts the pipeline lessons in their new order.
 

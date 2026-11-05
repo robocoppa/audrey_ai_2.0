@@ -7,6 +7,7 @@ import builtryteWordmark from "./assets/brand/builtryte-wordmark.png";
 import { AccountSettings } from "./AccountSettings";
 import { FileManager } from "./FileManager";
 import { AgentsWorkspace } from "./AgentsWorkspace";
+import { ProjectsWorkspace } from "./ProjectsWorkspace";
 import { SearchSidebar } from "./SearchSidebar";
 import { resolveSearchWorkspace } from "./searchNavigation";
 import "./App.css";
@@ -16,6 +17,7 @@ import {
   getCurrentUser,
   getCurrentUserPreferences,
   getAgentTask,
+  getConversation,
   getProject,
   getProjectKnowledge,
   getWatch,
@@ -98,7 +100,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
-  const [activeWorkspace, setActiveWorkspace] = useState<"chat" | "agents">("chat");
+  const [activeWorkspace, setActiveWorkspace] = useState<"chat" | "agents" | "projects">("chat");
   const [searchOpen, setSearchOpen] = useState(false);
   const [compactSearch, setCompactSearch] = useState(() => window.matchMedia?.("(max-width: 1279px)").matches ?? false);
   const searchLauncher = useRef<HTMLButtonElement>(null);
@@ -114,7 +116,7 @@ export function App() {
   const [composerWatchProjectRequest, setComposerWatchProjectRequest] = useState<{ project: AudreyProject; serial: number; owner: string }>();
   const [externalWatchRequest, setExternalWatchRequest] = useState<{ watch: PublicWatch; serial: number; owner: string }>();
   const [projectOpenRequest, setProjectOpenRequest] = useState<{ project: AudreyProject; serial: number; owner: string }>();
-  const [conversationOpenRequest, setConversationOpenRequest] = useState<{ conversation: Conversation; messageId: string; serial: number; owner: string }>();
+  const [conversationOpenRequest, setConversationOpenRequest] = useState<{ conversation: Conversation; messageId?: string; serial: number; owner: string }>();
   const [fileOpenRequest, setFileOpenRequest] = useState<{ fileId: string; artifact: Extract<SearchResult["target"], { kind: "file" }>["artifact"]; owner: string }>();
   const projectNavigation = useRef<{ serial: number; controller: AbortController | null }>({ serial: 0, controller: null });
   const workspaceOwner = session.status === "ready" ? `${session.user.id}:${workspaceRevision}` : "";
@@ -218,6 +220,28 @@ export function App() {
       if (signal.aborted || projectNavigation.current.serial !== serial) return;
       if (project.id !== projectId || project.private_required) throw new Error("This Project is unavailable.");
       setProjectOpenRequest({ project, serial, owner: workspaceOwner });
+      setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("projects");
+    });
+  }
+
+  async function openProjectPage(project: AudreyProject) {
+    await readProjectLink(async (signal, serial) => {
+      const current = await getProject(project.id, signal);
+      if (signal.aborted || projectNavigation.current.serial !== serial) return;
+      if (current.id !== project.id) throw new Error("This Project is unavailable.");
+      setProjectOpenRequest({ project: current, serial, owner: workspaceOwner });
+      setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("projects");
+    });
+  }
+
+  async function openProjectConversation(conversation: Conversation) {
+    await readProjectLink(async (signal, serial) => {
+      const current = await getConversation(conversation.id, signal);
+      if (signal.aborted || projectNavigation.current.serial !== serial) return;
+      if (current.id !== conversation.id || current.project_id !== conversation.project_id) {
+        throw new Error("This conversation changed Projects. Refresh before opening it.");
+      }
+      setConversationOpenRequest({ conversation: current, serial, owner: workspaceOwner });
       setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("chat");
     });
   }
@@ -249,7 +273,7 @@ export function App() {
           break;
         case "knowledge":
           setProjectOpenRequest({ project: target.project, serial, owner: workspaceOwner });
-          setActiveWorkspace("chat");
+          setActiveWorkspace("projects");
           break;
       }
       setSearchOpen(false); setNavigationOpen(false);
@@ -444,10 +468,11 @@ export function App() {
           </span>
         </a>
         <nav className="app-workspace-navigation" aria-label="Workspaces">
-          <button type="button" aria-current={activeWorkspace === "chat" ? "page" : undefined} onClick={() => { setNavigationOpen(false); setActiveWorkspace("chat"); }}>Chat</button>
-          <button type="button" aria-current={activeWorkspace === "agents" ? "page" : undefined} onClick={() => { setNavigationOpen(false); setActiveWorkspace("agents"); }}>
+          <button type="button" aria-current={activeWorkspace === "chat" ? "page" : undefined} onClick={() => { cancelProjectNavigation(); setProjectLinkError(""); setNavigationOpen(false); setActiveWorkspace("chat"); }}>Chat</button>
+          <button type="button" aria-current={activeWorkspace === "agents" ? "page" : undefined} onClick={() => { cancelProjectNavigation(); setProjectLinkError(""); setNavigationOpen(false); setActiveWorkspace("agents"); }}>
             Agents{activeAgentCount > 0 ? <span className="agents-active-count" aria-label={`${activeAgentCount} active agent tasks`}>{activeAgentCount}</span> : null}
           </button>
+          <button type="button" aria-current={activeWorkspace === "projects" ? "page" : undefined} onClick={() => { cancelProjectNavigation(); setProjectLinkError(""); setNavigationOpen(false); setActiveWorkspace("projects"); }}>Projects</button>
           <button type="button" ref={searchLauncher} aria-label={searchOpen ? "Collapse Search" : "Open Search"} aria-expanded={searchOpen} aria-controls="app-search-sidebar" title="Search saved content" onClick={() => {
             if (searchOpen) { closeSearch(); return; }
             setNavigationOpen(false);
@@ -481,13 +506,13 @@ export function App() {
               mobileNewChatHost={activeWorkspace === "chat" ? mobileNewChatHost : null}
               menuActions={<SessionActions {...sessionActions} variant="drawer" />}
               menuFooter={<SessionActions {...sessionActions} variant="footer" />}
-              projectOpenRequest={projectOpenRequest?.owner === workspaceOwner ? projectOpenRequest : undefined}
               conversationOpenRequest={conversationOpenRequest?.owner === workspaceOwner ? conversationOpenRequest : undefined}
               onNewProjectAgent={newProjectAgent}
               onResearchProjectKnowledge={researchProjectKnowledge}
               onOpenProjectAgent={openProjectAgent}
               onNewProjectWatch={newProjectWatch}
               onOpenProjectWatch={openProjectWatch}
+              onOpenProject={openProjectPage}
             />
           </Suspense>
         </div>
@@ -499,6 +524,13 @@ export function App() {
             composerWatchProjectRequest={composerWatchProjectRequest?.owner === workspaceOwner ? composerWatchProjectRequest : undefined}
             externalWatchRequest={externalWatchRequest?.owner === workspaceOwner ? externalWatchRequest : undefined}
             onOpenProject={(projectId) => void openAgentProject(projectId)} />
+        </div>
+        <div className="app-workspace-view" hidden={activeWorkspace !== "projects"} inert={activeWorkspace !== "projects" ? true : undefined}>
+          <ProjectsWorkspace key={workspaceOwner} visible={activeWorkspace === "projects" && !(searchOpen && compactSearch)} models={session.models}
+            openRequest={projectOpenRequest?.owner === workspaceOwner ? projectOpenRequest : undefined}
+            onOpenConversation={(conversation) => void openProjectConversation(conversation)}
+            onNewProjectAgent={newProjectAgent} onOpenProjectAgent={openProjectAgent}
+            onNewProjectWatch={newProjectWatch} onOpenProjectWatch={openProjectWatch} />
         </div>
         </div>
         {searchOpen && compactSearch ? <button type="button" className="app-search-backdrop" tabIndex={-1} aria-label="Dismiss Search" onClick={closeSearch} /> : null}

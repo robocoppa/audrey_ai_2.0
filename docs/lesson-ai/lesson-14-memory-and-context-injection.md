@@ -507,8 +507,8 @@ the real request can't get there.)
 
 This lesson opened the per-user surface — auth establishing identity,
 memory recalling durable facts, the chat archive capturing
-conversation history. The next lesson backs up a layer: when multiple
-users are hammering the same instance, what keeps one user's deep
-request from monopolizing the GPU and starving everybody else? Fair
-scheduling, the in-flight slot cap, and the round-robin guard are the
-upcoming subject.
+conversation history. The next lesson,
+[the OpenAI routes, end-to-end](lesson-16-openai-routes.md), opens the `/v1`
+door those requests come through: how a route decides which pipeline runs, how
+it streams a deep answer without buffering it, and what happens when the client
+hangs up.

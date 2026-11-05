@@ -73,6 +73,7 @@ const DEFAULT_SKILLS = [
 ] as const;
 
 function collectionPayload(path: string) {
+  if (path.endsWith("/knowledge/text")) return { text: "", revision: "0".repeat(64), max_text_chars: 8000 };
   if (path === "/api/activity/unread") return { unread_count: 0 };
   if (path.startsWith("/api/search?")) return { items: [], next_cursor: null, partial: false, indexing: false, warnings: [] };
   if (path === "/api/models") return { items: DEFAULT_MODELS };
@@ -182,7 +183,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open saved Project agent" }));
     expect(await screen.findByRole("heading", { name: BRIDGE_AGENT.title })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: `Open Project: ${BRIDGE_PROJECT.name}` }));
-    expect(await screen.findByText(`Opened Project ${BRIDGE_PROJECT.name}`)).toBeVisible();
+    expect(await screen.findByRole("heading", { name: BRIDGE_PROJECT.name })).toBeVisible();
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
     expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Preserved Project draft");
     expect(fetchMock.mock.calls.some(([, options]) => (options as RequestInit | undefined)?.method === "POST")).toBe(false);
@@ -217,7 +218,7 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: BRIDGE_WATCH.title })).toBeVisible();
     expect(screen.getByText("No saved checks yet. Run now to establish a baseline, or wait for the first scheduled check.")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Open Project" }));
-    expect(await screen.findByText(`Opened Project ${BRIDGE_PROJECT.name}`)).toBeVisible();
+    expect(await screen.findByRole("heading", { name: BRIDGE_PROJECT.name })).toBeVisible();
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
     fireEvent.click(screen.getByRole("button", { name: "Resume draft" }));
     expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Preserved watch draft");
@@ -306,7 +307,7 @@ describe("App", () => {
     const label = kind === "message" ? "Open conversation" : kind === "knowledge" ? "Open Project" : `Open ${kind}`;
     fireEvent.click(await screen.findByRole("button", { name: label }));
     if (kind === "message") expect(await screen.findByText("Opened conversation saved-chat at saved-message")).toBeVisible();
-    if (kind === "knowledge") expect(await screen.findByText(`Opened Project ${BRIDGE_PROJECT.name}`)).toBeVisible();
+    if (kind === "knowledge") expect(await screen.findByRole("heading", { name: BRIDGE_PROJECT.name })).toBeVisible();
     if (kind === "agent") expect(await screen.findByRole("heading", { name: BRIDGE_AGENT.title })).toBeVisible();
     if (kind === "file") {
       expect(await screen.findByRole("heading", { name: file.filename })).toBeVisible();

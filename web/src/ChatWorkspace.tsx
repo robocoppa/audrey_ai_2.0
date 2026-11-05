@@ -242,6 +242,7 @@ export function ChatWorkspace({
   onOpenProjectAgent,
   onNewProjectWatch,
   onOpenProjectWatch,
+  onOpenProject,
 }: {
   visible?: boolean;
   navigationOpen: boolean;
@@ -255,12 +256,13 @@ export function ChatWorkspace({
   models: AudreyModel[];
   skills: SkillSummary[];
   projectOpenRequest?: { project: AudreyProject; serial: number };
-  conversationOpenRequest?: { conversation: Conversation; messageId: string; serial: number };
+  conversationOpenRequest?: { conversation: Conversation; messageId?: string; serial: number };
   onNewProjectAgent?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
   onResearchProjectKnowledge?: (project: AudreyProject, entry: KnowledgeEntry, signal?: AbortSignal) => void | Promise<void>;
   onOpenProjectAgent?: (task: AgentTask, signal?: AbortSignal) => void | Promise<void>;
   onNewProjectWatch?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
   onOpenProjectWatch?: (watch: PublicWatch, signal?: AbortSignal) => void | Promise<void>;
+  onOpenProject?: (project: AudreyProject) => void | Promise<void>;
 }) {
   const [compactNavigation, setCompactNavigation] = useState(() =>
     window.matchMedia?.("(max-width: 1100px)").matches ?? false);
@@ -488,8 +490,8 @@ export function ChatWorkspace({
       setExpandedProjectId(selectedProjectIdRef.current);
       setView(conversation.archived_at !== null ? "archived" : "active");
       setSearchInput(""); setSearchQuery("");
-      setComposerFocusId(null);
-      setMessageOpenRequest({ conversationId: conversation.id, messageId, serial });
+      setComposerFocusId(messageId ? null : conversation.id);
+      setMessageOpenRequest(messageId ? { conversationId: conversation.id, messageId, serial } : undefined);
       setNavigationOpen(false);
     });
     return () => { current = false; };
@@ -642,6 +644,7 @@ export function ChatWorkspace({
   }
 
   function openProject(project: AudreyProject) {
+    if (onOpenProject) { void onOpenProject(project); return; }
     closeNavigation();
     selectedProjectIdRef.current = project.id;
     setSelectedProjectId(project.id);
@@ -780,7 +783,8 @@ export function ChatWorkspace({
   function projectCreated(project: AudreyProject) {
     setProjects((current) => [project, ...current]);
     closeNewProject();
-    openProject(project);
+    if (onOpenProject) void onOpenProject(project);
+    else openProject(project);
   }
 
   function projectChanged(updated: AudreyProject) {
@@ -957,7 +961,7 @@ export function ChatWorkspace({
                     <button
                       className="project-sidebar-link"
                       type="button"
-                      onClick={() => openProject(project)}
+                      onClick={() => onOpenProject ? void onOpenProject(project) : openProject(project)}
                       aria-current={current && selectedId === null ? "page" : undefined}
                       title={project.name}
                     >

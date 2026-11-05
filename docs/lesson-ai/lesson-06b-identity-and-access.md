@@ -1,11 +1,14 @@
 # Lesson 6b — Identity and access
 
-Every query in Lesson 6a filtered by a `user_id` taken from an authenticated
-caller. This lesson is about that caller. It answers two questions: How does
-Audrey know who is calling, and what decides what they may do?
+**Estimated time:** 35-50 minutes if you read with the source files open.
 
-Audrey answers them in different places. Proving who someone is happens at the
-door, mostly by a service outside Audrey. Deciding what they may do happens
+**Goal:** by the end of this lesson, you can answer *"how does Audrey know who
+is calling, and what decides what they may do?"*
+
+Every query in Lesson 6a filtered by a `user_id` taken from an authenticated
+caller. This lesson is about that caller. Audrey settles the two halves of the
+question in different places: Proving who someone is happens at the door,
+mostly by a service outside Audrey, and deciding what they may do happens
 inside, from Audrey's own records, on every request.
 
 ## 1. Context

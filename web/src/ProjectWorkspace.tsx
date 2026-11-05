@@ -408,10 +408,10 @@ export function ProjectHome({
   return (
     <div className="project-home" data-private={isPrivate ? "true" : undefined}>
       <header className="project-home-header">
-        <div>
-          <span>{isPrivate ? "Private project" : "Project"}</span>
+        <div className="project-home-title-line">
           <h1>{project.name}</h1>
-          <p>{project.instructions || "No project instructions yet."}</p>
+          {isPrivate ? <span className="project-private-label">Private</span> : null}
+          <p title={project.instructions || undefined}>{project.instructions || "No project instructions yet."}</p>
         </div>
         <div className="project-home-actions">
           <div className="project-management-actions">
@@ -524,6 +524,10 @@ export function ProjectHome({
           )}
         </section>
 
+        <ProjectKnowledgeSection project={project} visible={visible} />
+      </div>
+
+      <div className="project-home-grid project-home-details">
         <section className="project-panel" aria-labelledby="project-files-title">
           <header>
             <div>
@@ -592,10 +596,6 @@ export function ProjectHome({
             </ul>
           ) : null}
         </section>
-      </div>
-
-      <div className="project-home-grid project-home-details">
-        <ProjectKnowledgeSection project={project} visible={visible} />
         {!isPrivate && (onNewProjectAgent || onOpenProjectAgent) ? <ProjectAgents
           key={project.id} project={project} visible={visible}
           onNew={onNewProjectAgent} onOpen={onOpenProjectAgent} /> : null}

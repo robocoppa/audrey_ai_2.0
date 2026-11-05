@@ -18,7 +18,7 @@ Work-question changes were set aside before this handoff.
 
 ## Current implementation slice
 
-The native app has centered Chat, Agents and text-only Search buttons in the top
+The native app has centered Chat, Agents, Projects and text-only Search buttons in the top
 bar. Search toggles a right sidebar with its own
 query, filters, results and source reader, while preserving the active workspace
 and drafts. The panel shares Chat's 17rem (272px) sidebar width. At 1,280 pixels and above Search
@@ -38,9 +38,11 @@ Run again and the red two-click Delete remain at the workflow card's top right.
 Top-bar hover uses the filled, soft glow of My Files, with distinct keyboard focus
 retained. Agent headings/history use a saved
 short title, and the unchanged original objective is available in an expandable
-Original prompt section.
+Original prompt section. Original prompt and Questions and answers share one compact
+row; the top Last activity line is removed while history keeps its timestamps.
 Plan and progress and Recent activity share equal-width, equal-height cards when
-the workflow has enough width. Both have fixed headings and independent scrolling;
+the workflow has enough width. Step names, status and saved-result controls share compact rows; both panels
+have fixed headings and independent scrolling;
 narrow workspaces, including Search-open views, stack them. Result uses a compact
 header, restrained report headings and bounded, labeled code blocks. Saved report
 text is preserved. The saved Agent's Project is a compact badge beside its status,
@@ -48,8 +50,13 @@ with visible changed/unavailable warnings instead of an expanded context dropdow
 The Agent composer offers New project through the existing ordinary Project
 dialog. Creating selects the new Project and preserves the objective; it does
 not start an Agent. Cancel and failure preserve the previous selection and draft.
-Project headers keep Edit and Delete together. New conversation belongs inside
-the Project conversations box; Upload file stays on one line.
+Projects now has its own persistent workspace and compact Project directory.
+Switching preserves mounted Chat/Agent drafts; Project conversations open canonically
+in Chat. Agent Project links, Project breadcrumbs and Knowledge Search links open
+Projects. Knowledge sits top right beside Conversations; Files and Agents follow
+below. Project headers put instructions/the empty hint beside the title, with Edit
+and Delete together. New conversation belongs inside its conversations box; Upload
+file stays on one line.
 
 Project knowledge is now one plain editable textbox with explicit Save. The entry
 types, pin/approval/source controls, assignment buttons and Agent report proposal
@@ -104,6 +111,21 @@ Plan now explicitly disables thinking and asks for at most six short steps and
 still fail without saving a partial Plan. Local request-policy/executor checks
 pass; rerunning the same failed Agent with its frozen inputs remains the real
 model acceptance check.
+The planner now also receives an authoritative description of Work's selected-file
+paging capability only when its validated frozen selections support it. Omitted
+appendix text is a planned Work lookup rather than missing user input. Essential
+user choices can still ask questions; Plan itself gets no tools and all execution
+budgets remain unchanged. Existing waiting tasks can answer with a directive to
+read the selected appendix, or Cancel/Run again on that same Agent; neither path
+replaces the selected versions. Local fixture recovery passes; real Qwen behavior
+still needs the owner-operated file case.
+
+Agent response snapshots refresh ordinary progress committed by the worker between
+an awaited route operation and its HTTP reply. They serialize final owner/body
+checks and preserve compact summary responses. Successful writes are not replayed;
+original optimistic-write checks, deletion/account fences and changed input metadata
+remain strict. The UI also discards catalog/detail errors from reads invalidated
+by a newer start/delete operation; genuine current failures still appear.
 
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
 Adaptive multi-step plans, Private agent inputs,

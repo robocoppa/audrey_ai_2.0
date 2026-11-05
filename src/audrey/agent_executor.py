@@ -19,7 +19,12 @@ from audrey.app_state.titles import normalize_agent_title
 from audrey.background_admission import BackgroundGenerationGate
 from audrey.model_catalog import resolve_model
 from audrey.models.ollama import OllamaClient, OllamaError, generation_budget
-from audrey.pipeline.prompts import AGENT_PLAN_SYSTEM, AGENT_RESEARCH_SYSTEM, AGENT_REVIEW_SYSTEM
+from audrey.pipeline.prompts import (
+    AGENT_PLAN_FILE_READS_SYSTEM,
+    AGENT_PLAN_SYSTEM,
+    AGENT_RESEARCH_SYSTEM,
+    AGENT_REVIEW_SYSTEM,
+)
 from audrey.processing_policy import (
     ProcessingPolicy,
     ProcessingPolicyError,
@@ -412,7 +417,8 @@ class ResearchAgentExecutor:
 
         file_outputs = []
         native_files = step_id == "research" and agent_files_available(self.app)
-        native_reads = step_id == "research" and bool(selected_files) and file_inputs is not None
+        selected_file_reads = bool(selected_files) and file_inputs is not None
+        native_reads = step_id == "research" and selected_file_reads
         if native_files:
             tools = with_create_file(tools)
             # with_create_file constructs a fresh native spec. Shared discovery
@@ -447,6 +453,17 @@ class ResearchAgentExecutor:
             messages.insert(1, _project_message(project_context))
         if selected_files:
             messages.insert(-1, _file_input_message(selected_files))
+        if step_id == "plan" and selected_file_reads:
+            # Plan cannot invoke Work's tools. Describe the real later-stage
+            # capability explicitly so an excerpt boundary is not mistaken for
+            # missing user input. Metadata comes from validated frozen pins.
+            messages.insert(1, {
+                "role": "system",
+                "content": AGENT_PLAN_FILE_READS_SYSTEM + json.dumps([
+                    {key: source[key] for key in ("file_id", "chars", "total_chars", "truncated")}
+                    for source in selected_files
+                ], ensure_ascii=False, separators=(",", ":")),
+            })
         endpoint = self.app.state.cfg.env.ollama_host
         client = self.client_factory(endpoint, trust_env=False)
         try:

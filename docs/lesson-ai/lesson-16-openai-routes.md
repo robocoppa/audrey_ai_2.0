@@ -353,8 +353,8 @@ generator's job is to interleave both queues into one SSE stream.
 
 ### 2.6 Concept spotlight: `asyncio.Queue` as backpressure
 
-Lesson 15 introduced `asyncio.Future` as a one-shot signal. The
-streaming route uses a related primitive: `asyncio.Queue`, a
+Lesson 8b showed the GPU gate parking each waiter on an `asyncio.Future`, a
+one-shot signal. The streaming route uses a related primitive: `asyncio.Queue`, a
 bounded FIFO that decouples producer and consumer.
 
 ```python
@@ -512,9 +512,9 @@ Trace the cancel through:
   5. **The `async with inflight.slot(user_id)` and
      `gate.acquire()` blocks** unwind via the `try/finally` that
      `@asynccontextmanager` adds. The inflight semaphore is
-     released; the gate's release path runs (Lesson 15 §2.5
-     covered the gate's cancellation handling at
-     `fair_gate.py:121`). Other parked waiters wake up cleanly.
+     released; the gate's release path runs (Lesson 8b §2.6
+     covers the gate's cancellation handling). Other parked
+     waiters wake up cleanly.
 
 Net result: the route releases the in-flight slot, unwinds any active gate
 contexts, cancels the synth producer when cancellation reaches that stage, and

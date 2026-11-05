@@ -41,7 +41,8 @@ PASS, FAIL or NOT RUN for each case; an environmental blocker stays BLOCKED.
 
 ## Setup
 
-Open `https://ai.builtryte.xyz` in your normal signed-in browser. Create an
+Open `https://ai.builtryte.xyz` in your normal signed-in browser. Choose **Projects**
+in the top bar, then **New project**. Create an
 ordinary Project named **Agent acceptance — November 3**. Leave its instructions
 empty initially. Use only disposable test data in this Project.
 
@@ -102,6 +103,18 @@ check that Edit/Delete stay together and Upload file remains on one line.
 No upload or new model call is
 needed to inspect the existing result layout.
 
+**Current layout and deletion follow-up:** Original prompt and Questions and
+answers should be beside one another; Last activity should appear only in the
+history list. Plan/Work/Review names, statuses and View controls should fit compact
+rows. Delete a disposable finished task using its two-click confirmation, then
+immediately Start another simple task: “Write a one-sentence welcome for Fern
+Circle. Do not browse.” It should select the new Agent without an old task-change
+banner or a duplicate task. A genuine failed operation still needs assessment.
+In Projects, Knowledge should be beside Conversations at laptop widths, with
+Files/Agents below and the empty instructions hint beside the title. Switch to
+Chat and Agents and back; existing drafts should remain. No uploads are needed
+for this deletion/layout follow-up.
+
 ## 2. Selected files, later pages and answer quality
 
 In the test Project, start a new Agent and explicitly select **supply-list.csv**
@@ -113,6 +126,13 @@ and **garden-brief-long.txt**. Leave the control file unselected. Use:
 > approval code and next review date. Calculate the supply-list total and the
 > remaining budget. Save a downloadable Markdown checklist. State any information
 > you could not actually inspect. Do not browse.
+
+If the same Agent is already waiting for you to supply facts from the truncated
+appendix, answer: “Read those facts from the FINAL APPENDIX in the selected long
+file during Work; do not ask me to transcribe them.” Press Answer and continue.
+Alternatively Cancel, then Run again on that same task. Neither recovery should
+create a new Agent or require reuploading its frozen inputs. A new run should plan
+the file lookup rather than ask you to copy facts that Work can inspect.
 
 Check the shortened input counts, watch Recent activity, and open the downloaded
 file. Compare its contents against this key:

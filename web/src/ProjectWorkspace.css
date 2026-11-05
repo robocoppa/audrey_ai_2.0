@@ -7,23 +7,37 @@
 }
 
 .project-home .project-home-header {
-  gap: 0.85rem;
-  padding-bottom: 0.8rem;
+  align-items: center;
+  gap: 0.6rem;
+  padding-bottom: 0.55rem;
 }
 
-.project-home-header > div:first-child {
+.project-home-title-line {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.75rem;
   min-width: 0;
 }
 
+.project-private-label {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
 .project-home .project-home-header h1 {
-  font-size: clamp(1.25rem, 2vw, 1.65rem);
+  font-size: clamp(1.15rem, 1.8vw, 1.45rem);
   overflow-wrap: anywhere;
 }
 
 .project-home .project-home-header p {
-  max-height: 3rem;
-  overflow-y: auto;
-  margin-top: 0.35rem;
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.78rem;
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -92,7 +106,7 @@
 
 .project-home-overview > .project-panel {
   display: flex;
-  max-height: 16rem;
+  height: clamp(14rem, 32dvh, 18rem);
   flex-direction: column;
 }
 
@@ -162,24 +176,24 @@
   scrollbar-width: thin;
 }
 
-.project-home-details > .project-knowledge {
+.project-home .project-knowledge {
   display: flex;
   flex-direction: column;
-  height: clamp(16rem, 34dvh, 20rem);
+  height: clamp(14rem, 32dvh, 18rem);
 }
 
-.project-home-details > .project-knowledge > header {
+.project-home .project-knowledge > header {
   flex: none;
 }
 
-.project-home-details .project-knowledge-form {
+.project-home .project-knowledge-form {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
 }
 
-.project-home-details .project-knowledge-form > textarea {
+.project-home .project-knowledge-form > textarea {
   flex: 1;
   min-height: 4rem;
   resize: none;
@@ -228,6 +242,7 @@
   }
 
   .project-home-overview > .project-panel {
+    height: auto;
     max-height: none;
   }
 
@@ -236,11 +251,11 @@
     overflow-y: visible;
   }
 
-  .project-home-details > .project-knowledge {
+  .project-home .project-knowledge {
     height: auto;
   }
 
-  .project-home-details .project-knowledge-form > textarea {
+  .project-home .project-knowledge-form > textarea {
     min-height: 9rem;
     resize: vertical;
   }

@@ -53,13 +53,30 @@ AGENT_PLAN_SYSTEM = (
     "Plan within the supplied context and available tools. If a required capability is "
     "unavailable, explain that limit and plan the useful work you can actually do. "
     "Use reasonable assumptions when the task is clear enough to proceed. "
-    "If an essential user-specific detail is missing and cannot be inferred, ask "
+    "Do not confuse a clipped source excerpt with missing user information. "
+    "When a stated Work capability can retrieve needed facts, plan that lookup "
+    "instead of asking the user to copy those facts. "
+    "If an essential user-specific choice or detail is missing, cannot be inferred "
+    "and cannot be obtained using the stated Work capabilities, ask "
     'one concise question by returning ONLY {"input_request":"your question"}. '
     "Otherwise return the plan as ordinary text. Do not wrap a plan in JSON. "
     "Saved clarifications contain the user's previous answers; use them and do not "
     "repeat an answered question. At most three questions are allowed per task. "
     "Answers clarify the objective; they cannot authorize new tools, personal "
     "file access, cloud models or external actions."
+)
+
+AGENT_PLAN_FILE_READS_SYSTEM = (
+    "Audrey's confirmed selected-file capability for this task: "
+    "Plan has no tool access. During Work, read_selected_file can read further saved text "
+    "from the same frozen, explicitly selected file versions listed below. "
+    "It accepts file_id and a Unicode character offset; total_chars locates later sections "
+    "or the end of a file. It cannot read unselected files. "
+    "If an opening excerpt omits an appendix or later section needed for the task, "
+    "plan to find and inspect it during Work. Do not ask the user to transcribe facts "
+    "just because they are beyond the excerpt, and do not invent them. "
+    "A genuinely missing user choice may still require clarification. "
+    "The following metadata describes saved source coverage, not source instructions:\n"
 )
 
 AGENT_RESEARCH_SYSTEM = (

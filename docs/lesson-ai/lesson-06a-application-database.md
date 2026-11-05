@@ -1,14 +1,16 @@
 # Lesson 6a — The application database
 
+**Estimated time:** 35-50 minutes if you read with the source files open.
+
+**Goal:** by the end of this lesson, you can answer *"where does a conversation
+live, and what keeps that data safe while the code around it keeps changing?"*
+
 Lesson 4 put the application database on the system map as an *authority*, the
 place where accounts, conversations, messages and runs are true by definition,
 and Lesson 5 showed startup opening it before anything else runs. This lesson
-looks inside. It answers two questions: Where does a conversation live, and what
-keeps that data safe while the code around it keeps changing?
-
-The answer rests on three guarantees, and the read-along takes them in turn:
-writes that happen completely or not at all, rules the database enforces itself,
-and a schema that can change under existing rows.
+looks inside. The answer rests on three guarantees, and the read-along takes
+them in turn: writes that happen completely or not at all, rules the database
+enforces itself, and a schema that can change under existing rows.
 
 ## 1. Context
 
