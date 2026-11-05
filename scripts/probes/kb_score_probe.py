@@ -11,17 +11,15 @@ harness probes many labeled queries and reports the score distributions so the
 floor is set from data: the max off-domain score and the min on-domain score
 bound the safe window, and a candidate floor's misclassifications are counted.
 
-It hits Audrey's `/v1/kb/query` directly: that endpoint takes no auth
-and returns per-hit scores. Run it ON THE BOX (ollama-net DNS resolves there).
-As of the 2026-07-18 security review, Audrey's `:8000` is NOT published to the
-host, so the old `http://192.168.1.11:8000` over-the-LAN form no longer works —
-run from a container on ollama-net, or tunnel `:8000` from the laptop first
-(`ssh -N -L 8000:audrey:8000 <unraid>` then KB_PROBE_BASE_URL=http://localhost:8000).
+It queries Audrey's service-only `/v1/kb/query` endpoint. Set KB_SERVICE_TOKEN
+in the environment; it is sent as X-Audrey-Service-Token and never printed.
+The default URL uses Docker DNS on ollama-net. From the laptop, set
+KB_PROBE_BASE_URL=http://192.168.1.11:8000 for the documented LAN/WARP route.
 
 USAGE (on the box, on ollama-net):
     # default: http://audrey:8000 (internal name) or set --base-url
     python3 scripts/probes/kb_score_probe.py
-    KB_PROBE_BASE_URL=http://localhost:8000 python3 scripts/probes/kb_score_probe.py  # via tunnel
+    KB_PROBE_BASE_URL=http://192.168.1.11:8000 python3 scripts/probes/kb_score_probe.py
     python3 scripts/probes/kb_score_probe.py --queries scripts/probes/kb_probe_queries.json --top-k 5
     python3 scripts/probes/kb_score_probe.py --save-json /out/kb-scores.json   # machine-readable
 
@@ -48,26 +46,35 @@ DEFAULT_QUERIES = Path(__file__).with_name("kb_probe_queries.json")
 DEFAULT_BASE_URL = os.environ.get("KB_PROBE_BASE_URL", "http://audrey:8000")
 
 
-def _top_score(base_url: str, query: str, top_k: int, timeout_s: float) -> tuple[float | None, str]:
-    """Return (top hit score, top source) for one query, or (None, err) on failure.
+class ProbeRequestError(RuntimeError):
+    """A query failed instead of returning a usable KB result."""
 
-    None score means the query returned zero hits OR the call failed — the second
-    element carries the reason so an empty KB and a transport error don't look the
-    same in the report.
-    """
+
+def _top_score(
+    base_url: str, query: str, top_k: int, timeout_s: float, *, service_token: str,
+) -> tuple[float | None, str]:
+    """Return the top score/source, distinguishing zero hits from failed queries."""
     url = base_url.rstrip("/") + "/v1/kb/query"
     body = {"query": query, "top_k": top_k}
     try:
-        r = httpx.post(url, json=body, timeout=timeout_s)
+        r = httpx.post(
+            url, json=body, timeout=timeout_s,
+            headers={"X-Audrey-Service-Token": service_token},
+        )
     except httpx.HTTPError as e:
-        return None, f"error: {type(e).__name__}: {str(e)[:120]}"
+        raise ProbeRequestError(f"query transport failed ({type(e).__name__})") from None
     if r.status_code >= 300:
-        return None, f"http {r.status_code}: {r.text[:120]}"
-    results = (r.json() or {}).get("results") or []
-    if not results:
-        return None, "no hits"
-    top = results[0]
-    return float(top.get("score", 0.0)), str(top.get("source", ""))
+        raise ProbeRequestError(f"query returned HTTP {r.status_code}")
+    try:
+        results = r.json()["results"]
+        if not isinstance(results, list):
+            raise ValueError("results must be a list")
+        if results:
+            top = results[0]
+            return float(top["score"]), str(top.get("source", ""))
+    except (ValueError, TypeError, KeyError, AttributeError):
+        raise ProbeRequestError("query returned an invalid KB response") from None
+    return None, "no hits"
 
 
 def _fmt(x: float | None) -> str:
@@ -102,6 +109,11 @@ def main() -> int:
                    help="write per-query scores + summary as JSON")
     args = p.parse_args()
 
+    service_token = os.environ.get("KB_SERVICE_TOKEN", "").strip()
+    if not service_token:
+        print("Set KB_SERVICE_TOKEN before running the KB score probe.", file=sys.stderr)
+        return 2
+
     spec = json.loads(args.queries.read_text())
     labels = [k for k in ("on_domain", "off_domain") if isinstance(spec.get(k), list)]
     if not labels:
@@ -114,7 +126,13 @@ def main() -> int:
         rows: list[tuple[str, float | None, str]] = []
         print(f"── {label} ──")
         for q in spec[label]:
-            score, info = _top_score(args.base_url, q, args.top_k, args.timeout)
+            try:
+                score, info = _top_score(
+                    args.base_url, q, args.top_k, args.timeout, service_token=service_token,
+                )
+            except ProbeRequestError as exc:
+                print(f"KB score probe failed: {exc}", file=sys.stderr)
+                return 1
             rows.append((q, score, info))
             src = info if score is None else info.rsplit("/", 1)[-1]
             print(f"  {_fmt(score)}  {q[:52]:<52}  {src[:40]}")

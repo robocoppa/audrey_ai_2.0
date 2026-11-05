@@ -14,6 +14,9 @@ import pytest
 from fastapi import HTTPException
 
 import audrey.routes.openai.routes as openai_routes
+from audrey.app_state import ApplicationStore
+from audrey.auth import require_user
+from audrey.identity import Principal
 from audrey.routes.openai import (
     PASSTHROUGH_BARE,
     PASSTHROUGH_PREFIX,
@@ -74,8 +77,10 @@ def _stub_registry(location: str = "local") -> SimpleNamespace:
     return SimpleNamespace(location_of=lambda _name: location)
 
 
-def _stub_user(role: str = "user", email: str = "alice@example.com") -> SimpleNamespace:
-    return SimpleNamespace(email=email, role=role)
+def _stub_user(role: str = "user", email: str = "alice@example.com", *, auth_method: str = "cloudflare_access") -> Principal:
+    return Principal(user_id="usr_alice", storage_namespace=email, provider="cloudflare_access",
+                     provider_subject="alice", email=email, display_name="Alice", role=role,
+                     status="active", auth_method=auth_method)
 
 
 def test_resolve_rejects_when_passthrough_disabled():
@@ -267,7 +272,9 @@ async def test_chat_completions_rejects_skill_on_passthrough_before_dispatch():
         await openai_routes.chat_completions(
             payload,
             SimpleNamespace(app=SimpleNamespace()),
-            SimpleNamespace(email="alice@example.com"),
+            Principal(user_id="usr_alice", storage_namespace="alice@example.com", provider="cloudflare_access",
+                    provider_subject="alice", email="alice@example.com", display_name="Alice", role="user",
+                    status="active", auth_method="cloudflare_access"),
         )
 
     assert caught.value.status_code == 400
@@ -324,7 +331,9 @@ async def test_chat_completions_injects_explicit_skill_and_restricts_tools(monke
     response = await openai_routes.chat_completions(
         payload,
         SimpleNamespace(app=app),
-        SimpleNamespace(email="alice@example.com"),
+        Principal(user_id="usr_alice", storage_namespace="alice@example.com", provider="cloudflare_access",
+                    provider_subject="alice", email="alice@example.com", display_name="Alice", role="user",
+                    status="active", auth_method="cloudflare_access"),
     )
 
     assert response == {"ok": True}
@@ -335,3 +344,33 @@ async def test_chat_completions_injects_explicit_skill_and_restricts_tools(monke
         "role": "system",
         "content": skill.spec.instructions,
     }
+
+
+@pytest.mark.parametrize("required_role, allowed", [("admin", False), ("user", True), (None, True)])
+async def test_admin_personal_token_uses_user_role_for_passthrough_policy(tmp_path, required_role, allowed):
+    store = ApplicationStore(tmp_path / "passthrough.sqlite")
+    try:
+        owner = await store.resolve_external_identity(
+            provider="cloudflare_access", subject="admin-owner", email="admin@example.com",
+            display_name="Admin", role="admin", auth_method="cloudflare_access",
+        )
+        issued = await store.create_personal_token(
+            user_id=owner.user_id, name="Automation", scopes=["compat:full"], expires_at=None,
+        )
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(application_store=store)))
+        principal = await require_user(request, authorization=f"Bearer {issued.token}")
+        assert principal.role == "admin" and principal.auth_method == "personal_token"
+        cfg = _stub_cfg({"enabled": True, "allowed_models": ["test-model"], "require_role": required_role})
+        if allowed:
+            assert _resolve_passthrough_model(
+                f"{PASSTHROUGH_PREFIX}test-model", cfg, _stub_registry(), principal,
+            ) == ("test-model", "local")
+        else:
+            with pytest.raises(HTTPException) as exc:
+                _resolve_passthrough_model(
+                    f"{PASSTHROUGH_PREFIX}test-model", cfg, _stub_registry(), principal,
+                )
+            assert exc.value.status_code == 403
+        assert principal.role == "admin"
+    finally:
+        store.close()

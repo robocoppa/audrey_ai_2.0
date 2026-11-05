@@ -20,7 +20,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from audrey import __version__
-from audrey.auth import AuthedUser, require_user
+from audrey.auth import require_user
+from audrey.identity import Principal
 from audrey.pipeline.chat_archive import resolve_conversation_id
 from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.prompts import skill_instruction_for, with_skill_instruction
@@ -121,7 +122,7 @@ async def list_models(request: Request) -> dict[str, Any]:
 async def chat_completions(
     payload: ChatCompletionRequest,
     request: Request,
-    me: AuthedUser = Depends(require_user),
+    me: Principal = Depends(require_user),
 ):
     return await _create_chat_completion(payload, request, me)
 
@@ -129,7 +130,7 @@ async def chat_completions(
 async def _create_chat_completion(
     payload: ChatCompletionRequest,
     request: Request,
-    me: AuthedUser,
+    me: Principal,
     *,
     stream_session_factory: Callable[..., Any] | None = None,
     response_format: dict[str, Any] | None = None,
@@ -175,14 +176,7 @@ async def _create_chat_completion(
             ),
         )
 
-    # Identity comes from the Authorization header via require_user, NOT from
-    # payload.user (OpenAI-spec passthrough, trusted for nothing). If a client
-    # sent a different `user` field, log once for drift-debugging then ignore.
-    if payload.user and payload.user != me.email:
-        log.debug(
-            "chat.completions: payload.user=%r ignored (auth user=%r)",
-            payload.user, me.email,
-        )
+    # Caller identity is authenticated; the protocol user field is ignored.
 
     identity_messages = [
         message.model_dump(exclude_none=True)
@@ -274,7 +268,7 @@ async def _create_chat_completion(
         "metadata": payload.metadata,
     }
     conversation_id = resolve_conversation_id(
-        user_id=me.email,
+        user_id=me.storage_namespace,
         raw_payload=raw_payload,
         messages=identity_messages,
     )
@@ -284,7 +278,7 @@ async def _create_chat_completion(
         return StreamingResponse(
             _stream_via_pipeline(
                 app, payload, messages, options,
-                user_id=me.email,
+                user_id=me.storage_namespace,
                 conversation_id=conversation_id,
                 user_turn_text=user_turn_text,
                 skill_instruction=skill_instruction,
@@ -302,7 +296,7 @@ async def _create_chat_completion(
 
     return await _generate_via_pipeline(
         app, payload, messages, options,
-        user_id=me.email,
+        user_id=me.storage_namespace,
         conversation_id=conversation_id,
         user_turn_text=user_turn_text,
         skill_instruction=skill_instruction,
@@ -322,7 +316,7 @@ async def _create_chat_completion(
 async def create_response(
     payload: ResponseCreateRequest,
     request: Request,
-    me: AuthedUser = Depends(require_user),
+    me: Principal = Depends(require_user),
 ):
     """Generate one completed or streamed response through Audrey."""
 
@@ -332,18 +326,18 @@ async def create_response(
 
 
 @router.get("/responses/{response_id}")
-async def retrieve_response(response_id: str, request: Request, me: AuthedUser = Depends(require_user)):
+async def retrieve_response(response_id: str, request: Request, me: Principal = Depends(require_user)):
     """Read one unexpired saved response belonging to the current account."""
     return (await read_response(request, me, response_id))["response"]
 
 
 @router.delete("/responses/{response_id}")
-async def delete_response(response_id: str, request: Request, me: AuthedUser = Depends(require_user)):
+async def delete_response(response_id: str, request: Request, me: Principal = Depends(require_user)):
     """Delete one owned response and every retained descendant."""
     return await remove_response(request, me, response_id)
 
 
-async def _create_response(payload: ResponseCreateRequest, request: Request, me: AuthedUser):
+async def _create_response(payload: ResponseCreateRequest, request: Request, me: Principal):
 
     effort = payload.reasoning.effort if payload.reasoning is not None else None
     validate_reasoning_request(payload.model, effort=effort)

@@ -657,16 +657,16 @@ def test_native_file_delete_prunes_project_memberships(tmp_path, monkeypatch):
         )
     )
 
-    async def fake_delete(*, file_id, request, me):
+    async def fake_delete(*, file_id, request, principal):
         assert file_id == "alice-ready"
-        assert me.email == alice.storage_namespace
+        assert principal.storage_namespace == alice.storage_namespace
         return upload_routes.DeleteResponse(
             file_id=file_id,
             deleted=True,
             pending_cleanup=False,
         )
 
-    monkeypatch.setattr(native_files.upload_routes, "delete_file", fake_delete)
+    monkeypatch.setattr(native_files.file_service, "delete_file", fake_delete)
 
     app = FastAPI()
     app.state.application_store = store

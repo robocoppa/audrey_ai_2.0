@@ -3,7 +3,7 @@
 
 The smoke requires an active Cloudflare Access application assertion. It checks
 that an unknown bearer is rejected locally, then creates a short-lived
-Audrey personal token, exercises both native account and protected `/v1/files`
+Audrey personal token, exercises both native account and protected `/api/files`
 reads, revokes the token, and proves revocation is immediate.
 """
 
@@ -151,10 +151,10 @@ def main() -> int:
         if token_me.get("auth_provider") != "audrey":
             raise SmokeError("personal token did not resolve through Audrey authentication")
 
-        _, files = _json_request("/v1/files", token=personal_token)
-        file_items = files.get("files")
+        _, files = _json_request("/api/files", token=personal_token)
+        file_items = files.get("items")
         if not isinstance(file_items, list):
-            raise SmokeError("compatibility file listing returned an invalid shape")
+            raise SmokeError("native file listing returned an invalid shape")
 
         _, revoked = _json_request(
             f"/api/tokens/{token_id}",
@@ -181,7 +181,7 @@ def main() -> int:
         result["cutover"] = {
             "unknown_bearer_http": unknown_status,
             "unknown_bearer_rejected_locally": True,
-            "compatibility_file_count": len(file_items),
+            "native_file_count": len(file_items),
             "revoked_token_http": revoked_status,
         }
     except Exception as exc:  # noqa: BLE001 - retain error across cleanup

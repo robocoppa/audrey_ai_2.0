@@ -112,7 +112,7 @@ def _error(status: int, detail: str, *, code: str | None = None) -> HTTPExceptio
 
 async def _active_owner(app: Any, principal: Principal):
     if (
-        principal.status != "active" or principal.role == "bot" or "bots" in principal.groups
+        principal.status != "active" or "bots" in principal.groups
         or not principal.user_id or remote_personal_reads_blocked(principal.storage_namespace)
     ):
         raise _error(403, "Tax review requires an active account.")

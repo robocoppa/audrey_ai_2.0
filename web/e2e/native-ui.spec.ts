@@ -2388,14 +2388,14 @@ test("manages saved memories through the production browser bundle", async ({ pa
   const corrections: unknown[] = [];
   const creations: unknown[] = [];
 
-  await page.route("**/v1/me/memories**", async (route) => {
+  await page.route("**/api/me/memories**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname === "/v1/me/memories" && request.method() === "GET") {
+    if (url.pathname === "/api/me/memories" && request.method() === "GET") {
       await json(route, { items: deleted ? [] : [memory], next_cursor: null });
       return;
     }
-    if (url.pathname === "/v1/me/memories" && request.method() === "POST") {
+    if (url.pathname === "/api/me/memories" && request.method() === "POST") {
       const payload = request.postDataJSON() as {
         key: string; value: string; tags: string;
       };
@@ -2407,14 +2407,14 @@ test("manages saved memories through the production browser bundle", async ({ pa
       });
       return;
     }
-    if (url.pathname === "/v1/me/memories/preferred_name" && request.method() === "PUT") {
+    if (url.pathname === "/api/me/memories/preferred_name" && request.method() === "PUT") {
       const payload = request.postDataJSON() as { value: string; tags: string };
       corrections.push(payload);
       memory = { ...memory, ...payload, updated_at: "2026-09-01T00:01:00Z" };
       await json(route, memory);
       return;
     }
-    if (url.pathname === "/v1/me/memories/preferred_name" && request.method() === "DELETE") {
+    if (url.pathname === "/api/me/memories/preferred_name" && request.method() === "DELETE") {
       deleted = true;
       await json(route, { key: memory.key, deleted: true });
       return;
@@ -2423,6 +2423,10 @@ test("manages saved memories through the production browser bundle", async ({ pa
   });
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname.startsWith("/api/me/memories")) {
+      await route.fallback();
+      return;
+    }
     if (url.pathname === "/api/me") {
       await json(route, browserUser());
       return;
@@ -2437,6 +2441,14 @@ test("manages saved memories through the production browser bundle", async ({ pa
     }
     if (url.pathname === "/api/models") {
       await json(route, { items: browserModels() });
+      return;
+    }
+    if (url.pathname === "/api/skills") {
+      await json(route, { enabled: true, status: "ready", items: browserSkills() });
+      return;
+    }
+    if (url.pathname === "/api/projects") {
+      await json(route, { items: [], next_cursor: null });
       return;
     }
     await route.abort("failed");
@@ -2635,11 +2647,11 @@ test("exports archived chat and durably deletes Audrey data", async ({ page }) =
     },
   });
 
-  await page.route("**/v1/me/**", async (route) => {
+  await page.route("**/api/me/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     userDataAuthorization.push(request.headers().authorization);
-    if (url.pathname === "/v1/me/chat-history/export") {
+    if (url.pathname === "/api/me/chat-history/export") {
       await json(route, {
         schema_version: 1,
         items: [exportMessage],
@@ -2647,7 +2659,7 @@ test("exports archived chat and durably deletes Audrey data", async ({ page }) =
       });
       return;
     }
-    if (url.pathname === "/v1/me/data-purge" && request.method() === "POST") {
+    if (url.pathname === "/api/me/data-purge" && request.method() === "POST") {
       purgeRequests.push({
         body: request.postDataJSON(),
         idempotencyKey: request.headers()["idempotency-key"],
@@ -2659,7 +2671,7 @@ test("exports archived chat and durably deletes Audrey data", async ({ page }) =
       });
       return;
     }
-    if (url.pathname === "/v1/me/data-purge/purge_browser_data") {
+    if (url.pathname === "/api/me/data-purge/purge_browser_data") {
       purgeStatusReads += 1;
       await json(route, purgeReceipt("completed"));
       return;
@@ -2672,6 +2684,11 @@ test("exports archived chat and durably deletes Audrey data", async ({ page }) =
   });
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/api/me/chat-history/export"
+      || url.pathname.startsWith("/api/me/data-purge")) {
+      await route.fallback();
+      return;
+    }
     if (url.pathname === "/api/me/preferences") {
       await json(route, browserPreferences());
       return;
@@ -2690,6 +2707,14 @@ test("exports archived chat and durably deletes Audrey data", async ({ page }) =
     }
     if (url.pathname === "/api/models") {
       await json(route, { items: browserModels() });
+      return;
+    }
+    if (url.pathname === "/api/skills") {
+      await json(route, { enabled: true, status: "ready", items: browserSkills() });
+      return;
+    }
+    if (url.pathname === "/api/projects") {
+      await json(route, { items: [], next_cursor: null });
       return;
     }
     await route.abort("failed");

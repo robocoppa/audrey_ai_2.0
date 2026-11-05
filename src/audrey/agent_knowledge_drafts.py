@@ -135,7 +135,7 @@ class ReportKnowledgeDrafts:
             if row["revision"] != expected_revision or row["status"] != "completed" or not row["result_length"]:
                 raise DraftError(409, "The saved report changed or is not complete. Refresh it before generating suggestions.")
             principal = store._get_principal_sync(user_id)
-            if (principal is None or principal.status != "active" or principal.role == "bot"
+            if (principal is None or principal.status != "active"
                     or "bots" in principal.groups):
                 raise DraftError(404, "Saved report is unavailable.")
             if not _settings(self.app).enabled or current_processing_policy() is not None:
@@ -151,7 +151,7 @@ class ReportKnowledgeDrafts:
     async def _authorize(self, user_id, task_id, expected_revision):
         store = self.app.state.application_store
         principal = await store.get_principal(user_id=user_id)
-        if principal is None or principal.status != "active" or principal.role == "bot" or "bots" in principal.groups:
+        if principal is None or principal.status != "active" or "bots" in principal.groups:
             raise DraftError(404, "Saved report is unavailable.")
         if await resolve_model(self.app.state.cfg, store, principal, "local") is None:
             raise DraftError(503, "Local model access is unavailable.")

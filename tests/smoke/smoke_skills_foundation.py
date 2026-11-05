@@ -122,7 +122,7 @@ def main() -> int:
         # checkout is updated without recreating Audrey. Refresh first so this
         # smoke validates the deployed files rather than the startup snapshot.
         _, rediscovery = _json_request(
-            "/v1/admin/skills/rediscover",
+            "/api/admin/skills/rediscover",
             token=ADMIN_TOKEN,
             method="POST",
         )
@@ -166,7 +166,7 @@ def main() -> int:
             raise SmokeError("public capabilities did not report skills available")
 
         readiness_http, readiness = _json_request(
-            "/v1/admin/readiness",
+            "/api/admin/readiness",
             token=ADMIN_TOKEN,
             expected=frozenset({200, 503}),
         )

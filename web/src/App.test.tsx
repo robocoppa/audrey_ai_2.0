@@ -1299,21 +1299,21 @@ describe("App", () => {
       value: "Call the user Alice.",
       tags: "",
     };
-    const memoryPath = "/v1/me/memories/profile%2Ftimezone";
+    const memoryPath = "/api/me/memories/profile%2Ftimezone";
     const fetchMock = vi.fn().mockImplementation((path: string, request?: RequestInit) => {
-      if (path === "/v1/me/memories?limit=50") {
+      if (path === "/api/me/memories?limit=50") {
         return Promise.resolve(new Response(JSON.stringify({
           items: [firstMemory],
           next_cursor: "next/page",
         }), { status: 200, headers: { "Content-Type": "application/json" } }));
       }
-      if (path === "/v1/me/memories?limit=50&cursor=next%2Fpage") {
+      if (path === "/api/me/memories?limit=50&cursor=next%2Fpage") {
         return Promise.resolve(new Response(JSON.stringify({
           items: [secondMemory],
           next_cursor: null,
         }), { status: 200, headers: { "Content-Type": "application/json" } }));
       }
-      if (path === "/v1/me/memories" && request?.method === "POST") {
+      if (path === "/api/me/memories" && request?.method === "POST") {
         const body = JSON.parse(String(request.body)) as {
           key: string; value: string; tags: string;
         };
@@ -1392,7 +1392,7 @@ describe("App", () => {
     await waitFor(() => expect(screen.queryByRole("textbox", { name: "New memory key" })).not.toBeInTheDocument());
     expect(screen.getByText("The user prefers concise answers.")).toBeInTheDocument();
     const create = fetchMock.mock.calls.find(
-      ([path, request]) => path === "/v1/me/memories"
+      ([path, request]) => path === "/api/me/memories"
         && request?.method === "POST"
         && JSON.parse(String(request.body)).key === "response_style",
     ) as [string, RequestInit] | undefined;
@@ -1476,21 +1476,21 @@ describe("App", () => {
     };
     const fetchMock = vi.fn().mockImplementation(
       (path: string, request?: RequestInit) => {
-        if (path === "/v1/me/chat-history/export?limit=200") {
+        if (path === "/api/me/chat-history/export?limit=200") {
           return Promise.resolve(new Response(JSON.stringify({
             schema_version: 1,
             items: [firstMessage],
             next_cursor: "next page",
           }), { status: 200, headers: { "Content-Type": "application/json" } }));
         }
-        if (path === "/v1/me/chat-history/export?limit=200&cursor=next+page") {
+        if (path === "/api/me/chat-history/export?limit=200&cursor=next+page") {
           return Promise.resolve(new Response(JSON.stringify({
             schema_version: 1,
             items: [{ ...firstMessage, message_id: "msg_export_2", content: "Second page" }],
             next_cursor: null,
           }), { status: 200, headers: { "Content-Type": "application/json" } }));
         }
-        if (path === "/v1/me/data-purge" && request?.method === "POST") {
+        if (path === "/api/me/data-purge" && request?.method === "POST") {
           return Promise.resolve(new Response(JSON.stringify(completedPurge), {
             status: 202,
             headers: { "Content-Type": "application/json" },
@@ -1561,7 +1561,7 @@ describe("App", () => {
 
     expect(await screen.findByRole("heading", { name: "Deletion complete" })).toBeVisible();
     const purgeRequest = fetchMock.mock.calls.find(
-      ([path, request]) => path === "/v1/me/data-purge" && request?.method === "POST",
+      ([path, request]) => path === "/api/me/data-purge" && request?.method === "POST",
     ) as [string, RequestInit] | undefined;
     expect(JSON.parse(String(purgeRequest?.[1].body))).toEqual({
       confirmation: "DELETE ALL MY AUDREY DATA",

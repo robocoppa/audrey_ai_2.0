@@ -156,7 +156,7 @@ def _authority(app, principal, task, scope_guard=None):
         record = store.agents._lease(**_lease(task))
     except AgentTaskError:
         raise AgentDispatchStoppedError("Agent access, inputs or execution limits changed.") from None
-    if (current is None or current.status != "active" or current.role == "bot" or "bots" in current.groups
+    if (current is None or current.status != "active" or "bots" in current.groups
             or current.storage_namespace != principal.storage_namespace or record["user_id"] != principal.user_id
             or store.agents._internal(record)["current_step"] != "research"
             or remote_personal_reads_blocked(principal.storage_namespace)):

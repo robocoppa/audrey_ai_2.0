@@ -5,13 +5,13 @@ Each user who uploads files gets two lazily-created Qdrant collections:
   - `kb_user_images_<sanitized>` — 512-d cosine, CLIP
 
 Sanitization is `[^a-z0-9]+ -> "_"`, lowercased, stripped of leading/
-trailing underscores. So `bart@proton.me` → `bart_proton_me`. The raw
+trailing underscores. So `alice@example.com` → `alice_example_com`. The raw
 user id is preserved in each point's `user` payload field for display
 and for the payload-filter guard on deletes.
 
 Payload shape (both collections):
   {
-    "user":       "<raw user id>",            # e.g. bart@proton.me
+    "user":       "<raw user id>",            # e.g. alice@example.com
     "file_id":    "<uuid4>",                  # one per uploaded file
     "source":     "/data/uploads/<sanitized>/<uuid><ext>",
     "filename":   "RA_management.pdf",        # original, for display

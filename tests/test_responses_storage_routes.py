@@ -12,7 +12,7 @@ import pytest
 from fastapi import FastAPI
 
 from audrey.app_state import ApplicationStore
-from audrey.auth import AuthedUser, require_user
+from audrey.auth import require_user
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
@@ -68,7 +68,7 @@ async def service(tmp_path):
         display_name="Bob", role="user", auth_method="owui_bearer",
         legacy_storage_namespace="bob@example.com",
     )
-    current = [AuthedUser(email=alice.email, role=alice.role, principal=alice)]
+    current = [alice]
     state = SimpleNamespace(raw=reply(), chunks=None, captured=[], paths=[])
 
     def handler(request):
@@ -208,7 +208,7 @@ async def test_parent_lookup_is_uniform_owner_scoped_and_precedes_provider(servi
     root = (await service.client.post("/v1/responses", json=request_body(store=True, tools=[]))).json()
     response_id = root["id"]
     if kind == "foreign":
-        service.current[0] = AuthedUser(email=service.bob.email, role="user", principal=service.bob)
+        service.current[0] = service.bob
     elif kind == "deleted":
         deleted = await service.client.delete("/v1/responses/" + response_id)
         assert deleted.status_code == 200 and deleted.json() == {"id": response_id, "object": "response.deleted", "deleted": True}
@@ -337,7 +337,7 @@ async def test_stream_saves_before_terminal_is_exposed(service):
             if "event: response.completed\n" not in block:
                 continue
             terminal = json.loads(next(line[6:] for line in block.splitlines() if line.startswith("data: ")))["response"]
-            record = await service.store.responses.get(user.principal.user_id, terminal["id"])
+            record = await service.store.responses.get(user.user_id, terminal["id"])
             assert record is not None and record["response"] == terminal
 
 
@@ -415,7 +415,7 @@ async def test_cancellation_during_sqlite_commit_undoes_saved_record(service, mo
 @pytest.mark.parametrize("operation", ["post", "get", "delete"])
 async def test_storage_requires_canonical_owner_and_available_repository(service, missing, operation):
     if missing == "principal":
-        service.current[0] = AuthedUser(email="alice@example.com", role="user")
+        service.app.dependency_overrides.pop(require_user)
     else:
         del service.app.state.application_store
     before = len(service.provider.paths)

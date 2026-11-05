@@ -98,7 +98,6 @@ async def watch_authority(app: Any, user_id: str) -> Any:
     if (
         principal is None
         or principal.status != "active"
-        or principal.role == "bot"
         or "bots" in principal.groups
     ):
         raise AgentDispatchStoppedError("Watch account access is unavailable.")

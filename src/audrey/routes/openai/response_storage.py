@@ -21,7 +21,7 @@ from audrey.app_state.responses import (
     ResponseParentNotFoundError,
     ResponseStorageLimitError,
 )
-from audrey.auth import AuthedUser
+from audrey.identity import Principal
 from audrey.routes.openai.schemas import (
     ResponseCreateRequest,
     ResponseInputMessage,
@@ -39,14 +39,11 @@ def response_not_found() -> HTTPException:
     })
 
 
-def storage_context(request: Request, me: AuthedUser):
-    principal = getattr(me, "principal", None)
-    if principal is None:
-        raise HTTPException(status_code=401, detail="An Audrey account is required for saved responses.")
+def storage_context(request: Request, me: Principal):
     store = getattr(request.app.state, "application_store", None)
     if store is None:
         raise HTTPException(status_code=503, detail="Response storage is unavailable.")
-    return store.responses, principal.user_id
+    return store.responses, me.user_id
 
 
 def _storage_error(exc: Exception) -> HTTPException:
@@ -64,7 +61,7 @@ def _storage_error(exc: Exception) -> HTTPException:
 _STORAGE_ERRORS = (sqlite3.Error, InvalidResponseStateError, ResponseStorageLimitError, ResponseParentNotFoundError)
 
 
-async def read_response(request: Request, me: AuthedUser, response_id: str) -> dict[str, Any]:
+async def read_response(request: Request, me: Principal, response_id: str) -> dict[str, Any]:
     repository, owner_id = storage_context(request, me)
     try:
         saved = await repository.get(owner_id, response_id)
@@ -75,7 +72,7 @@ async def read_response(request: Request, me: AuthedUser, response_id: str) -> d
     return saved
 
 
-async def remove_response(request: Request, me: AuthedUser, response_id: str) -> dict[str, Any]:
+async def remove_response(request: Request, me: Principal, response_id: str) -> dict[str, Any]:
     repository, owner_id = storage_context(request, me)
     try:
         deleted = await repository.delete(owner_id, response_id)
@@ -87,7 +84,7 @@ async def remove_response(request: Request, me: AuthedUser, response_id: str) ->
 
 
 async def expand_stored_request(
-    payload: ResponseCreateRequest, request: Request, me: AuthedUser,
+    payload: ResponseCreateRequest, request: Request, me: Principal,
 ) -> ResponseCreateRequest:
     """Resolve owned context before file access or starting a provider stream."""
     if payload.store is not True and payload.previous_response_id is None:
@@ -180,7 +177,7 @@ def _failure(response, error):
     return failed
 
 
-async def retain_response(result, payload: ResponseCreateRequest, request: Request, me: AuthedUser):
+async def retain_response(result, payload: ResponseCreateRequest, request: Request, me: Principal):
     """Commit completion before HTTP/SSE success; incomplete runs are never saved."""
     repository = owner_id = None
     if payload.store is True:

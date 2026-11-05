@@ -10,7 +10,6 @@ from test_user_data_controls import _purge_status
 from test_user_data_purge import _ArchiveQueue, _FileWorker, _Transport
 
 from audrey.app_state import ApplicationStore
-from audrey.auth import AuthedUser
 from audrey.kb.uploads_db import UploadsDB
 from audrey.processing_policy import ProcessingPolicy, processing_scope
 from audrey.routes.app.conversations import delete_conversation, discard_empty_conversation
@@ -148,7 +147,6 @@ async def test_account_purge_removes_only_owner_exports_and_allows_new_cases(sta
         _request(store, exports, user_data_purges=coordinator),
         AccountPurgeRequest(confirmation="DELETE ALL MY AUDREY DATA"),
         idempotency_key=None,
-        me=AuthedUser(email=alice.storage_namespace, role="user", principal=alice),
         principal=alice,
     )
     assert result.status == "pending"

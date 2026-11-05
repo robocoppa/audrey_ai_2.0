@@ -10,9 +10,9 @@ from typing import Any
 
 from fastapi import Request
 
+from audrey import file_service
 from audrey.app_state import ApplicationStore, ConversationRecord, SourceSnapshot
 from audrey.app_state.knowledge import KnowledgeError
-from audrey.auth import AuthedUser
 from audrey.identity import Principal
 from audrey.kb.extract import is_audio_mime, is_image_mime, is_video_mime
 from audrey.kb.fusion import RRF_K, passes_evidence, reciprocal_rank_fusion
@@ -25,7 +25,6 @@ from audrey.knowledge_sources import (
 )
 from audrey.pipeline.complexity import count_tokens
 from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
-from audrey.routes import files as upload_routes
 from audrey.routes.kb import search_private_file_text
 
 PROJECT_RETRIEVAL_MAX_TOKENS = 3_000
@@ -40,17 +39,8 @@ class ProjectContextUnavailableError(RuntimeError):
     """A project has searchable files but its private retrieval path is down."""
 
 
-def _compat_user(principal: Principal) -> AuthedUser:
-    return AuthedUser(
-        email=principal.storage_namespace,
-        role=principal.role,
-        display_name=principal.display_name,
-        principal=principal,
-    )
-
-
 async def _list_for_owner(request: Request, principal: Principal):
-    return await upload_routes.list_files(request, _compat_user(principal))
+    return await file_service.list_files(request, principal)
 
 
 def _file_kind(mime: str) -> str:

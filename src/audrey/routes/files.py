@@ -1,64 +1,13 @@
-"""Per-user file uploads.
+"""Internal file-worker routes and shared upload lifecycle primitives.
 
-    POST   /v1/files           — multipart upload; stream to disk, validate,
-                                 ingest into the user's kb_user_text_* /
-                                 kb_user_images_* collections.
-    GET    /v1/files           — list the caller's files (one row per file_id).
-    DELETE /v1/files/{file_id} — purge all points for a file + delete bytes.
+Service-token routes under ``/v1/files`` support trusted file listing, artifact
+reads, downloads, OCR and media workers. Dispatch binds the body owner before
+calling the sidecar. Browser and personal-token file operations use ``/api/files``
+and the Principal-taking operations in ``audrey.file_service``.
 
-    POST   /v1/files/upload-sessions            — open a chunked upload.
-    PUT    .../upload-sessions/{id}/parts/{n}   — one part.
-    POST   .../upload-sessions/{id}/complete    — assemble and ingest.
-
-    POST   /v1/files/from-url                 — accept a video URL; the bytes
-                                                are downloaded elsewhere, later.
-
-    POST   /v1/files/jobs/claim               — SERVICE: lease a pending job.
-    POST   /v1/files/{file_id}/ingest-result  — SERVICE: video worker output.
-    POST   /v1/files/{file_id}/ocr-result     — SERVICE: scanned-PDF output.
-    POST   /v1/files/{file_id}/ingest-failed  — SERVICE: worker gave up.
-    POST   /v1/files/fetch/claim              — SERVICE: lease a download.
-    POST   /v1/files/fetch/{file_id}/result   — SERVICE: download landed.
-    POST   /v1/files/fetch/{file_id}/failed   — SERVICE: download gave up.
-    POST   /v1/files/list                     — SERVICE: a named user's files,
-                                                shaped for a model (phase 40).
-
-Identity: every user endpoint requires an active native session or personal
-access token and resolves the account's stable storage namespace. Ownership is
-derived from the authenticated principal, never a query parameter, form field,
-or caller-supplied user header.
-
-Safety layers (all mandatory):
-
-  - Token validation: `require_user` → 401 on missing/invalid token.
-  - Size cap: `kb.max_upload_mb` enforced while streaming (stop + 413 at limit).
-  - Mime sniff: libmagic reads the saved bytes — extension is a hint, sniff
-    is the gate. Whitelist in `kb.extract.ALLOWED_MIMES`.
-  - Per-user byte quota: one SQLite transaction reserves capacity before work
-    starts and counts stored bytes plus every in-flight upload transport.
-  - User isolation: every Qdrant read/write is scoped by both `file_id`
-    AND `user` in payload filters. See `QdrantKB.delete_by_file_id`.
-  - Filename sanitization: we keep the original filename for display, but
-    the bytes land at `<upload_root>/<sanitized_user>/<file_id><ext>` —
-    the client-supplied name is never used as a path segment.
-
-The `jobs`/`ingest-*` and `fetch/*` routes are the exception to all of the
-above: they authenticate with `require_service` and carry no user identity of
-their own, because the media worker and the media fetcher act on behalf of
-whoever owns the row. A user JWT must never reach them — see
-`auth.require_service`.
-
-`POST /v1/files/from-url` is a *user* route and keeps every gate above, with
-one addition: a host allowlist, because it is the only route here that makes
-this server originate an outbound request. What it does not do is download
-anything — see the Phase 41 section for why the bytes are somebody else's job.
-
-`POST /v1/files/list` is the same exception for the same reason, and one step
-more dangerous: it *names* its user in the body, so it is only safe while the
-sole caller holding the service token — the tools-server — has that argument
-overwritten according to the capability policy consumed by tool discovery and
-dispatch. The service-token gate and declared identity binding form one
-mechanism.
+Streaming byte limits, MIME validation, transactional quota reservations,
+Private processing policy and exact owner/file deletion filters are shared by
+both transports. Worker protocols carry the owner in their leased canonical row.
 """
 
 from __future__ import annotations
@@ -76,12 +25,11 @@ from pathlib import Path
 from typing import Literal
 
 import anyio
-from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
-from audrey.auth import AuthedUser, require_service, require_user
+from audrey.auth import require_service
 from audrey.kb.extract import (
-    ALLOWED_EXTENSIONS,
     ALLOWED_MIMES,
     EmptyExtractionError,
     UnsupportedMimeError,
@@ -93,7 +41,7 @@ from audrey.kb.extract import (
     ocr_text_path,
     sniff_mime,
 )
-from audrey.kb.file_deletion import FileDeletionWorker, FileOperationLocks
+from audrey.kb.file_deletion import FileOperationLocks
 from audrey.kb.ingest import (
     ingest_frame_descriptions,
     ingest_summary,
@@ -535,100 +483,6 @@ def _quota_http_error(error: QuotaExceededError) -> HTTPException:
     )
 
 
-@router.post("", response_model=UploadResponse)
-async def upload_file(
-    request: Request,
-    me: AuthedUser = Depends(require_user),
-    file: UploadFile = File(...),
-) -> UploadResponse:
-    """Accept one file, validate, extract, ingest into the caller's user collections."""
-    _refuse_unavailable_private_processing()
-    user = me.email
-
-    qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
-    text_embedder = getattr(request.app.state, "text_embedder", None)
-    image_embedder = getattr(request.app.state, "image_embedder", None)
-    if qdrant is None or text_embedder is None:
-        raise HTTPException(status_code=503, detail="KB is not initialized.")
-    storage = _get_storage_lifecycle(request)
-    max_upload = _max_upload_bytes(request)
-    max_total = _max_user_bytes(request)
-    root = _upload_root(request)
-    slug = sanitize_user(user)
-    file_id = str(uuid.uuid4())
-    ext = Path(file.filename or "").suffix.lower()
-    dest = root / slug / f"{file_id}{ext}"
-
-    declared = max_upload if file.size is None else int(file.size)
-    if declared <= 0:
-        raise HTTPException(status_code=422, detail="Empty upload.")
-    if declared > max_upload:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Upload exceeds {max_upload // (1024 * 1024)} MB limit.",
-        )
-
-    await _sweep_stale_upload_sessions(request, storage)
-    now, expired_before = _reservation_window(request)
-    try:
-        reservation = await storage.reserve_single_upload(
-            reservation_id=file_id,
-            user=user,
-            bytes_=declared,
-            max_user_bytes=max_total,
-            now=now,
-            expired_before=expired_before,
-        )
-    except QuotaExceededError as e:
-        raise _quota_http_error(e) from e
-
-    try:
-        # Collection creation is work too, so it happens only after capacity is
-        # held. Every exit below releases the reservation unless commit already
-        # consumed it.
-        text_col, image_col = await ensure_user_collections(qdrant, user)
-        written = await _stream_to_disk(file, dest, limit_bytes=max_upload)
-        if written < 0:
-            _safe_unlink(dest)
-            raise HTTPException(
-                status_code=413,
-                detail=f"Upload exceeds {max_upload // (1024 * 1024)} MB limit.",
-            )
-        if written == 0:
-            _safe_unlink(dest)
-            raise HTTPException(status_code=422, detail="Empty upload.")
-
-        try:
-            reservation = await storage.reserve_single_upload(
-                reservation_id=file_id,
-                user=user,
-                bytes_=written,
-                max_user_bytes=max_total,
-                now=_dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
-                expired_before=expired_before,
-            )
-        except QuotaExceededError as e:
-            _safe_unlink(dest)
-            raise _quota_http_error(e) from e
-
-        return await _validate_and_ingest(
-            request,
-            dest,
-            user=user,
-            file_id=file_id,
-            filename=file.filename or file_id,
-            written=written,
-            max_total=max_total,
-            qdrant=qdrant,
-            text_embedder=text_embedder,
-            image_embedder=image_embedder,
-            storage=storage,
-            reservation=reservation,
-            text_col=text_col,
-            image_col=image_col,
-        )
-    finally:
-        await storage.release(reservation)
 
 
 async def _store_pending_job(
@@ -1192,249 +1046,10 @@ async def _sweep_stale_upload_sessions(
 
 
 
-@router.post("/upload-sessions", response_model=SessionOpenResponse)
-async def open_upload_session(
-    body: SessionOpenRequest,
-    request: Request,
-    me: AuthedUser = Depends(require_user),
-) -> SessionOpenResponse:
-    """Reserve an upload id and tell the client how to slice the file."""
-    _refuse_unavailable_private_processing()
-    user = me.email
-    storage = _get_storage_lifecycle(request)
-
-    if body.total_bytes <= 0:
-        raise HTTPException(status_code=422, detail="total_bytes must be positive.")
-
-    max_bytes = _chunked_max_bytes(request)
-    if body.total_bytes > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Upload exceeds {max_bytes // (1024 * 1024)} MB chunked limit.",
-        )
-
-    max_total = _max_user_bytes(request)
-    part_size = _part_size(request)
-    parts_total = (body.total_bytes + part_size - 1) // part_size
-    upload_id = str(uuid.uuid4())
-    await _sweep_stale_upload_sessions(request, storage)
-    now, expired_before = _reservation_window(request)
-    try:
-        reservation = await storage.open_chunk_session(
-            upload_id=upload_id,
-            user=user,
-            filename=Path(body.filename or "upload").name[:255],
-            total_bytes=body.total_bytes,
-            part_size=part_size,
-            parts_total=parts_total,
-            max_user_bytes=max_total,
-            now=now,
-            expired_before=expired_before,
-        )
-    except QuotaExceededError as e:
-        raise _quota_http_error(e) from e
-
-    try:
-        _session_dir(request, user, upload_id).mkdir(parents=True, exist_ok=True)
-    except Exception:
-        await storage.release(reservation)
-        raise
-    log.info(
-        "files: session open user=%s upload_id=%s parts=%d bytes=%d",
-        user, upload_id, parts_total, body.total_bytes,
-    )
-    return SessionOpenResponse(
-        upload_id=upload_id, part_size=part_size,
-        parts_total=parts_total, received_parts=[],
-    )
 
 
-@router.put("/upload-sessions/{upload_id}/parts/{part_no}", response_model=PartResponse)
-async def upload_part(
-    upload_id: str,
-    part_no: int,
-    request: Request,
-    me: AuthedUser = Depends(require_user),
-) -> PartResponse:
-    """Stream one part to disk. Idempotent — a retried part overwrites."""
-    _refuse_unavailable_private_processing()
-    user = me.email
-    db = _get_uploads_db(request)
-    storage = _get_storage_lifecycle(request)
-
-    session = await db.get_session(upload_id, user=user)
-    if session is None:
-        raise HTTPException(status_code=404, detail="No such upload session.")
-    _refuse_unavailable_private_processing(session)
-    if not (0 <= part_no < int(session["parts_total"])):
-        raise HTTPException(
-            status_code=422,
-            detail=f"part_no out of range (0..{int(session['parts_total']) - 1}).",
-        )
-
-    part_size = int(session["part_size"])
-    dest = _session_dir(request, user, upload_id) / f"{part_no:06d}.part"
-    # Keep a valid prior part intact until both the bytes and the reservation
-    # update succeed. The final replace is atomic because both paths are siblings.
-    incoming = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.incoming")
-
-    # The shared writer awaits every bounded-pool disk write before it accepts
-    # another request chunk, and returns before writing a chunk over the cap.
-    try:
-        written = await _write_chunks_to_disk(
-            request.stream(), incoming, limit_bytes=part_size,
-        )
-        if written < 0:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Part exceeds the negotiated {part_size} byte size.",
-            )
-    except HTTPException:
-        _safe_unlink(incoming)
-        raise
-    except asyncio.CancelledError:
-        _safe_unlink(incoming)
-        raise
-    except Exception as e:
-        _safe_unlink(incoming)
-        log.exception("files: part write failed %s/%s: %s", upload_id, part_no, e)
-        raise HTTPException(status_code=500, detail=f"Part write failed: {e}") from e
-
-    if written == 0:
-        _safe_unlink(incoming)
-        raise HTTPException(status_code=422, detail="Empty part.")
-
-    now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
-    reservation = StorageReservation(
-        upload_id, user, "chunked", int(session["total_bytes"]),
-    )
-    try:
-        await storage.record_chunk_part(
-            reservation, part_no=part_no, bytes_=written, now=now,
-        )
-    except ValueError as e:
-        _safe_unlink(incoming)
-        raise HTTPException(
-            status_code=409,
-            detail=str(e),
-        ) from e
-    except asyncio.CancelledError:
-        _safe_unlink(incoming)
-        await _drop_session(storage, dest.parent, reservation)
-        raise
-    except Exception as e:
-        _safe_unlink(incoming)
-        await _drop_session(storage, dest.parent, reservation)
-        log.exception(
-            "files: part accounting failed %s/%s: %s", upload_id, part_no, e,
-        )
-        raise HTTPException(
-            status_code=500, detail=f"Part accounting failed: {e}",
-        ) from e
-
-    try:
-        await asyncio.to_thread(incoming.replace, dest)
-    except asyncio.CancelledError:
-        _safe_unlink(incoming)
-        await _drop_session(storage, dest.parent, reservation)
-        raise
-    except OSError as e:
-        _safe_unlink(incoming)
-        await _drop_session(storage, dest.parent, reservation)
-        log.exception("files: part commit failed %s/%s: %s", upload_id, part_no, e)
-        raise HTTPException(status_code=500, detail=f"Part commit failed: {e}") from e
-
-    parts_received, _ = await db.session_progress(upload_id)
-    return PartResponse(
-        upload_id=upload_id, part_no=part_no, bytes=written,
-        parts_received=parts_received, parts_total=int(session["parts_total"]),
-    )
 
 
-@router.post("/upload-sessions/{upload_id}/complete", response_model=UploadResponse)
-async def complete_upload_session(
-    upload_id: str,
-    request: Request,
-    me: AuthedUser = Depends(require_user),
-) -> UploadResponse:
-    """Assemble the parts and hand the result to the shared ingest path."""
-    _refuse_unavailable_private_processing()
-    user = me.email
-    db = _get_uploads_db(request)
-    storage = _get_storage_lifecycle(request)
-
-    qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
-    text_embedder = getattr(request.app.state, "text_embedder", None)
-    image_embedder = getattr(request.app.state, "image_embedder", None)
-    if qdrant is None or text_embedder is None:
-        raise HTTPException(status_code=503, detail="KB is not initialized.")
-
-    session = await db.get_session(upload_id, user=user)
-    if session is None:
-        raise HTTPException(status_code=404, detail="No such upload session.")
-    _refuse_unavailable_private_processing(session)
-
-    parts_total = int(session["parts_total"])
-    received = await db.received_part_numbers(upload_id)
-    missing = sorted(set(range(parts_total)) - received)
-    if missing:
-        # Don't assemble a file with holes in it — the sniff would read
-        # whatever landed and the user would get a baffling 415.
-        raise HTTPException(
-            status_code=409,
-            detail=f"Incomplete upload: {len(missing)} part(s) missing, first is {missing[0]}.",
-        )
-
-    text_col, image_col = await ensure_user_collections(qdrant, user)
-    max_total = _max_user_bytes(request)
-    reservation = StorageReservation(upload_id, user, "chunked", int(session["total_bytes"]))
-
-    filename = str(session["filename"])
-    file_id = str(uuid.uuid4())
-    ext = Path(filename).suffix.lower()
-    dest = _upload_root(request) / sanitize_user(user) / f"{file_id}{ext}"
-    session_dir = _session_dir(request, user, upload_id)
-
-    written = await asyncio.to_thread(_assemble_parts, session_dir, dest, parts_total)
-    if written != int(session["total_bytes"]):
-        _safe_unlink(dest)
-        await _drop_session(storage, session_dir, reservation)
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Assembled size {written} does not match the declared "
-                f"{int(session['total_bytes'])} bytes."
-            ),
-        )
-
-    try:
-        result = await _validate_and_ingest(
-            request,
-            dest,
-            user=user,
-            file_id=file_id,
-            filename=filename,
-            written=written,
-            max_total=max_total,
-            qdrant=qdrant,
-            text_embedder=text_embedder,
-            image_embedder=image_embedder,
-            storage=storage,
-            reservation=reservation,
-            text_col=text_col,
-            image_col=image_col,
-        )
-    finally:
-        # Parts are scratch either way: on success they're redundant, on
-        # failure the client must reopen a session rather than retry into a
-        # half-validated one.
-        await _drop_session(storage, session_dir, reservation)
-
-    log.info(
-        "files: session complete user=%s upload_id=%s file_id=%s bytes=%d",
-        user, upload_id, file_id, written,
-    )
-    return result
 
 
 def _assemble_parts(session_dir: Path, dest: Path, parts_total: int) -> int:
@@ -1676,74 +1291,6 @@ def _url_placeholder_name(url: str) -> str:
     return (candidate or "video")[:255]
 
 
-@router.post("/from-url", response_model=UploadResponse)
-async def ingest_from_url(
-    body: UrlIngestRequest,
-    request: Request,
-    me: AuthedUser = Depends(require_user),
-) -> UploadResponse:
-    """Accept a video URL and return immediately. The bytes arrive later.
-
-    **Nothing is downloaded in this request.** A 20-minute video is not an HTTP
-    request, and a route that waited for one would hold a worker for the whole
-    download and time out at the tunnel long before finishing.
-
-    The gates, in the order they run and for the reason they are in that order:
-
-      1. **Host allowlist, before anything else.** Not "whatever yt-dlp
-         accepts", which is ~1800 sites including plenty that serve arbitrary
-         files — that would make this a general-purpose file downloader with a
-         video-shaped name.
-      2. **Duplicate URL.** Cheap, and it is the single most likely mistake: a
-         double-clicked button or a link already in the list, each costing a
-         second download of the same 300 MB.
-      3. **Quota reservation.** Hold the configured per-URL ceiling because the
-         real size is not knowable yet. `fetch-result` verifies the actual bytes
-         fit that hold and converts it to stored usage.
-    """
-    _refuse_unavailable_private_processing()
-    user = me.email
-    db = _get_uploads_db(request)
-    storage = _get_storage_lifecycle(request)
-
-    source_url = _validate_fetch_url(body.url, _allowed_fetch_hosts(request))
-
-    existing = await db.find_by_source_url(user=user, source_url=source_url)
-    if existing is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"That link is already in your files as {existing['filename']!r} "
-                f"({existing['status']}). Delete it first to fetch it again."
-            ),
-        )
-
-    max_total = _max_user_bytes(request)
-    ceiling = _max_fetch_bytes(request)
-    file_id = str(uuid.uuid4())
-    filename = _url_placeholder_name(source_url)
-    await _sweep_stale_upload_sessions(request, storage)
-    now, expired_before = _reservation_window(request)
-    try:
-        await storage.reserve_url_fetch(
-            file_id=file_id,
-            user=user,
-            source_url=source_url,
-            filename=filename,
-            ceiling_bytes=ceiling,
-            max_user_bytes=max_total,
-            now=now,
-            expired_before=expired_before,
-        )
-    except QuotaExceededError as e:
-        raise _quota_http_error(e) from e
-    log.info(
-        "files: queued url fetch user=%s file_id=%s url=%r", user, file_id, source_url,
-    )
-    return UploadResponse(
-        file_id=file_id, filename=filename, mime="", bytes=0,
-        kind="video", collection="", chunks=0, status="fetch_pending",
-    )
 
 
 class FetchClaim(BaseModel):
@@ -2985,40 +2532,6 @@ async def requeue_job(
     return JobResultResponse(file_id=file_id, status=queued, chunks=0)
 
 
-@router.get("", response_model=ListResponse)
-async def list_files(
-    request: Request, me: AuthedUser = Depends(require_user),
-) -> ListResponse:
-    user = me.email
-    db = _get_uploads_db(request)
-
-    rows = await db.list_user(user)
-    # Projected straight from what `FileRow` declares, not a third hand-written
-    # column list. There was one here, and it had already drifted: `bytes`,
-    # `status`, `summary` and the rest were listed, `source_freed_at` was not —
-    # so the reclamation marker phase 38 added to `FileRow` and to the SELECT
-    # was silently `""` on every response, and the page's strikethrough could
-    # never render. Nothing errored, because the field has a default.
-    #
-    # "Adding a column means three places" was the lesson from the `summary`
-    # 500; this was the fourth, and it fails *quietly* rather than loudly.
-    # Driving the projection from the model removes it as a place at all —
-    # a field FileRow declares but the SELECT omits now raises `KeyError`
-    # here, which `TestListReturnsEveryFileRowField` already pins.
-    files = [FileRow(**{k: row[k] for k in FileRow.model_fields}) for row in rows]
-    total = sum(r.bytes for r in files)
-    return ListResponse(
-        user=user, files=files, total_bytes=total,
-        server_time=_dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
-        limits=Limits(
-            max_upload_bytes=_max_upload_bytes(request),
-            max_user_bytes=_max_user_bytes(request),
-            allowed_extensions=sorted(ALLOWED_EXTENSIONS),
-            chunked_max_bytes=_chunked_max_bytes(request),
-            part_size=_part_size(request),
-            fetch_hosts=sorted(_allowed_fetch_hosts(request)),
-        ),
-    )
 
 
 @router.post("/list", response_model=ServiceListResponse)
@@ -3027,35 +2540,7 @@ async def list_files_for_user(
     request: Request,
     _: None = Depends(require_service),
 ) -> ServiceListResponse:
-    """SERVICE: one named user's files, shaped for a model rather than a page.
-
-    Exists because the tools-server holds `KB_SERVICE_TOKEN` and **cannot
-    obtain a user JWT**, so it can never call `GET /v1/files` — that route
-    depends on `require_user`. Four phases in this campaign have now planned
-    around a service-token act-as that does not exist; check what a route
-    actually depends on before designing against it.
-
-    `require_service`, not `resolve_kb_caller`. The latter also accepts a user
-    JWT, and this route names its target user in the body — so a JWT-bearing
-    caller could read anyone's file list by typing a different email. The
-    security property here is the same one the job routes rely on: holding a
-    valid *user* token must not be enough to reach it.
-
-    That property alone is not sufficient, because the tools-server passes the
-    tool's `user` argument through to this body. The other half lives in
-    the declarative tool policy, whose argument binding overwrites the
-    model-supplied `user` with the authenticated pipeline user. **Both halves
-    are required.** Without that policy binding, a prompt naming another
-    user's email reaches their file list through this route.
-
-    POST rather than GET because the target is an email address: a query string
-    puts it in every access and proxy log along the way, and the sibling service
-    routes are POST regardless.
-
-    An unknown user gets an empty list, not a 404 — "you have not uploaded
-    anything" is a true and useful answer, and distinguishing an unknown user
-    from an empty one would leak which addresses exist.
-    """
+    """List one trusted owner's files; only the internal service may select it."""
     user = body.user.strip()
     if not user:
         raise HTTPException(status_code=422, detail="user is required.")
@@ -3328,32 +2813,6 @@ async def read_artifact(
     )
 
 
-@router.delete("/{file_id}", response_model=DeleteResponse)
-async def delete_file(
-    file_id: str, request: Request, me: AuthedUser = Depends(require_user),
-) -> DeleteResponse:
-    user = me.email
-    worker: FileDeletionWorker | None = getattr(
-        request.app.state,
-        "file_deletions",
-        None,
-    )
-    if worker is None:
-        raise HTTPException(status_code=503, detail="File deletion is not initialized.")
-
-    result = await worker.request(file_id, user=user)
-    log.info(
-        "files: delete user=%s file_id=%s known=%s completed=%s",
-        user,
-        file_id,
-        result.known,
-        result.completed,
-    )
-    return DeleteResponse(
-        file_id=file_id,
-        deleted=result.known,
-        pending_cleanup=result.known and not result.completed,
-    )
 
 
 def _read_generated_text(path: Path) -> str:

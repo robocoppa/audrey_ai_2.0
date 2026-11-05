@@ -7,7 +7,6 @@ import hashlib
 import json
 import socket
 from contextlib import asynccontextmanager
-from dataclasses import replace
 from types import SimpleNamespace
 
 import httpx
@@ -361,16 +360,12 @@ async def test_pause_during_model_access_lookup_fences_the_following_network_dis
     assert not state.resolved and not state.fetches and not state.clients
 
 
-@pytest.mark.parametrize("boundary", ["disabled", "agents_disabled", "bot", "bots", "model", "private"])
+@pytest.mark.parametrize("boundary", ["disabled", "agents_disabled", "bots", "model", "private"])
 async def test_live_account_and_policy_requirements_apply_before_even_a_baseline_fetch(state, boundary, monkeypatch):
     if boundary == "disabled":
         state.app.state.cfg.raw["watches"] = {"enabled": False}
     elif boundary == "agents_disabled":
         state.app.state.cfg.raw["agent_tasks"] = {"enabled": False}
-    elif boundary == "bot":
-        async def bot_principal(**_kwargs):
-            return replace(state.owner, role="bot")
-        monkeypatch.setattr(state.store, "get_principal", bot_principal)
     elif boundary == "bots":
         await _add_owner_to_bots(state)
     elif boundary == "model":

@@ -17,8 +17,9 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel
 from starlette.types import Message, Receive, Scope, Send
 
+from audrey import file_service
 from audrey.app_state import AttachmentSnapshot
-from audrey.auth import AuthedUser, require_scope
+from audrey.auth import require_scope
 from audrey.identity import Principal
 from audrey.kb.extract import (
     EmptyExtractionError,
@@ -110,22 +111,6 @@ class NativeFileTextResponse(BaseModel):
     total_chars: int
 
 
-def _compat_user(principal: Principal) -> AuthedUser:
-    """Project a native principal into the legacy upload service identity.
-
-    The compatibility service already keys every operation by Audrey's durable
-    ``storage_namespace``. Constructing this value server-side prevents a
-    browser from selecting an email or another user's namespace.
-    """
-
-    return AuthedUser(
-        email=principal.storage_namespace,
-        role=principal.role,
-        display_name=principal.display_name,
-        principal=principal,
-    )
-
-
 def native_image_limit(cfg: object) -> int:
     """Use the same image cap as the vision transcription path."""
 
@@ -184,7 +169,7 @@ async def _list_for_owner(
     request: Request,
     principal: Principal,
 ) -> upload_routes.ListResponse:
-    return await upload_routes.list_files(request, _compat_user(principal))
+    return await file_service.list_files(request, principal)
 
 
 async def _owned_row(
@@ -752,9 +737,9 @@ async def upload_file(
     file: UploadFile = File(...),
     principal: Principal = Depends(_files_access),
 ) -> NativeFileUploadResponse:
-    result = await upload_routes.upload_file(
+    result = await file_service.upload_file(
         request=request,
-        me=_compat_user(principal),
+        principal=principal,
         file=file,
     )
     return _upload_response(result)
@@ -768,10 +753,10 @@ async def fetch_file_from_url(
 ) -> NativeFileUploadResponse:
     """Queue an allowlisted video URL using the authenticated owner's namespace."""
 
-    result = await upload_routes.ingest_from_url(
+    result = await file_service.ingest_from_url(
         body=payload,
         request=request,
-        me=_compat_user(principal),
+        principal=principal,
     )
     return _upload_response(result)
 
@@ -785,10 +770,10 @@ async def open_upload_session(
     request: Request,
     principal: Principal = Depends(_files_access),
 ) -> upload_routes.SessionOpenResponse:
-    return await upload_routes.open_upload_session(
+    return await file_service.open_upload_session(
         body=payload,
         request=request,
-        me=_compat_user(principal),
+        principal=principal,
     )
 
 
@@ -802,11 +787,11 @@ async def upload_part(
     request: Request,
     principal: Principal = Depends(_files_access),
 ) -> upload_routes.PartResponse:
-    return await upload_routes.upload_part(
+    return await file_service.upload_part(
         upload_id=upload_id,
         part_no=part_no,
         request=request,
-        me=_compat_user(principal),
+        principal=principal,
     )
 
 
@@ -819,10 +804,10 @@ async def complete_upload_session(
     request: Request,
     principal: Principal = Depends(_files_access),
 ) -> NativeFileUploadResponse:
-    result = await upload_routes.complete_upload_session(
+    result = await file_service.complete_upload_session(
         upload_id=upload_id,
         request=request,
-        me=_compat_user(principal),
+        principal=principal,
     )
     return _upload_response(result)
 
@@ -833,10 +818,10 @@ async def delete_file(
     request: Request,
     principal: Principal = Depends(_files_access),
 ) -> NativeFileDeleteResponse:
-    result = await upload_routes.delete_file(
+    result = await file_service.delete_file(
         file_id=file_id,
         request=request,
-        me=_compat_user(principal),
+        principal=principal,
     )
     if not result.deleted:
         raise HTTPException(status_code=404, detail="File not found.")

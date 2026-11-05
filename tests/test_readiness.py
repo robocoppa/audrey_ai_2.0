@@ -347,15 +347,15 @@ async def test_admin_readiness_sets_503_only_for_unready_snapshot():
 
 
 def test_admin_readiness_route_requires_admin():
-    from audrey.auth import require_admin
+    from audrey.auth import require_admin_principal
     from audrey.routes import admin as admin_module
 
     route = next(
         route
         for route in admin_module.router.routes
-        if route.path == "/v1/admin/readiness"
+        if route.path == "/api/admin/readiness"
     )
-    assert require_admin in {dependency.call for dependency in route.dependant.dependencies}
+    assert require_admin_principal in {dependency.call for dependency in route.dependant.dependencies}
 
 
 @pytest.mark.asyncio

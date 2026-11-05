@@ -17,7 +17,7 @@ import httpx
 import tiktoken
 from fastapi import HTTPException, Request
 
-from audrey.auth import AuthedUser
+from audrey.identity import Principal
 from audrey.net.public_fetch import fetch_public_asset, resolve_public_url
 from audrey.net.remote_input import parse_remote_asset
 from audrey.routes.app.files import (
@@ -87,7 +87,7 @@ async def validate_file_prompt(messages: list[dict[str, Any]]) -> None:
 async def response_input_messages(
     payload: ResponseCreateRequest,
     request: Request,
-    me: AuthedUser,
+    me: Principal,
 ) -> list[dict[str, Any]]:
     """Finish remote admission before opening generation or an SSE stream."""
     remote = not isinstance(payload.input, str) and any(
@@ -115,10 +115,8 @@ async def _response_input_messages(payload, request, me) -> list[dict[str, Any]]
         for item in payload.input if isinstance(item, ResponseInputMessage) and isinstance(item.content, list)
         for part in item.content if getattr(part, "file_id", None) is not None or _remote_url(part) is not None
     ]
-    principal = getattr(me, "principal", None)
+    principal = me
     if file_parts:
-        if principal is None:
-            raise HTTPException(status_code=401, detail="An Audrey account is required for file inputs.")
         if len(file_parts) > MAX_FILE_PARTS:
             raise HTTPException(status_code=422, detail=f"At most {MAX_FILE_PARTS} file references are allowed per response.")
         images = sum(

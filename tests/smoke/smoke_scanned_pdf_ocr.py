@@ -173,7 +173,7 @@ def _wait_until_ready(file_id: str) -> tuple[dict[str, Any], int, float]:
 
 def _repair_until_ready() -> str:
     _request(
-        "/v1/admin/repair",
+        "/api/admin/repair",
         token=ADMIN_TOKEN,
         method="POST",
         expected=frozenset({202}),
@@ -181,7 +181,7 @@ def _repair_until_ready() -> str:
     deadline = time.monotonic() + 180
     last_status = ""
     while time.monotonic() < deadline:
-        _status, repair = _json_request("/v1/admin/repair-status", token=ADMIN_TOKEN)
+        _status, repair = _json_request("/api/admin/repair-status", token=ADMIN_TOKEN)
         last_status = str(repair.get("status") or "")
         if last_status == "ready":
             return last_status

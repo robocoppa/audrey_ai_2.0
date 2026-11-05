@@ -40,9 +40,8 @@ if TYPE_CHECKING:
 
 # ── SSRF guards ───────────────────────────────────────────────────────
 #
-# `_fetch_image` is called by the public `/v1/kb/query/image` route with
-# whatever URL an authenticated user supplied. Without these guards a
-# user could:
+# `_fetch_image` is called by the service-only `/v1/kb/query/image` route
+# with a URL relayed by the tools sidecar. Without these guards a caller could:
 #   - Probe internal services via redirects ("does qdrant:6333 respond?")
 #   - Hit Audrey's own loopback metrics/admin endpoints
 #   - OOM the container with a multi-GB response (no streaming cap)

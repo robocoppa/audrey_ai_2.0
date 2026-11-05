@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -81,11 +82,11 @@ def _listing() -> upload_routes.ListResponse:
 def test_native_list_uses_server_owned_namespace_and_hides_compat_fields(monkeypatch):
     captured = SimpleNamespace(user="")
 
-    async def fake_list(request, me):
-        captured.user = me.email
+    async def fake_list(request, principal):
+        captured.user = principal.storage_namespace
         return _listing()
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
 
     app = _app()
     app.state.cfg = SimpleNamespace(raw={"vision": {"max_images_per_turn": 2}})
@@ -145,10 +146,10 @@ def test_native_file_list_briefs_an_existing_verbose_video_summary(monkeypatch):
         "The streamer is wearing earphones and a dark shirt."
     )
 
-    async def fake_list(request, me):
+    async def fake_list(request, principal):
         return listing
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
 
     response = TestClient(_app()).get("/api/files")
 
@@ -161,10 +162,10 @@ def test_native_file_list_briefs_an_existing_verbose_video_summary(monkeypatch):
 
 
 def test_native_get_returns_only_a_file_in_the_owner_listing(monkeypatch):
-    async def fake_list(request, me):
+    async def fake_list(request, principal):
         return _listing()
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
     client = TestClient(_app())
 
     assert client.get("/api/files/file_123").status_code == 200
@@ -181,11 +182,11 @@ def test_native_original_download_is_owner_bound_attachment_with_ranges(monkeypa
     owner_dir.mkdir()
     (owner_dir / "file_123.txt").write_bytes(content)
 
-    async def fake_list(request, me):
-        assert me.email == "private-storage-123"
+    async def fake_list(request, principal):
+        assert principal.storage_namespace == "private-storage-123"
         return listing
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
     monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
     client = TestClient(_app())
 
@@ -214,10 +215,10 @@ def test_native_original_download_is_owner_bound_attachment_with_ranges(monkeypa
 def test_native_original_download_reports_reclaimed_or_missing_source(monkeypatch, tmp_path):
     listing = _listing()
 
-    async def fake_list(request, me):
+    async def fake_list(request, principal):
         return listing
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
     monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
     client = TestClient(_app())
 
@@ -241,11 +242,11 @@ def test_native_document_text_is_owner_bound_and_paged_without_gaps(monkeypatch,
     foreign_dir.mkdir()
     (foreign_dir / "file_foreign.txt").write_text("private", encoding="utf-8")
 
-    async def fake_list(request, me):
-        assert me.email == "private-storage-123"
+    async def fake_list(request, principal):
+        assert principal.storage_namespace == "private-storage-123"
         return listing
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
     monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
     client = TestClient(_app())
 
@@ -284,11 +285,11 @@ def test_native_scanned_pdf_reader_uses_derived_ocr_text(monkeypatch, tmp_path):
         encoding="utf-8",
     )
 
-    async def fake_list(request, me):
-        assert me.email == "private-storage-123"
+    async def fake_list(request, principal):
+        assert principal.storage_namespace == "private-storage-123"
         return listing
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
     monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
 
     response = TestClient(_app()).get("/api/files/file_123/text")
@@ -311,11 +312,11 @@ def test_native_image_preview_is_owner_bound_resized_and_strips_metadata(
         owner_dir / "file_123.png", pnginfo=metadata,
     )
 
-    async def fake_list(request, me):
-        assert me.email == "private-storage-123"
+    async def fake_list(request, principal):
+        assert principal.storage_namespace == "private-storage-123"
         return listing
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
     monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
     client = TestClient(_app())
 
@@ -353,11 +354,11 @@ def test_native_video_artifact_uses_exact_owned_id_and_pages_on_lines(monkeypatc
         )
     )
 
-    async def fake_list(request, me):
-        assert me.email == "private-storage-123"
+    async def fake_list(request, principal):
+        assert principal.storage_namespace == "private-storage-123"
         return listing
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
     monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
     owner_dir = tmp_path / upload_routes.sanitize_user("private-storage-123")
     owner_dir.mkdir()
@@ -411,10 +412,10 @@ def test_native_audio_artifacts_offer_transcript_and_summary_but_not_visual(
     (owner_dir / "file_123.transcript.txt").write_text("Spoken words.", encoding="utf-8")
     (owner_dir / "file_123.summary.txt").write_text("A short interview.", encoding="utf-8")
 
-    async def fake_list(request, me):
+    async def fake_list(request, principal):
         return listing
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
     monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
     client = TestClient(_app())
 
@@ -443,10 +444,10 @@ def test_native_pdf_offers_summary_as_an_artifact(monkeypatch, tmp_path):
         encoding="utf-8",
     )
 
-    async def fake_list(request, me):
+    async def fake_list(request, principal):
         return listing
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
     monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
     client = TestClient(_app())
 
@@ -465,11 +466,11 @@ def test_native_video_artifact_downloads_existing_sidecars_after_source_reclamat
     listing.files[0].mime = "video/mp4"
     listing.files[0].source_freed_at = "2026-09-01T00:00:00+00:00"
 
-    async def fake_list(request, me):
-        assert me.email == "private-storage-123"
+    async def fake_list(request, principal):
+        assert principal.storage_namespace == "private-storage-123"
         return listing
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
     monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
     owner_dir = tmp_path / upload_routes.sanitize_user("private-storage-123")
     owner_dir.mkdir()
@@ -518,10 +519,10 @@ def test_native_video_artifact_absence_and_validation(monkeypatch, tmp_path):
     listing = _listing()
     listing.files[0].mime = "video/mp4"
 
-    async def fake_list(request, me):
+    async def fake_list(request, principal):
         return listing
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
     monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
     client = TestClient(_app())
 
@@ -558,11 +559,11 @@ async def test_attachment_resolution_is_ready_owner_bound_and_indistinguishable(
         )
     )
 
-    async def fake_list(request, me):
-        assert me.email == "private-storage-123"
+    async def fake_list(request, principal):
+        assert principal.storage_namespace == "private-storage-123"
         return listing
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
     request = SimpleNamespace()
     resolved = await native_files.resolve_owned_attachments(
         request,
@@ -590,8 +591,8 @@ async def test_attachment_resolution_is_ready_owner_bound_and_indistinguishable(
 def test_native_upload_delegates_bytes_with_server_owned_identity(monkeypatch):
     captured = SimpleNamespace(user="", content=b"")
 
-    async def fake_upload(*, request, me, file):
-        captured.user = me.email
+    async def fake_upload(*, request, principal, file):
+        captured.user = principal.storage_namespace
         captured.content = await file.read()
         return upload_routes.UploadResponse(
             file_id="file_uploaded",
@@ -604,7 +605,7 @@ def test_native_upload_delegates_bytes_with_server_owned_identity(monkeypatch):
             status="ready",
         )
 
-    monkeypatch.setattr(native_files.upload_routes, "upload_file", fake_upload)
+    monkeypatch.setattr(native_files.file_service, "upload_file", fake_upload)
 
     response = TestClient(_app()).post(
         "/api/files",
@@ -629,8 +630,8 @@ def test_native_upload_delegates_bytes_with_server_owned_identity(monkeypatch):
 def test_native_url_fetch_queues_for_authenticated_owner_without_compat_fields(monkeypatch):
     captured = SimpleNamespace(user="", url="")
 
-    async def fake_fetch(*, body, request, me):
-        captured.user = me.email
+    async def fake_fetch(*, body, request, principal):
+        captured.user = principal.storage_namespace
         captured.url = body.url
         return upload_routes.UploadResponse(
             file_id="file_video",
@@ -643,7 +644,7 @@ def test_native_url_fetch_queues_for_authenticated_owner_without_compat_fields(m
             status="fetch_pending",
         )
 
-    monkeypatch.setattr(native_files.upload_routes, "ingest_from_url", fake_fetch)
+    monkeypatch.setattr(native_files.file_service, "ingest_from_url", fake_fetch)
     response = TestClient(_app()).post(
         "/api/files/from-url",
         json={"url": "https://example.com/watch?v=video-id", "user": "someone-else"},
@@ -665,13 +666,13 @@ def test_native_url_fetch_queues_for_authenticated_owner_without_compat_fields(m
 
 
 def test_native_url_fetch_preserves_duplicate_and_host_rejections(monkeypatch):
-    async def rejected(*, body, request, me):
+    async def rejected(*, body, request, principal):
         raise HTTPException(
             status_code=409 if "duplicate" in body.url else 403,
             detail="Already queued" if "duplicate" in body.url else "Host not allowed",
         )
 
-    monkeypatch.setattr(native_files.upload_routes, "ingest_from_url", rejected)
+    monkeypatch.setattr(native_files.file_service, "ingest_from_url", rejected)
     client = TestClient(_app())
     duplicate = client.post("/api/files/from-url", json={"url": "https://example.com/duplicate"})
     blocked = client.post("/api/files/from-url", json={"url": "https://evil.test/video"})
@@ -685,16 +686,19 @@ def test_native_url_fetch_preserves_duplicate_and_host_rejections(monkeypatch):
 def test_native_delete_preserves_deferred_cleanup_and_uses_404_for_unknown(monkeypatch):
     calls: list[tuple[str, str]] = []
 
-    async def fake_delete(*, file_id, request, me):
-        calls.append((file_id, me.email))
+    async def fake_delete(*, file_id, request, principal):
+        calls.append((file_id, principal.storage_namespace))
         return upload_routes.DeleteResponse(
             file_id=file_id,
             deleted=file_id == "known",
             pending_cleanup=file_id == "known",
         )
 
-    monkeypatch.setattr(native_files.upload_routes, "delete_file", fake_delete)
-    client = TestClient(_app())
+    monkeypatch.setattr(native_files.file_service, "delete_file", fake_delete)
+    app = _app()
+    prune = AsyncMock()
+    app.state.application_store = SimpleNamespace(projects=SimpleNamespace(prune_file=prune))
+    client = TestClient(app)
 
     deferred = client.delete("/api/files/known")
     missing = client.delete("/api/files/unknown")
@@ -706,10 +710,35 @@ def test_native_delete_preserves_deferred_cleanup_and_uses_404_for_unknown(monke
         "pending_cleanup": True,
     }
     assert missing.status_code == 404
+    prune.assert_awaited_once_with(user_id="usr_123", file_id="known")
     assert calls == [
         ("known", "private-storage-123"),
         ("unknown", "private-storage-123"),
     ]
+
+
+def test_native_file_list_shares_owned_service_and_retires_compatibility_route(monkeypatch):
+    owner = _principal()
+    callers = []
+
+    async def owned_list(request, principal):
+        callers.append(principal)
+        return _listing()
+
+    monkeypatch.setattr(native_files.file_service, "list_files", owned_list)
+    app = _app()
+    app.include_router(upload_routes.router)
+    app.dependency_overrides[native_files._files_access] = lambda: owner
+    client = TestClient(app)
+
+    native = client.get("/api/files")
+    compatibility = client.get("/v1/files")
+
+    assert native.status_code == 200
+    assert native.json()["items"][0]["id"] == "file_123"
+    assert compatibility.status_code == 404
+    assert owner.email != owner.storage_namespace
+    assert callers == [owner]
 
 
 def test_native_files_require_authentication():

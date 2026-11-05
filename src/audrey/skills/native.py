@@ -61,7 +61,6 @@ async def resolve_native_auto_skill(
         registry is None
         or not getattr(registry, "auto_select", False)
         or not registry.enabled
-        or principal.role == "bot"
         or "bots" in principal.groups
         or virtual_model.startswith("audrey_passthrough/")
     ):

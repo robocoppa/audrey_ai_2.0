@@ -270,11 +270,9 @@ class ChatCompletionRequest(BaseModel):
     user: str | None = Field(
         default=None,
         description=(
-            "OpenAI-spec passthrough field. Audrey **ignores** this for "
-            "identity purposes — the canonical user id comes from the "
-            "Authorization header (require_user → AuthedUser.email). Kept "
-            "in the schema for OpenAI client compatibility; logged for "
-            "debugging client-vs-resolved identity drift but never trusted."
+            "OpenAI-compatible field accepted and ignored. Audrey resolves "
+            "identity from verified authentication evidence and uses the "
+            "principal's stable storage namespace for personal data."
         ),
     )
 

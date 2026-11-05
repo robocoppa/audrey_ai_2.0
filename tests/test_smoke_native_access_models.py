@@ -196,7 +196,7 @@ class _FakeDeployment:
         if path == "/api/conversations/con_smoke" and method == "DELETE":
             self.conversation_deleted = True
             return 204, b"", headers
-        if path == "/v1/me/chat-history/con_smoke" and method == "DELETE":
+        if path == "/api/me/chat-history/con_smoke" and method == "DELETE":
             self.archive_deleted = True
             return 202, b"{}", headers
         if path == "/api/tokens/pat_smoke" and method == "DELETE":

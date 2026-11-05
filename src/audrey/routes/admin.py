@@ -13,18 +13,16 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ValidationError
 
-from audrey.auth import (
-    AuthedUser,
-    require_admin,
-)
+from audrey.auth import require_admin_principal
 from audrey.chat_projection import combine_repair_stats
+from audrey.identity import Principal
 from audrey.kb.reconcile import reconcile_once
 from audrey.readiness import ReadinessStatus
 from audrey.routes.user_data import RepairQueueStatus, UserDataRepairStatus
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/v1/admin", tags=["admin"])
+router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 
@@ -107,7 +105,7 @@ def _repair_state(queues: tuple[RepairQueueStatus, ...]) -> str:
 async def readiness_status(
     request: Request,
     response: Response,
-    _: AuthedUser = Depends(require_admin),
+    _: Principal = Depends(require_admin_principal),
 ) -> ReadinessStatus:
     """Current sanitized readiness; 503 only for required component failure."""
     collector = getattr(request.app.state, "readiness", None)
@@ -122,7 +120,7 @@ async def readiness_status(
 @router.post("/skills/rediscover", response_model=SkillRediscoverResponse)
 async def skills_rediscover(
     request: Request,
-    me: AuthedUser = Depends(require_admin),
+    me: Principal = Depends(require_admin_principal),
 ) -> SkillRediscoverResponse:
     """Atomically reload bundles and return sanitized diagnostics."""
 
@@ -160,7 +158,7 @@ async def skills_rediscover(
 @router.get("/repair-status", response_model=UserDataRepairStatus)
 async def repair_status(
     request: Request,
-    _: AuthedUser = Depends(require_admin),
+    _: Principal = Depends(require_admin_principal),
 ) -> UserDataRepairStatus:
     """Global repair counts without user identities, payloads, or raw errors."""
     uploads_db = getattr(request.app.state, "uploads_db", None)
@@ -238,7 +236,7 @@ async def repair_status(
 )
 async def repair(
     request: Request,
-    me: AuthedUser = Depends(require_admin),
+    me: Principal = Depends(require_admin_principal),
 ) -> AdminRepairTriggerResponse:
     """Wake local owners and run one bounded sidecar repair pass."""
     file_worker = getattr(request.app.state, "file_deletions", None)
@@ -328,7 +326,7 @@ async def repair(
 )
 async def rebuild_canonical_chat_projection(
     request: Request,
-    me: AuthedUser = Depends(require_admin),
+    me: Principal = Depends(require_admin_principal),
 ) -> ChatProjectionRebuildResponse:
     """Replay canonical turns through the durable chat-search projection."""
 
@@ -354,7 +352,7 @@ async def rebuild_canonical_chat_projection(
 @router.post("/chat_archive/prune")
 async def chat_archive_prune(
     request: Request,
-    me: AuthedUser = Depends(require_admin),
+    me: Principal = Depends(require_admin_principal),
 ) -> dict:
     """Apply the chat archive's retention policy on demand.
 
@@ -381,7 +379,7 @@ async def chat_archive_prune(
 @router.get("/chat_archive/stats")
 async def chat_archive_stats(
     request: Request,
-    _: AuthedUser = Depends(require_admin),
+    _: Principal = Depends(require_admin_principal),
 ) -> dict:
     """Counts and latest repair state from the chat archive.
 
@@ -409,7 +407,7 @@ async def chat_archive_stats(
 @router.post("/kb/reconcile")
 async def kb_reconcile(
     request: Request,
-    me: AuthedUser = Depends(require_admin),
+    me: Principal = Depends(require_admin_principal),
 ) -> dict:
     """Trigger one KB reconcile sweep on demand.
 

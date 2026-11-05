@@ -114,7 +114,7 @@ def _export_conversation(conversation_id: str) -> list[dict[str, Any]]:
         if cursor:
             query["cursor"] = cursor
         _, page = _json_request(
-            f"/v1/me/chat-history/export?{urlencode(query)}",
+            f"/api/me/chat-history/export?{urlencode(query)}",
             token=USER_TOKEN,
         )
         matches.extend(
@@ -167,7 +167,7 @@ def _wait_for_projection(
 
 def _repair_until_ready() -> dict[str, Any]:
     _json_request(
-        "/v1/admin/repair",
+        "/api/admin/repair",
         token=ADMIN_TOKEN,
         method="POST",
         expected=frozenset({202}),
@@ -176,7 +176,7 @@ def _repair_until_ready() -> dict[str, Any]:
     last: dict[str, Any] = {}
     while time.monotonic() < deadline:
         _, last = _json_request(
-            "/v1/admin/repair-status",
+            "/api/admin/repair-status",
             token=ADMIN_TOKEN,
         )
         if last.get("status") == "ready":
@@ -213,7 +213,7 @@ def _best_effort_cleanup(conversation_id: str, cancel_url: str) -> None:
         expected=frozenset({204, 404, 409}),
     )
     _request(
-        f"/v1/me/chat-history/{conversation_id}",
+        f"/api/me/chat-history/{conversation_id}",
         token=USER_TOKEN,
         method="DELETE",
         expected=frozenset({202, 404}),
@@ -267,7 +267,7 @@ def main() -> int:
         result["assistant_chars"] = len(canonical["assistant"])
 
         _, rebuild = _json_request(
-            "/v1/admin/chat_archive/rebuild-canonical",
+            "/api/admin/chat_archive/rebuild-canonical",
             token=ADMIN_TOKEN,
             method="POST",
             expected=frozenset({202}),

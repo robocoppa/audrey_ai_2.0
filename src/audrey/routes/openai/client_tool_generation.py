@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from audrey.auth import AuthedUser
+from audrey.identity import Principal
 from audrey.metrics import pipeline_seconds, pipeline_total
 from audrey.models.ollama import OllamaError
 from audrey.pipeline.messages import last_user_text
@@ -62,7 +62,7 @@ async def validate_client_tool_prompt(payload: ResponseCreateRequest) -> None:
     await validate_file_prompt(messages)
 
 
-async def prepare_client_tool_model(payload: ResponseCreateRequest, request: Request, me: AuthedUser) -> tuple[str, str]:
+async def prepare_client_tool_model(payload: ResponseCreateRequest, request: Request, me: Principal) -> tuple[str, str]:
     """Check existing passthrough policy and actual tool capability before fetch."""
     app = request.app
     target = _resolve_passthrough_model(payload.model, app.state.cfg, app.state.registry, me)
@@ -206,7 +206,7 @@ def _observe(started: float, outcome: str) -> None:
     pipeline_total.labels(mode="responses_tools", task_type="passthrough", outcome=outcome).inc()
 
 
-async def generate_client_tool_response(payload: ResponseCreateRequest, request: Request, me: AuthedUser,
+async def generate_client_tool_response(payload: ResponseCreateRequest, request: Request, me: Principal,
                                         messages: list[dict[str, Any]], target: tuple[str, str]):
     app = request.app
     concrete, location = target
@@ -218,11 +218,11 @@ async def generate_client_tool_response(payload: ResponseCreateRequest, request:
     messages = [message.model_dump(exclude_none=True, exclude={"metadata"}) for message in chat.messages]
     effort = payload.reasoning.effort if payload.reasoning is not None else None
     think = await _passthrough_think(app.state.ollama, app.state.cfg, concrete, effort=effort)
-    async with app.state.inflight.slot(me.email):
+    async with app.state.inflight.slot(me.storage_namespace):
         messages, _ = await describe_for_text_model(
             messages, ollama=app.state.ollama, registry=app.state.registry,
             health=app.state.health, gate=app.state.gate, cfg=app.state.cfg,
-            target_model=concrete, user_question=last_user_text(messages), user_id=me.email,
+            target_model=concrete, user_question=last_user_text(messages), user_id=me.storage_namespace,
         )
     # Image descriptions are new provider text; apply the same aggregate
     # budget after that adaptation as after document hydration.
@@ -231,7 +231,7 @@ async def generate_client_tool_response(payload: ResponseCreateRequest, request:
         {"content": json.dumps(chat.tools or [], ensure_ascii=False)},
     ])
     kwargs = dict(concrete=concrete, location=location, messages=messages,
-                  options=_options_from_request(chat), user_id=me.email, tools=chat.tools,
+                  options=_options_from_request(chat), user_id=me.storage_namespace, tools=chat.tools,
                   timeout_s=float(app.state.cfg.timeouts.get("medium", 180)), think=think)
     if payload.stream:
         async def body():
@@ -241,7 +241,7 @@ async def generate_client_tool_response(payload: ResponseCreateRequest, request:
             calls: list[dict] = []
             try:
                 yield session.start()
-                async with app.state.inflight.slot(me.email):
+                async with app.state.inflight.slot(me.storage_namespace):
                     async with aclosing(passthrough_stream(app.state.ollama, app.state.gate, **kwargs)) as stream:
                         async for chunk in stream:
                             if not isinstance(chunk, dict) or not isinstance(chunk.get("message", {}), dict):
@@ -284,7 +284,7 @@ async def generate_client_tool_response(payload: ResponseCreateRequest, request:
     started = time.perf_counter()
     outcome = "error"
     try:
-        async with app.state.inflight.slot(me.email):
+        async with app.state.inflight.slot(me.storage_namespace):
             raw = await passthrough_chat(app.state.ollama, app.state.gate, **kwargs)
         if not isinstance(raw, dict) or not isinstance(raw.get("message", {}), dict):
             raise HTTPException(status_code=502, detail="Provider response has an invalid shape.")

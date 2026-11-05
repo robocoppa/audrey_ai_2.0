@@ -33,8 +33,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from audrey.auth import AuthedUser, require_user
+from audrey.auth import require_principal
+from audrey.identity import Principal
 from audrey.kb.uploads_db import UploadsDB
+from audrey.routes.app.files import router as native_files_router
 from audrey.routes.files import FileRow, _waiting_for_s
 from audrey.routes.files import router as files_router
 
@@ -50,11 +52,14 @@ def db(tmp_path: Path) -> UploadsDB:
 def _build_app(db: UploadsDB, tmp_path: Path) -> FastAPI:
     app = FastAPI()
     app.include_router(files_router)
-    # `require_user` proxies the bearer to OWUI, which is not reachable from a
-    # hermetic test. These cases are about the projection and the clock, not
-    # about auth — `test_files_service_list.py` owns that.
-    app.dependency_overrides[require_user] = lambda: AuthedUser(
-        email=ME, role="user")
+    app.include_router(native_files_router, prefix="/api")
+    # Resolve the account locally: these cases cover the projection and clock.
+    # Authentication boundaries are exercised separately.
+    app.dependency_overrides[require_principal] = lambda: Principal(
+        user_id="usr_files", storage_namespace=ME, provider="test",
+        provider_subject="file-owner", email="profile@example.com", display_name="Alice",
+        role="user", status="active", auth_method="test",
+    )
     app.state.uploads_db = db
     app.state.cfg = SimpleNamespace(
         env=SimpleNamespace(kb_service_token=SECRET),
@@ -115,10 +120,10 @@ class TestTheThreePlacesLesson:
         await _add(db, "v1")
         await db.mark_source_freed("v1", freed_at="2026-08-02T00:00:00+00:00")
 
-        r = TestClient(_build_app(db, tmp_path)).get("/v1/files")
+        r = TestClient(_build_app(db, tmp_path)).get("/api/files")
 
         assert r.status_code == 200
-        assert r.json()["files"][0]["source_freed_at"] == "2026-08-02T00:00:00+00:00"
+        assert r.json()["items"][0]["source_freed_at"] == "2026-08-02T00:00:00+00:00"
 
 
 class TestWaitingFor:
@@ -203,7 +208,7 @@ class TestServerTime:
         broken job queue rather than a wrong clock."""
         await _add(db, "v1")
 
-        r = TestClient(_build_app(db, tmp_path)).get("/v1/files")
+        r = TestClient(_build_app(db, tmp_path)).get("/api/files")
 
         assert r.status_code == 200
         parsed = _dt.datetime.fromisoformat(r.json()["server_time"])

@@ -3,7 +3,7 @@
 Each tool server exposes a FastAPI app with one or more POST endpoints
 under the `tools` tag. Audrey reads `/openapi.json` at startup, retries an
 empty or degraded catalog rapidly for a bounded window, then refreshes it
-every minute. `POST /v1/tools/rediscover` also requests an immediate refresh.
+every minute. `POST /api/admin/tools/rediscover` also requests an immediate refresh.
 
 Output shape per discovered tool — matches Ollama's `/api/chat` tool schema:
     {

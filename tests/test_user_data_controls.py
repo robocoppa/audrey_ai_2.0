@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from audrey.app_state import ApplicationStore, PersonalTokenAuthenticationError
-from audrey.auth import AuthedUser, require_user
+from audrey.auth import require_user
 from audrey.identity import Principal
 from audrey.routes.user_data import (
     AccountPurgeRequest,
@@ -38,6 +38,16 @@ from audrey.user_data_visibility import (
     block_remote_personal_reads,
     unblock_remote_personal_reads,
 )
+
+
+def _principal(email: str, role: str = "user") -> Principal:
+    return Principal(
+        user_id="usr_test_owner", storage_namespace=email,
+        provider="cloudflare_access", provider_subject="test-owner",
+        email="profile@example.com", display_name="Alice", role=role,
+        status="active", auth_method="cloudflare_access",
+    )
+
 
 _TOOLS_SERVER = Path(__file__).resolve().parent.parent / "tools-server"
 SECRET = "s3cr3t-service-token"  # noqa: S105  (test fixture, not a real secret)
@@ -564,7 +574,7 @@ async def test_memory_route_injects_authenticated_user_not_browser_identity():
         tool="memory_search",
         response={"items": [], "next_cursor": None},
     )
-    me = AuthedUser(email="alice@example.com", role="user")
+    me = _principal(email="alice@example.com", role="user")
 
     await list_memories(request, limit=10, cursor=None, me=me)
 
@@ -582,8 +592,8 @@ async def test_remote_inventory_is_hidden_until_purge_cutoff_is_acknowledged():
         tool="memory_search",
         response={"items": [{"value": "old data"}], "next_cursor": None},
     )
-    me = AuthedUser(email="purge-gate@example.com", role="user")
-    block_remote_personal_reads(user=me.email, purge_id="purge-gate")
+    me = _principal(email="purge-gate@example.com", role="user")
+    block_remote_personal_reads(user=me.storage_namespace, purge_id="purge-gate")
     try:
         with pytest.raises(HTTPException) as exc:
             await list_memories(request, limit=10, cursor=None, me=me)
@@ -591,12 +601,12 @@ async def test_remote_inventory_is_hidden_until_purge_cutoff_is_acknowledged():
         assert exc.value.detail == "personal_data_purge_in_progress"
         http.post.assert_not_awaited()
     finally:
-        unblock_remote_personal_reads(user=me.email, purge_id="purge-gate")
+        unblock_remote_personal_reads(user=me.storage_namespace, purge_id="purge-gate")
 
 
 
 async def test_memory_create_route_injects_owner_and_preserves_conflict():
-    me = AuthedUser(email="alice@example.com", role="user")
+    me = _principal(email="alice@example.com", role="user")
     request, http = _request(
         tool="memory_search",
         response={
@@ -634,7 +644,7 @@ async def test_memory_create_route_injects_owner_and_preserves_conflict():
 
 
 async def test_mutation_routes_inject_authenticated_user():
-    me = AuthedUser(email="alice@example.com", role="user")
+    me = _principal(email="alice@example.com", role="user")
 
     update_request, update_http = _request(
         tool="memory_search",
@@ -741,7 +751,7 @@ async def test_repair_status_composes_current_user_queues_without_raw_errors():
         }),
     )
     request.app.state.archive_client = SimpleNamespace(user_stats=delivery_stats)
-    me = AuthedUser(email="alice@example.com", role="user")
+    me = _principal(email="alice@example.com", role="user")
 
     result = await get_repair_status(request, me=me)
 
@@ -749,15 +759,15 @@ async def test_repair_status_composes_current_user_queues_without_raw_errors():
     assert result.file_deletions.pending == 1
     assert result.conversation_deletions.completed == 1
     assert result.account_purges.completed == 1
-    file_stats.assert_awaited_once_with(me.email)
-    delivery_stats.assert_awaited_once_with(me.email)
-    assert http.post.await_args.kwargs["json"] == {"user": me.email}
+    file_stats.assert_awaited_once_with(me.storage_namespace)
+    delivery_stats.assert_awaited_once_with(me.storage_namespace)
+    assert http.post.await_args.kwargs["json"] == {"user": me.storage_namespace}
     assert http.post.await_args.args[0].endswith(
         "/user_data/chat_history/status"
     )
     rendered = result.model_dump_json()
     assert "private backend detail" not in rendered
-    assert me.email not in rendered
+    assert me.storage_namespace not in rendered
 
     attention_remote = {
         **remote,
@@ -803,11 +813,7 @@ async def test_repair_status_uses_stable_native_owner_and_storage_namespace():
         status="active",
         auth_method="owui_bearer",
     )
-    me = AuthedUser(
-        email="renamed@example.com",
-        role="user",
-        principal=principal,
-    )
+    me = principal
 
     result = await get_repair_status(request, me=me)
 
@@ -833,7 +839,7 @@ async def test_repair_status_reports_remote_backend_degraded():
     request.app.state.archive_client = SimpleNamespace(
         user_stats=AsyncMock(return_value=empty),
     )
-    me = AuthedUser(email="alice@example.com", role="user")
+    me = _principal(email="alice@example.com", role="user")
 
     result = await get_repair_status(request, me=me)
 
@@ -915,18 +921,11 @@ async def test_account_purge_uses_verified_owner_and_scoped_idempotency_key(tmp_
             )
         ),
     )
-    me = AuthedUser(
-        email="alice@example.com",
-        role="user",
-        principal=principal,
-    )
-
     try:
         result = await request_account_purge(
             request,
             AccountPurgeRequest(confirmation="DELETE ALL MY AUDREY DATA"),
             idempotency_key="same-operation",
-            me=me,
             principal=principal,
         )
         assert await store.list_personal_tokens(user_id=principal.user_id) == ()
@@ -976,7 +975,7 @@ def test_account_purge_rejects_personal_token(tmp_path):
 
     try:
         response = TestClient(app).post(
-            "/v1/me/data-purge",
+            "/api/me/data-purge",
             headers={"Authorization": f"Bearer {issued.token}"},
             json={"confirmation": "DELETE ALL MY AUDREY DATA"},
         )
@@ -997,7 +996,7 @@ async def test_account_purge_status_is_exact_owner_and_not_found_is_404():
     request = SimpleNamespace(
         app=SimpleNamespace(state=SimpleNamespace(user_data_purges=coordinator)),
     )
-    me = AuthedUser(email="alice@example.com", role="user")
+    me = _principal(email="alice@example.com", role="user")
 
     found = await get_account_purge(request, purge_id="purge-a", me=me)
     assert found.purge_id == "purge-a"
@@ -1015,7 +1014,7 @@ async def test_account_purge_status_is_exact_owner_and_not_found_is_404():
 async def test_mutation_not_found_is_a_current_user_404():
     request, _ = _request(tool="memory_search", response={})
     request.app.state.archive_http.post.return_value = httpx.Response(404)
-    me = AuthedUser(email="alice@example.com", role="user")
+    me = _principal(email="alice@example.com", role="user")
 
     with pytest.raises(HTTPException) as exc:
         await delete_memory(request, key="missing", me=me)
@@ -1028,7 +1027,7 @@ async def test_chat_route_injects_authenticated_user():
         tool="chat_history_search",
         response={"schema_version": 1, "items": [], "next_cursor": None},
     )
-    me = AuthedUser(email="alice@example.com", role="user")
+    me = _principal(email="alice@example.com", role="user")
 
     await export_chat_history(request, limit=50, cursor="next", me=me)
 
@@ -1042,7 +1041,7 @@ async def test_chat_route_injects_authenticated_user():
 async def test_sidecar_auth_failure_is_backend_failure_not_browser_401():
     request, _ = _request(tool="memory_search", response={})
     request.app.state.archive_http.post.return_value = httpx.Response(401)
-    me = AuthedUser(email="alice@example.com", role="user")
+    me = _principal(email="alice@example.com", role="user")
 
     with pytest.raises(HTTPException) as exc:
         await list_memories(request, limit=10, cursor=None, me=me)
@@ -1052,7 +1051,7 @@ async def test_sidecar_auth_failure_is_backend_failure_not_browser_401():
 async def test_invalid_cursor_stays_a_client_error():
     request, _ = _request(tool="memory_search", response={})
     request.app.state.archive_http.post.return_value = httpx.Response(422)
-    me = AuthedUser(email="alice@example.com", role="user")
+    me = _principal(email="alice@example.com", role="user")
 
     with pytest.raises(HTTPException) as exc:
         await list_memories(request, limit=10, cursor="bad", me=me)
@@ -1063,21 +1062,21 @@ async def test_invalid_cursor_stays_a_client_error():
 def test_public_routes_do_not_accept_a_user_selector():
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[require_user] = lambda: AuthedUser(
+    app.dependency_overrides[require_user] = lambda: _principal(
         email="alice@example.com", role="user",
     )
     schema = app.openapi()
 
     operations = (
-        ("/v1/me/memories", "get"),
-        ("/v1/me/memories", "post"),
-        ("/v1/me/memories/{key}", "put"),
-        ("/v1/me/memories/{key}", "delete"),
-        ("/v1/me/chat-history/export", "get"),
-        ("/v1/me/chat-history/{conversation_id}", "delete"),
-        ("/v1/me/repair-status", "get"),
-        ("/v1/me/data-purge", "post"),
-        ("/v1/me/data-purge/{purge_id}", "get"),
+        ("/api/me/memories", "get"),
+        ("/api/me/memories", "post"),
+        ("/api/me/memories/{key}", "put"),
+        ("/api/me/memories/{key}", "delete"),
+        ("/api/me/chat-history/export", "get"),
+        ("/api/me/chat-history/{conversation_id}", "delete"),
+        ("/api/me/repair-status", "get"),
+        ("/api/me/data-purge", "post"),
+        ("/api/me/data-purge/{purge_id}", "get"),
     )
     for path, method in operations:
         operation = schema["paths"][path][method]

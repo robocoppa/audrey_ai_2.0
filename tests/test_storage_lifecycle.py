@@ -10,7 +10,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from audrey.auth import AuthedUser, require_user
+from audrey.auth import require_principal
+from audrey.identity import Principal
 from audrey.kb.storage_lifecycle import (
     QuotaExceededError,
     StorageLifecycle,
@@ -18,7 +19,7 @@ from audrey.kb.storage_lifecycle import (
 )
 from audrey.kb.uploads_db import UploadsDB
 from audrey.kb.user_store import sanitize_user
-from audrey.routes.files import router as files_router
+from audrey.routes.app.files import router as native_files_router
 
 NOW = "2026-08-26T12:00:00+00:00"
 EXPIRED_BEFORE = "2026-08-26T10:00:00+00:00"
@@ -388,10 +389,11 @@ async def test_rejected_chunk_retry_preserves_the_previous_part(tmp_path: Path) 
     )
 
     app = FastAPI()
-    app.include_router(files_router)
-    app.dependency_overrides[require_user] = lambda: AuthedUser(
-        email=USER,
-        role="user",
+    app.include_router(native_files_router, prefix="/api")
+    app.dependency_overrides[require_principal] = lambda: Principal(
+        user_id="usr_files", storage_namespace=USER, provider="test",
+        provider_subject="file-owner", email="profile@example.com", display_name="Alice",
+        role="user", status="active", auth_method="test",
     )
     app.state.uploads_db = db
     app.state.cfg = SimpleNamespace(
@@ -402,20 +404,20 @@ async def test_rejected_chunk_retry_preserves_the_previous_part(tmp_path: Path) 
     with TestClient(app) as client:
         assert (
             client.put(
-                "/v1/files/upload-sessions/chunk-1/parts/0",
+                "/api/files/upload-sessions/chunk-1/parts/0",
                 content=b"a" * 5,
             ).status_code
             == 200
         )
         assert (
             client.put(
-                "/v1/files/upload-sessions/chunk-1/parts/1",
+                "/api/files/upload-sessions/chunk-1/parts/1",
                 content=b"b" * 10,
             ).status_code
             == 200
         )
         rejected = client.put(
-            "/v1/files/upload-sessions/chunk-1/parts/0",
+            "/api/files/upload-sessions/chunk-1/parts/0",
             content=b"c" * 10,
         )
 

@@ -25,6 +25,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from audrey.identity import Principal
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
@@ -102,7 +103,9 @@ async def _drain(app) -> list[str]:
             messages=[{"role": "user", "content": "hello"}],
             stream=True,
         ),
-        me=SimpleNamespace(email="alice@example.com", role="user"),
+        me=Principal(user_id="usr_alice", storage_namespace="alice@example.com", provider="cloudflare_access",
+                    provider_subject="alice", email="alice@example.com", display_name="Alice", role="user",
+                    status="active", auth_method="cloudflare_access"),
     )
     return [chunk.decode() if isinstance(chunk, bytes) else chunk
             async for chunk in resp.body_iterator]
@@ -142,7 +145,9 @@ async def test_non_streaming_passthrough_also_completes():
             messages=[{"role": "user", "content": "hello"}],
             stream=False,
         ),
-        me=SimpleNamespace(email="alice@example.com", role="user"),
+        me=Principal(user_id="usr_alice", storage_namespace="alice@example.com", provider="cloudflare_access",
+                    provider_subject="alice", email="alice@example.com", display_name="Alice", role="user",
+                    status="active", auth_method="cloudflare_access"),
     )
     assert resp["object"] == "chat.completion"
     assert captured[0]["think"] is False
@@ -213,7 +218,9 @@ async def _run_tool_loop_request(app, *, messages, stream: bool):
             tools=[_WEATHER_TOOL],
             stream=stream,
         ),
-        me=SimpleNamespace(email="alice@example.com", role="user"),
+        me=Principal(user_id="usr_alice", storage_namespace="alice@example.com", provider="cloudflare_access",
+                    provider_subject="alice", email="alice@example.com", display_name="Alice", role="user",
+                    status="active", auth_method="cloudflare_access"),
     )
     if not stream:
         return response

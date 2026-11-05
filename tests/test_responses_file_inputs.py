@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from PIL import Image, PngImagePlugin
 from pydantic import ValidationError
 
-from audrey.auth import AuthedUser, require_user
+from audrey.auth import require_user
 from audrey.identity import Principal
 from audrey.routes import files as uploads
 from audrey.routes.app import files as native_files
@@ -31,7 +31,7 @@ def library(monkeypatch, tmp_path):
         provider_subject="subject", email="alice@example.com", display_name="Alice",
         role="user", status="active", auth_method="cloudflare_access",
     )
-    user = AuthedUser(email="ignored-profile@example.com", role="user", principal=principal)
+    user = principal
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
         cfg=SimpleNamespace(raw={"vision": {"max_images_per_turn": 4}}),
     )))
@@ -54,12 +54,12 @@ def library(monkeypatch, tmp_path):
         return row, path
 
     async def owned_listing(_request, me):
-        listing_calls.append(me.email)
-        assert me.email == principal.storage_namespace
-        assert me.principal is principal
+        listing_calls.append(me.storage_namespace)
+        assert me.storage_namespace == principal.storage_namespace
+        assert me is principal
         return SimpleNamespace(files=list(rows.values()))
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", owned_listing)
+    monkeypatch.setattr(native_files.file_service, "list_files", owned_listing)
     monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda _request: tmp_path)
     captured = []
 
@@ -208,11 +208,14 @@ async def test_unavailable_source_is_rejected(library, part_type, mime, filename
 
 
 @pytest.mark.asyncio
-async def test_identity_without_principal_fails_closed(library):
-    library.user.principal = None
-    with pytest.raises(HTTPException) as error:
-        await routes.create_response(_payload({"type": "input_file", "file_id": "file_doc"}), library.request, library.user)
-    assert error.value.status_code == 401 and not library.listing_calls and not library.captured
+async def test_missing_authentication_rejects_file_inputs_before_reads(library):
+    app = FastAPI()
+    app.include_router(routes.router)
+    result = TestClient(app).post(
+        "/v1/responses",
+        json=_payload({"type": "input_file", "file_id": "file_doc"}).model_dump(mode="json"),
+    )
+    assert result.status_code == 401 and not library.listing_calls and not library.captured
 
 
 @pytest.mark.asyncio

@@ -8,7 +8,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from audrey.auth import require_principal, require_service
+from audrey.auth import require_service, require_user
 from audrey.references.library import (
     ReferenceLibraryRegistry,
     ReferenceNotFound,
@@ -110,7 +110,7 @@ def _bounded_read(result: dict) -> dict:
 
 
 @router.get("/libraries")
-async def libraries(request: Request, _: object = Depends(require_principal)) -> dict:
+async def libraries(request: Request, _: object = Depends(require_user)) -> dict:
     result = await asyncio.to_thread(_registry(request).list_libraries)
     releases = getattr(request.app.state, "reference_releases", None)
     if releases is not None:

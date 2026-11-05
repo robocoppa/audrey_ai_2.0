@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 
 from audrey.app_state import ApplicationStore
 from audrey.auth import (
-    AuthedUser,
     require_account_principal,
     require_account_user,
     require_principal,
@@ -412,11 +411,7 @@ def test_personal_token_needs_account_read_scope_for_me():
     )
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[require_account_user] = lambda: AuthedUser(
-        email=principal.storage_namespace,
-        role="user",
-        principal=principal,
-    )
+    app.dependency_overrides[require_account_user] = lambda: principal
 
     response = TestClient(app).get("/api/me")
 

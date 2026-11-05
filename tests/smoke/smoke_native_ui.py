@@ -141,7 +141,7 @@ def _agent_turn(conversation_id: str) -> tuple[str, list[dict[str, Any]]]:
 
 def _repair_until_ready() -> dict[str, Any]:
     _json_request(
-        "/v1/admin/repair",
+        "/api/admin/repair",
         token=ADMIN_TOKEN,
         method="POST",
         expected=frozenset({202}),
@@ -149,7 +149,7 @@ def _repair_until_ready() -> dict[str, Any]:
     deadline = time.monotonic() + 120
     last: dict[str, Any] = {}
     while time.monotonic() < deadline:
-        _, last = _json_request("/v1/admin/repair-status", token=ADMIN_TOKEN)
+        _, last = _json_request("/api/admin/repair-status", token=ADMIN_TOKEN)
         if last.get("status") == "ready":
             return last
         time.sleep(0.5)
@@ -186,7 +186,7 @@ def _cleanup(conversation_id: str, run_id: str) -> dict[str, Any]:
         expected=frozenset({204, 404}),
     )
     archive_status, _, _ = _request(
-        f"/v1/me/chat-history/{conversation_id}",
+        f"/api/me/chat-history/{conversation_id}",
         token=USER_TOKEN,
         method="DELETE",
         expected=frozenset({202, 404}),

@@ -181,7 +181,7 @@ class PrivateTasksRepository:
         groups = sorted(item["group_id"] for item in self._conn.execute(
             "SELECT group_id FROM user_group_memberships WHERE user_id=?", (user_id,)
         ).fetchall())
-        if row["role"] == "bot" or "bots" in groups:
+        if "bots" in groups:
             raise PrivateTaskAccessError("An active owner and Private case are required.")
         policy = self._conn.execute(
             "SELECT enabled,audience FROM model_access_policies WHERE model_id='private'"

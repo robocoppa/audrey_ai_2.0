@@ -19,6 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from audrey.identity import Principal
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaError
 from audrey.models.registry import ModelRegistry
@@ -208,8 +209,10 @@ def _stub_app(
     return SimpleNamespace(state=state)
 
 
-def _stub_user(email: str = "alice@example.com", role: str = "user") -> SimpleNamespace:
-    return SimpleNamespace(email=email, role=role)
+def _stub_user(email: str = "alice@example.com", role: str = "user") -> Principal:
+    return Principal(user_id="usr_alice", storage_namespace=email, provider="cloudflare_access",
+                     provider_subject="alice", email=email, display_name="Alice", role=role,
+                     status="active", auth_method="cloudflare_access")
 
 
 def _payload(

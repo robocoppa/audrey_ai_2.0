@@ -1,6 +1,7 @@
 """Cloudflare identity, local personal-token revocation and fail-closed access."""
 
 import datetime as dt
+import sqlite3
 from types import SimpleNamespace
 
 import httpx
@@ -10,9 +11,9 @@ from fastapi.testclient import TestClient
 
 from audrey.app_state import ApplicationStore
 from audrey.auth import (
-    AuthedUser,
     require_account_user,
-    require_admin,
+    require_admin_principal,
+    require_principal,
     require_provider_principal,
     require_user,
 )
@@ -20,6 +21,7 @@ from audrey.identity import (
     CloudflareAccessClaims,
     CloudflareAccessTokenError,
     CloudflareAccessUnavailableError,
+    Principal,
 )
 
 
@@ -43,16 +45,6 @@ async def test_unknown_bearers_are_rejected_locally(monkeypatch, authorization):
         await require_user(_fake_request(), authorization=authorization)
     assert exc.value.status_code == 401
     assert exc.value.detail == "Unsupported bearer token."
-
-
-def test_authed_user_has_no_id_field():
-    # The Phase 26 deploy hit `AttributeError: 'AuthedUser' object has
-    # no attribute 'id'` in production. This test exists so any future
-    # refactor that re-introduces an `.id` field is a deliberate, visible
-    # change rather than a silent one.
-    me = AuthedUser(email="x@y.z", role="user")
-    with pytest.raises(AttributeError):
-        _ = me.id
 
 
 async def test_require_user_missing_header_raises_401(monkeypatch):
@@ -111,15 +103,15 @@ async def test_cloudflare_header_creates_provider_neutral_principal(
         store.close()
 
     assert verifier.tokens == ["signed-access-token"]
-    assert me.principal is not None
-    assert me.principal.provider == "cloudflare_access"
-    assert me.principal.provider_subject == "cf-subject"
-    assert me.principal.auth_method == "cloudflare_access"
-    assert me.principal.role == "user"
-    assert me.principal.status == "pending"
-    assert me.principal.groups == frozenset()
-    assert me.email.startswith("ns_")
-    assert me.email != "alice@example.com"
+    assert me is not None
+    assert me.provider == "cloudflare_access"
+    assert me.provider_subject == "cf-subject"
+    assert me.auth_method == "cloudflare_access"
+    assert me.role == "user"
+    assert me.status == "pending"
+    assert me.groups == frozenset()
+    assert me.storage_namespace.startswith("ns_")
+    assert me.storage_namespace != "alice@example.com"
 
 
 def test_fastapi_reads_cloudflare_access_assertion_header(tmp_path):
@@ -132,8 +124,8 @@ def test_fastapi_reads_cloudflare_access_assertion_header(tmp_path):
     app.state.cloudflare_access_verifier = verifier
 
     @app.get("/probe")
-    async def probe(me: AuthedUser = Depends(require_account_user)):
-        return {"user_id": me.principal.user_id}
+    async def probe(me: Principal = Depends(require_account_user)):
+        return {"user_id": me.user_id}
 
     try:
         with TestClient(app) as client:
@@ -175,10 +167,10 @@ async def test_cloudflare_email_match_preserves_imported_account_and_namespace(t
     finally:
         store.close()
 
-    assert me.principal is not None
-    assert me.principal.user_id == imported.user_id
-    assert me.principal.storage_namespace == imported.storage_namespace
-    assert me.principal.status == "active"
+    assert me is not None
+    assert me.user_id == imported.user_id
+    assert me.storage_namespace == imported.storage_namespace
+    assert me.status == "active"
 
 
 async def test_invalid_cloudflare_header_never_falls_back_to_bearer(
@@ -233,7 +225,7 @@ async def _issue_token(
     store: ApplicationStore,
     *,
     scopes: list[str],
-) -> tuple[AuthedUser, str]:
+) -> tuple[Principal, str]:
     principal = await store.resolve_external_identity(
         provider="test",
         subject="token-owner",
@@ -249,14 +241,7 @@ async def _issue_token(
         scopes=scopes,
         expires_at=(dt.datetime.now(dt.UTC) + dt.timedelta(days=30)).isoformat(),
     )
-    return (
-        AuthedUser(
-            email=principal.email,
-            role=principal.role,
-            principal=principal,
-        ),
-        issued.token,
-    )
+    return principal, issued.token
 
 
 async def test_personal_token_auth_is_local_and_uses_storage_namespace(
@@ -280,9 +265,9 @@ async def test_personal_token_auth_is_local_and_uses_storage_namespace(
     finally:
         store.close()
 
-    assert me.email == "alice@example.com"
-    assert me.principal is not None
-    assert me.principal.auth_method == "personal_token"
+    assert me.storage_namespace == "alice@example.com"
+    assert me is not None
+    assert me.auth_method == "personal_token"
 
 
 async def test_personal_token_without_compat_scope_cannot_call_v1(tmp_path):
@@ -306,14 +291,14 @@ async def test_personal_token_revocation_takes_effect_on_next_request(tmp_path):
     owner, token = await _issue_token(store, scopes=["compat:full"])
     token_id = (
         await store.list_personal_tokens(
-            user_id=owner.principal.user_id,
+            user_id=owner.user_id,
         )
     )[0].token_id
     request = _fake_request(application_store=store)
     try:
         await require_user(request, authorization=f"Bearer {token}")
         assert await store.revoke_personal_token(
-            user_id=owner.principal.user_id,
+            user_id=owner.user_id,
             token_id=token_id,
         )
         with pytest.raises(HTTPException) as exc:
@@ -333,7 +318,7 @@ async def test_personal_token_cannot_manage_credentials(tmp_path):
             authorization=f"Bearer {token}",
         )
         with pytest.raises(HTTPException) as exc:
-            await require_provider_principal(principal=me.principal)
+            await require_provider_principal(principal=me)
     finally:
         store.close()
 
@@ -343,7 +328,7 @@ async def test_personal_token_cannot_manage_credentials(tmp_path):
     )
 
 
-async def test_personal_token_never_inherits_compatibility_admin_role(tmp_path):
+async def test_admin_personal_token_keeps_account_identity_but_cannot_manage_credentials(tmp_path):
     store = ApplicationStore(tmp_path / "app.sqlite")
     owner = await store.resolve_external_identity(
         provider="test",
@@ -365,25 +350,90 @@ async def test_personal_token_never_inherits_compatibility_admin_role(tmp_path):
             _fake_request(application_store=store),
             authorization=f"Bearer {issued.token}",
         )
-        assert me.principal is not None
-        assert me.principal.role == "admin"
-        assert me.role == "user"
+        assert me is not None
+        assert me.role == "admin"
         with pytest.raises(HTTPException) as exc:
-            await require_admin(me=me)
+            await require_provider_principal(principal=me)
     finally:
         store.close()
 
     assert exc.value.status_code == 403
 
 
-async def test_require_admin_passes_admin_role():
-    me = AuthedUser(email="a@b.c", role="admin")
-    out = await require_admin(me=me)
-    assert out is me
+@pytest.mark.parametrize("role, expected", [("admin", None), ("user", 403)])
+async def test_require_admin_principal_enforces_account_authority(tmp_path, role, expected):
+    store = ApplicationStore(tmp_path / "admin.sqlite")
+    try:
+        principal = await store.resolve_external_identity(
+            provider="cloudflare_access", subject="admin-gate", email="alice@example.com",
+            display_name="Alice", role=role, auth_method="cloudflare_access",
+        )
+        if expected is None:
+            assert await require_admin_principal(principal=principal) is principal
+        else:
+            with pytest.raises(HTTPException) as exc:
+                await require_admin_principal(principal=principal)
+            assert exc.value.status_code == expected
+    finally:
+        store.close()
 
 
-async def test_require_admin_rejects_user_role_with_403():
-    me = AuthedUser(email="a@b.c", role="user")
-    with pytest.raises(HTTPException) as exc:
-        await require_admin(me=me)
-    assert exc.value.status_code == 403
+@pytest.mark.parametrize("path", ["/api/me/memories", "/v1/chat/completions"])
+async def test_compatibility_scope_is_explicit_and_independent_of_route_prefix(tmp_path, path):
+    store = ApplicationStore(tmp_path / "scope.sqlite")
+    _, token = await _issue_token(store, scopes=["account:read"])
+    request = _fake_request(application_store=store, path=path)
+    try:
+        principal = await require_principal(request, authorization=f"Bearer {token}")
+        assert principal.scopes == frozenset({"account:read"})
+        with pytest.raises(HTTPException) as exc:
+            await require_user(request, authorization=f"Bearer {token}")
+        assert exc.value.status_code == 403
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize("status", ["pending", "disabled"])
+async def test_account_status_remains_visible_while_resource_auth_refuses_inactive_access(tmp_path, status):
+    store = ApplicationStore(tmp_path / "status.sqlite")
+    verifier = _CloudflareVerifier(
+        CloudflareAccessClaims(subject="cf-status", email="alice@example.com")
+    )
+    request = _fake_request(application_store=store, cloudflare_access_verifier=verifier)
+    try:
+        principal = await require_account_user(request, cloudflare_access_jwt="signed-access")
+        if status == "disabled":
+            with sqlite3.connect(store.path) as connection:
+                connection.execute("UPDATE app_users SET status = 'disabled'")
+        principal = await require_account_user(request, cloudflare_access_jwt="signed-access")
+        assert principal.status == status
+        with pytest.raises(HTTPException) as exc:
+            await require_principal(request, cloudflare_access_jwt="signed-access")
+        assert exc.value.status_code == 403
+    finally:
+        store.close()
+
+
+async def test_admin_personal_token_is_refused_by_provider_admin_route(tmp_path):
+    store = ApplicationStore(tmp_path / "admin-token.sqlite")
+    try:
+        owner = await store.resolve_external_identity(
+            provider="cloudflare_access", subject="admin-token", email="admin@example.com",
+            display_name="Admin", role="admin", auth_method="cloudflare_access",
+        )
+        issued = await store.create_personal_token(
+            user_id=owner.user_id, name="Admin automation", scopes=["compat:full"], expires_at=None,
+        )
+        app = FastAPI()
+        app.state.application_store = store
+
+        @app.get("/api/admin/probe")
+        async def probe(principal: Principal = Depends(require_admin_principal)):
+            return {"user_id": principal.user_id}
+
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://audrey") as client:
+            response = await client.get("/api/admin/probe", headers={"Authorization": f"Bearer {issued.token}"})
+        assert response.status_code == 403
+        assert response.json()["detail"] == "External provider authentication is required for this operation."
+    finally:
+        store.close()

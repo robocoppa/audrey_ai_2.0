@@ -13,11 +13,19 @@ from fastapi import HTTPException
 
 from audrey import main as main_module
 from audrey.app_state import ApplicationStore
-from audrey.auth import AuthedUser
-from audrey.identity import CloudflareAccessClaims
+from audrey.identity import CloudflareAccessClaims, Principal
 from audrey.pipeline import graph as graph_module
 from audrey.skills import SkillLimits, SkillRegistry
 from audrey.tools.discovery import ToolRegistry, ToolSpec
+
+
+def _admin_principal() -> Principal:
+    return Principal(
+        user_id="usr_admin", storage_namespace="ns_admin",
+        provider="cloudflare_access", provider_subject="admin",
+        email="admin@example.com", display_name="Admin", role="admin",
+        status="active", auth_method="cloudflare_access", groups=frozenset({"admins"}),
+    )
 
 
 def _spec(name: str, *, available: bool) -> ToolSpec:
@@ -172,7 +180,7 @@ async def test_empty_rediscovery_preserves_live_registry_and_skills(tool_state, 
     monkeypatch.setattr(main_module, "discover_all", discover)
 
     with pytest.raises(HTTPException) as error:
-        await main_module.rediscover_tools(_admin=AuthedUser(email="admin@example.com", role="admin"))
+        await main_module.rediscover_tools(_admin=_admin_principal())
 
     assert error.value.status_code == 503
     discover.assert_awaited_once_with(cfg.tools["servers"])
@@ -191,7 +199,7 @@ async def test_successful_rediscovery_replaces_records_in_place(
     spec = _spec("web_fetch", available=available)
     monkeypatch.setattr(main_module, "discover_all", AsyncMock(return_value=ToolRegistry(by_name={spec.name: spec})))
 
-    result = await main_module.rediscover_tools(_admin=AuthedUser(email="admin@example.com", role="admin"))
+    result = await main_module.rediscover_tools(_admin=_admin_principal())
 
     names = ["web_fetch"] if available else []
     assert result == {"tools": names, "count": len(names), "declared_count": 1}
@@ -206,7 +214,7 @@ async def test_empty_rediscovery_is_valid_without_configured_servers(tool_state,
     discover = AsyncMock(return_value=ToolRegistry())
     monkeypatch.setattr(main_module, "discover_all", discover)
 
-    result = await main_module.rediscover_tools(_admin=AuthedUser(email="admin@example.com", role="admin"))
+    result = await main_module.rediscover_tools(_admin=_admin_principal())
 
     assert result == {"tools": [], "count": 0, "declared_count": 0}
     discover.assert_awaited_once_with([])
@@ -223,8 +231,11 @@ async def test_legacy_upload_page_is_retired_without_removing_file_api():
         assert (await client.head("/upload")).status_code == 404
 
     paths = {route.path for route in main_module.app.routes}
-    assert "/v1/files" in paths
-    assert "/v1/files/{file_id}" in paths
+    assert "/api/files" in paths
+    assert "/v1/files/list" in paths
+    assert "/v1/files" not in paths
+    assert "/api/files/{file_id}" in paths
+    assert "/v1/files/{file_id}" not in paths
 
 
 async def test_live_monitor_tracks_loss_and_recovery_in_existing_graph_and_skills(
@@ -414,7 +425,7 @@ async def test_manual_rediscovery_waits_for_background_fetch_before_publishing_n
     ))
     await asyncio.wait_for(old_fetch_started.wait(), timeout=1)
     manual = asyncio.create_task(main_module.rediscover_tools(
-        _admin=AuthedUser(email="admin@example.com", role="admin"),
+        _admin=_admin_principal(),
     ))
     try:
         await asyncio.sleep(0)

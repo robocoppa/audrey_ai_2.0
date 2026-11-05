@@ -23,7 +23,7 @@ from audrey.agent_executor import ResearchAgentExecutor, agent_settings
 from audrey.agent_files import recover_agent_output_staging_for_startup
 from audrey.agent_runtime import AgentRuntime
 from audrey.app_state import ApplicationStore
-from audrey.auth import AuthedUser, require_admin, require_principal
+from audrey.auth import require_admin_principal, require_user
 from audrey.chat_projection import ChatProjectionPromoter
 from audrey.config import get_config
 from audrey.content_search import ContentSearchError, ContentSearchIndex
@@ -58,6 +58,7 @@ from audrey.routes.app.runs import NativeRunManager
 from audrey.routes.evidence_tools import router as evidence_tools_router
 from audrey.routes.files import router as files_router
 from audrey.routes.inflight import UserInflightRegistry
+from audrey.routes.kb import admin_router as kb_admin_router
 from audrey.routes.kb import router as kb_router
 from audrey.routes.media import router as media_router
 from audrey.routes.openai import VIRTUAL_MODELS
@@ -649,6 +650,7 @@ app = FastAPI(
 app.include_router(openai_router)
 app.include_router(application_router)
 app.include_router(kb_router)
+app.include_router(kb_admin_router)
 app.include_router(references_router)
 app.include_router(evidence_tools_router)
 app.include_router(tool_history_router)
@@ -683,7 +685,7 @@ async def metrics(request: Request) -> Response:
 
 @app.get("/v1/tools", tags=["tools"])
 async def list_tools(
-    _principal: Principal = Depends(require_principal),
+    _principal: Principal = Depends(require_user),
 ) -> dict[str, list[dict]]:
     """Let an active account inspect the registered ReAct tool catalogue."""
     reg = app.state.tools
@@ -707,9 +709,9 @@ async def list_tools(
     }
 
 
-@app.post("/v1/tools/rediscover", tags=["tools"])
+@app.post("/api/admin/tools/rediscover", tags=["tools"])
 async def rediscover_tools(
-    _admin: AuthedUser = Depends(require_admin),
+    _admin: Principal = Depends(require_admin_principal),
 ) -> dict[str, list[str] | int]:
     """Re-fetch /openapi.json from every configured tool server.
 

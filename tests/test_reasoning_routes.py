@@ -10,7 +10,8 @@ import pytest
 from fastapi import FastAPI
 
 from audrey.app_state import ApplicationStore
-from audrey.auth import AuthedUser, require_user
+from audrey.auth import require_user
+from audrey.identity import Principal
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
@@ -65,7 +66,11 @@ async def provider():
         )
         registry = ModelRegistry(cfg)
         registry.location_of = lambda _model: "local"
-        user = AuthedUser(email="alice@example.com", role="user")
+        user = Principal(
+            user_id="usr_alice", storage_namespace="alice@example.com", provider="cloudflare_access",
+            provider_subject="alice", email="alice@example.com", display_name="Alice", role="user",
+            status="active", auth_method="cloudflare_access",
+        )
         app = FastAPI()
         app.include_router(routes.router)
         app.state.cfg = cfg
@@ -243,9 +248,7 @@ async def test_saved_response_keeps_echo_but_continuation_does_not_inherit_contr
     account = await store.resolve_external_identity(provider="owui", subject="reasoning-alice", email="alice@example.com",
                                                     display_name="Alice", role="user", auth_method="owui_bearer")
     service.app.state.application_store = store
-    service.app.dependency_overrides[require_user] = lambda: AuthedUser(
-        email=account.email, role=account.role, principal=account,
-    )
+    service.app.dependency_overrides[require_user] = lambda: account
     try:
         first = terminal(await service.client.post(endpoint("responses"), json=body(
             "responses", effort="high", store=True, stream=stream,

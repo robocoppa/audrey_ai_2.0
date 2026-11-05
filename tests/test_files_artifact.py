@@ -348,9 +348,8 @@ class TestMissingArtifacts:
 class TestIsolation:
     async def test_a_user_token_cannot_reach_it(self, client, db, tmp_path):
         await _ready_video(db, tmp_path)
-        # No service token. `require_service`, not `resolve_kb_caller`: the
-        # route names its user in the body, so a JWT holder could otherwise
-        # read anyone's documents by typing a different address.
+        # The service-only route selects its owner from the body. Browser
+        # and personal-token credentials must not authorize that selection.
         assert client.post(
             "/v1/files/artifact",
             json={"user": ME, "filename": "jason retirement.mp4"},

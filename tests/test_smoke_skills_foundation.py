@@ -70,13 +70,13 @@ def test_smoke_checks_the_complete_builtin_skill_registry(monkeypatch, capsys):
             }
         if path == "/api/capabilities":
             return 200, {"skills": {"status": "available"}}
-        if path == "/v1/admin/readiness":
+        if path == "/api/admin/readiness":
             assert expected == frozenset({200, 503})
             return 200, {
                 "skills": _ready_counts(),
                 "components": {"skills": {"status": "available"}},
             }
-        if path == "/v1/admin/skills/rediscover":
+        if path == "/api/admin/skills/rediscover":
             assert method == "POST"
             return 200, {**_ready_counts(), "invalid": []}
         raise AssertionError(f"unexpected request: {method} {path}")
@@ -94,10 +94,10 @@ def test_smoke_checks_the_complete_builtin_skill_registry(monkeypatch, capsys):
         "video-analysis",
     ]
     assert calls == [
-        ("POST", "/v1/admin/skills/rediscover", "admin-evidence"),
+        ("POST", "/api/admin/skills/rediscover", "admin-evidence"),
         ("GET", "/api/skills", "user-evidence"),
         ("GET", "/api/capabilities", "user-evidence"),
-        ("GET", "/v1/admin/readiness", "admin-evidence"),
+        ("GET", "/api/admin/readiness", "admin-evidence"),
     ]
 
 
@@ -105,7 +105,7 @@ def test_smoke_fails_on_the_wrong_catalog(monkeypatch, capsys):
     monkeypatch.setattr(smoke, "USER_TOKEN", "user-evidence")
     monkeypatch.setattr(smoke, "ADMIN_TOKEN", "admin-evidence")
     def fake_json_request(path, **_kwargs):
-        if path == "/v1/admin/skills/rediscover":
+        if path == "/api/admin/skills/rediscover":
             return 200, {**_ready_counts(), "invalid": []}
         if path == "/api/skills":
             return 200, {

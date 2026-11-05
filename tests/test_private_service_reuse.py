@@ -11,7 +11,6 @@ from fastapi import FastAPI, HTTPException
 
 from audrey.app_state import ApplicationStore
 from audrey.app_state.history_import import ArchiveExport
-from audrey.auth import KBCaller
 from audrey.kb.qdrant import QdrantKB, SearchScope
 from audrey.kb.uploads_db import UploadsDB
 from audrey.kb.user_store import user_image_collection, user_text_collection
@@ -121,12 +120,11 @@ async def test_user_kb_reads_fail_closed_when_restriction_authority_is_unavailab
 async def test_kb_refuses_before_embedding_or_search_when_authority_is_missing(image):
     embedder = SimpleNamespace(embed_one=AsyncMock(), embed_text=AsyncMock())
     request = _request(qdrant=object(), text_embedder=embedder, image_embedder=embedder)
-    caller = KBCaller(email=_OWNER, is_service=True)
     with pytest.raises(HTTPException) as raised:
         if image:
-            await kb.kb_query_image(kb.ImageQuery(query="invoice", user=_OWNER), request, caller)
+            await kb.kb_query_image(kb.ImageQuery(query="invoice", user=_OWNER), request, None)
         else:
-            await kb.kb_query(kb.TextQuery(query="invoice", user=_OWNER), request, caller)
+            await kb.kb_query(kb.TextQuery(query="invoice", user=_OWNER), request, None)
     assert raised.value.status_code == 503
     embedder.embed_one.assert_not_awaited()
     embedder.embed_text.assert_not_awaited()

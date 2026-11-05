@@ -1,17 +1,6 @@
-"""Phase 31 — authentication on the KB query routes (`/v1/kb/query[/image]`).
+"""Service-only KB queries preserve explicit trusted owner selection.
 
-The routes used to trust a caller-supplied `user` and merge that user's private
-collection with no auth, so publishing 8000 to the LAN would let any device read
-another user's uploads. These tests pin the fix:
-
-  - `verify_service_token` fails closed on a blank/absent secret.
-  - `resolve_kb_caller` accepts a valid service token (act-as) OR a user bearer,
-    and 401s otherwise.
-  - The routes honor the body `user` only for a service caller; an authenticated
-    end user is pinned to their own email, so `user` can't widen the search.
-
-Hermetic: qdrant/embedder are fakes, the merge is patched to capture the effective
-user, and authentication is stubbed where the bearer arm is exercised. No network.
+Hermetic: real token storage, fake embedders/search and no network.
 """
 
 from __future__ import annotations
@@ -24,12 +13,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 import audrey.routes.kb as kb_module
-from audrey import auth as auth_module
-from audrey.auth import (
-    KBCaller,
-    resolve_kb_caller,
-    verify_service_token,
-)
+from audrey.app_state import ApplicationStore
+from audrey.auth import require_service, verify_service_token
 from audrey.routes.kb import router
 
 SECRET = "s3cr3t-service-token"  # noqa: S105  (test fixture, not a real secret)
@@ -57,64 +42,22 @@ def test_verify_service_token_missing_presented():
     assert verify_service_token(None, SECRET) is False
 
 
-# ── resolve_kb_caller (unit) ───────────────────────────────────────────
-
-
-
-
-
-
-
-def _fake_request(
-    service_token: str = SECRET,
-):
+def _fake_request(service_token: str = SECRET):
     return SimpleNamespace(
         app=SimpleNamespace(state=SimpleNamespace(
-            cfg=SimpleNamespace(env=SimpleNamespace(
-                kb_service_token=service_token,
-            )),
+            cfg=SimpleNamespace(env=SimpleNamespace(kb_service_token=service_token)),
         )),
     )
 
 
-async def test_resolve_service_token_yields_service_caller():
-    caller = await resolve_kb_caller(
-        _fake_request(), x_audrey_service_token=SECRET, authorization=None,
-    )
-    assert caller == KBCaller(email=None, is_service=True)
+async def test_valid_service_token_is_accepted():
+    assert await require_service(_fake_request(), x_audrey_service_token=SECRET) is None
 
 
-async def test_resolve_no_creds_raises_401():
+@pytest.mark.parametrize("expected,presented", [(SECRET, None), (SECRET, "wrong"), ("", "")])
+async def test_service_token_gate_fails_closed(expected, presented):
     with pytest.raises(HTTPException) as exc:
-        await resolve_kb_caller(_fake_request(), x_audrey_service_token=None, authorization=None)
-    assert exc.value.status_code == 401
-
-
-async def test_resolve_bad_service_token_falls_through_to_bearer_401():
-    # A wrong service token is not a free pass — it falls to the bearer arm,
-    # which 401s when no bearer is present.
-    with pytest.raises(HTTPException) as exc:
-        await resolve_kb_caller(_fake_request(), x_audrey_service_token="nope", authorization=None)  # noqa: S106
-    assert exc.value.status_code == 401
-
-
-async def test_resolve_user_bearer_yields_user_caller(monkeypatch):
-    monkeypatch.setattr(auth_module, "require_user", AsyncMock(return_value=SimpleNamespace(email="alice@example.com")))
-    caller = await resolve_kb_caller(
-        _fake_request(),
-        x_audrey_service_token=None,
-        authorization="Bearer tok",
-    )
-    assert caller == KBCaller(email="alice@example.com", is_service=False)
-
-
-async def test_resolve_blank_secret_disables_service_arm(monkeypatch):
-    # With no configured secret, even a matching-looking header can't act-as;
-    # the caller must present a bearer (here none → 401).
-    with pytest.raises(HTTPException) as exc:
-        await resolve_kb_caller(
-            _fake_request(service_token=""), x_audrey_service_token="", authorization=None,
-        )
+        await require_service(_fake_request(expected), x_audrey_service_token=presented)
     assert exc.value.status_code == 401
 
 
@@ -193,32 +136,48 @@ def test_route_wrong_service_token_401(monkeypatch):
     assert r.status_code == 401
 
 
-def test_route_user_bearer_is_pinned_to_own_email(monkeypatch):
-    # THE security assertion: an authenticated user cannot read someone else's
-    # KB by naming them in `user` — the search is forced to the caller's email.
+@pytest.mark.parametrize("path", ["/v1/kb/query", "/v1/kb/query/image"])
+@pytest.mark.parametrize("bad_service", [None, "wrong"])
+def test_valid_personal_token_cannot_query_kb(monkeypatch, tmp_path, path, bad_service):
     app, captured = _build_app(monkeypatch)
-    app.dependency_overrides[resolve_kb_caller] = lambda: KBCaller(
-        email="bob@example.com", is_service=False,
-    )
-    r = TestClient(app).post(
-        "/v1/kb/query", json={"query": "hi", "user": "alice@example.com"},
-        headers={"Authorization": "Bearer tok"},
-    )
-    assert r.status_code == 200
-    assert captured["user"] == "bob@example.com"  # body `user` ignored
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    import asyncio
+
+    async def issue():
+        principal = await store.resolve_external_identity(
+            provider="test", subject="kb-owner", email="alice@example.com",
+            display_name="Alice", role="admin", auth_method="test",
+        )
+        return await store.create_personal_token(
+            user_id=principal.user_id, name="KB refusal", scopes=["compat:full"],
+            expires_at="2099-01-01T00:00:00+00:00",
+        )
+
+    issued = asyncio.run(issue())
+    app.state.application_store = store
+    headers = {"Authorization": f"Bearer {issued.token}"}
+    if bad_service is not None:
+        headers["X-Audrey-Service-Token"] = bad_service
+    try:
+        response = TestClient(app).post(
+            path, json={"query": "invoice", "user": "other-owner"}, headers=headers,
+        )
+    finally:
+        store.close()
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Service token required."
+    assert captured == {}
 
 
-def test_route_image_user_bearer_is_pinned_to_own_email(monkeypatch):
+@pytest.mark.parametrize("path", ["/v1/kb/query", "/v1/kb/query/image"])
+def test_access_assertion_cannot_query_kb(monkeypatch, path):
     app, captured = _build_app(monkeypatch)
-    app.dependency_overrides[resolve_kb_caller] = lambda: KBCaller(
-        email="bob@example.com", is_service=False,
+    response = TestClient(app).post(
+        path, json={"query": "invoice"},
+        headers={"Cf-Access-Jwt-Assertion": "access-assertion"},
     )
-    r = TestClient(app).post(
-        "/v1/kb/query/image", json={"query": "a cat", "user": "alice@example.com"},
-        headers={"Authorization": "Bearer tok"},
-    )
-    assert r.status_code == 200
-    assert captured["user"] == "bob@example.com"
+    assert response.status_code == 401
+    assert captured == {}
 
 
 def test_route_image_service_token_acts_as_body_user(monkeypatch):
@@ -229,3 +188,8 @@ def test_route_image_service_token_acts_as_body_user(monkeypatch):
     )
     assert r.status_code == 200
     assert captured["user"] == "alice@example.com"
+
+
+def test_kb_stats_route_is_removed(monkeypatch):
+    app, _ = _build_app(monkeypatch)
+    assert TestClient(app).get("/v1/kb/stats").status_code == 404

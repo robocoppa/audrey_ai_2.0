@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hmac
 import logging
-from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, Request
@@ -31,35 +30,11 @@ log = logging.getLogger(__name__)
 _PERSONAL_TOKEN_PREFIX = "aud_pat_"  # noqa: S105 — public format discriminator
 
 
-@dataclass(slots=True)
-class AuthedUser:
-    """Authenticated identity for native and compatible API routes.
-
-    ``email`` carries the stable storage namespace for existing file and memory
-    APIs; ``principal`` contains the account's email and canonical user id.
-    """
-
-    email: str
-    role: str
-    display_name: str = ""
-    principal: Principal | None = None
-
-
-@dataclass(slots=True)
-class KBCaller:
-    email: str | None
-    is_service: bool
-
-
 async def _resolve_personal_token(
     request: Request,
     token: str,
-) -> AuthedUser:
-    """Resolve an Audrey bearer locally and enforce compatibility policy.
-
-    Personal tokens never inherit provider-admin authority on `/v1`; that
-    avoids stale admin access if the external provider later demotes a user.
-    """
+) -> Principal:
+    """Resolve an Audrey bearer locally with current account and token state."""
 
     store = getattr(request.app.state, "application_store", None)
     if store is None:
@@ -75,18 +50,7 @@ async def _resolve_personal_token(
             detail="Personal access token is invalid.",
         ) from exc
 
-    if request.url.path.startswith("/v1/") and "compat:full" not in principal.scopes:
-        raise HTTPException(
-            status_code=403,
-            detail="Personal access token lacks compat:full scope.",
-        )
-
-    return AuthedUser(
-        email=principal.storage_namespace,
-        role="user",
-        display_name=principal.display_name,
-        principal=principal,
-    )
+    return principal
 
 
 async def _resolve_cloudflare_access(
@@ -94,7 +58,7 @@ async def _resolve_cloudflare_access(
     token: str,
     *,
     allow_inactive: bool = False,
-) -> AuthedUser:
+) -> Principal:
     """Bind verified Access email to Audrey while keeping roles Audrey-owned."""
 
     verifier = getattr(request.app.state, "cloudflare_access_verifier", None)
@@ -145,28 +109,18 @@ async def _resolve_cloudflare_access(
 
     if not allow_inactive and principal.status != "active":
         raise HTTPException(status_code=403, detail=_inactive_account_detail(principal))
-    return AuthedUser(
-        email=principal.storage_namespace,
-        role=principal.role,
-        display_name=principal.display_name,
-        principal=principal,
-    )
+    return principal
 
 
-async def require_user(
+async def require_principal(
     request: Request,
     authorization: str | None = Header(default=None),
     cloudflare_access_jwt: Annotated[
         str | None,
         Header(alias="Cf-Access-Jwt-Assertion"),
     ] = None,
-) -> AuthedUser:
-    """FastAPI dependency — inject `AuthedUser` into route handlers.
-
-    Use as `me: AuthedUser = Depends(require_user)`. Returns 401 on
-    missing/invalid token. Every route that writes
-    or lists user-scoped data MUST depend on this.
-    """
+) -> Principal:
+    """Authenticate one active Audrey account from Access or a personal token."""
     verifier = getattr(request.app.state, "cloudflare_access_verifier", None)
     if verifier is not None and cloudflare_access_jwt:
         # A bad Access assertion must fail closed. Never fall through to a
@@ -192,7 +146,7 @@ async def require_account_user(
         str | None,
         Header(alias="Cf-Access-Jwt-Assertion"),
     ] = None,
-) -> AuthedUser:
+) -> Principal:
     """Authenticate `/api/me` while exposing pending Cloudflare account status."""
 
     verifier = getattr(request.app.state, "cloudflare_access_verifier", None)
@@ -202,43 +156,37 @@ async def require_account_user(
             cloudflare_access_jwt,
             allow_inactive=True,
         )
-    return await require_user(request, authorization, cloudflare_access_jwt)
+    return await require_principal(request, authorization, cloudflare_access_jwt)
 
 
 async def require_account_principal(
-    me: AuthedUser = Depends(require_account_user),
+    principal: Principal = Depends(require_account_user),
 ) -> Principal:
-    """Return provider-backed account state before the active-access gate."""
-
-    if me.principal is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Audrey application identity is not initialized.",
-        )
-    if (
-        me.principal.auth_method == "personal_token"
-        and "account:read" not in me.principal.scopes
-    ):
+    """Return account status, enforcing account:read only for personal tokens."""
+    if principal.auth_method == "personal_token" and "account:read" not in principal.scopes:
         raise HTTPException(
             status_code=403,
             detail="Personal access token lacks account:read scope.",
         )
-    return me.principal
+    return principal
 
 
-async def require_principal(
-    me: AuthedUser = Depends(require_user),
+async def require_user(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    cloudflare_access_jwt: Annotated[
+        str | None,
+        Header(alias="Cf-Access-Jwt-Assertion"),
+    ] = None,
 ) -> Principal:
-    """Resolve native application routes to one active Audrey principal."""
-
-    if me.principal is None:
+    """Require an active compatibility-API caller with compat:full for tokens."""
+    principal = await require_principal(request, authorization, cloudflare_access_jwt)
+    if principal.auth_method == "personal_token" and "compat:full" not in principal.scopes:
         raise HTTPException(
-            status_code=503,
-            detail="Audrey application identity is not initialized.",
+            status_code=403,
+            detail="Personal access token lacks compat:full scope.",
         )
-    if me.principal.status != "active":
-        raise HTTPException(status_code=403, detail="Audrey account is disabled.")
-    return me.principal
+    return principal
 
 
 def require_scope(scope: str):
@@ -280,16 +228,6 @@ async def require_admin_principal(
     return principal
 
 
-async def require_admin(me: AuthedUser = Depends(require_user)) -> AuthedUser:
-    """Like `require_user`, but additionally enforces `role == "admin"`.
-
-    A caller without administrator authority receives 403.
-    """
-    if me.role != "admin":
-        raise HTTPException(status_code=403, detail="Admin role required.")
-    return me
-
-
 def verify_service_token(presented: str | None, expected: str) -> bool:
     if not expected or not presented:
         return False
@@ -300,29 +238,10 @@ async def require_service(
     request: Request,
     x_audrey_service_token: str | None = Header(default=None),
 ) -> None:
-    """Service-token-only gate, for routes no browser should ever reach.
-
-    Distinct from `resolve_kb_caller`, which accepts *either* a service token
-    or a user JWT. The video job routes (Phase 33) hand out filesystem paths
-    and accept results on behalf of an arbitrary user, so holding a valid user
-    token must not be enough to reach them — otherwise any logged-in user could
-    claim another's video and post a transcript into their collection.
-    """
+    """Require the shared internal credential for trusted service operations."""
     expected = request.app.state.cfg.env.kb_service_token
     if not verify_service_token(x_audrey_service_token, expected):
         raise HTTPException(status_code=401, detail="Service token required.")
-
-
-async def resolve_kb_caller(
-    request: Request,
-    x_audrey_service_token: str | None = Header(default=None),
-    authorization: str | None = Header(default=None),
-) -> KBCaller:
-    expected = request.app.state.cfg.env.kb_service_token
-    if verify_service_token(x_audrey_service_token, expected):
-        return KBCaller(email=None, is_service=True)
-    me = await require_user(request, authorization)
-    return KBCaller(email=me.email, is_service=False)
 
 
 def _inactive_account_detail(principal: Principal) -> str:
@@ -332,8 +251,6 @@ def _inactive_account_detail(principal: Principal) -> str:
 
 
 __all__ = [
-    "AuthedUser",
-    "KBCaller",
     "require_account_principal",
     "require_account_user",
     "require_admin_principal",
@@ -341,8 +258,6 @@ __all__ = [
     "require_principal",
     "require_scope",
     "require_provider_principal",
-    "require_admin",
     "verify_service_token",
-    "resolve_kb_caller",
     "require_service",
 ]

@@ -9,11 +9,14 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from audrey.auth import AuthedUser, require_service, require_user
+from audrey import file_service
+from audrey.auth import require_principal, require_service
+from audrey.identity import Principal
 from audrey.kb.storage_lifecycle import StorageLifecycle, StorageReservation
 from audrey.kb.uploads_db import UploadsDB
 from audrey.processing_policy import ProcessingPolicy, processing_scope
 from audrey.routes import files
+from audrey.routes.app.files import router as native_files_router
 
 USER = "alice@example.com"
 STAMP = "2026-10-19T10:00:00+00:00"
@@ -30,6 +33,7 @@ def db(tmp_path):
 def _app(db, tmp_path):
     app = FastAPI()
     app.include_router(files.router)
+    app.include_router(native_files_router, prefix="/api")
     app.state.uploads_db = db
     app.state.qdrant = AsyncMock()
     app.state.text_embedder = AsyncMock()
@@ -39,8 +43,10 @@ def _app(db, tmp_path):
         "video": {"lease_minutes": 30, "max_attempts": 3},
     }})
     app.dependency_overrides[require_service] = lambda: None
-    app.dependency_overrides[require_user] = lambda: AuthedUser(
-        email=USER, role="user", display_name="Alice",
+    app.dependency_overrides[require_principal] = lambda: Principal(
+        user_id="usr_files", storage_namespace=USER, provider="test",
+        provider_subject="file-owner", email="profile@example.com", display_name="Alice",
+        role="user", status="active", auth_method="test",
     )
     return app
 
@@ -112,10 +118,10 @@ async def test_private_session_refuses_before_part_write_or_assembly(db, tmp_pat
     with TestClient(app) as client:
         if route == "part":
             response = client.put(
-                "/v1/files/upload-sessions/protected-session/parts/0", content=b"private data",
+                "/api/files/upload-sessions/protected-session/parts/0", content=b"private data",
             )
         else:
-            response = client.post("/v1/files/upload-sessions/protected-session/complete")
+            response = client.post("/api/files/upload-sessions/protected-session/complete")
     _assert_refused(response)
     assert await db.session_progress("protected-session") == (0, 0)
     app.state.qdrant.ensure_collection.assert_not_called()
@@ -216,13 +222,18 @@ async def test_independent_document_summary_refuses_before_fail_soft_handler(db,
 async def test_ordinary_upload_entry_points_cannot_shed_an_active_policy(operation):
     policy = ProcessingPolicy(local_models={"local:latest": "a" * 64}, ollama_base_url="http://ollama:11434")
     request = SimpleNamespace()  # Any attempt to access app state before refusal fails.
+    principal = Principal(
+        user_id="usr_files", storage_namespace=USER, provider="test",
+        provider_subject="file-owner", email="profile@example.com", display_name="Alice",
+        role="user", status="active", auth_method="test",
+    )
     with processing_scope(policy), pytest.raises(HTTPException) as error:
         if operation == "single":
-            await files.upload_file(request, me=SimpleNamespace(email=USER), file=None)
+            await file_service.upload_file(request, principal=principal, file=None)
         elif operation == "session":
-            await files.open_upload_session(None, request, me=SimpleNamespace(email=USER))
+            await file_service.open_upload_session(None, request, principal=principal)
         else:
-            await files.ingest_from_url(None, request, me=SimpleNamespace(email=USER))
+            await file_service.ingest_from_url(None, request, principal=principal)
     assert error.value.status_code == 409
 
 

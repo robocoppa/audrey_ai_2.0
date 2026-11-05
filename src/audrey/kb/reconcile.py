@@ -25,7 +25,7 @@ for `interval_s` between sweeps. Pass `interval_s=0` for "single-shot,
 exit after one run" — useful for a one-off CLI sweep.
 
 The same `reconcile_once()` function backs both the periodic loop and
-the admin endpoint `POST /v1/admin/kb/reconcile`. No code path runs
+the admin endpoint `POST /api/admin/kb/reconcile`. No code path runs
 the reconcile in two places at once — the periodic task and the admin
 trigger share the same qdrant client and serialize naturally through
 qdrant's per-collection locking.

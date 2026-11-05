@@ -2,12 +2,11 @@
 
     POST /v1/kb/query         — text query, returns top-k hits
     POST /v1/kb/query/image   — image query (url or b64), returns top-k hits
-    POST /v1/kb/ingest        — trigger an ingest run over one or more paths
-    GET  /v1/kb/stats         — per-collection point counts
+    POST /api/admin/kb/ingest — provider-admin ingest over one or more paths
 
 `custom-tools`' `kb_search` and `kb_image_search` tools proxy to these
-two query endpoints, so when the ReAct loop dispatches a KB lookup it
-comes right back into this router.
+two service-token query endpoints. Trusted service callers supply the opaque
+storage namespace after dispatch binds it to the authenticated owner.
 """
 
 from __future__ import annotations
@@ -25,7 +24,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from audrey.auth import AuthedUser, KBCaller, require_admin, resolve_kb_caller
+from audrey.auth import require_admin_principal, require_service
+from audrey.identity import Principal
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.fusion import RRF_K, FusedHit, passes_evidence, reciprocal_rank_fusion
 from audrey.kb.ingest import ingest_many
@@ -36,6 +36,7 @@ from audrey.metrics import kb_search_hits, kb_search_seconds
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/kb", tags=["kb"])
+admin_router = APIRouter(prefix="/api/admin/kb", tags=["admin"])
 
 
 class TextQuery(BaseModel):
@@ -116,18 +117,6 @@ class QueryResponse(BaseModel):
     # between "that file has nothing about this" and "there is no such file",
     # and a model told the first will confidently report the wrong one.
     notice: str = ""
-
-
-class StatsResponse(BaseModel):
-    collections: dict[str, int] = Field(
-        description=(
-            "Per-collection point counts. A value of -1 means the count call "
-            "to Qdrant failed for that collection (transport error, missing "
-            "collection, etc.) — treat -1 as 'unknown', not 'zero'."
-        )
-    )
-    text_collection: str
-    image_collection: str
 
 
 async def search_private_file_text(
@@ -435,13 +424,13 @@ async def _resolve_filename(
 async def kb_query(
     req: TextQuery,
     request: Request,
-    caller: KBCaller = Depends(resolve_kb_caller),
+    _service: None = Depends(require_service),
 ) -> QueryResponse:
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
     embedder: TextEmbedder | None = getattr(request.app.state, "text_embedder", None)
     if qdrant is None or embedder is None:
         raise HTTPException(status_code=503, detail="KB is not initialized")
-    effective_user = req.user if caller.is_service else caller.email
+    effective_user = req.user
 
     scope: SearchScope | None = None
     notice = ""
@@ -824,7 +813,7 @@ async def _search_images_merged(
 async def kb_query_image(
     req: ImageQuery,
     request: Request,
-    caller: KBCaller = Depends(resolve_kb_caller),
+    _service: None = Depends(require_service),
 ) -> QueryResponse:
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
     embedder: ImageEmbedder | None = getattr(request.app.state, "image_embedder", None)
@@ -835,7 +824,7 @@ async def kb_query_image(
             status_code=422,
             detail="One of query, image_url, or image_b64 is required.",
         )
-    effective_user = req.user if caller.is_service else caller.email
+    effective_user = req.user
     scope = await _exclude_deleted_private_files(
         request,
         user=effective_user,
@@ -870,11 +859,11 @@ async def kb_query_image(
     )
 
 
-@router.post("/ingest")
+@admin_router.post("/ingest")
 async def kb_ingest(
     req: IngestRequest,
     request: Request,
-    _admin: AuthedUser = Depends(require_admin),
+    _admin: Principal = Depends(require_admin_principal),
 ) -> dict[str, Any]:
     app = request.app
     qdrant: QdrantKB | None = getattr(app.state, "qdrant", None)
@@ -899,17 +888,4 @@ async def kb_ingest(
     return {"roots": [str(r) for r in roots], **stats.as_dict()}
 
 
-@router.get("/stats", response_model=StatsResponse)
-async def kb_stats(request: Request) -> StatsResponse:
-    qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
-    if qdrant is None:
-        raise HTTPException(status_code=503, detail="KB is not initialized")
-    counts = await qdrant.counts()
-    return StatsResponse(
-        collections=counts,
-        text_collection=qdrant.text_collection,
-        image_collection=qdrant.image_collection,
-    )
-
-
-__all__ = ["router"]
+__all__ = ["admin_router", "router"]

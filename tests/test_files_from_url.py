@@ -31,8 +31,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from audrey.auth import AuthedUser, require_user
+from audrey.auth import require_principal
+from audrey.identity import Principal
 from audrey.kb.uploads_db import UploadsDB
+from audrey.routes.app.files import router as native_files_router
 from audrey.routes.files import FileRow, _url_placeholder_name, _waiting_for_s
 from audrey.routes.files import router as files_router
 
@@ -60,8 +62,12 @@ def _build_app(
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(files_router)
-    app.dependency_overrides[require_user] = lambda: AuthedUser(
-        email=ME, role="user")
+    app.include_router(native_files_router, prefix="/api")
+    app.dependency_overrides[require_principal] = lambda: Principal(
+        user_id="usr_files", storage_namespace=ME, provider="test",
+        provider_subject="file-owner", email="profile@example.com", display_name="Alice",
+        role="user", status="active", auth_method="test",
+    )
     app.state.uploads_db = db
     app.state.cfg = SimpleNamespace(
         env=SimpleNamespace(kb_service_token=SECRET),
@@ -97,7 +103,7 @@ def client(app: FastAPI) -> TestClient:
 
 class TestAccept:
     def test_a_youtube_link_is_accepted_and_returns_immediately(self, client):
-        r = client.post("/v1/files/from-url", json={"url": URL})
+        r = client.post("/api/files/from-url", json={"url": URL})
         assert r.status_code == 200, r.text
         body = r.json()
         # Not 'pending'. The bytes do not exist yet, and saying 'pending' here
@@ -108,29 +114,29 @@ class TestAccept:
         assert body["mime"] == ""
 
     async def test_the_row_records_where_it_came_from(self, client, db):
-        client.post("/v1/files/from-url", json={"url": URL})
+        client.post("/api/files/from-url", json={"url": URL})
         rows = await db.list_user(ME)
         assert len(rows) == 1
         assert rows[0]["source_url"] == URL
         assert rows[0]["status"] == "fetch_pending"
 
     def test_source_url_reaches_the_file_list(self, client):
-        client.post("/v1/files/from-url", json={"url": URL})
-        rows = client.get("/v1/files").json()["files"]
+        client.post("/api/files/from-url", json={"url": URL})
+        rows = client.get("/api/files").json()["items"]
         # The fourth-place bug phase 40 fixed: a column in the schema, the
         # migration and the SELECT still has to be on `FileRow` to be projected.
         assert "source_url" in FileRow.model_fields
         assert rows[0]["source_url"] == URL
 
     def test_a_host_not_on_the_list_is_refused(self, client, db):
-        r = client.post("/v1/files/from-url", json={"url": "https://evil.test/v.mp4"})
+        r = client.post("/api/files/from-url", json={"url": "https://evil.test/v.mp4"})
         assert r.status_code == 403
         assert "evil.test" in r.json()["detail"]
 
     def test_a_lookalike_host_is_refused(self, client):
         # The reason matching is exact rather than endswith.
         r = client.post(
-            "/v1/files/from-url", json={"url": "https://youtube.com.evil.test/v"},
+            "/api/files/from-url", json={"url": "https://youtube.com.evil.test/v"},
         )
         assert r.status_code == 403
 
@@ -139,7 +145,7 @@ class TestAccept:
         # would see the literal string 'www.youtube.com@evil.test' — or, worse,
         # a naive split on '@' — and this is the case that catches it.
         r = client.post(
-            "/v1/files/from-url",
+            "/api/files/from-url",
             json={"url": "https://www.youtube.com@evil.test/watch?v=x"},
         )
         assert r.status_code == 403
@@ -149,7 +155,7 @@ class TestAccept:
         # `hostname` drops the port, so this is allowed — the host really is
         # youtube.com. Pinned so a future switch to netloc matching fails here.
         r = client.post(
-            "/v1/files/from-url", json={"url": "https://www.youtube.com:443/watch?v=z"},
+            "/api/files/from-url", json={"url": "https://www.youtube.com:443/watch?v=z"},
         )
         assert r.status_code == 200
 
@@ -159,31 +165,31 @@ class TestAccept:
         "gopher://youtube.com/",
     ])
     def test_only_http_and_https_are_fetchable(self, client, url):
-        assert client.post("/v1/files/from-url", json={"url": url}).status_code == 422
+        assert client.post("/api/files/from-url", json={"url": url}).status_code == 422
 
     def test_an_empty_url_is_refused(self, client):
-        assert client.post("/v1/files/from-url", json={"url": "   "}).status_code == 422
+        assert client.post("/api/files/from-url", json={"url": "   "}).status_code == 422
 
     def test_an_empty_allowlist_refuses_everything(self, db, tmp_path):
         # The safe direction for an absent config: a deployment that predates
         # this setting must not silently acquire an open downloader.
         c = TestClient(_build_app(db, tmp_path, allowed=[]))
-        r = c.post("/v1/files/from-url", json={"url": URL})
+        r = c.post("/api/files/from-url", json={"url": URL})
         assert r.status_code == 403
         assert "none configured" in r.json()["detail"]
 
     async def test_nothing_is_recorded_when_the_host_is_refused(self, client, db):
-        client.post("/v1/files/from-url", json={"url": "https://evil.test/v.mp4"})
+        client.post("/api/files/from-url", json={"url": "https://evil.test/v.mp4"})
         assert await db.list_user(ME) == []
 
     def test_the_same_link_twice_is_refused(self, client):
-        assert client.post("/v1/files/from-url", json={"url": URL}).status_code == 200
-        r = client.post("/v1/files/from-url", json={"url": URL})
+        assert client.post("/api/files/from-url", json={"url": URL}).status_code == 200
+        r = client.post("/api/files/from-url", json={"url": URL})
         assert r.status_code == 409
         assert "already in your files" in r.json()["detail"]
 
     async def test_a_failed_fetch_can_be_pasted_again(self, client, db):
-        client.post("/v1/files/from-url", json={"url": URL})
+        client.post("/api/files/from-url", json={"url": URL})
         rows = await db.list_user(ME)
         claimed = await db.claim_fetch(lease_id="L", now="2026-08-05T00:00:00+00:00")
         await db.fail_job(
@@ -192,14 +198,14 @@ class TestAccept:
         )
         # The one case a user would obviously retry by hand. Refusing it would
         # mean deleting the failed row first, for no reason anyone could guess.
-        assert client.post("/v1/files/from-url", json={"url": URL}).status_code == 200
+        assert client.post("/api/files/from-url", json={"url": URL}).status_code == 200
         assert len(await db.list_user(ME)) == len(rows) + 1
 
     def test_a_full_account_is_refused_before_any_download(self, db, tmp_path):
         # 100 MB quota against a 2048 MB per-URL ceiling: no fetch can fit.
         c = TestClient(_build_app(
             db, tmp_path, max_user_bytes=100 * 1024 * 1024, max_bytes_mb=2048))
-        r = c.post("/v1/files/from-url", json={"url": URL})
+        r = c.post("/api/files/from-url", json={"url": URL})
         assert r.status_code == 413
         assert "2048MB" in r.json()["detail"]
 
@@ -234,12 +240,12 @@ class TestClaim:
         assert client.post("/v1/files/fetch/claim", headers=SVC).status_code == 204
 
     def test_a_user_token_cannot_claim(self, client):
-        # `require_service`, not `resolve_kb_caller`: this hands out a
-        # filesystem path and acts for an arbitrary user.
+        # This service-only operation hands out a filesystem path and
+        # acts for the owner named by the trusted worker protocol.
         assert client.post("/v1/files/fetch/claim").status_code == 401
 
     def test_a_claim_carries_the_url_the_caps_and_a_writable_directory(self, client):
-        client.post("/v1/files/from-url", json={"url": URL})
+        client.post("/api/files/from-url", json={"url": URL})
         job = client.post("/v1/files/fetch/claim", headers=SVC).json()
         assert job["source_url"] == URL
         assert job["user"] == ME
@@ -251,7 +257,7 @@ class TestClaim:
         assert Path(job["stage_dir"]).is_dir()
 
     def test_the_claim_hands_out_staging_and_not_a_user_directory(self, client, tmp_path):
-        client.post("/v1/files/from-url", json={"url": URL})
+        client.post("/api/files/from-url", json={"url": URL})
         job = client.post("/v1/files/fetch/claim", headers=SVC).json()
         stage = Path(job["stage_dir"])
         # The fetcher is the container with internet egress running a
@@ -268,12 +274,12 @@ class TestClaim:
         assert stat.S_IMODE(stage.stat().st_mode) == 0o770
 
     async def test_claiming_moves_the_row_out_of_the_queue(self, client, db):
-        client.post("/v1/files/from-url", json={"url": URL})
+        client.post("/api/files/from-url", json={"url": URL})
         client.post("/v1/files/fetch/claim", headers=SVC)
         assert (await db.list_user(ME))[0]["status"] == "fetching"
 
     def test_two_fetchers_do_not_get_the_same_row(self, client):
-        client.post("/v1/files/from-url", json={"url": URL})
+        client.post("/api/files/from-url", json={"url": URL})
         first = client.post("/v1/files/fetch/claim", headers=SVC)
         second = client.post("/v1/files/fetch/claim", headers=SVC)
         assert first.status_code == 200
@@ -285,7 +291,7 @@ class TestClaim:
 
 
 def _accept_and_claim(client: TestClient) -> dict:
-    client.post("/v1/files/from-url", json={"url": URL})
+    client.post("/api/files/from-url", json={"url": URL})
     return client.post("/v1/files/fetch/claim", headers=SVC).json()
 
 
@@ -597,7 +603,7 @@ class TestStagingSweep:
     def test_an_unreadable_staging_directory_does_not_break_the_claim(
         self, client, tmp_path, monkeypatch,
     ):
-        client.post("/v1/files/from-url", json={"url": URL})
+        client.post("/api/files/from-url", json={"url": URL})
 
         def boom(_self):
             raise OSError("the disk is having a day")
@@ -730,7 +736,7 @@ class TestProgress:
             json={"lease_id": job["lease_id"], "downloaded_bytes": 1024,
                   "total_bytes": 4096},
         )
-        rows = client.get("/v1/files").json()["files"]
+        rows = client.get("/api/files").json()["items"]
         assert (rows[0]["fetch_downloaded_bytes"], rows[0]["fetch_total_bytes"]) \
             == (1024, 4096)
 
@@ -805,7 +811,7 @@ class TestProgress:
         ).status_code == 401
 
     async def test_a_row_nobody_holds_is_refused(self, client, db):
-        client.post("/v1/files/from-url", json={"url": URL})
+        client.post("/api/files/from-url", json={"url": URL})
         rows = await db.list_user(ME)
         r = client.post(
             f"/v1/files/fetch/{rows[0]['file_id']}/progress", headers=SVC,
@@ -825,7 +831,7 @@ class TestExtractorArgsRideTheClaim:
     """
 
     def test_an_unconfigured_deployment_still_gets_one_attempt(self, client):
-        client.post("/v1/files/from-url", json={"url": URL})
+        client.post("/api/files/from-url", json={"url": URL})
         job = client.post("/v1/files/fetch/claim", headers=SVC).json()
         # `[""]`, not `[]`. One attempt with no `--extractor-args` is yt-dlp's
         # own behaviour; an empty list would be a downloader configured to try
@@ -840,7 +846,7 @@ class TestExtractorArgsRideTheClaim:
             "youtube:player_client=android_vr", "youtube:player_client=tv", "",
         ]
         c = TestClient(app)
-        c.post("/v1/files/from-url", json={"url": URL})
+        c.post("/api/files/from-url", json={"url": URL})
         job = c.post("/v1/files/fetch/claim", headers=SVC).json()
         # Order is meaningful: the fetcher tries them in this sequence.
         assert job["extractor_args"] == [
@@ -851,7 +857,7 @@ class TestExtractorArgsRideTheClaim:
         app = _build_app(db, tmp_path)
         app.state.cfg.raw["kb"]["fetch"]["extractor_args"] = "youtube:player_client=tv"
         c = TestClient(app)
-        c.post("/v1/files/from-url", json={"url": URL})
+        c.post("/api/files/from-url", json={"url": URL})
         job = c.post("/v1/files/fetch/claim", headers=SVC).json()
         # This setting shipped as a bare string before it was a list. A
         # deployment whose config still says so must keep downloading rather

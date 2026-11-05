@@ -24,7 +24,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from audrey import __version__
-from audrey.auth import AuthedUser
+from audrey.identity import Principal
 from audrey.metrics import pipeline_seconds, pipeline_total
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
@@ -77,7 +77,7 @@ def _passthrough_concrete(model: str) -> str:
 
 
 def _resolve_passthrough_model(
-    payload_model: str, cfg, registry: ModelRegistry, me: AuthedUser,
+    payload_model: str, cfg, registry: ModelRegistry, me: Principal,
 ) -> tuple[str, str]:
     """Return (concrete_model, location) for a passthrough request.
 
@@ -87,7 +87,8 @@ def _resolve_passthrough_model(
     if not pt_cfg.get("enabled"):
         raise HTTPException(status_code=403, detail="Passthrough disabled.")
     required_role = pt_cfg.get("require_role")
-    if required_role and me.role != required_role:
+    effective_role = "user" if me.auth_method == "personal_token" else me.role
+    if required_role and effective_role != required_role:
         raise HTTPException(
             status_code=403,
             detail=f"Passthrough requires role={required_role!r}.",
@@ -145,7 +146,7 @@ async def _handle_passthrough(
     app,
     request: Request,
     payload: ChatCompletionRequest,
-    me: AuthedUser,
+    me: Principal,
     *,
     stream_session_factory: Callable[..., Any] | None = None,
     response_format: dict[str, Any] | None = None,
@@ -180,12 +181,12 @@ async def _handle_passthrough(
     # Its own inflight slot rather than the request's: the transcription is
     # a separate dispatch, and both branches below open their own slot for
     # the forward itself. Sequential, never nested.
-    async with inflight.slot(me.email):
+    async with inflight.slot(me.storage_namespace):
         messages, _n_described = await describe_for_text_model(
             messages,
             ollama=ollama, registry=registry, health=app.state.health, gate=gate,
             cfg=cfg, target_model=concrete, user_question=last_user_text(messages),
-            user_id=me.email,
+            user_id=me.storage_namespace,
         )
 
     if payload.stream:
@@ -193,7 +194,7 @@ async def _handle_passthrough(
             t0 = time.perf_counter()
             terminal = StreamTerminal()
             try:
-                async with inflight.slot(me.email):
+                async with inflight.slot(me.storage_namespace):
                     stream = (
                         _passthrough_stream_sse(
                             ollama,
@@ -203,7 +204,7 @@ async def _handle_passthrough(
                             location=location,
                             messages=messages,
                             options=options,
-                            user_id=me.email,
+                            user_id=me.storage_namespace,
                             tools=payload.tools,
                             timeout_s=timeout_s,
                             think=think,
@@ -218,7 +219,7 @@ async def _handle_passthrough(
                             location=location,
                             messages=messages,
                             options=options,
-                            user_id=me.email,
+                            user_id=me.storage_namespace,
                             tools=payload.tools,
                             format=response_format,
                             timeout_s=timeout_s,
@@ -259,12 +260,12 @@ async def _handle_passthrough(
     t0 = time.perf_counter()
     outcome = "ok"
     try:
-        async with inflight.slot(me.email):
+        async with inflight.slot(me.storage_namespace):
             resp = await passthrough_chat(
                 ollama, gate,
                 concrete=concrete, location=location,
                 messages=messages, options=options,
-                user_id=me.email, tools=payload.tools, format=response_format,
+                user_id=me.storage_namespace, tools=payload.tools, format=response_format,
                 timeout_s=timeout_s, think=think,
             )
     except OllamaError as e:

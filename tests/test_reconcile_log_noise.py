@@ -139,7 +139,7 @@ async def test_a_concurrent_request_keeps_its_httpx_lines(caplog):
 
 
 async def test_the_admin_trigger_stays_verbose(caplog):
-    """`POST /v1/admin/kb/reconcile` is the "I am debugging a sweep" path: one
+    """`POST /api/admin/kb/reconcile` is the "I am debugging a sweep" path: one
     sweep, on demand, where the round-trips are the thing you asked for. The
     default is verbose so the admin endpoint gets it without opting in."""
     caplog.set_level(logging.INFO)

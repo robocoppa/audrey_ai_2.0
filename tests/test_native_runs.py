@@ -706,10 +706,10 @@ def test_native_image_attachment_uses_owned_preview_and_survives_follow_up(
     )
 
     async def fake_list(request, me):
-        assert me.email == owner.storage_namespace
+        assert me.storage_namespace == owner.storage_namespace
         return listing
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", fake_list)
     monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
     conversation = asyncio.run(
         store.conversations.create(user_id=owner.user_id, default_mode="fast")

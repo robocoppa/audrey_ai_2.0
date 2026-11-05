@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 import audrey.routes.openai.routes as openai_routes
+from audrey.identity import Principal
 from audrey.routes.openai.routes import create_response, router
 from audrey.routes.openai.schemas import ResponseCreateRequest
 from audrey.routes.openai.streaming import ResponsesStreamSession, StreamOutcome
@@ -20,8 +21,10 @@ def _request() -> SimpleNamespace:
     return SimpleNamespace(app=SimpleNamespace())
 
 
-def _user() -> SimpleNamespace:
-    return SimpleNamespace(email="alice@example.com", role="user")
+def _user() -> Principal:
+    return Principal(user_id="usr_alice", storage_namespace="alice@example.com", provider="cloudflare_access",
+                    provider_subject="alice", email="alice@example.com", display_name="Alice", role="user",
+                    status="active", auth_method="cloudflare_access")
 
 
 def _chat_result(*, content: str = "A concise answer.") -> dict:

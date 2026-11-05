@@ -1130,7 +1130,7 @@ export function revokePersonalToken(tokenId: string): Promise<{
 export function listSavedMemories(cursor?: string): Promise<ListResponse<SavedMemory>> {
   const params = new URLSearchParams({ limit: "50" });
   if (cursor) params.set("cursor", cursor);
-  return apiJson<ListResponse<SavedMemory>>(`/v1/me/memories?${params}`);
+  return apiJson<ListResponse<SavedMemory>>(`/api/me/memories?${params}`);
 }
 
 export function createSavedMemory(
@@ -1138,7 +1138,7 @@ export function createSavedMemory(
   value: string,
   tags: string,
 ): Promise<SavedMemory> {
-  return apiJson<SavedMemory>("/v1/me/memories", {
+  return apiJson<SavedMemory>("/api/me/memories", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ key, value, tags }),
@@ -1150,7 +1150,7 @@ export function correctSavedMemory(
   value: string,
   tags: string,
 ): Promise<SavedMemory> {
-  return apiJson<SavedMemory>(`/v1/me/memories/${encodeURIComponent(key)}`, {
+  return apiJson<SavedMemory>(`/api/me/memories/${encodeURIComponent(key)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ value, tags }),
@@ -1158,7 +1158,7 @@ export function correctSavedMemory(
 }
 
 export function deleteSavedMemory(key: string): Promise<{ key: string; deleted: boolean }> {
-  return apiJson(`/v1/me/memories/${encodeURIComponent(key)}`, {
+  return apiJson(`/api/me/memories/${encodeURIComponent(key)}`, {
     method: "DELETE",
   });
 }
@@ -1182,7 +1182,7 @@ export async function exportChatHistory(): Promise<ChatHistoryExport> {
       schema_version: number;
       items: ChatExportMessage[];
       next_cursor: string | null;
-    }>(`/v1/me/chat-history/export?${params}`);
+    }>(`/api/me/chat-history/export?${params}`);
     if (schemaVersion !== null && page.schema_version !== schemaVersion) {
       throw new Error("Chat export schema changed between pages.");
     }
@@ -1198,7 +1198,7 @@ export function requestAccountDataPurge(
   confirmation: string,
   idempotencyKey: string,
 ): Promise<AccountPurgeStatus> {
-  return apiJson<AccountPurgeStatus>("/v1/me/data-purge", {
+  return apiJson<AccountPurgeStatus>("/api/me/data-purge", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1210,7 +1210,7 @@ export function requestAccountDataPurge(
 
 export function getAccountDataPurge(purgeId: string): Promise<AccountPurgeStatus> {
   return apiJson<AccountPurgeStatus>(
-    `/v1/me/data-purge/${encodeURIComponent(purgeId)}`,
+    `/api/me/data-purge/${encodeURIComponent(purgeId)}`,
   );
 }
 

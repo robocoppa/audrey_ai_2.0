@@ -63,7 +63,7 @@ def _fake_qdrant(text="kb_text", image="kb_images"):
 
 
 def _fake_admin(email: str = "admin@example.com"):
-    """Build the minimal `AuthedUser` shape the handler reads."""
+    """Build the minimal `Principal` shape the handler reads."""
     # Handler only reads `me.email` for the log line.
     return SimpleNamespace(email=email, role="admin")
 
@@ -465,18 +465,18 @@ async def test_admin_repair_is_partial_but_local_work_still_wakes_on_sidecar_out
     purge_wake.assert_called_once_with()
 
 
-def test_admin_repair_routes_require_admin_and_accept_no_user_selector():
-    from audrey.auth import require_admin
+def test_admin_repair_routes_require_admin_principal_and_accept_no_user_selector():
+    from audrey.auth import require_admin_principal
     from audrey.routes import admin as admin_module
 
     paths = {route.path: route for route in admin_module.router.routes}
     for path in (
-        "/v1/admin/repair-status",
-        "/v1/admin/repair",
-        "/v1/admin/chat_archive/rebuild-canonical",
+        "/api/admin/repair-status",
+        "/api/admin/repair",
+        "/api/admin/chat_archive/rebuild-canonical",
     ):
         route = paths[path]
-        assert require_admin in {item.call for item in route.dependant.dependencies}
+        assert require_admin_principal in {item.call for item in route.dependant.dependencies}
         assert all(parameter.name != "user" for parameter in route.dependant.query_params)
         assert all(parameter.name != "user" for parameter in route.dependant.path_params)
 
@@ -525,13 +525,13 @@ async def test_skills_rediscover_refreshes_readiness_and_returns_sanitized_count
 
 
 def test_skills_rediscover_route_requires_admin():
-    from audrey.auth import require_admin
+    from audrey.auth import require_admin_principal
     from audrey.routes import admin as admin_module
 
     route = next(
         route
         for route in admin_module.router.routes
-        if route.path == "/v1/admin/skills/rediscover"
+        if route.path == "/api/admin/skills/rediscover"
     )
 
-    assert require_admin in {item.call for item in route.dependant.dependencies}
+    assert require_admin_principal in {item.call for item in route.dependant.dependencies}

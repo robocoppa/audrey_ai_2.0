@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from test_responses_file_inputs import library as library
 
+from audrey.identity import Principal
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
@@ -27,7 +28,9 @@ TOOLS = [{
     "parameters": {"type": "object", "properties": {"nonce": {"type": "string"}},
                    "required": ["nonce"], "additionalProperties": False},
 }]
-USER = SimpleNamespace(email="alice@example.com", role="user")
+USER = Principal(user_id="usr_alice", storage_namespace="alice@example.com", provider="cloudflare_access",
+                    provider_subject="alice", email="alice@example.com", display_name="Alice", role="user",
+                    status="active", auth_method="cloudflare_access")
 
 
 def call(nonce="one", *, name="get_marker"):

@@ -119,7 +119,7 @@ class PrivateTaskAdmission:
 
     async def _authorize(self, user_id: str, conversation_id: str):
         principal = await self.store.get_principal(user_id=user_id)
-        if (principal is None or principal.status != "active" or principal.role == "bot"
+        if (principal is None or principal.status != "active"
                 or "bots" in principal.groups
                 or remote_personal_reads_blocked(principal.storage_namespace)):
             raise PrivateTaskAccessError("An active owner and Private case are required.")

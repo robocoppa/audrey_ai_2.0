@@ -136,7 +136,7 @@ def _row(file_id="file_document", *, filename="report.pdf", mime="application/pd
     )
 
 
-@pytest.mark.parametrize("guard", ["missing", "off", "disabled", "bot", "legacy_bot", "direct"])
+@pytest.mark.parametrize("guard", ["missing", "off", "disabled", "bot", "direct"])
 async def test_auto_guards_skip_historical_file_lookup(native_request, owner, monkeypatch, guard):
     async def unexpected_lookup(*_args, **_kwargs):
         raise AssertionError("disabled automatic selection looked up historical files")
@@ -154,8 +154,6 @@ async def test_auto_guards_skip_historical_file_lookup(native_request, owner, mo
         native_request,
         replace(owner, groups=frozenset({"bots", "users"}))
         if guard == "bot"
-        else replace(owner, role="bot")
-        if guard == "legacy_bot"
         else owner,
         registry=registry,
         virtual_model="audrey_passthrough/qwen-test" if guard == "direct" else "audrey_auto",
@@ -258,10 +256,10 @@ async def test_followups_refresh_latest_attachment_metadata_without_reading_cont
     seen = []
 
     async def owned_list(_request, user):
-        seen.append(user.email)
+        seen.append(user.storage_namespace)
         return _list_for(owner, _row(filename="actual-recording.mp4", mime="video/mp4"))
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", owned_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", owned_list)
     registry = _registry()
     evidence = []
     resolve_auto = registry.resolve_auto
@@ -327,11 +325,11 @@ async def test_missing_or_unready_latest_history_abstains_without_falling_back(
     seen = []
 
     async def owned_list(_request, user):
-        seen.append(user.email)
+        seen.append(user.storage_namespace)
         latest = () if status == "deleted" else (_row(status=status),)
         return _list_for(owner, _row("older_file", filename="older.pdf"), *latest)
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", owned_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", owned_list)
     result = await resolve_native_auto_skill(
         native_request,
         owner,
@@ -431,10 +429,10 @@ def test_native_entrypoints_resolve_and_persist_automatic_skill(
     app, store, owner, captured = _native_app(tmp_path, auto_select=auto_select)
 
     async def owned_list(_request, user):
-        assert user.email == owner.storage_namespace
+        assert user.storage_namespace == owner.storage_namespace
         return _list_for(owner, _row())
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", owned_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", owned_list)
     conversation = asyncio.run(
         store.conversations.create(user_id=owner.user_id, default_mode="fast")
     )
@@ -476,7 +474,9 @@ def test_native_entrypoints_resolve_and_persist_automatic_skill(
             resolved = captured["resolved_skill"]
             assert resolved.spec.id == "grounded-document-analysis"
             assert resolved.reason == "automatic"
-            assert set(captured["model_tools"].names()) == DOCUMENT_TOOLS
+            assert resolved.spec.allowed_tools == DOCUMENT_TOOLS
+            # Native runs add the owned-output capability after skill filtering.
+            assert set(captured["model_tools"].names()) == DOCUMENT_TOOLS | {"create_file"}
             assert run["skill_id"] == resolved.spec.id
             assert run["skill_version"] == resolved.spec.version
             assert run["skill_digest"] == resolved.spec.digest
@@ -498,10 +498,10 @@ def test_explicit_native_skill_wins_over_attached_document(tmp_path, monkeypatch
     app, store, owner, captured = _native_app(tmp_path, auto_select=True)
 
     async def owned_list(_request, user):
-        assert user.email == owner.storage_namespace
+        assert user.storage_namespace == owner.storage_namespace
         return _list_for(owner, _row())
 
-    monkeypatch.setattr(native_files.upload_routes, "list_files", owned_list)
+    monkeypatch.setattr(native_files.file_service, "list_files", owned_list)
     conversation = asyncio.run(
         store.conversations.create(user_id=owner.user_id, default_mode="fast")
     )

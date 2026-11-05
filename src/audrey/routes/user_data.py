@@ -1,8 +1,8 @@
 """Authenticated current-user controls for Audrey-owned personal data.
 
-The browser never sends a user id. ``require_user`` resolves the bearer token
-through the current identity provider and each handler inserts that verified
-identity into an internal, service-authenticated custom-tools request. The
+The browser never sends a user id. ``require_user`` resolves an active
+principal and enforces personal-token scopes. Each handler inserts its stable
+storage namespace into an internal, service-authenticated custom-tools request. The
 sidecar endpoints are absent from its OpenAPI document, so these controls do
 not become model-callable tools.
 """
@@ -16,12 +16,12 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field, ValidationError
 
-from audrey.auth import AuthedUser, require_provider_principal, require_user
+from audrey.auth import require_provider_principal, require_user
 from audrey.chat_projection import combine_repair_stats
 from audrey.identity import Principal
 from audrey.user_data_visibility import remote_personal_reads_blocked
 
-router = APIRouter(prefix="/v1/me", tags=["user-data"])
+router = APIRouter(prefix="/api/me", tags=["user-data"])
 
 _MEMORY_HOST_TOOL = "memory_search"
 _CHAT_HOST_TOOL = "chat_history_search"
@@ -292,15 +292,15 @@ async def list_memories(
     request: Request,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     cursor: Annotated[str | None, Query(max_length=512)] = None,
-    me: AuthedUser = Depends(require_user),
+    me: Principal = Depends(require_user),
 ) -> MemoryPage:
     """List only the authenticated account-owned durable memories."""
-    _ensure_remote_personal_reads_available(me.email)
+    _ensure_remote_personal_reads_available(me.storage_namespace)
     value = await _request_page(
         request,
         tool_name=_MEMORY_HOST_TOOL,
         path=_MEMORY_LIST_PATH,
-        user=me.email,
+        user=me.storage_namespace,
         limit=limit,
         cursor=cursor,
     )
@@ -317,7 +317,7 @@ async def list_memories(
 async def create_memory(
     request: Request,
     creation: MemoryCreation,
-    me: AuthedUser = Depends(require_user),
+    me: Principal = Depends(require_user),
 ) -> MemoryItem:
     """Add a new memory under the authenticated account, without overwriting."""
     value = await _request_backend(
@@ -325,7 +325,7 @@ async def create_memory(
         tool_name=_MEMORY_HOST_TOOL,
         path=_MEMORY_CREATE_PATH,
         body={
-            "user": me.email,
+            "user": me.storage_namespace,
             "key": creation.key,
             "value": creation.value,
             "tags": creation.tags,
@@ -347,11 +347,11 @@ async def correct_memory(
     request: Request,
     correction: MemoryCorrection,
     key: Annotated[str, Path(min_length=1, max_length=200)],
-    me: AuthedUser = Depends(require_user),
+    me: Principal = Depends(require_user),
 ) -> MemoryItem:
     """Correct one existing memory owned by the authenticated account."""
     body: dict[str, Any] = {
-        "user": me.email,
+        "user": me.storage_namespace,
         "key": key,
         "value": correction.value,
     }
@@ -378,14 +378,14 @@ async def correct_memory(
 async def delete_memory(
     request: Request,
     key: Annotated[str, Path(min_length=1, max_length=200)],
-    me: AuthedUser = Depends(require_user),
+    me: Principal = Depends(require_user),
 ) -> MemoryDeleteResult:
     """Delete one memory owned by the authenticated account."""
     value = await _request_backend(
         request,
         tool_name=_MEMORY_HOST_TOOL,
         path=_MEMORY_DELETE_PATH,
-        body={"user": me.email, "key": key},
+        body={"user": me.storage_namespace, "key": key},
         unprocessable_detail="invalid_memory_delete",
         not_found_detail="memory_not_found",
     )
@@ -403,15 +403,15 @@ async def export_chat_history(
     request: Request,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     cursor: Annotated[str | None, Query(max_length=512)] = None,
-    me: AuthedUser = Depends(require_user),
+    me: Principal = Depends(require_user),
 ) -> ChatExportPage:
     """Export one portable page of the authenticated account-owned chat source."""
-    _ensure_remote_personal_reads_available(me.email)
+    _ensure_remote_personal_reads_available(me.storage_namespace)
     value = await _request_page(
         request,
         tool_name=_CHAT_HOST_TOOL,
         path=_CHAT_EXPORT_PATH,
-        user=me.email,
+        user=me.storage_namespace,
         limit=limit,
         cursor=cursor,
     )
@@ -432,14 +432,14 @@ async def export_chat_history(
 async def delete_chat_history(
     request: Request,
     conversation_id: Annotated[str, Path(min_length=1, max_length=200)],
-    me: AuthedUser = Depends(require_user),
+    me: Principal = Depends(require_user),
 ) -> ChatDeletionResult:
     """Durably delete one conversation owned by the authenticated account."""
     value = await _request_backend(
         request,
         tool_name=_CHAT_HOST_TOOL,
         path=_CHAT_DELETE_PATH,
-        body={"user": me.email, "conversation_id": conversation_id},
+        body={"user": me.storage_namespace, "conversation_id": conversation_id},
         unprocessable_detail="invalid_chat_history_delete",
         not_found_detail="conversation_not_found",
     )
@@ -471,7 +471,6 @@ async def request_account_purge(
         str | None,
         Header(alias="Idempotency-Key", max_length=128),
     ] = None,
-    me: AuthedUser = Depends(require_user),
     principal: Principal = Depends(require_provider_principal),
 ) -> AccountPurgeStatus:
     """Durably purge one provider-authenticated account snapshot."""
@@ -490,11 +489,11 @@ async def request_account_purge(
     if idempotency_key:
         purge_id = str(uuid.uuid5(
             uuid.NAMESPACE_URL,
-            f"audrey-purge|{me.email}|{idempotency_key}",
+            f"audrey-purge|{principal.storage_namespace}|{idempotency_key}",
         ))
     try:
         value = await _purge_coordinator(request).request(
-            user=me.email,
+            user=principal.storage_namespace,
             purge_id=purge_id,
         )
         search = getattr(request.app.state, "content_search", None)
@@ -519,11 +518,11 @@ async def request_account_purge(
 async def get_account_purge(
     request: Request,
     purge_id: Annotated[str, Path(min_length=1, max_length=128)],
-    me: AuthedUser = Depends(require_user),
+    me: Principal = Depends(require_user),
 ) -> AccountPurgeStatus:
     """Return one exact-owner purge receipt without raw backend errors."""
     value = await _purge_coordinator(request).status(
-        user=me.email,
+        user=me.storage_namespace,
         purge_id=purge_id,
     )
     if value is None:
@@ -540,19 +539,19 @@ async def get_account_purge(
 @router.get("/repair-status", response_model=UserDataRepairStatus)
 async def get_repair_status(
     request: Request,
-    me: AuthedUser = Depends(require_user),
+    me: Principal = Depends(require_user),
 ) -> UserDataRepairStatus:
     """Current-user retry state without payloads, raw errors, or user selectors."""
     uploads_db = getattr(request.app.state, "uploads_db", None)
     file_stats = getattr(uploads_db, "user_file_deletion_stats", None)
     if callable(file_stats):
-        file_deletions = _queue_status(await file_stats(me.email))
+        file_deletions = _queue_status(await file_stats(me.storage_namespace))
     else:
         file_deletions = _queue_status(available=False)
 
     purge_stats = getattr(uploads_db, "user_data_purge_stats", None)
     if callable(purge_stats):
-        account_purges = _queue_status(await purge_stats(me.email))
+        account_purges = _queue_status(await purge_stats(me.storage_namespace))
     else:
         account_purges = _queue_status(available=False)
 
@@ -561,15 +560,10 @@ async def get_repair_status(
     projector = getattr(request.app.state, "archive_projector", None)
     projection_stats = getattr(projector, "user_stats", None)
     local_delivery_stats = []
-    if callable(projection_stats) and me.principal is not None:
-        local_delivery_stats.append(await projection_stats(me.principal.user_id))
+    if callable(projection_stats):
+        local_delivery_stats.append(await projection_stats(me.user_id))
     if callable(delivery_stats):
-        storage_namespace = (
-            me.principal.storage_namespace
-            if me.principal is not None
-            else me.email
-        )
-        local_delivery_stats.append(await delivery_stats(storage_namespace))
+        local_delivery_stats.append(await delivery_stats(me.storage_namespace))
     if local_delivery_stats:
         chat_delivery = _queue_status(
             combine_repair_stats(*local_delivery_stats)
@@ -582,7 +576,7 @@ async def get_repair_status(
             request,
             tool_name=_CHAT_HOST_TOOL,
             path=_CHAT_STATUS_PATH,
-            body={"user": me.email},
+            body={"user": me.storage_namespace},
             unprocessable_detail="invalid_repair_status",
         )
     except HTTPException as e:
