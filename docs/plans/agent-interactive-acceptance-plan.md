@@ -127,6 +127,26 @@ down. Try a narrow window too. The same saved task should continue, and a
 confirmation arriving after switching tasks must not appear on the other task.
 No upload is needed. This layout-only change requires rebuilding `audrey-ui`.
 
+**Sidebar and Project directory follow-up:** rebuild both `audrey` and
+`audrey-ui` on Tower after syncing this update; no migration or upload is needed.
+Open Agents in a fresh browser session. New should be selected in the left bar,
+with no Tasks/Watches/Activity bar above the workspace. Type an unsent objective,
+switch Tasks → Watches → New, and confirm the draft remains without starting work.
+Start “Write a one-sentence welcome for Fern Circle. Do not browse.” Tasks should
+become selected; watch its saved status change from queued/running to completed,
+then open the same result. Existing paused, waiting, failed and cancelled tasks
+should each show their status. Expand Tasks → Updates and open an existing agent
+or watch alert; it should open that exact saved work. At phone width, use Agent
+controls, switch all three sections inside the drawer, then open saved work and
+check the drawer closes. Keyboard Escape should return focus to the controls.
+In Projects, each directory card should show a chat count and last activity.
+Create one conversation in a disposable Project, return to Projects and confirm
+the count increases once. Send a message and return to check activity advances.
+Archive a chat: the count should remain; delete or move one: refresh Projects and
+check the count changes. Narrow the window and confirm the selected Project's
+summary remains beneath the picker. A completed status alone does not establish
+that these navigation, count and activity checks passed.
+
 ## 2. Selected files, later pages and answer quality
 
 In the test Project, start a new Agent and explicitly select **supply-list.csv**
@@ -293,7 +313,7 @@ Project: its Watch must block Run/Resume until explicitly reassigned/unlinked.
 
 For actual change alerts, use a public page you control. Establish a baseline,
 change text in a way that clearly meets the criterion, then Run now. Inspect the
-exact diff, local-model assessment and Activity link to that exact saved check.
+exact diff, local-model assessment and Tasks → Updates link to that exact saved check.
 Run again unchanged and check that no duplicate alert is created. Resume the
 schedule and observe at least one **Scheduled** check (minimum interval: 60 minutes),
 then Pause it. Without a controlled change or an observed scheduled run, mark

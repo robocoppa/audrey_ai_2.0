@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import json
 import sqlite3
 import threading
 import uuid
+from dataclasses import replace
 
 from audrey.app_state.records import ProjectFileRecord, ProjectRecord
 from audrey.processing_policy import ProcessingPolicyError, current_processing_policy
@@ -78,12 +80,13 @@ class ProjectsRepository:
                 )
                 row = self._project_row_locked(user_id, project_id)
                 assert row is not None
+                record = self._with_summaries_locked(user_id, (row,))[0]
                 self._conn.commit()
             except BaseException:
                 if self._conn.in_transaction:
                     self._conn.rollback()
                 raise
-        return _project_from_row(row)
+        return record
 
     async def get(self, *, user_id: str, project_id: str) -> ProjectRecord | None:
         return await asyncio.to_thread(self._get_sync, user_id, project_id)
@@ -91,9 +94,10 @@ class ProjectsRepository:
     def _get_sync(self, user_id: str, project_id: str) -> ProjectRecord | None:
         user_id = _required(user_id, "user id")
         project_id = _required(project_id, "project id")
-        with self._lock:
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN")
             row = self._project_row_locked(user_id, project_id)
-        return _project_from_row(row) if row is not None else None
+            return self._with_summaries_locked(user_id, (row,))[0] if row is not None else None
 
     async def snapshot_for_conversation(
         self,
@@ -164,7 +168,8 @@ class ProjectsRepository:
             raise InvalidProjectStateError("project limit must be between 1 and 101")
         if (before_updated_at is None) != (before_project_id is None):
             raise InvalidProjectStateError("project cursor is incomplete")
-        with self._lock:
+        with self._lock, self._conn:
+            self._conn.execute("BEGIN")
             rows = self._conn.execute(
                 "SELECT project_id, user_id, name, instructions, created_at, updated_at, "
                 "private_required "
@@ -181,7 +186,7 @@ class ProjectsRepository:
                     limit,
                 ),
             ).fetchall()
-        return tuple(_project_from_row(row) for row in rows)
+            return self._with_summaries_locked(user_id, rows)
 
     async def update(
         self,
@@ -238,12 +243,13 @@ class ProjectsRepository:
                     return None
                 row = self._project_row_locked(user_id, project_id)
                 assert row is not None
+                record = self._with_summaries_locked(user_id, (row,))[0]
                 self._conn.commit()
             except BaseException:
                 if self._conn.in_transaction:
                     self._conn.rollback()
                 raise
-        return _project_from_row(row)
+        return record
 
     async def delete(self, *, user_id: str, project_id: str) -> bool:
         return await asyncio.to_thread(self._delete_sync, user_id, project_id)
@@ -495,6 +501,56 @@ class ProjectsRepository:
             (user_id, project_id),
         ).fetchone()
 
+    def _with_summaries_locked(
+        self,
+        user_id: str,
+        rows: list[sqlite3.Row] | tuple[sqlite3.Row, ...],
+    ) -> tuple[ProjectRecord, ...]:
+        """Read bounded directory metadata together, without per-project queries."""
+        if not rows:
+            return ()
+        summaries = self._conn.execute(
+            "WITH selected AS ("
+            "SELECT project_id,user_id,updated_at FROM app_projects "
+            "WHERE user_id=? AND project_id IN (SELECT value FROM json_each(?))"
+            "), chats AS ("
+            "SELECT p.project_id,COUNT(*) AS conversation_count,"
+            "MAX(MAX(c.updated_at,COALESCE(c.last_message_at,c.created_at))) AS activity_at "
+            "FROM selected p JOIN app_conversations c "
+            "ON c.project_id=p.project_id AND c.user_id=p.user_id GROUP BY p.project_id"
+            "), activity AS ("
+            "SELECT project_id,updated_at AS activity_at FROM selected "
+            "UNION ALL SELECT p.project_id,k.updated_at "
+            "FROM selected p JOIN app_project_knowledge k "
+            "ON k.project_id=p.project_id AND k.user_id=p.user_id "
+            "UNION ALL SELECT p.project_id,t.updated_at "
+            "FROM selected p JOIN app_agent_project_contexts a "
+            "ON a.project_id=p.project_id AND a.user_id=p.user_id "
+            "JOIN app_agent_tasks t ON t.task_id=a.task_id AND t.user_id=p.user_id "
+            "UNION ALL SELECT p.project_id,w.updated_at "
+            "FROM selected p JOIN app_watches w "
+            "ON w.project_id=p.project_id AND w.user_id=p.user_id "
+            "UNION ALL SELECT p.project_id,r.updated_at "
+            "FROM selected p JOIN app_watches w "
+            "ON w.project_id=p.project_id AND w.user_id=p.user_id "
+            "JOIN app_watch_runs r ON r.watch_id=w.watch_id AND r.user_id=p.user_id"
+            ") SELECT p.project_id,COALESCE(c.conversation_count,0) AS conversation_count,"
+            "MAX(MAX(p.updated_at,COALESCE(c.activity_at,p.updated_at)),"
+            "MAX(a.activity_at)) AS last_activity_at "
+            "FROM selected p LEFT JOIN chats c ON c.project_id=p.project_id "
+            "JOIN activity a ON a.project_id=p.project_id GROUP BY p.project_id",
+            (user_id, json.dumps([str(row["project_id"]) for row in rows])),
+        ).fetchall()
+        by_project = {str(row["project_id"]): row for row in summaries}
+        return tuple(
+            replace(
+                _project_from_row(row),
+                conversation_count=int(by_project[str(row["project_id"])]["conversation_count"]),
+                last_activity_at=str(by_project[str(row["project_id"])]["last_activity_at"]),
+            )
+            for row in rows
+        )
+
 
 def _project_from_row(row: sqlite3.Row) -> ProjectRecord:
     return ProjectRecord(
@@ -505,6 +561,7 @@ def _project_from_row(row: sqlite3.Row) -> ProjectRecord:
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
         private_required=bool(row["private_required"]),
+        last_activity_at=str(row["updated_at"]),
     )
 
 

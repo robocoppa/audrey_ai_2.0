@@ -32,8 +32,13 @@ saved step results/reports, pause/resume/cancel, rerun the same agent and delete
 terminal history. Run again preserves completed checkpoints on unfinished tasks;
 completed tasks repeat Work/Review using the saved Plan. The agent ID and
 selection stay the same. Lists return compact summaries and load the selected report separately.
-Agents has a left sidebar for creation, history and active controls; its workflow
-and sidebar scroll independently. Small screens use a controls drawer. Terminal
+Agents has New, Watches and Tasks tabs at the top of its left sidebar, with New
+selected initially. New holds the compact composer; Tasks holds running and past
+work with explicit status labels, active controls and an expandable Updates inbox.
+The former Tasks/Watches/Activity bar is removed. Switching sections preserves
+task/Watch drafts and saved workflow selection; starting selects Tasks. Workflow
+and sidebar scroll independently. Small screens keep section switching inside the
+controls drawer, closing it when opening saved work. Terminal
 Run again and the red two-click Delete remain at the workflow card's top right.
 Top-bar hover uses the filled, soft glow of My Files, with distinct keyboard focus
 retained. Agent headings/history use a saved
@@ -54,6 +59,11 @@ The Agent composer offers New project through the existing ordinary Project
 dialog. Creating selects the new Project and preserves the objective; it does
 not start an Agent. Cancel and failure preserve the previous selection and draft.
 Projects now has its own persistent workspace and compact Project directory.
+Each directory card shows the canonical chat count and last activity, with Private
+labels and full timestamps available accessibly. Counts include archived chats;
+deleted/unlinked chats are excluded. Activity includes retained Project, chat,
+Knowledge, Agent and Watch/check updates. One owner-scoped batch supplies each
+page. Narrow layouts retain a summary for the selected Project below the picker.
 Switching preserves mounted Chat/Agent drafts; Project conversations open canonically
 in Chat. Agent Project links, Project breadcrumbs and Knowledge Search links open
 Projects. Knowledge sits top right beside Conversations; Files and Agents follow
@@ -205,7 +215,8 @@ models; the explicit report helper is described below. There are no global-memor
 summaries. Local tests and mocked browser flows pass; real-model reuse
 and deployed acceptance remain manual.
 
-Public-page Watches now appear beside Tasks and Activity inside Agents. Creating a
+Public-page Watches use the Watches sidebar tab inside Agents; activity is in
+Tasks → Updates. Creating a
 watch explicitly saves one public HTTP(S) URL, a criterion and a previewed interval,
 daily or weekly schedule in an IANA timezone. Query parameters, URL credentials,
 fragments, nonstandard ports and local destinations are excluded. Saving schedules

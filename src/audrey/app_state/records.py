@@ -86,6 +86,8 @@ class ProjectRecord:
     created_at: str
     updated_at: str
     private_required: bool = False
+    conversation_count: int = 0
+    last_activity_at: str = ""
 
 
 @dataclass(frozen=True, slots=True)

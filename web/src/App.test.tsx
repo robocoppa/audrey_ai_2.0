@@ -185,6 +185,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: `Open Project: ${BRIDGE_PROJECT.name}` }));
     expect(await screen.findByRole("heading", { name: BRIDGE_PROJECT.name })).toBeVisible();
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Agent sections" })).getByRole("button", { name: "New" }));
     expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Preserved Project draft");
     expect(fetchMock.mock.calls.some(([, options]) => (options as RequestInit | undefined)?.method === "POST")).toBe(false);
   });
@@ -236,7 +237,7 @@ describe("App", () => {
     await act(async () => resolve(new Response(JSON.stringify(BRIDGE_PROJECT), { headers: { "Content-Type": "application/json" } })));
     expect(navigation.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
-    expect(screen.getByRole("button", { name: "Tasks" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "New" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("form", { name: "Create watch" })).not.toBeInTheDocument();
   });
 
@@ -257,7 +258,7 @@ describe("App", () => {
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
     expect(signal?.aborted).toBe(true);
     await act(async () => resolve(new Response(JSON.stringify(BRIDGE_WATCH), { headers: { "Content-Type": "application/json" } })));
-    expect(screen.getByRole("button", { name: "Tasks" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "New" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("heading", { name: BRIDGE_WATCH.title })).not.toBeInTheDocument();
   });
 
@@ -328,7 +329,7 @@ describe("App", () => {
     expect(document.querySelector(".topbar")).toContainElement(workspaceNavigation);
     const navigation = within(workspaceNavigation);
     fireEvent.click(navigation.getByRole("button", { name: "Agents" }));
-    expect(screen.getByRole("heading", { name: "Agents", level: 1 })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "New agent", level: 1 })).toBeVisible();
     expect(chat).not.toBeVisible();
     fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Keep this research draft" } });
     fireEvent.click(navigation.getByRole("button", { name: "Chat" }));

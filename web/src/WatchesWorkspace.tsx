@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ApiError, actOnWatch, createWatch, deleteWatch, getWatch, getWatchRun,
   listWatchRuns, listWatches, updateWatch,
@@ -23,7 +23,7 @@ function scheduleLabel(watch: Pick<PublicWatch, "schedule">) {
   return `${cadence} · ${schedule.timezone}`;
 }
 
-export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigationOpenChange, openRequest, composerProjectRequest, externalWatchRequest, onOpenProject }: {
+export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigationOpenChange, openRequest, composerProjectRequest, externalWatchRequest, onOpenProject, sidebarTabs }: {
   visible: boolean;
   timezone?: string;
   navigationOpen?: boolean;
@@ -32,6 +32,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
   composerProjectRequest?: { project: AudreyProject; serial: number };
   externalWatchRequest?: { watch: PublicWatch; serial: number };
   onOpenProject?: (id: string) => void;
+  sidebarTabs?: ReactNode;
 }) {
   const [watches, setWatches] = useState<PublicWatch[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -321,12 +322,13 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
   }
 
   const errors = <>{error ? <p className="agents-error" role="alert">{error}</p> : null}{notice ? <p className="agents-notice" role="status">{notice}</p> : null}</>;
-  return <section className="watches-workspace" data-sidebar-open={sidebarOpen} aria-labelledby="watches-title">
+  return <section className={`watches-workspace${sidebarTabs ? " watches-workspace-integrated" : ""}`} data-sidebar-open={sidebarOpen} aria-labelledby="watches-title">
     {compact ? <div className="agents-mobile-toolbar" inert={sidebarOpen ? true : undefined}><button className="agents-secondary" type="button" ref={sidebarButton} aria-controls="watches-navigation" aria-expanded={sidebarOpen} onClick={() => setDrawerOpen(true)}>Watch controls</button><span>Page monitoring</span></div> : null}
     {sidebarOpen ? <button className="agents-sidebar-backdrop" type="button" tabIndex={-1} aria-label="Dismiss watch controls" onClick={closeSidebar} /> : null}
     <div className="watch-columns">
       <aside className="watch-sidebar" id="watches-navigation" ref={sidebar} aria-label="Saved watches" role={compact ? "dialog" : undefined} aria-modal={sidebarOpen ? true : undefined} aria-hidden={compact && !sidebarOpen ? true : undefined} inert={compact && !sidebarOpen ? true : undefined}>
-        <header className="agents-header"><div><p className="agents-eyebrow">Keep an eye on what matters</p><h1 id="watches-title">Watches</h1></div>{compact ? <button type="button" className="agents-secondary watch-sidebar-close" aria-label="Close watch controls" onClick={closeSidebar}>✕</button> : null}</header>
+        {sidebarTabs}
+        <header className="agents-header"><div>{!sidebarTabs ? <p className="agents-eyebrow">Keep an eye on what matters</p> : null}<h1 id="watches-title">Watches</h1></div>{compact ? <button type="button" className="agents-secondary watch-sidebar-close" aria-label="Close watch controls" onClick={closeSidebar}>✕</button> : null}</header>
         <div className="watch-sidebar-scroll"><button className="agents-primary" type="button" disabled={busy} onClick={newWatch}>New watch</button><p className="watch-help">Scheduled checks continue while you’re away. Only public pages are supported.</p><button className="agents-refresh" type="button" onClick={() => setToken((value) => value + 1)}>Refresh watches</button>{loading ? <p role="status">Loading watches…</p> : !watches.length ? <p className="agents-empty">No watches yet. Create one to follow a public page.</p> : <ul className="agents-task-list">{watches.map((watch) => <li key={watch.id}><button type="button" className="agents-task-card" aria-pressed={!formActive && selectedId === watch.id} onClick={() => selectWatch(watch.id)} aria-label={`Open watch: ${watch.title}`}><span className={`agents-status agents-status-${watch.enabled ? "running" : "paused"}`}>{watch.enabled ? "Scheduled" : "Paused"}</span><strong>{watch.title}</strong><span className="agents-task-stage">{watch.active_run_id ? "Check in progress" : watch.latest_run ? runLabel(watch.latest_run) : "Awaiting baseline"}</span><span className="agents-task-stage">Next: {timestamp(watch.next_run_at)}</span></button></li>)}</ul>}</div>
       </aside>
       <section className="watch-detail-scroll" aria-label="Selected watch" tabIndex={0} ref={detail} inert={sidebarOpen ? true : undefined}>{errors}<div className="watch-detail">
@@ -336,7 +338,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
           <header className="watch-detail-header"><div className="agents-detail-toolbar"><span className={`agents-status agents-status-${selected.enabled ? "running" : "paused"}`}>{selected.enabled ? "Scheduled" : "Paused"}</span><WatchControls key={`${selected.id}:${selected.revision}:${visible}`} watch={selected} busy={busy} onAction={(action) => void act(selected, action)} onEdit={() => { externalRead.current?.abort(); setFormKey((value) => value + 1); setEditing(selected); setFormVisible(true); setFormProjectRequest(undefined); setConflict(undefined); }} /></div><h2>{selected.title}</h2><a href={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a><p>{selected.criterion}</p><WatchProjectView project={selected.project} onOpenProject={onOpenProject} /><p>{scheduleLabel(selected)}</p><p>Next scheduled check: <strong>{timestamp(selected.next_run_at)}</strong></p>{!selected.enabled ? <p>Run now checks this page once and leaves the schedule paused.</p> : null}</header>
           <section className="watch-history" aria-labelledby="watch-history-title"><h3 id="watch-history-title">Check history</h3><p className="watch-help">The first successful check saves a baseline. Later successful checks compare normalized page text; failed checks leave the baseline unchanged. Showing up to 50 recent checks.</p>{runs.length ? <ul>{runs.map((item) => <li key={item.id}><button type="button" aria-pressed={runId === item.id} onClick={() => { setRunId(item.id); setRun(null); }}><strong>{runLabel(item)}</strong><span>{item.kind === "catchup" ? "Catch-up after downtime" : item.kind === "manual" ? "Run now" : "Scheduled"}</span><time dateTime={item.scheduled_at}>{timestamp(item.scheduled_at)}</time></button></li>)}</ul> : <p className="agents-empty">No saved checks yet. Run now to establish a baseline, or wait for the first scheduled check.</p>}</section>
           {run && run.id === runId && run.watch_id === selected.id ? <WatchRunDetail run={run} timestamp={timestamp} onOpenProject={onOpenProject} /> : loadingRun ? <p role="status">Loading saved check…</p> : null}
-        </> : <div className="agents-welcome"><span className="agents-welcome-mark" aria-hidden="true">◉</span><h2>Follow a public page</h2><p>Save a schedule and a criterion for the changes you care about. Audrey keeps check history and adds relevant changes to Activity.</p><button className="agents-primary" type="button" onClick={newWatch}>Create a watch</button></div>}
+        </> : <div className="agents-welcome"><span className="agents-welcome-mark" aria-hidden="true">◉</span><h2>Follow a public page</h2><p>Save a schedule and a criterion for the changes you care about. Audrey keeps check history and adds relevant changes to task updates.</p><button className="agents-primary" type="button" onClick={newWatch}>Create a watch</button></div>}
       </div></section>
     </div>
   </section>;

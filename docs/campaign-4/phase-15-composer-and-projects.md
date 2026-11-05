@@ -45,6 +45,14 @@ Server-owned limits are 100 name characters, 4,000 instruction characters, and 2
 
 Project CRUD, conversation creation/listing, move/ungroup, file selection/removal, and pagination use the owner-scoped API. Deleting a project transactionally ungroups conversations and removes references while retaining conversations and files. Deleting a file prunes project references.
 
+Project list and CRUD responses include `conversation_count` and `last_activity_at`
+for the directory. Counts include currently associated archived chats, excluding
+deleted/unlinked chats and other owners. Activity is the latest retained timestamp
+from the Project, its chats/messages, Knowledge, Agents and Watches/checks; file
+attachment changes already update the Project timestamp. Summaries are read in one
+bounded batch per page without reading content bodies. The existing `updated_at`
+pagination order and cursor remain unchanged.
+
 The sidebar has compact collapsible Projects. Project home provides instructions, conversations, file management, and clear non-destructive deletion confirmation. Ordinary search/history and New conversation remain available.
 
 ### Project deletion control

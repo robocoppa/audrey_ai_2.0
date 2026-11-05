@@ -81,6 +81,8 @@ class ProjectResponse(BaseModel):
     instructions: str
     created_at: str
     updated_at: str
+    conversation_count: int
+    last_activity_at: str
 
 
 class ProjectListResponse(BaseModel):
@@ -144,6 +146,8 @@ def _project_response(record: ProjectRecord) -> ProjectResponse:
         instructions=record.instructions,
         created_at=record.created_at,
         updated_at=record.updated_at,
+        conversation_count=record.conversation_count,
+        last_activity_at=record.last_activity_at,
     )
 
 

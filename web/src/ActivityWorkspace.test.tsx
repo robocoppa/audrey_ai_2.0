@@ -37,11 +37,12 @@ describe("unified Activity", () => {
     expect(screen.getAllByText(unsafe)).toHaveLength(2); expect(document.querySelector('img[src="x"]')).toBeNull();
   });
 
-  it("resolves the canonical terminal agent revision before marking read and opening", async () => {
+  it.each([false, true])("resolves the canonical terminal agent revision before marking read and opening (compact: %s)", async (compact) => {
     const open = vi.fn(), unread = vi.fn();
     let finish!: (value: api.AgentTask) => void;
     vi.mocked(api.getActivityAgentTask).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
-    workspace({ onOpenAgent: open, onUnreadChange: unread });
+    workspace({ onOpenAgent: open, onUnreadChange: unread, compact });
+    expect(screen.getByRole("heading", { name: compact ? "Updates" : "Activity", level: compact ? 3 : 1 })).toBeVisible();
     fireEvent.click(await screen.findByRole("button", { name: /Public documentation comparison/ }));
     expect(api.readActivity).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
     await act(async () => finish(task()));
@@ -79,10 +80,10 @@ describe("unified Activity", () => {
     expect(api.readActivity).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
   });
 
-  it("rejects a mismatched task revision without silently opening the latest run", async () => {
+  it.each([false, true])("rejects a mismatched task revision without silently opening the latest run (compact: %s)", async (compact) => {
     vi.mocked(api.getActivityAgentTask).mockResolvedValue(task({ revision: 8 })); const open = vi.fn();
-    workspace({ onOpenAgent: open }); fireEvent.click(await screen.findByRole("button", { name: /Public documentation comparison/ }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("refresh Activity"); expect(api.readActivity).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
+    workspace({ onOpenAgent: open, compact }); fireEvent.click(await screen.findByRole("button", { name: /Public documentation comparison/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(compact ? "refresh updates" : "refresh Activity"); expect(api.readActivity).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
   });
 
   it("opens the exact notified watch run before marking its notice read", async () => {
@@ -101,13 +102,13 @@ describe("unified Activity", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("This watch or saved check is no longer available"); expect(api.readActivity).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
   });
 
-  it("aborts target navigation on hiding and ignores a late saved result", async () => {
+  it.each([false, true])("aborts target navigation on hiding and ignores a late saved result (compact: %s)", async (compact) => {
     let finish!: (value: api.AgentTask) => void;
     vi.mocked(api.getActivityAgentTask).mockImplementation(() => new Promise((resolve) => { finish = resolve; })); const open = vi.fn(), unread = vi.fn();
-    const view = workspace({ onOpenAgent: open, onUnreadChange: unread });
+    const view = workspace({ onOpenAgent: open, onUnreadChange: unread, compact });
     fireEvent.click(await screen.findByRole("button", { name: /Public documentation comparison/ }));
     const signal = vi.mocked(api.getActivityAgentTask).mock.calls[0][1];
-    view.rerender(<ActivityWorkspace visible={false} onOpenAgent={open} onOpenWatch={vi.fn()} onUnreadChange={unread} />);
+    view.rerender(<ActivityWorkspace visible={false} onOpenAgent={open} onOpenWatch={vi.fn()} onUnreadChange={unread} compact={compact} />);
     expect(signal?.aborted).toBe(true); await act(async () => finish(task()));
     expect(open).not.toHaveBeenCalled(); expect(api.readActivity).not.toHaveBeenCalled();
   });

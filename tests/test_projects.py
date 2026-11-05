@@ -247,6 +247,165 @@ async def test_projects_repository_enforces_ownership_limits_moves_and_delete(tm
         store.close()
 
 
+async def test_project_directory_counts_current_owned_chats_and_batches_activity(tmp_path, monkeypatch):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    alice = await _resolve(store, subject="alice-summary", email="alice@example.com")
+    bob = await _resolve(store, subject="bob-summary", email="bob@example.com")
+    try:
+        first = await store.projects.create(user_id=alice.user_id, name="Garden")
+        second = await store.projects.create(user_id=alice.user_id, name="Other garden")
+        foreign = await store.projects.create(user_id=bob.user_id, name="Foreign")
+        chats = [await store.conversations.create(
+            user_id=alice.user_id, title=title, project_id=first.project_id,
+        ) for title in ("Active", "Archived", "Deleted", "Moved")]
+        await store.conversations.update(
+            user_id=alice.user_id, conversation_id=chats[1].conversation_id, archived=True,
+        )
+        await store.conversations.delete(
+            user_id=alice.user_id, conversation_id=chats[2].conversation_id,
+        )
+        await store.conversations.update(
+            user_id=alice.user_id, conversation_id=chats[3].conversation_id,
+            project_id=second.project_id, update_project=True,
+        )
+        foreign_chat = await store.conversations.create(
+            user_id=bob.user_id, title="Foreign", project_id=foreign.project_id,
+        )
+        base = "2026-01-01T00:00:00+00:00"
+        with store._lock:
+            store._conn.execute("UPDATE app_projects SET updated_at=?", (base,))
+            store._conn.execute("UPDATE app_conversations SET created_at=?,updated_at=?", (base, base))
+            store._conn.execute(
+                "UPDATE app_conversations SET last_message_at=? WHERE conversation_id=?",
+                ("2026-01-03T00:00:00+00:00", chats[0].conversation_id),
+            )
+            store._conn.execute(
+                "UPDATE app_conversations SET updated_at=? WHERE conversation_id=?",
+                ("2026-01-04T00:00:00+00:00", chats[1].conversation_id),
+            )
+            store._conn.execute(
+                "UPDATE app_conversations SET updated_at=? WHERE conversation_id=?",
+                ("2026-01-30T00:00:00+00:00", chats[3].conversation_id),
+            )
+            # A malformed legacy link must never contribute another owner's data.
+            store._conn.execute(
+                "UPDATE app_conversations SET project_id=?,updated_at=? WHERE conversation_id=?",
+                (first.project_id, "2050-01-01T00:00:00+00:00", foreign_chat.conversation_id),
+            )
+            store._conn.commit()
+            statements = []
+            store._conn.set_trace_callback(statements.append)
+        try:
+            page = await store.projects.list_page(user_id=alice.user_id, limit=10)
+        finally:
+            store._conn.set_trace_callback(None)
+        assert len([sql for sql in statements if sql.lstrip().startswith(("SELECT", "WITH"))]) == 2
+        by_id = {record.project_id: record for record in page}
+        assert set(by_id) == {first.project_id, second.project_id}
+        assert by_id[first.project_id].conversation_count == 2
+        assert by_id[first.project_id].last_activity_at == "2026-01-04T00:00:00+00:00"
+        assert by_id[second.project_id].conversation_count == 1
+        assert by_id[second.project_id].last_activity_at == "2026-01-30T00:00:00+00:00"
+        assert await store.projects.get(user_id=bob.user_id, project_id=first.project_id) is None
+
+        monkeypatch.setattr("audrey.app_state.projects._utc_now", lambda: "2026-01-05T00:00:00+00:00")
+        edited = await store.projects.update(user_id=alice.user_id, project_id=first.project_id, name="Renamed")
+        assert edited.conversation_count == 2
+        assert edited.last_activity_at == "2026-01-05T00:00:00+00:00"
+        await store.conversations.delete(user_id=alice.user_id, conversation_id=chats[1].conversation_id)
+        await store.conversations.update(
+            user_id=alice.user_id, conversation_id=chats[0].conversation_id,
+            project_id=None, update_project=True,
+        )
+        empty = await store.projects.get(user_id=alice.user_id, project_id=first.project_id)
+        assert empty.conversation_count == 0
+        assert empty.last_activity_at == "2026-01-05T00:00:00+00:00"
+        monkeypatch.setattr("audrey.app_state.repositories._utc_now", lambda: "2026-01-31T00:00:00+00:00")
+        started = await store.conversations.begin_run(
+            user_id=alice.user_id, conversation_id=chats[3].conversation_id, user_content="A new message",
+        )
+        await store.conversations.finish_run(
+            user_id=alice.user_id, run_id=started.run.run_id, outcome="succeeded", assistant_content="Saved reply",
+        )
+        active = await store.projects.get(user_id=alice.user_id, project_id=second.project_id)
+        assert active.conversation_count == 1
+        assert active.last_activity_at == "2026-01-31T00:00:00+00:00"
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize("view", ["get", "list"])
+async def test_project_summary_keeps_one_snapshot_during_concurrent_deletion(tmp_path, monkeypatch, view):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    other = ApplicationStore(store.path)
+    owner = await _resolve(store, subject="summary-delete", email="alice@example.com")
+    try:
+        project = await store.projects.create(user_id=owner.user_id, name="Garden")
+        await store.conversations.create(user_id=owner.user_id, project_id=project.project_id)
+        summarize = store.projects._with_summaries_locked
+
+        def delete_before_summary(user_id, rows):
+            assert other.projects._delete_sync(user_id, project.project_id)
+            return summarize(user_id, rows)
+
+        monkeypatch.setattr(store.projects, "_with_summaries_locked", delete_before_summary)
+        if view == "get":
+            saved = await store.projects.get(user_id=owner.user_id, project_id=project.project_id)
+        else:
+            saved = (await store.projects.list_page(user_id=owner.user_id, limit=10))[0]
+        assert saved.project_id == project.project_id
+        assert saved.conversation_count == 1
+        assert await store.projects.get(user_id=owner.user_id, project_id=project.project_id) is None
+    finally:
+        other.close()
+        store.close()
+
+
+async def test_project_activity_includes_retained_knowledge_agents_and_watch_checks(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner = await _resolve(store, subject="activity-summary", email="alice@example.com")
+    try:
+        project = await store.projects.create(user_id=owner.user_id, name="Garden")
+        note = await store.knowledge.create(
+            user_id=owner.user_id, project_id=project.project_id, kind="fact", text="Garden plan",
+        )
+        task = await store.agents.create(
+            user_id=owner.user_id, project_id=project.project_id,
+            objective="Prepare a garden checklist", request_id="summary-agent",
+        )
+        watch = await store.watches.create(
+            user_id=owner.user_id, project_id=project.project_id, request_id="summary-watch",
+            title="Garden supplies", url="https://example.com/supplies", criterion="Discounts",
+            schedule={"kind": "interval", "timezone": "UTC", "interval_minutes": 60}, enabled=False,
+        )
+        run = await store.watches.run_now(
+            user_id=owner.user_id, watch_id=watch["id"], expected_revision=watch["revision"],
+        )
+        activity_updates = (
+            ("UPDATE app_project_knowledge SET updated_at=? WHERE entry_id=?", note["id"]),
+            ("UPDATE app_agent_tasks SET updated_at=? WHERE task_id=?", task["id"]),
+            ("UPDATE app_watches SET updated_at=? WHERE watch_id=?", watch["id"]),
+            ("UPDATE app_watch_runs SET updated_at=? WHERE run_id=?", run["active_run_id"]),
+        )
+        with store._lock:
+            store._conn.execute("UPDATE app_projects SET updated_at='2026-01-01T00:00:00+00:00'")
+            for query, identity in activity_updates:
+                store._conn.execute(query, ("2026-01-02T00:00:00+00:00", identity))
+            store._conn.commit()
+        for query, identity in activity_updates:
+            with store._lock:
+                store._conn.execute(query, ("2026-01-03T00:00:00+00:00", identity))
+                store._conn.commit()
+            current = await store.projects.get(user_id=owner.user_id, project_id=project.project_id)
+            assert current.conversation_count == 0
+            assert current.last_activity_at == "2026-01-03T00:00:00+00:00"
+            with store._lock:
+                store._conn.execute(query, ("2026-01-02T00:00:00+00:00", identity))
+                store._conn.commit()
+    finally:
+        store.close()
+
+
 def _file(
     file_id: str,
     *,
@@ -315,6 +474,8 @@ def test_projects_api_is_owner_scoped_and_revalidates_ready_files(tmp_path, monk
             )
             assert created.status_code == 201
             project_id = created.json()["id"]
+            assert created.json()["conversation_count"] == 0
+            assert created.json()["last_activity_at"] == created.json()["updated_at"]
 
             second = client.post("/api/projects", json={"name": "Second"})
             assert second.status_code == 201
@@ -396,6 +557,13 @@ def test_projects_api_is_owner_scoped_and_revalidates_ready_files(tmp_path, monk
                 json={"title": "Another project conversation"},
             )
             assert another.status_code == 201
+            summary = client.get(f"/api/projects/{project_id}").json()
+            assert summary["conversation_count"] == 2
+            assert summary["last_activity_at"] == another.json()["updated_at"]
+            listed_summary = next(item for item in client.get("/api/projects").json()["items"]
+                                  if item["id"] == project_id)
+            assert listed_summary["conversation_count"] == summary["conversation_count"]
+            assert listed_summary["last_activity_at"] == summary["last_activity_at"]
             conversation_page = client.get(f"/api/projects/{project_id}/conversations?limit=1")
             assert conversation_page.status_code == 200
             conversation_cursor = conversation_page.json()["next_cursor"]

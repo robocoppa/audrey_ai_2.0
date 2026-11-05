@@ -38,18 +38,20 @@ export function ProjectsWorkspace({ visible, models, openRequest, onOpenConversa
   const openedRequest = useRef<number | null>(null);
   const selection = useRef<string | null>(null);
   const listGeneration = useRef(0);
+  const summaryRequest = useRef<AbortController | null>(null);
   const lifetime = useRef(0);
   const active = useRef(visible);
   const defaultModelId = models.find(({ id }) => id === "auto")?.id ?? models[0]?.id ?? "auto";
+  const selectedSummary = projects.find(({ id }) => id === selectedId);
 
-  useEffect(() => { lifetime.current += 1; return () => { lifetime.current += 1; }; }, []);
+  useEffect(() => { lifetime.current += 1; return () => { lifetime.current += 1; summaryRequest.current?.abort(); }; }, []);
   useEffect(() => { active.current = visible; }, [visible]);
 
   useEffect(() => {
     if (!visible) return;
     const controller = new AbortController();
     const generation = ++listGeneration.current;
-    queueMicrotask(() => { if (!controller.signal.aborted) { setLoading(true); setError(""); } });
+    queueMicrotask(() => { if (!controller.signal.aborted && generation === listGeneration.current) { setLoading(true); setError(""); } });
     void listProjects(undefined, controller.signal).then((page) => {
       if (controller.signal.aborted || generation !== listGeneration.current) return;
       setProjects((current) => {
@@ -70,6 +72,7 @@ export function ProjectsWorkspace({ visible, models, openRequest, onOpenConversa
       if (!active) return;
       openedRequest.current = openRequest.serial;
       const next = openRequest.project;
+      summaryRequest.current?.abort();
       setProjects((current) => [next, ...current.filter(({ id }) => id !== next.id)]);
       selection.current = next.id; setSelectedId(next.id); setProject(next);
     });
@@ -79,26 +82,43 @@ export function ProjectsWorkspace({ visible, models, openRequest, onOpenConversa
   useEffect(() => {
     if (!visible || !selectedId) return;
     const controller = new AbortController();
-    queueMicrotask(() => { if (!controller.signal.aborted) { setDetailLoading(true); setError(""); } });
+    const generation = listGeneration.current;
+    queueMicrotask(() => { if (!controller.signal.aborted && generation === listGeneration.current) { setDetailLoading(true); setError(""); } });
     void Promise.all([getProject(selectedId, controller.signal), listProjectConversations(selectedId), listProjectFiles(selectedId, controller.signal)])
       .then(([current, threads, linked]) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || generation !== listGeneration.current) return;
         setProject(current); setConversations(threads.items); setConversationCursor(threads.next_cursor); setFiles(linked.items);
         if (linked.limits) setLimits(linked.limits);
-        setProjects((items) => items.map((item) => item.id === current.id ? current : item));
+        setProjects((items) => items.map((item) => item.id === current.id ? { ...item, ...current } : item));
       }).catch((reason: unknown) => {
-        if (!controller.signal.aborted) { setProject(null); setConversations([]); setFiles([]); setError(messageOf(reason)); }
-      }).finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
+        if (!controller.signal.aborted && generation === listGeneration.current) { setProject(null); setConversations([]); setFiles([]); setError(messageOf(reason)); }
+      }).finally(() => { if (!controller.signal.aborted && generation === listGeneration.current) setDetailLoading(false); });
     return () => controller.abort();
   }, [visible, selectedId, refresh]);
 
   useEffect(() => { if (!visible) queueMicrotask(() => setCreating(false)); }, [visible]);
 
   function select(id: string) {
+    if (selection.current !== (id || null)) summaryRequest.current?.abort();
     selection.current = id || null; setSelectedId(selection.current);
     setError(""); setConversationCursor(null);
     if (!id) setDetailLoading(false);
     if (id !== project?.id) { setConversations([]); setFiles([]); }
+  }
+
+  function refreshProjectSummary(id: string) {
+    summaryRequest.current?.abort();
+    const controller = new AbortController();
+    summaryRequest.current = controller;
+    const generation = listGeneration.current;
+    const mounted = lifetime.current;
+    void getProject(id, controller.signal).then((updated) => {
+      if (controller.signal.aborted || mounted !== lifetime.current || generation !== listGeneration.current || selection.current !== id || updated.id !== id) return;
+      setProjects((current) => current.map((item) => item.id === id ? withProjectSummary(item, updated) : item));
+      setProject((current) => current?.id === id ? withProjectSummary(current, updated) : current);
+    }).catch(() => {
+      // Keep the last saved summary; the next visible list/detail refresh retries it.
+    }).finally(() => { if (summaryRequest.current === controller) summaryRequest.current = null; });
   }
 
   async function loadMoreProjects() {
@@ -138,8 +158,16 @@ export function ProjectsWorkspace({ visible, models, openRequest, onOpenConversa
       {loading ? <p className="project-empty" role="status">Loading projects…</p> : null}
       <nav className="projects-directory-list" aria-label="Project list">
         {projects.map((item) => <button key={item.id} type="button" aria-current={selectedId === item.id ? "page" : undefined}
-          onClick={() => select(item.id)}><span>{item.name}</span>{item.private_required ? <small>Private</small> : null}</button>)}
+          aria-labelledby={`project-directory-name-${item.id}`} aria-describedby={`project-directory-summary-${item.id}`}
+          onClick={() => select(item.id)}>
+          <span className="projects-directory-title"><span id={`project-directory-name-${item.id}`} title={item.name}>{item.name}</span>
+            {item.private_required ? <small className="projects-directory-private">Private</small> : null}</span>
+          <ProjectDirectorySummary project={item} id={`project-directory-summary-${item.id}`} />
+        </button>)}
       </nav>
+      {selectedSummary ? <div className="projects-compact-summary">
+        <ProjectDirectorySummary project={selectedSummary} />
+      </div> : null}
       {!loading && projects.length === 0 ? <p className="project-empty">No projects yet.</p> : null}
       {nextCursor ? <button type="button" disabled={loadingMore} onClick={() => void loadMoreProjects()}>{loadingMore ? "Loading…" : "More projects"}</button> : null}
     </aside>
@@ -148,9 +176,9 @@ export function ProjectsWorkspace({ visible, models, openRequest, onOpenConversa
       {project && project.id === selectedId ? <ProjectHome key={project.id} visible={visible} project={project} conversations={conversations}
         files={files} filesLoading={detailLoading} limits={limits} defaultModelId={defaultModelId}
         onProjectChange={(updated) => {
-          listGeneration.current += 1; setLoading(false);
+          listGeneration.current += 1; setLoading(false); setDetailLoading(false);
           if (selection.current === updated.id) setProject(updated);
-          setProjects((current) => current.map((item) => item.id === updated.id ? updated : item));
+          setProjects((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
         }}
         onProjectDeleted={(id) => {
           listGeneration.current += 1; setLoading(false);
@@ -159,7 +187,9 @@ export function ProjectsWorkspace({ visible, models, openRequest, onOpenConversa
         }}
         onConversationCreated={(conversation) => {
           if (selection.current !== project.id) return;
+          listGeneration.current += 1; setLoading(false); setDetailLoading(false);
           setConversations((current) => [conversation, ...current.filter(({ id }) => id !== conversation.id)]);
+          refreshProjectSummary(project.id);
           if (active.current) onOpenConversation(conversation);
         }}
         onConversationSelected={onOpenConversation}
@@ -177,6 +207,33 @@ export function ProjectsWorkspace({ visible, models, openRequest, onOpenConversa
         select(created.id);
       }} /> : null}
   </div>;
+}
+
+function validChatCount(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
+
+function ProjectDirectorySummary({ project, id }: { project: AudreyProject; id?: string }) {
+  const count = project.conversation_count;
+  const activity = project.last_activity_at ? new Date(project.last_activity_at) : null;
+  const validActivity = activity && !Number.isNaN(activity.valueOf());
+  const countLabel = validChatCount(count) ? `${count} ${count === 1 ? "chat" : "chats"}` : "Chat count unavailable";
+  const fullActivity = validActivity ? new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "long" }).format(activity) : null;
+  return <span className="projects-directory-summary" id={id}>
+    <span className="projects-directory-accessible">{`${project.private_required ? "Private project. " : ""}${countLabel}. ${fullActivity ? `Last activity ${fullActivity}` : "Activity unavailable"}.`}</span>
+    <span className="projects-directory-chat-count" aria-hidden="true">{countLabel}</span>
+    <span className="projects-directory-activity" aria-hidden="true">{validActivity ? <>
+      <span>Last activity </span><time dateTime={activity.toISOString()} title={fullActivity ?? undefined}>
+        {new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(activity)}
+      </time>
+    </> : "Activity unavailable"}</span>
+  </span>;
+}
+
+function withProjectSummary(current: AudreyProject, updated: AudreyProject): AudreyProject {
+  return {
+    ...current,
+    ...(validChatCount(updated.conversation_count) ? { conversation_count: updated.conversation_count } : {}),
+    ...(updated.last_activity_at && !Number.isNaN(Date.parse(updated.last_activity_at)) ? { last_activity_at: updated.last_activity_at } : {}),
+  };
 }
 
 function messageOf(reason: unknown) { return reason instanceof Error ? reason.message : "Project is unavailable. Try again."; }

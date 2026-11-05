@@ -286,6 +286,9 @@ export interface AudreyProject {
   instructions: string;
   created_at: string;
   updated_at: string;
+  /** Canonical owned chat count, including archived chats. Older responses may omit summaries. */
+  conversation_count?: number;
+  last_activity_at?: string | null;
 }
 
 export interface AudreyProjectList extends ListResponse<AudreyProject> {

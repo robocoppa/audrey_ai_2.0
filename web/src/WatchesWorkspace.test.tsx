@@ -187,10 +187,18 @@ describe("watch activity and visibility", () => {
     expect(signal?.aborted).toBe(true);
   });
 
-  it("opens mobile controls with trapped focus and closes them after selecting a watch", async () => {
-    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }))); workspace();
+  it.each([false, true])("opens mobile controls with trapped focus and closes them after selecting a watch (sidebar tabs: %s)", async (integrated) => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    workspace({ sidebarTabs: integrated ? <nav aria-label="Agent sections"><button type="button">New</button><button type="button">Watches</button><button type="button">Tasks</button></nav> : undefined });
     await screen.findByRole("heading", { name: "Release announcements" }); fireEvent.click(screen.getByRole("button", { name: "Watch controls" }));
     const dialog = screen.getByRole("dialog", { name: "Saved watches" }); const close = within(dialog).getByRole("button", { name: "Close watch controls" }); expect(close).toHaveFocus();
+    if (integrated) {
+      const firstTab = within(dialog).getByRole("button", { name: "New" });
+      firstTab.focus(); fireEvent.keyDown(firstTab, { key: "Tab", shiftKey: true });
+      expect(within(dialog).getByRole("button", { name: "Open watch: Release announcements" })).toHaveFocus();
+      fireEvent.keyDown(document.activeElement!, { key: "Tab" });
+      expect(firstTab).toHaveFocus();
+    }
     fireEvent.click(within(dialog).getByRole("button", { name: "Open watch: Release announcements" }));
     expect(screen.queryByRole("dialog", { name: "Saved watches" })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("region", { name: "Selected watch" })).toHaveFocus());

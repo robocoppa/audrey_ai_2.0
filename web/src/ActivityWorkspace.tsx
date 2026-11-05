@@ -10,13 +10,14 @@ function label(item: ActivityNotice) {
   return item.kind === "change" ? "Relevant change" : "Watch failed";
 }
 
-export function ActivityWorkspace({ visible, timezone, onUnreadChange, onOpenAgent, onOpenWatch, isAgentResultCurrent }: {
+export function ActivityWorkspace({ visible, timezone, onUnreadChange, onOpenAgent, onOpenWatch, isAgentResultCurrent, compact = false }: {
   visible: boolean;
   timezone?: string;
   onUnreadChange: (count: number) => void;
   onOpenAgent: (task: AgentTask) => void;
   onOpenWatch: (watch: PublicWatch, run: WatchRun) => void;
   isAgentResultCurrent?: (task: AgentTask) => boolean;
+  compact?: boolean;
 }) {
   const [items, setItems] = useState<ActivityNotice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,7 +51,7 @@ export function ActivityWorkspace({ visible, timezone, onUnreadChange, onOpenAge
         if (controller.signal.aborted || started !== generation.current) return;
         setItems(result.items); unread.current = result.unread_count; onUnreadChange(result.unread_count);
       } catch (reason) {
-        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Could not load Activity.");
+        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : `Could not load ${compact ? "updates" : "Activity"}.`);
       } finally { inFlight = false; if (!controller.signal.aborted) setLoading(false); }
     }
     void refresh();
@@ -63,7 +64,7 @@ export function ActivityWorkspace({ visible, timezone, onUnreadChange, onOpenAge
       window.removeEventListener("focus", onVisible);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [visible, token, onUnreadChange]);
+  }, [visible, token, onUnreadChange, compact]);
 
   async function open(item: ActivityNotice) {
     targetRequest.current?.abort();
@@ -106,7 +107,8 @@ export function ActivityWorkspace({ visible, timezone, onUnreadChange, onOpenAge
     } catch (reason) {
       if (!isCurrent()) return;
       if (reason instanceof ApiError && (reason.status === 404 || reason.status === 409)) {
-        setError(item.origin === "agent" ? item.kind === "input_required" ? "This agent question is no longer current. It may have been answered or cancelled; refresh Activity." : "This agent result is no longer current. It may have been run again or deleted; refresh Activity." : "This watch or saved check is no longer available. Refresh Activity.");
+        const refreshLabel = compact ? "updates" : "Activity";
+        setError(item.origin === "agent" ? item.kind === "input_required" ? `This agent question is no longer current. It may have been answered or cancelled; refresh ${refreshLabel}.` : `This agent result is no longer current. It may have been run again or deleted; refresh ${refreshLabel}.` : `This watch or saved check is no longer available. Refresh ${refreshLabel}.`);
       } else setError(reason instanceof Error ? reason.message : "Could not open this saved activity.");
     } finally { if (targetRequest.current === controller) { targetRequest.current = null; setOpening(null); } }
   }
@@ -117,14 +119,15 @@ export function ActivityWorkspace({ visible, timezone, onUnreadChange, onOpenAge
     return () => document.removeEventListener("visibilitychange", onHidden);
   }, []);
 
-  return <section className="activity-workspace" aria-labelledby="activity-title">
-    <header><h1 id="activity-title">Activity</h1><p>Agent questions, completed agents, agent failures, relevant page changes and persistent watch failures. Open an item to view its saved work.</p><p>Unread activity appears first. Showing up to 50 current items.</p><button className="agents-secondary" type="button" onClick={() => { setError(""); setToken((value) => value + 1); }}>Refresh activity</button></header>
+  const titleId = compact ? "agent-updates-title" : "activity-title";
+  return <section className={`activity-workspace${compact ? " activity-workspace-compact" : ""}`} aria-labelledby={titleId}>
+    <header>{compact ? <h3 id={titleId}>Updates</h3> : <><h1 id={titleId}>Activity</h1><p>Agent questions, completed agents, agent failures, relevant page changes and persistent watch failures. Open an item to view its saved work.</p><p>Unread activity appears first. Showing up to 50 current items.</p></>}<button className="agents-secondary" type="button" onClick={() => { setError(""); setToken((value) => value + 1); }}>{compact ? "Refresh updates" : "Refresh activity"}</button></header>
     {error ? <p className="agents-error" role="alert">{error}</p> : null}
-    {loading ? <p role="status">Loading activity…</p> : !items.length ? <p className="agents-empty">No activity yet. Agent results and watch alerts will appear here.</p> : <ul>{items.map((item) => {
+    {loading ? <p role="status">{compact ? "Loading updates…" : "Loading activity…"}</p> : !items.length ? <p className="agents-empty">{compact ? "No updates yet." : "No activity yet. Agent results and watch alerts will appear here."}</p> : <ul>{items.map((item) => {
       const key = `${item.origin}:${item.id}`;
       const date = new Date(item.created_at);
       return <li key={key}><button type="button" className="activity-notice" data-unread={!item.read_at} disabled={opening === key} onClick={() => void open(item)}>
-        <span>{item.read_at ? "Read" : "Unread"} · {label(item)}</span><strong>{item.title}</strong><p>{item.body}</p><time dateTime={item.created_at}>{Number.isNaN(date.getTime()) ? "Time unavailable" : formatter.format(date)}</time><span>{opening === key ? "Opening saved work…" : item.kind === "input_required" ? "Open agent question →" : item.origin === "agent" ? "Open agent result →" : "Open saved check →"}</span>
+        <span>{item.read_at ? "Read" : "Unread"} · {label(item)}</span><strong>{item.title}</strong>{!compact ? <p>{item.body}</p> : null}<time dateTime={item.created_at}>{Number.isNaN(date.getTime()) ? "Time unavailable" : formatter.format(date)}</time><span>{opening === key ? "Opening saved work…" : item.kind === "input_required" ? "Open agent question →" : item.origin === "agent" ? "Open agent result →" : "Open saved check →"}</span>
       </button></li>;
     })}</ul>}
   </section>;

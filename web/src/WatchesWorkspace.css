@@ -3,6 +3,10 @@
 .watch-columns { display: grid; grid-template-columns: minmax(17rem, 22rem) minmax(0, 1fr); min-height: 0; min-width: 0; }
 .watch-sidebar { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; border-right: 1px solid var(--border); background: rgb(9 20 37 / 88%); }
 .watch-sidebar-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 1.1rem 1.1rem; }
+.watches-workspace-integrated .watch-sidebar .agents-header { align-items: center; gap: 0.5rem; padding: 0.7rem 0.9rem 0.65rem; }
+.watches-workspace-integrated .watch-sidebar .agents-header h1 { font-size: 1rem; }
+.watches-workspace-integrated .watch-sidebar-scroll { padding: 0 0.9rem 0.9rem; }
+.watches-workspace-integrated .watch-columns { grid-template-columns: minmax(17rem, 20rem) minmax(0, 1fr); }
 .watch-sidebar-scroll > .agents-primary { width: 100%; }
 .watch-help { color: var(--muted); font-size: 0.77rem; line-height: 1.65; }
 .watch-detail-scroll { min-height: 0; min-width: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: clamp(1rem, 2.5vw, 2rem); }
@@ -54,6 +58,7 @@
 @media (max-width: 760px) {
   .watches-workspace { grid-template-rows: auto minmax(0, 1fr); }
   .watch-columns { grid-template-columns: minmax(0, 1fr); }
+  .watches-workspace-integrated .watch-columns { grid-template-columns: minmax(0, 1fr); }
   .watch-sidebar { display: none; position: fixed; z-index: 61; inset: 0 auto 0 0; width: min(23rem, calc(100% - 2rem)); height: 100dvh; box-shadow: 1rem 0 3rem rgb(0 0 0 / 25%); background: var(--surface-deep); }
   .watches-workspace[data-sidebar-open="true"] .watch-sidebar { display: flex; }
   .watch-detail-scroll, .watch-detail { padding: 1rem; }
