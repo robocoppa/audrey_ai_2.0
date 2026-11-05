@@ -423,10 +423,31 @@ describe("AgentsWorkspace", () => {
     fireEvent.change(await screen.findByRole("textbox", { name: "Your answer" }), { target: { value: response } });
     fireEvent.click(screen.getByRole("button", { name: "Answer and continue" }));
     await waitFor(() => expect(answer).toHaveBeenCalledWith(saved.id, "input-1", 6, response));
-    expect(await screen.findByText(/Answer saved\. This agent will continue/)).toBeVisible();
+    const confirmation = await screen.findByText(/Answer saved\. This agent will continue/);
+    expect(confirmation).toBeVisible();
+    expect(confirmation).toHaveAttribute("role", "status");
+    expect(confirmation.closest(".agents-detail-header")).not.toBeNull();
     expect(screen.getAllByRole("button", { name: `Open agent: ${saved.objective}` })).toHaveLength(1); expect(create).not.toHaveBeenCalled();
     fireEvent.click(screen.getByLabelText("Questions and answers"));
     expect(screen.getByText(response)).toBeVisible(); expect(document.querySelector(".agents-input-history b")).toBeNull();
+  });
+
+  it("keeps a delayed answer confirmation off another selected task", async () => {
+    const first = waitingTask(), second = task({ id: "agent-second", objective: "Prepare a welcome note" });
+    const answered = { ...first, status: "queued" as const, revision: 7, input_requests: first.input_requests!.map((input) => ({ ...input, answer: "Use 2026.", answered_at: first.updated_at })) };
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [first, second] });
+    vi.mocked(api.getAgentTask).mockImplementation(async (id) => id === first.id ? first : second);
+    let finishAnswer!: (saved: AgentTask) => void;
+    vi.spyOn(api, "answerAgentInput").mockImplementation(() => new Promise((resolve) => { finishAnswer = resolve; }));
+    render(<AgentsWorkspace />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Your answer" }), { target: { value: "Use 2026." } });
+    fireEvent.click(screen.getByRole("button", { name: "Answer and continue" }));
+    fireEvent.click(screen.getByRole("button", { name: `Open agent: ${second.objective}` }));
+    expect(await screen.findByRole("heading", { name: second.objective })).toBeVisible();
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [answered, second] });
+    await act(async () => { finishAnswer(answered); });
+    expect(screen.queryByText(/Answer saved\. This agent will continue/)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: second.objective })).toBeVisible();
   });
 
   it("preserves separate answer drafts across task selection, hidden tabs and same-revision summaries", async () => {

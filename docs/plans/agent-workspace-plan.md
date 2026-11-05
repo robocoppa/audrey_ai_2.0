@@ -1,6 +1,6 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, November 4, 2026. Saved task Agents, unified lexical
+**Status:** In progress, November 5, 2026. Saved task Agents, unified lexical
 Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner confirms Search
 returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
 
@@ -40,6 +40,9 @@ retained. Agent headings/history use a saved
 short title, and the unchanged original objective is available in an expandable
 Original prompt section. Original prompt and Questions and answers share one compact
 row; the top Last activity line is removed while history keeps its timestamps.
+Task confirmations and conflict notices appear compactly inside the matching
+Agent's header, without a banner pushing the card down. Delayed responses cannot
+show their confirmation on another task; Project creation feedback stays separate.
 Plan and progress and Recent activity share equal-width, equal-height cards when
 the workflow has enough width. Step names, status and saved-result controls share compact rows; both panels
 have fixed headings and independent scrolling;

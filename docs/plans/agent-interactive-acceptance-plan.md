@@ -4,11 +4,14 @@ Prepared November 3, 2026. **In progress; full acceptance pending.** These are o
 against Audrey's running UI, worker, local models and real downloads. Internal
 scripted checks remain regression evidence; they do not close these cases.
 
-November 4 update: the owner supplied a Fern Circle result and requested layout
-cleanup; its download checks have not been reported. Case 2 failed during Plan
-with a local-model output-limit error before Work began. A concise, nonthinking
-Plan fix is prepared; retry that same Agent after rebuilding backend/UI. Neither
-the file-reading capability nor the full case is accepted by this failed run.
+November 5 update: after the earlier Plan output-limit failure and concise,
+nonthinking Plan fix, the owner supplied a completed Case 2 purchasing report.
+Its four appendix decisions and USD 260.30 total / USD 212.05 remainder match
+the answer key. The report describes reads at 40,000 → 44,733 → 49,222 and links
+`garden-purchasing-checklist.md`; the saved read activity and downloaded file
+have not been independently inspected. Report content is confirmed; full Case 2
+acceptance still needs those checks. The earlier Fern Circle downloads also
+remain unconfirmed.
 The owner then replaced structured Knowledge with a plain Project knowledge
 textbox. Cases 3–5 and 7 below now test that simpler workflow; the previous source
 attachment, assignment and proposal UI cases are superseded, not accepted.
@@ -114,6 +117,15 @@ In Projects, Knowledge should be beside Conversations at laptop widths, with
 Files/Agents below and the empty instructions hint beside the title. Switch to
 Chat and Agents and back; existing drafts should remain. No uploads are needed
 for this deletion/layout follow-up.
+
+**Answer confirmation follow-up:** after deploying the UI update, answer an
+existing Agent planning question. If none is waiting, start a disposable Agent:
+“Before writing a one-sentence garden welcome, ask me which garden name to use.”
+Answer “Fern Circle.” The saved-answer confirmation should appear as compact
+text inside that Agent's header, without an external banner moving the card
+down. Try a narrow window too. The same saved task should continue, and a
+confirmation arriving after switching tasks must not appear on the other task.
+No upload is needed. This layout-only change requires rebuilding `audrey-ui`.
 
 ## 2. Selected files, later pages and answer quality
 

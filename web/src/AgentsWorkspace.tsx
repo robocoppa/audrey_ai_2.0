@@ -251,7 +251,7 @@ function AgentTasksWorkspace({
   const [refreshToken, setRefreshToken] = useState(0);
   const [detailRefreshToken, setDetailRefreshToken] = useState(0);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<{ text: string; taskId?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [answerDrafts, setAnswerDrafts] = useState<Record<string, AnswerDraft>>({});
   const [projects, setProjects] = useState<AudreyProject[]>([]);
@@ -412,7 +412,7 @@ function AgentTasksWorkspace({
     queueMicrotask(() => {
       if (controller.signal.aborted) return;
       setTasks((current) => mergeTasks(current, [openRequest.task], deletedIds.current));
-      setSelectedId(openRequest.task.id); setFilter("all"); setError(""); setNotice("");
+      setSelectedId(openRequest.task.id); setFilter("all"); setError(""); setNotice(null);
       window.requestAnimationFrame(() => { if (compactNavigation) detailRef.current?.focus({ preventScroll: true }); });
     });
     return () => controller.abort();
@@ -509,7 +509,7 @@ function AgentTasksWorkspace({
   function selectTask(id: string) {
     setSelectedId(id);
     setError("");
-    setNotice("");
+    setNotice(null);
     showWorkflow();
   }
 
@@ -535,7 +535,7 @@ function AgentTasksWorkspace({
     mutationGeneration.current += 1;
     setBusy(true);
     setError("");
-    setNotice("");
+    setNotice(null);
     let projectVerified = false;
     // Retain this identity after a lost response so Retry does not create duplicates.
     try {
@@ -592,7 +592,7 @@ function AgentTasksWorkspace({
     mutationGeneration.current += 1;
     setBusy(true);
     setError("");
-    setNotice("");
+    setNotice(null);
     try {
       const updated = await actOnAgentTask(task.id, action, task.revision);
       if (mounted.current) {
@@ -610,7 +610,7 @@ function AgentTasksWorkspace({
           const latest = await getAgentTask(task.id);
           if (mounted.current) {
             setTasks((current) => mergeTasks(current, [latest], deletedIds.current));
-            setNotice("This agent changed while you were acting. Its latest saved state is shown; review it before trying again.");
+            setNotice({ taskId: task.id, text: "This agent changed while you were acting. Its latest saved state is shown; review it before trying again." });
           }
         } catch (reloadError) {
           if (mounted.current) setError(messageOf(reloadError));
@@ -628,7 +628,7 @@ function AgentTasksWorkspace({
     mutationGeneration.current += 1;
     setBusy(true);
     setError("");
-    setNotice("");
+    setNotice(null);
     try {
       await deleteAgentTask(task.id, task.revision);
       if (!mounted.current) return;
@@ -644,7 +644,7 @@ function AgentTasksWorkspace({
           const latest = await getAgentTask(task.id);
           if (mounted.current) {
             setTasks((current) => mergeTasks(current, [latest], deletedIds.current));
-            setNotice("This agent changed while you were acting. Its latest saved state is shown; review it before trying again.");
+            setNotice({ taskId: task.id, text: "This agent changed while you were acting. Its latest saved state is shown; review it before trying again." });
           }
         } catch (reloadError) {
           if (mounted.current) setError(messageOf(reloadError));
@@ -660,7 +660,7 @@ function AgentTasksWorkspace({
     if (busyRef.current || agentContextBlocked(task) || task.status !== "waiting_for_input" || draft.revision !== task.revision
       || request.answer !== null || task.input_requests?.find((item) => item.answer === null)?.id !== request.id) return;
     busyRef.current = true; mutationGeneration.current += 1;
-    setBusy(true); setError(""); setNotice("");
+    setBusy(true); setError(""); setNotice(null);
     try {
       const saved = await answerAgentInput(task.id, request.id, draft.revision, draft.text);
       if (!mounted.current) return;
@@ -668,7 +668,7 @@ function AgentTasksWorkspace({
       setAnswerDrafts((current) => {
         const next = { ...current }; delete next[inputDraftKey(task.id, request.id)]; return next;
       });
-      setNotice("Answer saved. This agent will continue planning with your answer.");
+      setNotice({ taskId: task.id, text: "Answer saved. This agent will continue planning with your answer." });
     } catch (reason) {
       if (!mounted.current) return;
       if (reason instanceof ApiError && reason.status === 409) {
@@ -676,7 +676,7 @@ function AgentTasksWorkspace({
           const latest = await getAgentTask(task.id);
           if (!mounted.current) return;
           setTasks((current) => mergeTasks(current, [latest], deletedIds.current));
-          setNotice("This agent changed while you were answering. Review its latest question and saved answers before continuing.");
+          setNotice({ taskId: task.id, text: "This agent changed while you were answering. Review its latest question and saved answers before continuing." });
         } catch (reloadError) { if (mounted.current) setError(messageOf(reloadError)); }
       } else setError(messageOf(reason));
     } finally {
@@ -732,7 +732,7 @@ function AgentTasksWorkspace({
           </header>
           <div className="agents-sidebar-scroll">
             {sidebarOpen && error ? <p className="agents-error" role="alert">{error}</p> : null}
-            {sidebarOpen && notice ? <p className="agents-notice" role="status">{notice}</p> : null}
+            {sidebarOpen && notice && !notice.taskId ? <p className="agents-notice" role="status">{notice.text}</p> : null}
             <form className="agents-composer" onSubmit={submit}>
               <div className="agents-project-heading">
                 <label htmlFor="agent-project">Project <span className="agents-optional">Optional</span></label>
@@ -831,7 +831,7 @@ function AgentTasksWorkspace({
 
         <section className="agents-workflow" aria-label="Selected agent" ref={detailRef} tabIndex={0} inert={sidebarOpen ? true : undefined}>
           {!sidebarOpen && error ? <p className="agents-error" role="alert">{error}</p> : null}
-          {!sidebarOpen && notice ? <p className="agents-notice" role="status">{notice}</p> : null}
+          {!sidebarOpen && notice && !notice.taskId ? <p className="agents-notice" role="status">{notice.text}</p> : null}
           <div className="agents-detail">
             {selected ? (
               <>
@@ -840,6 +840,7 @@ function AgentTasksWorkspace({
                     <div className="agents-detail-meta">
                       <span className={`agents-status agents-status-${selected.status}`}>{STATUS_LABELS[selected.status]}</span>
                       {selected.project_context ? <AgentProjectContextBadge task={selected} onOpenProject={onOpenProject} /> : null}
+                      {notice?.taskId === selected.id ? <span className="agents-task-notice" role="status">{notice.text}</span> : null}
                     </div>
                     {isFinished(selected) ? <AgentTaskControls
                       key={`${selected.id}:${isFinished(selected) ? selected.revision : "active"}:${visible}`}
@@ -905,7 +906,7 @@ function AgentTasksWorkspace({
           setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
           setProjectsLoading(false); setProjectsError(""); setProjectRefresh((value) => value + 1);
           setComposerProject(project); setComposerFiles(null); setComposerOrigin(null); setPendingKnowledgeRequest(null); setUnavailableProjectId(null);
-          setCreatingProject(false); setNotice("Project created and selected. Your task draft is kept.");
+          setCreatingProject(false); setNotice({ text: "Project created and selected. Your task draft is kept." });
           window.requestAnimationFrame(() => objectiveRef.current?.focus());
         }} /> : null}
     </section>
