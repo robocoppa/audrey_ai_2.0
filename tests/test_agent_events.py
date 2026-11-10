@@ -295,7 +295,7 @@ async def test_invalid_outcomes_and_counts_are_rejected_without_finishing(state,
     assert (await _events(state, task))["items"][0]["state"] == "started"
 
 
-async def test_tool_metadata_is_work_only_and_non_models_cannot_claim_token_usage(state):
+async def test_tool_metadata_follows_live_stages_and_non_models_cannot_claim_token_usage(state):
     task = await _claim(state)
     lease = _lease(task)
     with pytest.raises(AgentTaskConflictError):
@@ -311,6 +311,27 @@ async def test_tool_metadata_is_work_only_and_non_models_cannot_claim_token_usag
     assert await _events(state, task) == first
     with pytest.raises(AgentTaskConflictError):
         await state.store.agents.finish_event(**lease, seq=seq, state="completed")
+
+
+async def test_review_records_native_tools_and_refuses_web_activity(state):
+    task = await _claim(state)
+    lease = _lease(task)
+    for stage in ("plan", "research"):
+        await state.store.agents.reserve_operation(**lease, step_id=stage)
+        await state.store.agents.checkpoint(**lease, step_id=stage, result="Saved work.")
+    for tool in ("read_selected_file", "create_file"):
+        seq = await state.store.agents.start_event(**lease, stage="review", kind="tool", tool=tool)
+        await state.store.agents.finish_event(**lease, seq=seq, duration_ms=4)
+    before = await _events(state, task)
+    assert [(item["stage"], item["tool"]) for item in before["items"][:2]] == [
+        ("review", "create_file"), ("review", "read_selected_file"),
+    ]
+    for tool in ("web_search", "web_fetch"):
+        with pytest.raises(AgentTaskError):
+            await state.store.agents.start_event(**lease, stage="review", kind="tool", tool=tool)
+    with pytest.raises(AgentTaskConflictError):
+        await state.store.agents.start_event(**lease, stage="research", kind="tool", tool="create_file")
+    assert await _events(state, task) == before
 
 
 async def test_budget_and_inactive_owner_fence_event_callbacks(state):
@@ -363,7 +384,7 @@ async def test_schema_upgrade_keeps_saved_tasks_and_enforces_owner_foreign_key(s
     upgraded = ApplicationStore(state.store.path)
     upgraded.agents._clock = state.clock
     try:
-        assert upgraded.schema_version == 38
+        assert upgraded.schema_version == 39
         assert (await upgraded.agents.get(user_id=state.owner.user_id, task_id=task["id"]))["objective"] == task["objective"]
         assert upgraded._conn.execute("PRAGMA foreign_key_check").fetchall() == []
         with upgraded._conn, pytest.raises(sqlite3.IntegrityError):

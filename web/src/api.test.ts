@@ -322,17 +322,18 @@ describe("saved agent task requests", () => {
     await expect(getAgentTask("owned")).rejects.toThrow("The saved agent input files could not be read.");
   });
 
-  it("reads bounded canonical file metadata across task, list, action, answer and Activity responses", async () => {
-    const value = { id: "agent-owned", outputs: [output] };
+  it.each([undefined, null, true, false])("reads canonical file metadata and its current marker %s across task responses", async (current) => {
+    const savedOutput = { ...output, ...(current !== undefined ? { current } : {}) };
+    const value = { id: "agent-owned", outputs: [{ ...savedOutput, body: "Not response metadata" }] };
     const fetchMock = vi.fn().mockImplementation(async (path: string) => jsonResponse(path === "/api/agents" ? { items: [value] } : value));
     vi.stubGlobal("fetch", fetchMock);
-    expect((await listAgentTasks()).items[0].outputs).toEqual([output]);
-    expect((await getAgentTask(value.id)).outputs).toEqual([output]);
-    expect((await actOnAgentTask(value.id, "rerun", 3)).outputs).toEqual([output]);
-    expect((await answerAgentInput(value.id, "question", 3, "Continue.")).outputs).toEqual([output]);
-    expect((await getActivityAgentTask("notice")).outputs).toEqual([output]);
+    expect((await listAgentTasks()).items[0].outputs).toEqual([savedOutput]);
+    expect((await getAgentTask(value.id)).outputs).toEqual([savedOutput]);
+    expect((await actOnAgentTask(value.id, "rerun", 3)).outputs).toEqual([savedOutput]);
+    expect((await answerAgentInput(value.id, "question", 3, "Continue.")).outputs).toEqual([savedOutput]);
+    expect((await getActivityAgentTask("notice")).outputs).toEqual([savedOutput]);
     fetchMock.mockResolvedValueOnce(jsonResponse(value));
-    expect((await createAgentTask("Prepare a checklist", "new-task")).outputs).toEqual([output]);
+    expect((await createAgentTask("Prepare a checklist", "new-task")).outputs).toEqual([savedOutput]);
   });
 
   it.each([
@@ -345,6 +346,9 @@ describe("saved agent task requests", () => {
     { ...output, filename: "unsafe\nname.md" },
     { ...output, filename: "" },
     { ...output, created_at: "invalid" },
+    { ...output, current: "true" },
+    { ...output, current: 1 },
+    { ...output, current: {} },
   ])("rejects malformed or noncanonical file output %#", async (invalid) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ outputs: [invalid] })));
     await expect(getAgentTask("owned")).rejects.toThrow("The saved agent files could not be read.");

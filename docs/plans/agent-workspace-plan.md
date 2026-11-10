@@ -1,6 +1,6 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, November 5, 2026. Saved task Agents, unified lexical
+**Status:** In progress, November 9, 2026. Saved task Agents, unified lexical
 Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner confirms Search
 returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
 
@@ -32,6 +32,12 @@ saved step results/reports, pause/resume/cancel, rerun the same agent and delete
 terminal history. Run again preserves completed checkpoints on unfinished tasks;
 completed tasks repeat Work/Review using the saved Plan. The agent ID and
 selection stay the same. Lists return compact summaries and load the selected report separately.
+Review can now reread frozen selected-file ranges and save corrected deliverables
+through the native tools. It has no web or personal-file tools. Successful file
+publication records the current version per filename; Review corrections replace
+that selection while retaining older immutable files under Previous files.
+Legacy outputs without attribution remain labelled Saved. A repeated earlier file
+identity can become current again; creation time does not determine the winner.
 Agents has New, Watches and Tasks tabs at the top of its left sidebar, with New
 selected initially. New holds the compact composer; Tasks holds running and past
 work with explicit status labels, active controls and an expandable Updates inbox.
@@ -595,11 +601,13 @@ deployed browser acceptance remain separate.
 
 ### Agent file outputs
 
-Work can use the existing native `create_file` tool to produce TXT, Markdown, CSV,
+Work and Review can use the existing native `create_file` tool to produce TXT, Markdown, CSV,
 JSON, DOCX or XLSX deliverables. Files are ordinary owned generated outputs in
 My Files, with a Project attachment when the task belongs to an ordinary Project
 and its file limit permits it. A full Project leaves the file in My Files with
-a tool notice. Plan and Review cannot write files. Selected ordinary file inputs
+a tool notice. Plan cannot write files. Review uses the same bounded native
+publication to save a corrected requested deliverable, rather than presenting
+an intended file body as a saved replacement. Selected ordinary file inputs
 are described below; Private inputs, code execution and external write tools remain pending.
 
 Each task has eight lifetime distinct output identities, counting pending attempts
@@ -614,7 +622,7 @@ its receipts while retaining independently saved My Files outputs.
 Application schema 34 stores reserved/ready output intents with owner/task identity,
 filename and digest; receipts contain no file bodies or tool arguments. The final
 publication holds application then upload locks, rechecks the live lease, owner,
-model access, Project context and deletion tombstones, and commits the catalog
+model access, exact bound/live Work or Review stage, Project context and deletion tombstones, and commits the catalog
 and ready receipt without awaiting. The upload database's shared commit helper
 also preserves existing native chat behavior. These are separate databases: if
 the catalog commits before a crash prevents the receipt commit, an authorized
@@ -625,8 +633,16 @@ toward the lifetime limit. Cancellation and revoked scope stop publication.
 
 The task's Files panel exposes canonical authenticated downloads while working,
 failed, cancelled, completed or rerunning. List summaries omit output metadata;
-full task refreshes reconcile the panel. Work checkpoints and final reports retain
-canonical file links even when Review omits them. Downloads use normal ownership
+full task refreshes reconcile the panel. Work/Review checkpoints and final reports retain
+current canonical file links even when Review omits them. Per-stage output IDs
+live in existing private checkpoint metadata and update after successful creation
+or identical reuse, replacing only the current selection for that filename.
+Interrupted work retains the selection; a completed-task rerun clears the reset
+stages' selections. All lifetime receipts and the eight-identity limit remain.
+The API's `current` marker is true, false or null for unclassified legacy files.
+Previous files are collapsed separately; deletion never promotes an older file.
+Known superseded links in new reports become references to Previous files, while
+saved older checkpoints and original file bytes remain. Downloads use normal ownership
 and deletion checks, with a recoverable missing-file message. Generated working
 outputs do not become independent evidence.
 
@@ -741,9 +757,9 @@ configuration change. No credentials or upload are required for the smoke.
 
 ### Reading further selected-file text
 
-Work now offers a native `read_selected_file` tool when the task has explicit
-ordinary Project file selections. The initial excerpts still guide Plan and
-Review; Work can request additional parts of the same frozen saved text, OCR or
+Work and Review offer a native `read_selected_file` tool when the task has explicit
+ordinary Project file selections. Initial excerpts guide Plan; Work and Review
+can request additional parts of the same frozen saved text, OCR or
 transcript. Selecting a Project alone grants no file access. The reader accepts
 only a selected file ID, a Unicode character offset and a bounded character limit;
 it accepts no caller-supplied user, Project, path, URL or revision. Private,
@@ -759,13 +775,13 @@ actually returned, so continuation cannot silently skip a shortened tail. EOF
 has an empty page and null continuation. Invalid offsets and arguments return
 fixed content-free errors. The existing 8 MiB/500,000-character source limits
 and task call/round/time budgets still apply. Availability does not imply that
-the model inspected the whole source; Work instructions require honest coverage.
+the model inspected the whole source; both tool-using stages require honest coverage.
 
 Each read parses only the requested selected source, checks the full saved-text
 digest and revalidates owner, lease, context, attachment, deletion, local-model
 access and purge state after awaited disk reads. Changed or unavailable inputs
 stop execution before source delivery or a new model request. Read callbacks are
-bound to one Work attempt and expire on scope exit; escaped callbacks, unbound
+bound to one Work or Review attempt, require its exact live stage and expire on scope exit; escaped callbacks, unbound
 chat/Private calls and forged remote specs have no HTTP fallback. The current
 local Qwen weights are checked before dispatch, and reads use the existing
 operation allowance. Page bodies are transient tool replies, with no new task
@@ -776,6 +792,15 @@ table transactionally, preserving existing sequences, outcomes, timestamps,
 owners, constraints and task links. Upgrade and deliberate rollback tests verify
 saved history remains intact. Recent activity labels reads as Read selected file;
 input help distinguishes initial excerpts from later reads.
+
+Schema 39 extends that event table to permit only native file reads/creation in
+Review, preserving populated history and its existing ownership/retention rules.
+Plan remains tool-free; public web tools remain Work-only. Review uses the existing
+local-model admission, step timeout, round/operation/output limits and source fences.
+Integration checks exercise an incorrect Work file, real later-page reads during
+Review, a corrected owned download and unchanged original bytes. Scripted replies
+verify this code path; real Qwen correction and same-Agent rerun acceptance remain
+owner-operated. Rebuild backend/UI; schema 39 applies automatically at startup.
 
 Affected service/executor/dispatch tests, migration/response tests and frontend
 tests/typecheck/lint/build pass. The

@@ -241,7 +241,8 @@ class AgentFileInputs:
         if (current is None or current.status != "active" or "bots" in current.groups
                 or current.storage_namespace != principal.storage_namespace or record["user_id"] != principal.user_id
                 or task.get("user_id") != principal.user_id
-                or self.store.agents._internal(record)["current_step"] != "research"
+                or task.get("current_step") not in {"research", "review"}
+                or self.store.agents._internal(record)["current_step"] != task.get("current_step")
                 or remote_personal_reads_blocked(principal.storage_namespace)):
             raise AgentDispatchStoppedError("Selected file reading is unavailable.")
         model = next((item for item in configured_models(self.app.state.cfg) if item.id == "local"), None)

@@ -94,7 +94,7 @@ async def test_explicit_saved_artifact_prefix_metadata_and_no_body_manifest(stat
     claimed = await state.store.agents.claim()
     resolved = await state.service.resolve(claimed, lease(claimed))
     assert resolved[0]["text"] == "SELECTED FILE BODY" and len(resolved) == 1
-    assert state.store.schema_version == 38
+    assert state.store.schema_version == 39
 
 
 async def test_prefix_is_per_file_token_bounded_and_visible_as_partial(state):

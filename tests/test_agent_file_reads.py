@@ -1,4 +1,4 @@
-"""Selected-file pages use real frozen source proofs and revocable Work authority."""
+"""Selected-file pages use frozen source proofs and revocable Work/Review authority."""
 
 from __future__ import annotations
 
@@ -22,11 +22,15 @@ from audrey.tools.discovery import ToolRegistry
 from audrey.user_data_visibility import block_remote_personal_reads, unblock_remote_personal_reads
 
 
-async def _work(state, file_ids):
+async def _work(state, file_ids, *, stage="research"):
     await create(state, file_ids)
     task = await state.store.agents.claim()
     await state.store.agents.reserve_operation(**lease(task), step_id="plan")
-    return await state.store.agents.checkpoint(**lease(task), step_id="plan", result="Use the selected files.")
+    task = await state.store.agents.checkpoint(**lease(task), step_id="plan", result="Use the selected files.")
+    if stage == "review":
+        await state.store.agents.reserve_operation(**lease(task), step_id="research")
+        task = await state.store.agents.checkpoint(**lease(task), step_id="research", result="Prepared the work.")
+    return task
 
 
 async def _read(state, task, **arguments):
@@ -34,12 +38,13 @@ async def _read(state, task, **arguments):
         return await agent_file_read_handler(user_id=state.owner.storage_namespace)(arguments)
 
 
-async def test_reads_past_prompt_prefix_and_parses_only_requested_selection(state, monkeypatch):
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_reads_past_prompt_prefix_and_parses_only_requested_selection(state, monkeypatch, stage):
     text = "A useful line of local text. " * 1000 + "ONLY AT THE END"
     first, _ = await file(state, text=text)
     second, _ = await file(state, text="OTHER SELECTED TEXT")
     await file(state, text="UNSELECTED PRIVATE CONTENT")
-    task = await _work(state, [first, second])
+    task = await _work(state, [first, second], stage=stage)
     prefix = next(item for item in task["file_inputs"]["files"] if item["file_id"] == first)
     assert prefix["chars"] < text.index("ONLY AT THE END")
     original = state.service.reader._read_file
@@ -98,14 +103,15 @@ async def test_invalid_arguments_fail_without_parsing_any_source(state, monkeypa
     assert result["error"] == "invalid_arguments" and "text" not in result
 
 
-async def test_unselected_foreign_and_private_files_are_identically_refused_without_read(state, monkeypatch):
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_unselected_foreign_and_private_files_are_identically_refused_without_read(state, monkeypatch, stage):
     fid, _ = await file(state)
     unselected, _ = await file(state, text="DO NOT READ")
     foreign_project = await state.store.projects.create(user_id=state.other.user_id, name="Foreign")
     foreign, _ = await file(state, owner=state.other, project=foreign_project, text="FOREIGN SECRET")
     private_project = await state.store.projects.create(user_id=state.owner.user_id, name="Private", private_required=True)
     private, _ = await file(state, private=True, project=private_project, text="PRIVATE SECRET")
-    task = await _work(state, [fid])
+    task = await _work(state, [fid], stage=stage)
     monkeypatch.setattr(state.service.reader, "_read_file", lambda *_: pytest.fail("Unselected file was parsed"))
     responses = [await _read(state, task, file_id=value) for value in (unselected, foreign, private, "unknown")]
     assert all(result == responses[0] for result in responses)
@@ -124,9 +130,10 @@ async def test_retained_artifact_and_generated_origin_remain_exact(state, kind, 
     assert page["text"] == text[5:13] and page["artifact"] == artifact and page["origin"] == origin
 
 
-async def test_same_stat_changed_body_fails_digest_proof(state):
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_same_stat_changed_body_fails_digest_proof(state, stage):
     fid, path = await file(state, text="Frozen original body")
-    task = await _work(state, [fid])
+    task = await _work(state, [fid], stage=stage)
     previous = path.stat()
     path.write_text("Changed revised body")
     os.utime(path, ns=(previous.st_atime_ns, previous.st_mtime_ns))
@@ -138,9 +145,10 @@ async def test_same_stat_changed_body_fails_digest_proof(state):
 
 
 @pytest.mark.parametrize("change", ["cancel", "detach", "body", "delete", "disabled", "expired", "model", "purge", "owner"])
-async def test_final_authority_fence_after_disk_read_prevents_late_text(state, monkeypatch, change):
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_final_authority_fence_after_disk_read_prevents_late_text(state, monkeypatch, change, stage):
     fid, path = await file(state, text="TEXT MUST NOT ESCAPE")
-    task = await _work(state, [fid])
+    task = await _work(state, [fid], stage=stage)
     original = state.service.reader._disk
 
     async def intercepted(*args, **kwargs):
@@ -178,9 +186,10 @@ async def test_final_authority_fence_after_disk_read_prevents_late_text(state, m
         unblock_remote_personal_reads(user=state.owner.storage_namespace, purge_id="test-read")
 
 
-async def test_scope_expiration_invalidates_captured_and_inherited_handlers(state, monkeypatch):
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_scope_expiration_invalidates_captured_and_inherited_handlers(state, monkeypatch, stage):
     fid, _ = await file(state)
-    task = await _work(state, [fid])
+    task = await _work(state, [fid], stage=stage)
     proceed = asyncio.Event()
 
     async def inherited():
@@ -201,9 +210,10 @@ async def test_scope_expiration_invalidates_captured_and_inherited_handlers(stat
         await child
 
 
-async def test_read_started_in_scope_cannot_finish_after_scope_exit(state, monkeypatch):
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_read_started_in_scope_cannot_finish_after_scope_exit(state, monkeypatch, stage):
     fid, _ = await file(state)
-    task = await _work(state, [fid])
+    task = await _work(state, [fid], stage=stage)
     started, release = asyncio.Event(), asyncio.Event()
     original = state.service.reader._disk
 
@@ -222,12 +232,12 @@ async def test_read_started_in_scope_cannot_finish_after_scope_exit(state, monke
         await child
 
 
-async def test_plan_review_private_and_changed_policy_cannot_supply_read_scope(state):
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_plan_private_and_changed_policy_cannot_supply_read_scope(state, stage):
     fid, _ = await file(state)
-    task = await _work(state, [fid])
-    for step in ("plan", "review"):
-        with pytest.raises(AgentDispatchStoppedError), agent_file_read_scope(app=state.app, principal=state.owner, task={**task, "current_step": step}):
-            pytest.fail("Wrong step received read scope")
+    task = await _work(state, [fid], stage=stage)
+    with pytest.raises(AgentDispatchStoppedError), agent_file_read_scope(app=state.app, principal=state.owner, task={**task, "current_step": "plan"}):
+        pytest.fail("Plan received read scope")
     policy = ProcessingPolicy(local_models={"qwen3.8:latest": "a" * 64}, ollama_base_url="http://local.test")
     with agent_file_read_scope(app=state.app, principal=state.owner, task=task):
         handler = agent_file_read_handler(user_id=state.owner.storage_namespace)
@@ -235,6 +245,26 @@ async def test_plan_review_private_and_changed_policy_cannot_supply_read_scope(s
             await handler({"file_id": fid})
     with processing_scope(policy), pytest.raises(AgentDispatchStoppedError), agent_file_read_scope(app=state.app, principal=state.owner, task=task):
         pytest.fail("Private policy received read scope")
+
+
+async def test_work_read_callback_cannot_cross_into_live_review(state, monkeypatch):
+    fid, _ = await file(state, text="LATE WORK MUST NOT READ THIS")
+    task = await _work(state, [fid])
+    with agent_file_read_scope(app=state.app, principal=state.owner, task=task):
+        captured = agent_file_read_handler(user_id=state.owner.storage_namespace)
+        await state.store.agents.reserve_operation(**lease(task), step_id="research")
+        await state.store.agents.checkpoint(**lease(task), step_id="research", result="Finished Work.")
+        monkeypatch.setattr(state.service.reader, "_read_file", lambda *_: pytest.fail("Stale Work parsed a source"))
+        with pytest.raises(AgentDispatchStoppedError):
+            await captured({"file_id": fid})
+
+
+async def test_review_read_binding_cannot_run_before_work_finishes(state, monkeypatch):
+    fid, _ = await file(state)
+    task = await _work(state, [fid])
+    monkeypatch.setattr(state.service.reader, "_read_file", lambda *_: pytest.fail("Early Review parsed a source"))
+    with pytest.raises(AgentDispatchStoppedError):
+        await _read(state, {**task, "current_step": "review"}, file_id=fid)
 
 
 async def test_restart_reuses_frozen_source_without_saved_page_text(state):

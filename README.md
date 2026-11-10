@@ -225,7 +225,9 @@ AGENTS.md           # canonical agent guide
 
 ## Status
 
-Campaigns 1–4 are closed by the owner as of October 27, 2026. Their contracts
-are indexed in [docs/README.md](docs/README.md); no campaign implementation or
-acceptance queue remains. New work starts from a new user request. Local working
-context lives in the gitignored `docs/PROJECT_STATE.md`.
+Campaigns 1–4 are closed by the owner. Campaigns 1–3 and Campaign 4 phases 01–20
+closed October 27, 2026; Campaign 4's subsequently requested identity cleanup
+closed November 5. Their contracts and verification limits are indexed in
+[docs/README.md](docs/README.md); no campaign implementation or acceptance queue
+remains. New work starts from a new user request. Local working context lives in
+the gitignored `docs/PROJECT_STATE.md`.

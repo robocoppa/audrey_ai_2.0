@@ -225,10 +225,10 @@ def _file_call(**changes):
     }}]})
 
 
-async def _step(state, step_id="plan", *, max_operations=96, generated_title=True, project_id=None, knowledge_entry=None, file_inputs=None):
+async def _step(state, step_id="plan", *, max_operations=96, generated_title=True, project_id=None, knowledge_entry=None, file_inputs=None, objective="Compare the public release notes."):
     task = await state.store.agents.create(
         user_id=state.owner.user_id,
-        objective="Compare the public release notes.",
+        objective=objective,
         request_id=f"request-{step_id}",
         limits={"max_operations": max_operations},
         project_id=project_id,
@@ -437,6 +437,8 @@ async def test_every_step_uses_only_local_qwen_and_only_research_has_public_tool
     supplied = json.loads(
         next(row["content"] for row in requests[0]["messages"] if row["role"] == "user")
     )
+    if step_id == "review":
+        assert supplied.pop("current_output_files") == []
     assert supplied == {
         "objective": task["objective"],
         "saved_work": {
@@ -685,7 +687,7 @@ async def test_work_creates_owned_download_without_http_and_review_keeps_canonic
     await s.store.agents.checkpoint(**lease, step_id="review", result=reviewed)
     completed = await s.store.agents.complete(**lease, result=reviewed)
     assert outputs[0]["download_url"] in completed["result"]
-    assert not _content_requests(s)[-1].get("tools")
+    assert {tool["function"]["name"] for tool in _content_requests(s)[-1]["tools"]} == {"create_file"}
     # Use the ASGI transport rather than the fixture's tool transport.
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=s.app), base_url="http://test") as client:
         downloaded = await client.get(outputs[0]["download_url"])
@@ -705,13 +707,12 @@ async def test_work_creates_owned_download_without_http_and_review_keeps_canonic
     assert repeated["steps"][0] == completed["steps"][0]
 
 
-@pytest.mark.parametrize("step_id", ["plan", "review"])
-async def test_planning_and_review_cannot_create_native_outputs(file_state, step_id):
+async def test_planning_cannot_create_native_outputs(file_state):
     s = file_state
-    task = await _step(s, step_id)
+    task = await _step(s, "plan")
     s.responses.append(_file_call())
     with pytest.raises(AgentDispatchStoppedError, match="returned no report text"):
-        await s.executor(task, step_id)
+        await s.executor(task, "plan")
     assert not _content_requests(s)[0].get("tools")
     assert not await s.files_db.list_user(s.owner.storage_namespace)
     assert not s.tool_requests
@@ -757,12 +758,22 @@ async def test_native_output_rechecks_live_authority_at_dispatch(file_state, kin
     assert not s.tool_requests
 
 
-async def test_native_output_capability_does_not_grant_personal_tools(file_state):
+@pytest.mark.parametrize(
+    ("step_id", "tool_name"),
+    [
+        ("research", "memory_recall"),
+        ("review", "memory_recall"),
+        ("review", "get_file_text"),
+        ("review", "web_search"),
+        ("review", "web_fetch"),
+    ],
+)
+async def test_native_output_capability_does_not_grant_other_tools(file_state, step_id, tool_name):
     s = file_state
-    task = await _step(s, "research")
-    s.responses.append(_search("memory_recall"))
+    task = await _step(s, step_id)
+    s.responses.append(_search(tool_name))
     with pytest.raises(AgentDispatchStoppedError, match="tool is unavailable"):
-        await s.executor(task, "research")
+        await s.executor(task, step_id)
     assert not await s.files_db.list_user(s.owner.storage_namespace)
     assert not s.tool_requests
 
@@ -1561,7 +1572,7 @@ async def test_selected_file_excerpt_reaches_each_local_step_without_unselected_
                              "total_chars": len(path.read_text()), "truncated": False}]
     else:
         assert capabilities == []
-    if step_id != "research":
+    if step_id == "plan":
         assert not payload.get("tools")
     else:
         assert "read_selected_file" in {item["function"]["name"] for item in payload["tools"]}
@@ -1571,6 +1582,80 @@ def _read_call(file_id="chosen-input", **arguments):
     return _answer("", message={"tool_calls": [{"function": {
         "name": "read_selected_file", "arguments": {"file_id": file_id, **arguments},
     }}]})
+
+
+async def test_review_rereads_selected_appendix_and_publishes_corrected_immutable_download(file_state):
+    s = file_state
+    s.app.state.cfg.raw["agent_tasks"] = {}
+    fixtures = Path(__file__).parent / "manual" / "agent-workspace"
+    brief = (fixtures / "garden-brief-long.txt").read_text()
+    csv_text = (fixtures / "supply-list.csv").read_text()
+    project, path, _ = await _selected_file_context(s, selected_text=brief)
+    (path.parent / "supplies.csv").write_text(csv_text)
+    await s.files_db.record_upload(
+        file_id="supplies", user=s.owner.storage_namespace, filename="supply-list.csv", mime="text/csv",
+        bytes_=len(csv_text.encode()), kind="text", collection="", chunks=0,
+        uploaded_at="2026-11-09T12:00:00+00:00",
+    )
+    await s.store.projects.add_file(user_id=s.owner.user_id, project_id=project.project_id, file_id="supplies")
+    pins = await get_agent_file_inputs(s.app).capture(s.owner, project.project_id, ["chosen-input", "supplies"])
+    task = await _step(s, "research", project_id=project.project_id, file_inputs=pins,
+                       objective="Read the selected appendix and supply list. Save a correct purchasing checklist as garden.md.")
+    lease = {"task_id": task["id"], "lease_token": task["lease_token"], "fence": task["fence"]}
+    incorrect = "# Garden checklist\nSupply total: USD 270.95\nRemaining: USD 201.40\n"
+    corrected = ("# Garden checklist\nSupply total: USD 260.30\nRemaining: USD 212.05\n"
+                 "Ceiling: USD 472.35\nWednesday\nMOSS-7Q4-RIVER\n2026-11-23\n")
+    s.responses.extend([_file_call(filename="garden.md", content=incorrect), _answer(incorrect)])
+    work = await s.executor(task, "research")
+    saved = await s.store.agents.checkpoint(**lease, step_id="research", result=work)
+    original = saved["outputs"][0]
+    pages = []
+
+    async def review_reply():
+        payload = json.loads(s.provider_requests[-1].content)
+        assert payload["messages"][0]["content"].startswith(AGENT_REVIEW_SYSTEM)
+        assert {tool["function"]["name"] for tool in payload["tools"]} == {"create_file", "read_selected_file"}
+        quoted = next(message for message in payload["messages"] if message["content"].startswith("User-selected file excerpts"))
+        assert "MOSS-7Q4-RIVER" not in quoted["content"] and "270.95" in json.dumps(payload)
+        task_context = json.loads(next(message["content"] for message in payload["messages"]
+                                       if message["role"] == "user" and message["content"].startswith('{"objective"')))
+        assert task_context["current_output_files"] == [{key: original[key]
+            for key in ("file_id", "filename", "download_url", "created_at")}]
+        results = [message for message in payload["messages"] if message["role"] == "tool"]
+        if not results:
+            s.responses.append(_read_call(offset=40000, limit=6000))
+            return
+        result = json.loads(results[-1]["content"])
+        if "start" in result:
+            assert result["text"] == brief[result["start"]:result["end"]]
+            pages.append(result)
+            if result["has_more"]:
+                s.responses.append(_read_call(offset=result["next_offset"], limit=6000))
+            else:
+                assert all(fact in "".join(page["text"] for page in pages)
+                           for fact in ("472.35", "Wednesday", "MOSS-7Q4-RIVER", "2026-11-23"))
+                s.responses.append(_file_call(filename="garden.md", content=corrected))
+        else:
+            assert result["file_id"] != original["file_id"] and not result.get("error")
+            s.responses.append(_answer("Corrected and saved USD 260.30 / USD 212.05. "
+                                       f"[Download garden.md]({result['download_url']})"))
+
+    s.on_chat = review_reply
+    review = await s.executor(saved, "review")
+    await s.store.agents.checkpoint(**lease, step_id="review", result=review)
+    completed = await s.store.agents.complete(**lease, result=review)
+    current = [output for output in completed["outputs"] if output["current"] is True]
+    assert len(current) == 1 and current[0]["file_id"] != original["file_id"]
+    assert current[0]["download_url"] in completed["result"] and original["download_url"] not in completed["result"]
+    assert original["download_url"] in completed["steps"][1]["result"]
+    assert len(pages) >= 2 and pages[0]["start"] == 40000 and pages[-1]["end"] == len(brief)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=s.app), base_url="http://test") as client:
+        assert (await client.get(current[0]["download_url"])).text == corrected
+        assert (await client.get(original["download_url"])).text == incorrect
+    tools = [event for event in await _activity(s, task) if event["stage"] == "review" and event["kind"] == "tool"]
+    assert len(tools) == len(pages) + 1 and all(event["state"] == "completed" for event in tools)
+    assert "MOSS-7Q4-RIVER" not in json.dumps(tools)
+    assert not s.tool_requests and not s.responses
 
 
 async def test_selected_files_do_not_suppress_a_genuinely_missing_user_choice(file_state):
@@ -1667,7 +1752,8 @@ async def test_existing_excerpt_question_can_recover_same_agent_and_read_real_ap
             else:
                 s.responses.append(_answer("Saved the inspected appendix checklist: " + result["download_url"]))
         else:
-            assert system.startswith(AGENT_REVIEW_SYSTEM) and capabilities == [] and not payload.get("tools")
+            assert system.startswith(AGENT_REVIEW_SYSTEM) and capabilities == []
+            assert {item["function"]["name"] for item in payload["tools"]} == {"create_file", "read_selected_file"}
             objective = json.loads(next(message["content"] for message in reversed(payload["messages"])
                                         if message["role"] == "user"))
             s.responses.append(_answer(objective["saved_work"]["research"]))

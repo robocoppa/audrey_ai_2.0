@@ -66,13 +66,17 @@ def lease(task):
     return {"task_id": task["id"], "lease_token": task["lease_token"], "fence": task["fence"]}
 
 
-async def work(state, *, project=False):
+async def work(state, *, project=False, stage="research"):
     p = await state.store.projects.create(user_id=state.owner.user_id, name="Working files") if project else None
     await state.store.agents.create(user_id=state.owner.user_id, objective="Create a budget file.", request_id="first",
                                    project_id=p.project_id if p else None)
     task = await state.store.agents.claim()
     await state.store.agents.reserve_operation(**lease(task), step_id="plan")
-    return await state.store.agents.checkpoint(**lease(task), step_id="plan", result="Make a file."), p
+    task = await state.store.agents.checkpoint(**lease(task), step_id="plan", result="Make a file.")
+    if stage == "review":
+        await state.store.agents.reserve_operation(**lease(task), step_id="research")
+        task = await state.store.agents.checkpoint(**lease(task), step_id="research", result="Prepared the file.")
+    return task, p
 
 
 async def create(state, task, **changes):
@@ -85,8 +89,9 @@ def receipts(state):
     return [dict(row) for row in state.store._conn.execute("SELECT * FROM app_agent_outputs").fetchall()]
 
 
-async def test_download_owner_project_immutable_and_identical_concurrent_retry(state):
-    task, project = await work(state, project=True)
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_download_owner_project_immutable_and_identical_concurrent_retry(state, stage):
+    task, project = await work(state, project=True, stage=stage)
     one, two = await asyncio.gather(create(state, task), create(state, task))
     assert one["file_id"] == two["file_id"]
     assert {one["created"], two["created"]} == {True, False}
@@ -131,7 +136,9 @@ async def test_saved_links_survive_review_omission_and_task_history_deletion(sta
     await state.store.agents.reserve_operation(**lease(task), step_id="research")
     task = await state.store.agents.checkpoint(**lease(task), step_id="research", result="Completed the budget.")
     assert output["download_url"] in task["steps"][1]["result"]
-    assert task["outputs"] == [{key: output[key] for key in ("file_id", "filename", "download_url", "created_at")}]
+    assert task["outputs"] == [{**{key: output[key] for key in (
+        "file_id", "filename", "download_url", "created_at",
+    )}, "current": True}]
     await state.store.agents.reserve_operation(**lease(task), step_id="review")
     task = await state.store.agents.checkpoint(**lease(task), step_id="review", result="Checked.")
     final = await state.store.agents.complete(**lease(task), result="Checked.")
@@ -150,8 +157,133 @@ async def test_utf8_saved_links_stay_within_byte_limit(state):
     assert len(saved.encode()) <= 64000 and output["download_url"] in saved
 
 
-async def test_deleted_file_tombstone_blocks_retry_without_new_bytes(state):
+async def finish_file_work(state, task, *, result="Checked the budget."):
+    await state.store.agents.reserve_operation(**lease(task), step_id="research")
+    task = await state.store.agents.checkpoint(**lease(task), step_id="research", result="Prepared the budget.")
+    await state.store.agents.reserve_operation(**lease(task), step_id="review")
+    await state.store.agents.checkpoint(**lease(task), step_id="review", result=result)
+    return await state.store.agents.complete(**lease(task), result=result)
+
+
+def current_ids(task):
+    return {item["file_id"] for item in task.get("outputs", []) if item["current"] is True}
+
+
+@pytest.mark.parametrize("filename", ["budget.csv", "budget[final].csv"])
+async def test_same_name_corrections_and_reusing_older_bytes_select_actual_current_version(state, filename):
     task, _ = await work(state)
+    original = await create(state, task, filename=filename)
+    corrected = await create(state, task, filename=filename, rows=[["Corrected", 260.30]])
+    label = filename.replace("[", r"\[").replace("]", r"\]")
+    completed = await finish_file_work(state, task, result=(
+        "Checked. [Download " + label + "](https://audrey.example" + original["download_url"] + ")"
+    ))
+    assert current_ids(completed) == {corrected["file_id"]}
+    assert original["download_url"] not in completed["result"]
+    assert corrected["download_url"] in completed["result"]
+    work_text = completed["steps"][1]["result"]
+    assert original["download_url"] not in work_text and corrected["download_url"] in work_text
+    assert [item["current"] for item in completed["outputs"]].count(False) == 1
+
+    # The exact old content is a valid new choice. Its creation timestamp
+    # predates the correction, so sorting receipts cannot determine currentness.
+    original_bytes = (await state.client.get(original["download_url"])).content
+    await state.store.agents.control(user_id=state.owner.user_id, task_id=task["id"],
+                                     expected_revision=completed["revision"], action="rerun")
+    queued = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert current_ids(queued) == set()
+    assert all(item["current"] is False for item in queued["outputs"])
+    task = await state.store.agents.claim()
+    reused = await create(state, task, filename=filename)
+    assert reused["file_id"] == original["file_id"] and reused["created"] is False
+    completed_again = await finish_file_work(state, task)
+    assert completed_again["id"] == completed["id"]
+    assert completed_again["steps"][0] == completed["steps"][0]
+    assert current_ids(completed_again) == {original["file_id"]}
+    assert corrected["download_url"] not in completed_again["result"]
+    assert original["download_url"] in completed_again["result"]
+    assert len(receipts(state)) == 2
+    assert (await state.client.get(original["download_url"])).content == original_bytes
+    assert b"Corrected" in (await state.client.get(corrected["download_url"])).content
+
+
+async def test_review_current_version_survives_reclaim_and_deleted_current_does_not_promote_history(state):
+    task, _ = await work(state)
+    original = await create(state, task)
+    await state.store.agents.reserve_operation(**lease(task), step_id="research")
+    task = await state.store.agents.checkpoint(**lease(task), step_id="research", result="Prepared the budget.")
+    corrected = await create(state, task, rows=[["Corrected", 260.30]])
+    latest = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert current_ids(latest) == {corrected["file_id"]}
+    with state.store._lock:
+        state.store._conn.execute("UPDATE app_agent_tasks SET lease_expires_at='2000-01-01T00:00:00+00:00'")
+        state.store._conn.commit()
+    state.store.close()
+    state.store = ApplicationStore(state.tmp_path / "app.sqlite")
+    state.app.state.application_store = state.store
+    recovered = await state.store.agents.claim()
+    assert recovered["current_step"] == "review" and recovered["fence"] > task["fence"]
+    assert current_ids(recovered) == {corrected["file_id"]}
+    assert recovered["steps"][1]["result"] == task["steps"][1]["result"]
+    await state.store.agents.reserve_operation(**lease(recovered), step_id="review")
+    await state.store.agents.checkpoint(**lease(recovered), step_id="review", result="Corrected the budget.")
+    completed = await state.store.agents.complete(**lease(recovered), result="Corrected the budget.")
+    assert original["download_url"] not in completed["result"]
+    assert corrected["download_url"] in completed["result"]
+    assert (await state.client.delete("/api/files/" + corrected["file_id"])).status_code == 200
+    after_delete = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert current_ids(after_delete) == {corrected["file_id"]}
+    assert (await state.client.get(corrected["download_url"])).status_code == 404
+    assert (await state.client.get(original["download_url"])).status_code == 200
+
+
+async def test_legacy_outputs_remain_unclassified_until_an_explicit_new_publication(state):
+    task, _ = await work(state)
+    original = await create(state, task)
+    other = await create(state, task, filename="other.csv")
+    with state.store._lock:
+        row = state.store._conn.execute("SELECT steps_json FROM app_agent_tasks WHERE task_id=?", (task["id"],)).fetchone()
+        steps = json.loads(row["steps_json"])
+        for step in steps:
+            step.pop("output_ids", None)
+        state.store._conn.execute("UPDATE app_agent_tasks SET steps_json=? WHERE task_id=?", (json.dumps(steps), task["id"]))
+        state.store._conn.commit()
+    legacy = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert all(item["current"] is None for item in legacy["outputs"])
+    assert all("output_ids" not in step for step in legacy["steps"])
+    legacy_response = await state.client.get(f"/api/agents/{task['id']}")
+    assert legacy_response.status_code == 200
+    assert all(item["current"] is None for item in legacy_response.json()["outputs"])
+    corrected = await create(state, task, rows=[["Corrected", 260.30]])
+    completed = await finish_file_work(state, task)
+    by_id = {item["file_id"]: item for item in completed["outputs"]}
+    assert by_id[original["file_id"]]["current"] is False
+    assert by_id[corrected["file_id"]]["current"] is True
+    assert by_id[other["file_id"]]["current"] is None
+    assert original["download_url"] not in completed["result"]
+    assert other["download_url"] not in completed["result"]
+    assert corrected["download_url"] in completed["result"]
+    response = await state.client.get(f"/api/agents/{task['id']}")
+    assert response.status_code == 200 and response.json()["outputs"] == completed["outputs"]
+    assert all("output_ids" not in step and "output_history_unknown" not in step for step in response.json()["steps"])
+
+
+async def test_review_shares_work_lifetime_cap_and_can_reuse_an_existing_identity(state):
+    task, _ = await work(state)
+    outputs = [await create(state, task, filename=f"budget-{index}.csv") for index in range(8)]
+    assert all("error" not in output for output in outputs)
+    await state.store.agents.reserve_operation(**lease(task), step_id="research")
+    task = await state.store.agents.checkpoint(**lease(task), step_id="research", result="Prepared eight files.")
+    assert task["current_step"] == "review"
+    assert (await create(state, task, filename="ninth.csv"))["error"] == "generated_file_limit"
+    reused = await create(state, task, filename="budget-0.csv")
+    assert reused["file_id"] == outputs[0]["file_id"] and reused["created"] is False
+    assert len(receipts(state)) == 8
+
+
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_deleted_file_tombstone_blocks_retry_without_new_bytes(state, stage):
+    task, _ = await work(state, stage=stage)
     output = await create(state, task)
     response = await state.client.delete("/api/files/" + output["file_id"])
     assert response.status_code == 200
@@ -230,8 +362,9 @@ async def test_receipt_failure_before_catalog_commit_rolls_back_upload_and_clean
 
 
 @pytest.mark.parametrize("change", ["cancel", "project_delete", "model_grant", "disabled", "expired"])
-async def test_final_publication_rechecks_authority_after_last_io(state, monkeypatch, change):
-    task, project = await work(state, project=True)
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_final_publication_rechecks_authority_after_last_io(state, monkeypatch, change, stage):
+    task, project = await work(state, project=True, stage=stage)
     original = asyncio.to_thread
     changed = False
 
@@ -263,8 +396,9 @@ async def test_final_publication_rechecks_authority_after_last_io(state, monkeyp
     assert not list((state.tmp_path / "files").rglob("*.csv"))
 
 
-async def test_limits_persist_pending_and_deleted_identities_across_rerun(state):
-    task, _ = await work(state)
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_limits_persist_pending_and_deleted_identities_across_rerun(state, stage):
+    task, _ = await work(state, stage=stage)
     for index in range(8):
         result = await create(state, task, filename=f"budget-{index}.csv")
         assert "error" not in result
@@ -280,8 +414,9 @@ async def test_limits_persist_pending_and_deleted_identities_across_rerun(state)
     assert (await create(state, resumed, filename="ninth.csv"))["error"] == "generated_file_limit"
 
 
-async def test_quota_rejection_keeps_pending_identity_and_no_orphans(state):
-    task, _ = await work(state)
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_quota_rejection_keeps_pending_identity_and_no_orphans(state, stage):
+    task, _ = await work(state, stage=stage)
     state.app.state.cfg.raw["kb"]["max_user_bytes"] = 1
     result = await create(state, task)
     assert result["error"] == "file_quota_exceeded"
@@ -301,8 +436,9 @@ async def test_pending_quota_failures_consume_lifetime_identities_but_identical_
     assert "error" not in await create(state, task, filename="pending-0.csv")
 
 
-async def test_revoked_scope_foreign_identity_and_private_policy_refuse(state):
-    task, _ = await work(state)
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_revoked_scope_foreign_identity_and_private_policy_refuse(state, stage):
+    task, _ = await work(state, stage=stage)
     assert agent_file_handler(user_id=state.owner.storage_namespace) is None
     files = []
     with agent_file_scope(app=state.app, principal=state.owner, task=task, files=files):
@@ -321,6 +457,46 @@ async def test_revoked_scope_foreign_identity_and_private_policy_refuse(state):
         await create(state, task)
 
 
+async def test_review_correction_creates_a_download_without_changing_work_bytes(state):
+    task, _ = await work(state)
+    original = await create(state, task)
+    before = (await state.client.get(original["download_url"])).content
+    await state.store.agents.reserve_operation(**lease(task), step_id="research")
+    review = await state.store.agents.checkpoint(**lease(task), step_id="research", result="Saved a draft budget.")
+    arguments = {"filename": "budget.csv", "format": "csv", "rows": [["Item", "Amount"], ["Rent", 1250]]}
+    with agent_file_scope(app=state.app, principal=state.owner, task=review, files=[]):
+        handler = agent_file_handler(user_id=state.owner.storage_namespace)
+        corrected = await handler(arguments)
+        repeated = await handler(arguments)
+    assert corrected["file_id"] != original["file_id"] and repeated["file_id"] == corrected["file_id"]
+    assert repeated["created"] is False
+    download = await state.client.get(corrected["download_url"])
+    assert download.status_code == 200 and '"Rent","1250"' in download.text
+    assert (await state.client.get(original["download_url"])).content == before
+    assert len(receipts(state)) == 2
+
+
+async def test_work_handler_cannot_publish_after_live_stage_advances_to_review(state):
+    task, _ = await work(state)
+    with agent_file_scope(app=state.app, principal=state.owner, task=task, files=[]):
+        captured = agent_file_handler(user_id=state.owner.storage_namespace)
+        await state.store.agents.reserve_operation(**lease(task), step_id="research")
+        await state.store.agents.checkpoint(**lease(task), step_id="research", result="Finished Work.")
+        with pytest.raises(AgentDispatchStoppedError):
+            await captured({"filename": "late.txt", "format": "txt", "content": "Late Work"})
+    assert receipts(state) == [] and await state.db.list_user(state.owner.storage_namespace) == []
+
+
+async def test_review_binding_cannot_publish_while_work_is_live(state):
+    task, _ = await work(state)
+    forged = {**task, "current_step": "review"}
+    with agent_file_scope(app=state.app, principal=state.owner, task=forged, files=[]):
+        with pytest.raises(AgentDispatchStoppedError):
+            await agent_file_handler(user_id=state.owner.storage_namespace)(
+                {"filename": "early.txt", "format": "txt", "content": "Early Review"})
+    assert receipts(state) == [] and await state.db.list_user(state.owner.storage_namespace) == []
+
+
 async def test_invalid_requests_never_reserve_or_write(state):
     task, _ = await work(state)
     bad = await create(state, task, filename="../budget.csv")
@@ -330,6 +506,7 @@ async def test_invalid_requests_never_reserve_or_write(state):
 
 async def test_schema33_upgrade_preserves_task_and_adds_owner_fenced_metadata_only(state):
     task, _ = await work(state)
+    before_upgrade = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
     with state.store._lock:
         state.store._conn.execute("DROP TABLE app_agent_outputs")
         state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=34")
@@ -337,9 +514,9 @@ async def test_schema33_upgrade_preserves_task_and_adds_owner_fenced_metadata_on
     state.store.close()
     state.store = ApplicationStore(state.tmp_path / "app.sqlite")
     state.app.state.application_store = state.store
-    assert state.store.schema_version == 38
+    assert state.store.schema_version == 39
     restored = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
-    assert restored["steps"] == task["steps"]
+    assert restored["steps"] == before_upgrade["steps"]
     with state.store._lock, pytest.raises(sqlite3.IntegrityError):
         state.store._conn.execute(
             "INSERT INTO app_agent_outputs(file_id,task_id,user_id,filename,identity_sha256,status,created_at) "

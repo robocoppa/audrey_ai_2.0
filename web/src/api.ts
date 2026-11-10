@@ -656,6 +656,7 @@ export interface AgentOutput {
   filename: string;
   download_url: string;
   created_at: string;
+  current?: boolean | null;
 }
 
 export function isAgentOutput(value: unknown): value is AgentOutput {
@@ -665,7 +666,8 @@ export function isAgentOutput(value: unknown): value is AgentOutput {
     && output.download_url === `/api/files/${encodeURIComponent(output.file_id)}/download`
     && typeof output.filename === "string" && Boolean(output.filename.trim())
     && Array.from(output.filename).length <= 240 && !/[\p{Cc}\\/]/u.test(output.filename)
-    && typeof output.created_at === "string" && Number.isFinite(Date.parse(output.created_at));
+    && typeof output.created_at === "string" && Number.isFinite(Date.parse(output.created_at))
+    && (output.current === undefined || output.current === null || typeof output.current === "boolean");
 }
 
 function readAgentTaskFiles(task: AgentTask): AgentTask {
@@ -690,7 +692,9 @@ function readAgentTaskFiles(task: AgentTask): AgentTask {
     || new Set(task.outputs.map(({ file_id }) => file_id)).size !== task.outputs.length) {
     throw new ApiError(502, "The saved agent files could not be read. Refresh this agent.");
   }
-  return { ...task, outputs: task.outputs.map(({ file_id, filename, download_url, created_at }) => ({ file_id, filename, download_url, created_at })) };
+  return { ...task, outputs: task.outputs.map(({ file_id, filename, download_url, created_at, current }) => ({
+    file_id, filename, download_url, created_at, ...(current !== undefined ? { current } : {}),
+  })) };
 }
 
 export function listAgentTasks(signal?: AbortSignal, projectId?: string): Promise<{ items: AgentTask[] }> {

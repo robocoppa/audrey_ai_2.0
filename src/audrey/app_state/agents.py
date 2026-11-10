@@ -46,6 +46,7 @@ _EVENT_FIELDS = (
     "duration_ms", "input_tokens", "output_tokens",
 )
 _EVENT_TOOLS = frozenset({"web_search", "web_fetch", "create_file", "read_selected_file"})
+_REVIEW_EVENT_TOOLS = frozenset({"create_file", "read_selected_file"})
 _PUBLIC_FIELDS = (
     "objective", "title", "status", "revision", "created_at", "updated_at", "result", "error", "attempts",
 )
@@ -76,9 +77,22 @@ class AgentOutputLimitError(AgentTaskError):
 
 
 def _output_links(result: str, outputs: list[dict]) -> str:
-    """Retain canonical server links within the saved UTF-8 byte allowance."""
+    """Retain current server links without promoting historical file versions."""
+    for item in outputs:
+        if item.get("current") is not False:
+            continue
+        # A reviewer may repeat a prior Work download after publishing a
+        # correction. Keep its label as text, but do not advertise that old
+        # version as the current downloadable deliverable.
+        path = re.escape(item["download_url"])
+        result = re.sub(
+            r"\[((?:\\.|[^\]\\\n])*)\]\((?:https?://[^/\s)]+)?" + path + r"\)",
+            r"\1 (earlier version; see Files)", result,
+        )
     links = []
     for item in outputs:
+        if item.get("current") is not True:
+            continue
         url = item["download_url"]
         if re.search(r"\]\(" + re.escape(url) + r"\)", result):
             continue
@@ -167,7 +181,7 @@ class AgentsRepository:
         record["limits"] = json.loads(record.pop("limits_json"))
         record["input_requests"] = self._input_requests(record["task_id"])
         record["project_context"] = self._project_contexts.public(task_id=record["task_id"], user_id=record["user_id"])
-        record["outputs"] = self._outputs(record["task_id"], record["user_id"])
+        record["outputs"] = self._outputs(record["task_id"], record["user_id"], record["steps"])
         record["file_inputs"] = self._file_inputs_public(record["task_id"], record["user_id"])
         return record
 
@@ -194,14 +208,26 @@ class AgentsRepository:
         if selected is not None and not selected["current"]:
             raise AgentTaskContextError(FILES_CHANGED)
 
-    def _outputs(self, task_id: str, user_id: str) -> list[dict]:
+    def _outputs(self, task_id: str, user_id: str, steps: list[dict]) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT file_id,filename,created_at FROM app_agent_outputs "
+            "WHERE task_id=? AND user_id=? AND status='ready' ORDER BY created_at,file_id",
+            (task_id, user_id),
+        ).fetchall()
+        filenames = {row["file_id"]: row["filename"] for row in rows}
+        current, unknown = {}, False
+        for step in steps:
+            if step["id"] not in {"research", "review"}:
+                continue
+            unknown |= "output_ids" not in step or bool(step.get("output_history_unknown"))
+            # Review publications supersede Work versions with the same name.
+            for file_id in step.get("output_ids", []):
+                if file_id in filenames:
+                    current[filenames[file_id]] = file_id
         return [{"file_id": row["file_id"], "filename": row["filename"],
-                 "download_url": f"/api/files/{row['file_id']}/download", "created_at": row["created_at"]}
-                for row in self._conn.execute(
-                    "SELECT file_id,filename,created_at FROM app_agent_outputs "
-                    "WHERE task_id=? AND user_id=? AND status='ready' ORDER BY created_at,file_id",
-                    (task_id, user_id),
-                ).fetchall()]
+                 "download_url": f"/api/files/{row['file_id']}/download", "created_at": row["created_at"],
+                 "current": (current[row["filename"]] == row["file_id"] if row["filename"] in current
+                             else None if unknown else False)} for row in rows]
 
     @staticmethod
     def _public(record: dict) -> dict:
@@ -212,7 +238,8 @@ class AgentsRepository:
             "status": "waiting_for_input" if record["status"] == "paused" and any(
                 item["answer"] is None for item in record["input_requests"]
             ) else record["status"],
-            "steps": [dict(step) for step in record["steps"]],
+            "steps": [{key: value for key, value in step.items()
+                       if key not in {"output_ids", "output_history_unknown"}} for step in record["steps"]],
             "input_requests": [dict(item) for item in record["input_requests"]],
             "project_context": record["project_context"],
             **({"outputs": [dict(item) for item in record["outputs"]]} if record["outputs"] else {}),
@@ -222,6 +249,7 @@ class AgentsRepository:
     def _internal(self, record: dict) -> dict:
         return {
             **self._public(record),
+            "steps": [dict(step) for step in record["steps"]],
             **{key: record[key] for key in (
                 "user_id", "lease_token", "lease_expires_at", "fence", "limits",
                 "operations", "active_seconds",
@@ -321,10 +349,11 @@ class AgentsRepository:
 
     @staticmethod
     def _event_identity(stage: str, kind: str, tool: str | None) -> None:
+        tools = _EVENT_TOOLS if stage == "research" else _REVIEW_EVENT_TOOLS if stage == "review" else frozenset()
         if (not isinstance(stage, str) or stage not in {"plan", "research", "review", "title"}
                 or not isinstance(kind, str) or kind not in {"stage", "model", "tool"}
                 or (stage == "title" and kind != "model")
-                or (kind == "tool" and (stage != "research" or not isinstance(tool, str) or tool not in _EVENT_TOOLS))
+                or (kind == "tool" and (not isinstance(tool, str) or tool not in tools))
                 or (kind != "tool" and tool is not None)):
             raise AgentTaskError("Invalid agent activity.")
 
@@ -457,7 +486,7 @@ class AgentsRepository:
 
     async def reserve_output(
         self, *, task_id: str, lease_token: str, fence: int, file_id: str,
-        filename: str, identity_sha256: str,
+        filename: str, identity_sha256: str, stage: str = "research",
     ) -> dict:
         """Record content-free intent before bytes or catalog rows can be written."""
         if (not isinstance(file_id, str) or not re.fullmatch(r"[0-9a-f-]{36}", file_id)
@@ -466,14 +495,16 @@ class AgentsRepository:
         filename = _text(filename, maximum=720, name="output filename")
         if len(filename) > 180:
             raise AgentTaskError("Invalid output filename.")
+        if stage not in {"research", "review"}:
+            raise AgentTaskConflictError("Only Work and Review can create files.")
 
         def work():
             record = self._lease(task_id, lease_token, fence)
             self._context(record)
             self._account(record)
             self._budget(record)
-            if self._internal(record)["current_step"] != "research":
-                raise AgentTaskConflictError("Only the Work step can create files.")
+            if self._internal(record)["current_step"] != stage:
+                raise AgentTaskConflictError("The file publication stage changed.")
             row = self._conn.execute("SELECT * FROM app_agent_outputs WHERE file_id=?", (file_id,)).fetchone()
             if row is not None:
                 if (row["task_id"], row["user_id"], row["filename"], row["identity_sha256"]) != (
@@ -495,6 +526,34 @@ class AgentsRepository:
             return dict(self._conn.execute("SELECT * FROM app_agent_outputs WHERE file_id=?", (file_id,)).fetchone())
 
         return await asyncio.to_thread(self._transaction, work)
+
+    def record_output(self, record: dict, *, file_id: str, stage: str) -> None:
+        """Publish current-version metadata inside the native publication transaction.
+
+        The caller holds both catalog locks and has just checked the live lease,
+        stage and storage deletion fences. Successful identical reuse counts as
+        publication, even when its immutable receipt predates a newer version.
+        """
+        if stage not in {"research", "review"} or self._internal(record)["current_step"] != stage:
+            raise AgentTaskConflictError("The file publication stage changed.")
+        row = self._conn.execute(
+            "SELECT filename FROM app_agent_outputs WHERE file_id=? AND task_id=? AND user_id=? AND status='ready'",
+            (file_id, record["task_id"], record["user_id"]),
+        ).fetchone()
+        if row is None:
+            raise AgentTaskConflictError("The published output is unavailable.")
+        step = next(item for item in record["steps"] if item["id"] == stage)
+        if "output_ids" not in step:
+            # A pre-upgrade unfinished step may already have unclassified files.
+            # A new success cannot establish what those other filenames mean.
+            step.update(output_ids=[], output_history_unknown=True)
+        versions = {item["file_id"]: item["filename"] for item in self._conn.execute(
+            "SELECT file_id,filename FROM app_agent_outputs WHERE task_id=? AND user_id=? AND status='ready'",
+            (record["task_id"], record["user_id"]),
+        ).fetchall()}
+        step["output_ids"] = [item for item in step["output_ids"] if versions.get(item) != row["filename"]]
+        step["output_ids"].append(file_id)
+        self._save(record)
 
     def _queue_capacity(self, user_id: str, limits: dict, *, exclude_task_id: str | None = None) -> None:
         queued = self._conn.execute(
@@ -569,7 +628,8 @@ class AgentsRepository:
             if saved["owned"] >= 200 or saved["total"] >= 5000:
                 raise AgentTaskError("Agent task capacity reached.")
             task_id, now = str(uuid.uuid4()), _stamp(self._clock())
-            steps = [{"id": key, "label": label, "status": "pending", "result": ""}
+            steps = [{"id": key, "label": label, "status": "pending", "result": "",
+                      **({"output_ids": []} if key in {"research", "review"} else {})}
                      for key, label in _STEP_LABELS]
             self._conn.execute(
                 "INSERT INTO app_agent_tasks (task_id,user_id,request_id,objective,status,"
@@ -867,7 +927,7 @@ class AgentsRepository:
             self._context(record)
             self._account(record)
             self._budget(record)
-            saved_result = _output_links(result, record["outputs"]) if step_id == "research" else result
+            saved_result = _output_links(result, record["outputs"]) if step_id in {"research", "review"} else result
             step = next((item for item in record["steps"] if item["id"] == step_id), None)
             if step is not None and step["status"] == "completed" and step["result"] == saved_result:
                 return self._internal(record)
@@ -1122,7 +1182,8 @@ class AgentsRepository:
                 if all(step["status"] == "completed" for step in record["steps"]):
                     for step in record["steps"]:
                         if step["id"] != "plan":
-                            step.update(status="pending", result="")
+                            step.update(status="pending", result="", output_ids=[])
+                            step.pop("output_history_unknown", None)
                 record.update(result="", error="")
                 if not record["title"]:
                     record["title_attempted"] = 0

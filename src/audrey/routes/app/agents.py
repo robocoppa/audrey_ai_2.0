@@ -59,6 +59,7 @@ class AgentOutputResponse(BaseModel):
     filename: str
     download_url: str
     created_at: str
+    current: bool | None = None
 
 
 class AgentFileInputResponse(BaseModel):

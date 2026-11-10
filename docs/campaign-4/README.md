@@ -1,9 +1,11 @@
 # Campaign 4 — closed
 
-**Closed by owner October 27, 2026.** All campaign work, browser acceptance
-followups and implementation queues are closed. This is a scope decision;
-unreported checks are not retroactively recorded as passes. Closure does not
-implement retired or deferred proposals. New work starts only with a new user request.
+**Closed by owner.** Phases 01–20 closed October 27, 2026; the subsequently
+requested identity cleanup, phase 21, closed November 5, 2026. Campaign
+implementation and acceptance queues are closed. Each phase retains its
+verification limits; unreported or unsuccessful checks are not recorded as
+passes. Closure does not implement retired or deferred proposals. New work
+starts only with a new user request.
 
 Each phase retains its implemented behavior, security boundaries and material
 limitations. Model measurements remain in [MODEL-FACTS](../../evals/MODEL-FACTS.md).
@@ -35,6 +37,7 @@ no longer a deployment or test handoff.
 | 18 | [Admin and project presentation](phase-18-admin-and-project-presentation.md) | Closed |
 | 19 | [Calculation and evidence tools](phase-19-evidence-tools.md) | Closed |
 | 20 | [References and Private Tax review](phase-20-reference-libraries-and-private-tax-assistance.md) | Closed with accuracy and coverage limits |
+| 21 | [Legacy identity cleanup](phase-21-legacy-identity-cleanup.md) | Closed November 5; owner-reported Responses smoke passed |
 
 ## Standing decisions
 

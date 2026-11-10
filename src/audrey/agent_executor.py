@@ -415,9 +415,10 @@ class ResearchAgentExecutor:
         from audrey.agent_files import agent_file_scope, agent_files_available
 
         file_outputs = []
-        native_files = step_id == "research" and agent_files_available(self.app)
+        native_step = step_id in {"research", "review"}
+        native_files = native_step and agent_files_available(self.app)
         selected_file_reads = bool(selected_files) and file_inputs is not None
-        native_reads = step_id == "research" and selected_file_reads
+        native_reads = native_step and selected_file_reads
         if native_files:
             tools = with_create_file(tools)
             # with_create_file constructs a fresh native spec. Shared discovery
@@ -430,13 +431,17 @@ class ResearchAgentExecutor:
         previous = {
             step["id"]: step["result"] for step in task["steps"] if step["status"] == "completed"
         }
+        task_context = {"objective": task["objective"], "saved_work": previous}
+        if step_id == "review":
+            task_context["current_output_files"] = [
+                {key: output[key] for key in ("file_id", "filename", "download_url", "created_at")}
+                for output in task.get("outputs", []) if output.get("current") is True
+            ]
         messages = [
             {"role": "system", "content": prompts[step_id]},
             {
                 "role": "user",
-                "content": json.dumps(
-                    {"objective": task["objective"], "saved_work": previous}, ensure_ascii=False
-                ),
+                "content": json.dumps(task_context, ensure_ascii=False),
             },
         ]
         clarifications = [
@@ -444,10 +449,8 @@ class ResearchAgentExecutor:
             for item in task.get("input_requests", []) if item["answer"] is not None
         ]
         if clarifications:
-            messages[1]["content"] = json.dumps(
-                {"objective": task["objective"], "saved_work": previous, "clarifications": clarifications},
-                ensure_ascii=False,
-            )
+            task_context["clarifications"] = clarifications
+            messages[1]["content"] = json.dumps(task_context, ensure_ascii=False)
         if project_context is not None:
             messages.insert(1, _project_message(project_context))
         if selected_files:
@@ -539,7 +542,7 @@ class ResearchAgentExecutor:
                 agent_file_read_scope(app=self.app, principal=principal, task=task)
                 if native_reads else nullcontext(),
             ):
-                if step_id == "research":
+                if step_id == "research" or (step_id == "review" and (native_files or native_reads)):
                     report = await (self.react_runner or run_react)(
                         local,
                         self.app.state.health,

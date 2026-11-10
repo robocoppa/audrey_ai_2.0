@@ -1,4 +1,4 @@
-"""Immutable owner-bound working files from one live saved Agent Work step.
+"""Immutable owner-bound working files from one live saved Agent Work or Review step.
 
 Durable content-free intents bridge the application and upload databases. A
 retry reconciles the deterministic catalog identity; it never overwrites bytes.
@@ -102,7 +102,7 @@ def agent_files_available(app: Any) -> bool:
 @contextmanager
 def agent_file_scope(*, app: Any, principal: Principal, task: dict, files: list[dict]) -> Iterator[None]:
     if (_BINDING.get() is not None or not isinstance(principal, Principal)
-            or task.get("user_id") != principal.user_id or task.get("current_step") != "research"
+            or task.get("user_id") != principal.user_id or task.get("current_step") not in {"research", "review"}
             or current_processing_policy() is not None):
         raise AgentDispatchStoppedError("Agent file creation is unavailable.")
     binding = _Binding(app, principal, task, files)
@@ -158,7 +158,8 @@ def _authority(app, principal, task, scope_guard=None):
         raise AgentDispatchStoppedError("Agent access, inputs or execution limits changed.") from None
     if (current is None or current.status != "active" or "bots" in current.groups
             or current.storage_namespace != principal.storage_namespace or record["user_id"] != principal.user_id
-            or store.agents._internal(record)["current_step"] != "research"
+            or task.get("current_step") not in {"research", "review"}
+            or store.agents._internal(record)["current_step"] != task.get("current_step")
             or remote_personal_reads_blocked(principal.storage_namespace)):
         raise AgentDispatchStoppedError("Agent file creation is unavailable.")
     model = next((item for item in configured_models(app.state.cfg) if item.id == "local"), None)
@@ -226,7 +227,8 @@ async def create_agent_file(app, principal, task, arguments, *, scope_guard=None
     reservation = None
     paths: list[Path] = []
     try:
-        await store.agents.reserve_output(**_lease(task), file_id=file_id, filename=body.filename, identity_sha256=identity)
+        await store.agents.reserve_output(**_lease(task), file_id=file_id, filename=body.filename,
+                                         identity_sha256=identity, stage=task["current_step"])
         guard()
         async with app.state.file_operation_locks.hold(file_id):
             deleted = await db.file_deletion_ids(principal.storage_namespace)
@@ -302,7 +304,7 @@ async def create_agent_file(app, principal, task, arguments, *, scope_guard=None
                     linked, notice = _project_link(store, record, file_id, now)
                     if receipt["status"] != "ready":
                         store._conn.execute("UPDATE app_agent_outputs SET status='ready',committed_at=? WHERE file_id=?", (now, file_id))
-                        store.agents._save(record)
+                    store.agents.record_output(record, file_id=file_id, stage=task["current_step"])
                     return {"file_id": file_id, "filename": body.filename,
                             "download_url": f"/api/files/{file_id}/download", "created_at": receipt["created_at"],
                             "created": created, "project_id": linked, "notice": notice, "origin": "generated",

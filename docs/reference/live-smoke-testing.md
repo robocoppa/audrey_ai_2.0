@@ -41,9 +41,16 @@ without printing values before telling the user to source it.
 | Variable | Use |
 |---|---|
 | `AUDREY_EVAL_BASE_URL` | API eval URL, normally `http://192.168.1.11:8000/v1` |
+| `AUDREY_SMOKE_BASE_URL` | Native/API smoke origin, normally `http://192.168.1.11:8000` |
 | `AUDREY_EVAL_API_KEY` | Audrey PAT with `compat:full` for compatibility calls |
 | `AUDREY_USER_JWT` | Current Cloudflare Access application assertion for native user smokes |
 | `AUDREY_ADMIN_JWT` | Distinct administrator's application assertion when required |
+
+The Responses smoke prefers `AUDREY_SMOKE_BASE_URL` over `AUDREY_EVAL_BASE_URL`.
+Keep both on the working LAN/WARP address when sourcing this file. A stale
+exported smoke URL can otherwise override a corrected eval URL. Connection
+timeouts occur before an HTTP authentication result; refreshing JWTs does not
+change the selected address. The Responses smoke authenticates with the PAT.
 
 Tower `.env.smoke.local` contains only the two native JWT names. Use plain
 `KEY=value`, no `export` or Markdown URLs. Application JWT values expire;

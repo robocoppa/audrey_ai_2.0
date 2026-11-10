@@ -11,9 +11,11 @@
 | Evaluation harness and reports | [Evals](../evals/README.md) |
 | Host and service setup | [Guides](guides/), [reference](reference/) |
 
-All four campaigns are **closed as of 2026-10-27**. Their indexes preserve the
-delivered contracts and distinguish ideas closed without implementation. They
-contain no active implementation or acceptance queue.
+All four campaigns are **closed**. Campaigns 1–3 and Campaign 4 phases 01–20
+closed October 27, 2026; the subsequently requested Campaign 4 identity cleanup
+closed November 5. Their indexes preserve delivered contracts, verification
+limits and ideas closed without implementation. They contain no active
+implementation or acceptance queue.
 
 | Campaign | Scope |
 | --- | --- |

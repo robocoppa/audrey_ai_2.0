@@ -62,7 +62,7 @@ locally as the answer key.
 
 If the deployed build needs updating, rebuild `audrey` and `audrey-ui` on Tower
 from `/mnt/user/appdata/audrey_ai_2.0` through the normal deployment workflow.
-Backend startup applies schema 38 automatically. No configuration edit or new
+Backend startup applies schema 39 automatically. No configuration edit or new
 upload is required for the Knowledge and layout checks.
 
 ## 1. General task, usable files and real activity
@@ -277,6 +277,35 @@ On the completed case-2 task, note its saved Plan and activity attempt. Press
 **Pass:** one task remains selected; the completed Plan is retained; new Work and
 Review occur; prior activity remains. Previously downloaded files keep their
 original bytes. Changed generated content may legitimately create another file.
+
+**Owner result, November 9:** the rerun Result reports correcting a supply total
+of USD 270.95 to USD 260.30 and a remainder of USD 201.40 to USD 212.05. Those final
+totals are correct. It presents intended Markdown, cannot independently recheck
+the appendix and lists three same-name downloads. The owner downloaded the files
+and thinks the Plan was retained; downloaded totals and same-Agent identity remain
+unconfirmed. Distinct
+file IDs alone do not establish duplicate tasks or broken immutable storage.
+Source review found two gaps: Review had no native tools to check/save corrections,
+and Work/final reports received every lifetime output as if current. Both are
+corrected locally; this case stays open for a real rerun and download check.
+
+After deploying this correction, rebuild `audrey` and `audrey-ui` on Tower;
+startup applies schema 39 without a configuration change or new upload. Rerun
+the same eligible purchasing Agent. Review can read needed selected ranges and
+save a corrected file; inspect any actual Review tool entries when it does so.
+Open the file marked **Current** in **Files** and check the downloaded Markdown contains
+USD 260.30 and USD 212.05, agrees with the final Result, and preserves the appendix
+facts. Older versions belong under **Previous files** and must retain their bytes.
+Unclassified legacy files stay labelled Saved until a new publication establishes
+their role. Confirm the same Agent/Plan and new Work/Review attempt as above.
+
+To exercise correction deliberately with no upload, use a separate disposable
+Agent: “Create arithmetic-check.md. During Work save a clearly labelled test draft
+containing 6 × 7 = 41. During Review check that arithmetic and save the corrected
+final file under the same filename. Link the saved correction in your final
+report.” Expected: Current contains 42, Previous files retains the draft with 41,
+and actual Review create-file activity is saved. Model refusal to create the
+requested test draft or an unexercised correction is inconclusive for this path.
 
 For a real restart check, create a separate Project Agent with the two selected
 files, saved knowledge and the case-2 prompt. After its Plan is saved and Work has started, restart

@@ -32,7 +32,7 @@ def agent_file_read_scope(*, app: Any, principal: Principal, task: dict) -> Iter
     inputs = task.get("file_inputs")
     if (_BINDING.get() is not None or not isinstance(principal, Principal)
             or principal.status != "active" or not principal.storage_namespace
-            or task.get("user_id") != principal.user_id or task.get("current_step") != "research"
+            or task.get("user_id") != principal.user_id or task.get("current_step") not in {"research", "review"}
             or not isinstance(inputs, dict) or not inputs.get("files")
             or get_agent_file_inputs(app) is None or current_processing_policy() is not None):
         raise AgentDispatchStoppedError("Selected file reading is unavailable.")
@@ -71,7 +71,7 @@ def agent_file_read_handler(*, user_id: str | None):
 
 
 def with_selected_file_read(tools: ToolRegistry) -> ToolRegistry:
-    """Add a fresh Work-only native spec without changing shared discovery."""
+    """Add a fresh native spec for Work/Review without changing shared discovery."""
     declaration = TOOL_DECLARATIONS["read_selected_file"]
     spec = ToolSpec(
         name="read_selected_file",
