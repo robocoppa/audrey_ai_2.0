@@ -1,6 +1,6 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, November 9, 2026. Saved task Agents, unified lexical
+**Status:** In progress, November 10, 2026. Saved task Agents, unified lexical
 Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner confirms Search
 returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
 
@@ -32,6 +32,13 @@ saved step results/reports, pause/resume/cancel, rerun the same agent and delete
 terminal history. Run again preserves completed checkpoints on unfinished tasks;
 completed tasks repeat Work/Review using the saved Plan. The agent ID and
 selection stay the same. Lists return compact summaries and load the selected report separately.
+Schema 40 separates a run's bounded worker claims from the lifetime attempt
+history. Run again renews only the retry allowance, including for an Agent whose
+previous run exhausted it. Automatic retry, restart, pause/resume and answering
+questions retain the current run's usage. Lifetime attempt labels, operation/time
+charges, file limits, Plans and source pins remain. The additive migration starts
+existing tasks at the original accounting baseline; upgrading grants no automatic
+retry. Backend rebuild and an owner-operated same-Agent retry are required.
 Review can now reread frozen selected-file ranges and save corrected deliverables
 through the native tools. It has no web or personal-file tools. Successful file
 publication records the current version per filename; Review corrections replace
@@ -1021,8 +1028,9 @@ material changes require revalidation/replanning, while a Project rename does no
 Bound queued/active work per user and globally, plan steps/replans, model/tool
 calls, retries, active execution time, output bytes and event retention in
 `config.yaml`. Start conservatively with one active agent task per user. Account
-for all attempts and child calls; resume and Run again do not reset usage.
-Reruns check current queue capacity and remaining saved allowances before changing
+for all attempts and child calls. Resume preserves retry usage; explicit Run again
+renews its bounded worker-claim allowance while retaining lifetime resource usage.
+Reruns check current queue capacity and remaining operation/time allowances before changing
 the task. Reserve resources
 before dispatch and conservatively retain charges for unknown outcomes after a
 crash until reconciled. User waiting time does not consume active execution allowance.

@@ -462,6 +462,57 @@ async def test_ordinary_failures_are_bounded_and_do_not_persist_provider_errors(
     assert "credential" not in str(saved) and "private provider" not in str(saved)
 
 
+async def test_explicit_rerun_renews_only_retry_allowance_across_restart(state):
+    task = await _create(state)
+    seen = []
+    fail = True
+
+    async def execute(current, step_id):
+        seen.append((step_id, current["attempts"]))
+        state.clock.advance(1)
+        if fail and step_id == "research":
+            raise RuntimeError("Transient transport failure")
+        return f"Saved {step_id}"
+
+    runtime = _runtime(state, execute, max_attempts=2)
+    for cycle in range(2):
+        assert await runtime.run_once()
+        assert await runtime.run_once()
+        assert not await runtime.run_once()
+        failed = await _get(state, task)
+        assert failed["status"] == "failed" and failed["attempts"] == (cycle + 1) * 2
+        saved_plan = failed["steps"][0]
+        assert saved_plan["result"] == "Saved plan"
+        before = dict(state.store._conn.execute(
+            "SELECT operations,active_seconds FROM app_agent_tasks WHERE task_id=?", (task["id"],),
+        ).fetchone())
+        queued = await _control(state, task, "rerun")
+        assert queued["id"] == task["id"] and queued["steps"][0] == saved_plan
+        assert queued["attempts"] == failed["attempts"]
+        state.store.close()
+        state.store = ApplicationStore(state.path)
+        state.store.agents._clock = state.clock
+        runtime = _runtime(state, execute, max_attempts=2)
+        assert await _get(state, task) == queued
+        after = dict(state.store._conn.execute(
+            "SELECT operations,active_seconds FROM app_agent_tasks WHERE task_id=?", (task["id"],),
+        ).fetchone())
+        assert after == before
+
+    fail = False
+    assert await runtime.run_once()
+    completed = await _get(state, task)
+    assert completed["status"] == "completed" and completed["attempts"] == 5
+    assert completed["steps"][0] == saved_plan
+    assert seen == [("plan", 1), ("research", 1), ("research", 2), ("research", 3),
+                    ("research", 4), ("research", 5), ("review", 5)]
+    usage = state.store._conn.execute(
+        "SELECT operations,active_seconds FROM app_agent_tasks WHERE task_id=?", (task["id"],),
+    ).fetchone()
+    assert usage["operations"] > before["operations"]
+    assert usage["active_seconds"] > before["active_seconds"]
+
+
 async def test_pausing_and_resuming_cannot_reset_the_attempt_allowance(state):
     task = await _create(state)
     calls = 0

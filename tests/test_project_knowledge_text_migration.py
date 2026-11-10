@@ -34,6 +34,12 @@ async def test_schema38_preserves_populated_schema37_and_rolls_back_failed_rebui
     with monkeypatch.context() as patch:
         patch.setattr(store_module, "MIGRATIONS", tuple(item for item in MIGRATIONS if item[0] <= 37))
         legacy = ApplicationStore(path)
+        # Current repository methods need this private field while generating
+        # historical rows. Remove it below before exercising any migration.
+        legacy._conn.execute(
+            "ALTER TABLE app_agent_tasks ADD COLUMN attempt_base INTEGER NOT NULL DEFAULT 0 "
+            "CHECK (typeof(attempt_base)='integer' AND attempt_base>=0 AND attempt_base<=attempts)",
+        )
         try:
             owner = await legacy.resolve_external_identity(
                 provider="test", subject="alice", email="alice@example.com", display_name="Alice",
@@ -70,6 +76,11 @@ async def test_schema38_preserves_populated_schema37_and_rolls_back_failed_rebui
         finally:
             legacy.close()
 
+    with sqlite3.connect(path) as connection:
+        assert not connection.execute("SELECT 1 FROM app_agent_tasks WHERE attempt_base!=0").fetchone()
+        connection.execute("ALTER TABLE app_agent_tasks DROP COLUMN attempt_base")
+        assert "attempt_base" not in {row[1] for row in connection.execute("PRAGMA table_info(app_agent_tasks)")}
+
     with monkeypatch.context() as patch:
         broken = tuple((version, sql.replace(
             "ALTER TABLE app_project_knowledge_v38", "SELECT missing_migration_fixture; ALTER TABLE app_project_knowledge_v38",
@@ -85,7 +96,7 @@ async def test_schema38_preserves_populated_schema37_and_rolls_back_failed_rebui
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 39 and rows(upgraded._conn) == before
+        assert upgraded.schema_version == 40 and rows(upgraded._conn) == before
         assert await upgraded.agents.get(user_id=owner.user_id, task_id=frozen["id"]) == frozen
         assert await upgraded.knowledge.get(**args, entry_id=proposal["id"]) == proposal
         assert await upgraded.knowledge.get(**args, entry_id=rejected["id"]) == rejected

@@ -81,6 +81,7 @@ _ADDITIVE_COLUMN_MIGRATIONS = {
     25: {"app_project_files": ("origin",)},
     28: {"app_agent_tasks": ("title", "title_attempted")},
     33: {"app_watches": ("project_id",)},
+    40: {"app_agent_tasks": ("attempt_base",)},
 }
 
 
@@ -221,6 +222,11 @@ class ApplicationStore:
                         definition = (
                             "INTEGER NOT NULL DEFAULT 0 CHECK (typeof(title_attempted) = 'integer' "
                             "AND title_attempted IN (0, 1))"
+                        )
+                    elif column == "attempt_base":
+                        definition = (
+                            "INTEGER NOT NULL DEFAULT 0 CHECK (typeof(attempt_base) = 'integer' "
+                            "AND attempt_base >= 0 AND attempt_base <= attempts)"
                         )
                     elif column == "origin":
                         definition = "TEXT NOT NULL DEFAULT 'upload' CHECK (origin IN ('upload', 'generated'))"

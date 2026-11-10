@@ -126,7 +126,7 @@ class AgentSettings(BaseModel):
     model: Literal["qwen3.8:latest"] = "qwen3.8:latest"
     poll_seconds: float = Field(default=2.0, gt=0, le=60)
     lease_seconds: int = Field(default=60, ge=2, le=300)
-    max_attempts: int = Field(default=6, ge=1, le=20)
+    max_attempts: int = Field(default=6, ge=1, le=20, description="Worker claims per explicitly started run.")
     step_timeout_seconds: float = Field(default=600.0, gt=0, le=1800)
     max_operations: int = Field(default=96, ge=3, le=1000)
     max_active_seconds: int = Field(default=1800, ge=30, le=7200)

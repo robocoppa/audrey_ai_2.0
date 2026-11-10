@@ -271,7 +271,7 @@ async def test_answer_cannot_reset_or_escape_cumulative_execution_limits(state, 
             "active_seconds": "UPDATE app_agent_tasks SET active_seconds=1800",
         }[limit]
         state.store._conn.execute(sql)
-    with pytest.raises(AgentTaskError, match="allowance"):
+    with pytest.raises(AgentTaskError, match="retry limit" if limit == "attempts" else "allowance"):
         await _answer(state, waiting)
     assert state.store._conn.execute("SELECT answer FROM app_agent_input_requests").fetchone()[0] is None
 
@@ -321,7 +321,7 @@ async def test_additive_migration_preserves_existing_tasks_notices_and_no_input_
         state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=31")
     second = ApplicationStore(state.store.path)
     try:
-        assert second.schema_version == 39
+        assert second.schema_version == 40
         assert await second.agents.get(user_id=state.owner.user_id, task_id=task["id"]) == failed
         assert (await second.notifications.feed(user_id=state.owner.user_id))["unread_count"] == 1
         assert second._conn.execute("SELECT COUNT(*) FROM app_agent_input_requests").fetchone()[0] == 0

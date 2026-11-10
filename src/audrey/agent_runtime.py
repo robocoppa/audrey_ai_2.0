@@ -31,8 +31,9 @@ class AgentRuntime:
     """One queued task at a time, sharing Audrey's existing model admission.
 
     ``run_once`` is also available without starting the dispatcher, for isolated
-    checks. All attempt, operation and active-time accounting is repository-owned
-    and persists across process restarts, pause and resume.
+    checks. Attempt history, operation and active-time accounting is repository-owned
+    and persists across process restarts, pause and resume. Only an explicit rerun
+    starts a fresh bounded retry allowance; cumulative resource charges remain.
     """
 
     def __init__(

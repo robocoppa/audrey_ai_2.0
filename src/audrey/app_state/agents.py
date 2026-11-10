@@ -51,7 +51,7 @@ _PUBLIC_FIELDS = (
     "objective", "title", "status", "revision", "created_at", "updated_at", "result", "error", "attempts",
 )
 _SAVED_FIELDS = (
-    "status", "revision", "attempts", "fence", "lease_token", "lease_expires_at",
+    "status", "revision", "attempts", "attempt_base", "fence", "lease_token", "lease_expires_at",
     "accounted_at", "active_seconds", "operations", "result", "error", "updated_at", "title", "title_attempted",
 )
 
@@ -252,7 +252,7 @@ class AgentsRepository:
             "steps": [dict(step) for step in record["steps"]],
             **{key: record[key] for key in (
                 "user_id", "lease_token", "lease_expires_at", "fence", "limits",
-                "operations", "active_seconds",
+                "operations", "active_seconds", "attempt_base",
                 "title_attempted",
             )},
             "title_generated": bool(record["title"]),
@@ -280,7 +280,7 @@ class AgentsRepository:
         if len(steps_json.encode("utf-8")) > 200000:
             raise AgentTaskError("Agent saved step storage allowance exhausted.")
         self._conn.execute(
-            "UPDATE app_agent_tasks SET status=?,revision=?,attempts=?,fence=?,lease_token=?,"
+            "UPDATE app_agent_tasks SET status=?,revision=?,attempts=?,attempt_base=?,fence=?,lease_token=?,"
             "lease_expires_at=?,accounted_at=?,active_seconds=?,operations=?,result=?,error=?,"
             "updated_at=?,title=?,title_attempted=?,steps_json=? WHERE task_id=?",
             (*[record[key] for key in _SAVED_FIELDS],
@@ -829,10 +829,15 @@ class AgentsRepository:
                     insert_agent_notice(self._conn, record, created_at=record["updated_at"])
                     continue
                 if (
-                    record["attempts"] >= max_attempts
+                    record["attempts"] - record["attempt_base"] >= max_attempts
                     or record["active_seconds"] >= record["limits"]["max_active_seconds"]
                 ):
-                    record.update(status="failed", error="Agent execution allowance exhausted.")
+                    error = (
+                        "Agent execution allowance exhausted."
+                        if record["active_seconds"] >= record["limits"]["max_active_seconds"]
+                        else "Automatic retry limit reached. Use Run again to retry this Agent."
+                    )
+                    record.update(status="failed", error=error)
                     self._clear_lease(record)
                     self._save(record)
                     insert_agent_notice(self._conn, record, created_at=record["updated_at"])
@@ -1084,8 +1089,8 @@ class AgentsRepository:
                 raise AgentTaskConflictError("Agent task changed. Refresh before trying again.")
             self._queue_capacity(user_id, queue_limits or record["limits"], exclude_task_id=task_id)
             self._budget(record)
-            if record["attempts"] >= max_attempts:
-                raise AgentTaskError("Agent attempt allowance exhausted.")
+            if record["attempts"] - record["attempt_base"] >= max_attempts:
+                raise AgentTaskError("This run reached its retry limit. Cancel, then use Run again.")
             if record["operations"] >= record["limits"]["max_operations"]:
                 raise AgentTaskError("Agent operation allowance exhausted.")
             now = _stamp(self._clock())
@@ -1173,10 +1178,11 @@ class AgentsRepository:
             if action == "rerun":
                 self._queue_capacity(user_id, queue_limits or record["limits"])
                 self._budget(record)
-                if record["attempts"] >= max_attempts:
-                    raise AgentTaskError("Agent attempt allowance exhausted.")
                 if record["operations"] >= record["limits"]["max_operations"]:
                     raise AgentTaskError("Agent operation allowance exhausted.")
+                # Explicit owner intent starts a fresh bounded recovery window.
+                # Lifetime attempt numbers and all other usage stay cumulative.
+                record["attempt_base"] = record["attempts"]
                 # Continue unfinished work; a fully finished report gets fresh
                 # Work/Review while its committed Plan remains reusable.
                 if all(step["status"] == "completed" for step in record["steps"]):

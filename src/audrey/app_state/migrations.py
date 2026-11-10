@@ -1633,6 +1633,13 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX idx_app_agent_events_owner ON app_agent_events(user_id,task_id,seq);
         """,
     ),
+    (
+        40,
+        """
+        ALTER TABLE app_agent_tasks ADD COLUMN attempt_base INTEGER NOT NULL DEFAULT 0
+          CHECK (typeof(attempt_base)='integer' AND attempt_base>=0 AND attempt_base<=attempts);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

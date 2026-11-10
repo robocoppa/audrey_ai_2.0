@@ -151,7 +151,7 @@ async def test_schema_32_preserves_legacy_tasks_without_implicitly_adopting_proj
         state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=32")
     upgraded = ApplicationStore(state.store.path)
     try:
-        assert upgraded.schema_version == 39
+        assert upgraded.schema_version == 40
         assert await upgraded.agents.get(user_id=state.owner.user_id, task_id=task["id"]) == task
         assert upgraded._conn.execute("SELECT COUNT(*) FROM app_agent_project_contexts").fetchone()[0] == 0
     finally:

@@ -151,7 +151,7 @@ async def test_title_additive_migration_repairs_partial_schema_without_losing_sa
         state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=28")
     upgraded = ApplicationStore(state.store.path)
     try:
-        assert upgraded.schema_version == 39
+        assert upgraded.schema_version == 40
         current = await upgraded.agents.get(user_id=state.owner.user_id, task_id=task["id"])
         assert current["title"] == "Saved Public Research Title" and current["objective"] == task["objective"]
         assert current["steps"][0] == task["steps"][0]
@@ -700,7 +700,7 @@ async def test_rerun_fences_every_delayed_old_worker_write(state):
     assert saved["status"] == "running" and saved["steps"][0]["result"] == "Saved plan"
 
 
-@pytest.mark.parametrize("limit", ["attempts", "operations", "time"])
+@pytest.mark.parametrize("limit", ["operations", "time"])
 async def test_rerun_rejects_exhausted_allowances_without_erasing_saved_work(state, limit):
     limits = (
         {"max_operations": 2}
@@ -711,7 +711,7 @@ async def test_rerun_rejects_exhausted_allowances_without_erasing_saved_work(sta
     )
     _, terminal = await _terminal_task(state, limits=limits)
     with pytest.raises(AgentTaskError, match="allowance exhausted"):
-        await _control(state, terminal, "rerun", max_attempts=1 if limit == "attempts" else 6)
+        await _control(state, terminal, "rerun")
     assert (
         await state.store.agents.get(user_id=state.owner.user_id, task_id=terminal["id"])
         == terminal
@@ -747,3 +747,50 @@ async def test_rerun_persists_same_identity_checkpoints_and_cumulative_usage_aft
     assert claimed["steps"][0]["result"] == "Saved plan"
     assert claimed["operations"] == 2 and claimed["active_seconds"] == 2
     assert claimed["attempts"] == 2
+
+
+async def test_explicit_reruns_exceed_six_lifetime_attempts_without_rewriting_plan_or_history(state):
+    _, completed = await _terminal_task(state, 3, "completed")
+    plan = completed["steps"][0]
+    for attempt in range(2, 9):
+        queued = await _control(state, completed, "rerun", max_attempts=1)
+        assert queued["id"] == completed["id"] and queued["attempts"] == attempt - 1
+        assert "attempt_base" not in queued
+        claimed = await state.store.agents.claim(max_attempts=1)
+        assert claimed["attempts"] == attempt and claimed["attempt_base"] == attempt - 1
+        assert claimed["steps"][0] == plan and claimed["active_seconds"] == 2
+        for stage in ("research", "review"):
+            claimed = await _step(state, claimed, stage, result=f"Saved {stage} on attempt {attempt}.")
+        completed = await state.store.agents.complete(**_lease(claimed), result=f"Report {attempt}.")
+    assert completed["id"] == queued["id"] and completed["attempts"] == 8
+    assert completed["steps"][0] == plan and completed["result"] == "Report 8."
+    assert len(await state.store.agents.list(user_id=state.owner.user_id)) == 1
+    assert state.store._conn.execute("SELECT operations FROM app_agent_tasks").fetchone()[0] == 17
+    assert {row[0] for row in state.store._conn.execute("SELECT DISTINCT attempt FROM app_agent_events")} == set(range(1, 9))
+
+
+async def test_answer_uses_current_recovery_window_and_pause_does_not_reset_it(state):
+    await _create(state)
+    for _ in range(6):
+        claimed = await state.store.agents.claim(max_attempts=1)
+        await state.store.agents.reserve_operation(**_lease(claimed), step_id="plan")
+        failed = await state.store.agents.fail(**_lease(claimed), error="A saved failure.")
+        await _control(state, failed, "rerun", max_attempts=1)
+    claimed = await state.store.agents.claim(max_attempts=2)
+    assert claimed["attempts"] == 7 and claimed["attempt_base"] == 6
+    await state.store.agents.reserve_operation(**_lease(claimed), step_id="plan")
+    waiting = await state.store.agents.request_input(**_lease(claimed), question="Which garden name should I use?")
+    queued = await state.store.agents.answer_input(
+        user_id=state.owner.user_id, task_id=waiting["id"], request_id=waiting["input_requests"][0]["id"],
+        expected_revision=waiting["revision"], answer="Fern Circle", max_attempts=2,
+    )
+    assert queued["attempts"] == 7 and queued["input_requests"][0]["answer"] == "Fern Circle"
+    resumed = await state.store.agents.claim(max_attempts=2)
+    assert resumed["attempts"] == 8 and resumed["attempt_base"] == 6
+    paused = await _control(state, resumed, "pause")
+    await _control(state, paused, "resume")
+    assert await state.store.agents.claim(max_attempts=2) is None
+    failed = await state.store.agents.get(user_id=state.owner.user_id, task_id=queued["id"])
+    assert failed["attempts"] == 8 and failed["status"] == "failed"
+    assert "Use Run again" in failed["error"]
+    assert state.store._conn.execute("SELECT attempt_base FROM app_agent_tasks").fetchone()[0] == 6

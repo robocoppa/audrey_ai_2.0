@@ -317,22 +317,59 @@ async def test_missing_web_tools_allow_rerun_of_same_agent_with_saved_plan(agent
     assert queued["steps"][1]["label"] == "Work"
 
 
-@pytest.mark.parametrize("cap", ["max_queued_per_user", "max_queued_global", "max_attempts"])
-async def test_http_rerun_uses_current_server_admission_and_attempt_limits(agents, cap):
+@pytest.mark.parametrize("cap", ["max_queued_per_user", "max_queued_global"])
+async def test_http_rerun_uses_current_server_admission_limits(agents, cap):
     completed = await _complete_task(agents)
-    if cap != "max_attempts":
-        if cap == "max_queued_global":
-            agents.current[0] = agents.owners[1]
-        assert (await _create(agents, request_id="waiting")).status_code == 201
-        agents.current[0] = agents.owners[0]
+    if cap == "max_queued_global":
+        agents.current[0] = agents.owners[1]
+    assert (await _create(agents, request_id="waiting")).status_code == 201
+    agents.current[0] = agents.owners[0]
     agents.app.state.cfg.raw["agent_tasks"] = {cap: 1}
     wakes = len(agents.wakes)
     response = await _rerun(agents, completed)
     assert response.status_code == 422, response.text
-    expected_error = "allowance exhausted" if cap == "max_attempts" else "capacity reached"
-    assert expected_error in response.text
+    assert "capacity reached" in response.text
     assert (await agents.client.get(f"/api/agents/{completed['id']}")).json() == completed
     assert len(agents.wakes) == wakes
+
+
+async def test_http_rerun_recovers_attempt_exhaustion_on_same_agent_with_saved_plan(agents):
+    agents.app.state.cfg.raw["agent_tasks"] = {"max_attempts": 1}
+    task = (await _create(agents)).json()
+    fail = True
+    seen = []
+
+    async def execute(current, step_id):
+        seen.append((current["id"], step_id, current["attempts"]))
+        if fail and step_id == "research":
+            raise RuntimeError("Transient model transport failure")
+        return f"Saved {step_id}"
+
+    runtime = AgentRuntime(agents.store.agents, execute, max_attempts=1)
+    assert await runtime.run_once()
+    assert not await runtime.run_once()
+    failed = (await agents.client.get(f"/api/agents/{task['id']}")).json()
+    assert failed["status"] == "failed" and failed["attempts"] == 1
+    assert failed["steps"][0]["result"] == "Saved plan"
+    wakes = len(agents.wakes)
+    response = await _rerun(agents, failed)
+    assert response.status_code == 200, response.text
+    queued = response.json()
+    assert queued["id"] == task["id"] and queued["steps"][0] == failed["steps"][0]
+    assert queued["attempts"] == 1 and "attempt_base" not in queued
+    assert len(agents.wakes) == wakes + 1
+    assert (await _rerun(agents, failed)).status_code == 409
+    fail = False
+    assert await runtime.run_once()
+    completed = (await agents.client.get(f"/api/agents/{task['id']}")).json()
+    assert completed["status"] == "completed" and completed["attempts"] == 2
+    assert completed["steps"][0] == failed["steps"][0]
+    assert seen == [(task["id"], stage, attempt) for stage, attempt in (
+        ("plan", 1), ("research", 1), ("research", 2), ("review", 2),
+    )]
+    listing = (await agents.client.get("/api/agents")).json()["items"]
+    assert [item["id"] for item in listing] == [task["id"]]
+    assert all("attempt_base" not in item for item in listing)
 
 
 async def test_native_agents_require_authentication():

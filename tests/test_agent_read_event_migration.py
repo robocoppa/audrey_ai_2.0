@@ -14,6 +14,12 @@ async def test_schema37_preserves_schema36_events_and_allows_selected_file_reads
     with monkeypatch.context() as patch:
         patch.setattr(store_module, "MIGRATIONS", tuple(item for item in MIGRATIONS if item[0] <= 36))
         legacy = ApplicationStore(path)
+        # Current repository methods need this private field while generating
+        # historical rows. Remove it below before exercising any migration.
+        legacy._conn.execute(
+            "ALTER TABLE app_agent_tasks ADD COLUMN attempt_base INTEGER NOT NULL DEFAULT 0 "
+            "CHECK (typeof(attempt_base)='integer' AND attempt_base>=0 AND attempt_base<=attempts)",
+        )
         try:
             owner = await legacy.resolve_external_identity(provider="test", subject="alice", email="alice@example.com",
                 display_name="Alice", role="user", auth_method="test")
@@ -32,6 +38,11 @@ async def test_schema37_preserves_schema36_events_and_allows_selected_file_reads
             assert legacy.schema_version == 36
         finally:
             legacy.close()
+
+    with sqlite3.connect(path) as connection:
+        assert not connection.execute("SELECT 1 FROM app_agent_tasks WHERE attempt_base!=0").fetchone()
+        connection.execute("ALTER TABLE app_agent_tasks DROP COLUMN attempt_base")
+        assert "attempt_base" not in {row[1] for row in connection.execute("PRAGMA table_info(app_agent_tasks)")}
     # A failure after the old table is dropped must still restore that table
     # and its rows through the migration runner's transaction rollback.
     with monkeypatch.context() as patch:
@@ -46,7 +57,7 @@ async def test_schema37_preserves_schema36_events_and_allows_selected_file_reads
         assert not connection.execute("SELECT name FROM sqlite_master WHERE name='app_agent_events_v37'").fetchone()
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 39
+        assert upgraded.schema_version == 40
         assert await upgraded.agents.events(user_id=owner.user_id, task_id=task["id"]) == before
         assert await upgraded.agents.get(user_id=owner.user_id, task_id=task["id"]) == before_task
         seq = await upgraded.agents.start_event(**lease, stage="research", kind="tool", tool="read_selected_file")

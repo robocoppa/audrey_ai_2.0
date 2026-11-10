@@ -279,7 +279,7 @@ async def test_schema33_upgrade_preserves_legacy_unscoped_request_digest_and_run
         state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=33")
     upgraded = ApplicationStore(state.store.path)
     try:
-        assert upgraded.schema_version == 39
+        assert upgraded.schema_version == 40
         saved = await upgraded.watches.create(**inputs(state, project_id=None))
         assert saved["id"] == watch["id"] and saved["project"] is None
         assert saved["active_run_id"] == queued["active_run_id"] and saved["latest_run"]["definition"]["project"] is None

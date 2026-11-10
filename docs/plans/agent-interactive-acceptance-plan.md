@@ -62,7 +62,7 @@ locally as the answer key.
 
 If the deployed build needs updating, rebuild `audrey` and `audrey-ui` on Tower
 from `/mnt/user/appdata/audrey_ai_2.0` through the normal deployment workflow.
-Backend startup applies schema 39 automatically. No configuration edit or new
+Backend startup applies schema 40 automatically. No configuration edit or new
 upload is required for the Knowledge and layout checks.
 
 ## 1. General task, usable files and real activity
@@ -278,6 +278,19 @@ On the completed case-2 task, note its saved Plan and activity attempt. Press
 Review occur; prior activity remains. Previously downloaded files keep their
 original bytes. Changed generated content may legitimately create another file.
 
+**November 10 retry-limit correction:** the owner hit “Agent attempt allowance
+exhausted” while retrying. The previous lifetime attempt gate could permanently
+block Run again after enough claims. Schema 40 keeps lifetime attempt history and
+gives each explicit rerun a fresh bounded retry allowance; ordinary automatic
+retries, restarts, answers and pause/resume cannot renew it. Lifetime operation,
+active-time and file limits still apply. After syncing this fix on Tower, rebuild
+the backend from `/mnt/user/appdata/audrey_ai_2.0` with
+`docker compose up -d --build audrey`, then refresh the browser and press Run again
+on that same exhausted Agent. No upload is needed. Pass: it queues and starts on
+the same card with its original completed Plan and a higher attempt number,
+without another task. Complete the download checks below on the resulting file.
+This owner-operated retry remains pending; local recovery tests are supplemental.
+
 **Owner result, November 9:** the rerun Result reports correcting a supply total
 of USD 270.95 to USD 260.30 and a remainder of USD 201.40 to USD 212.05. Those final
 totals are correct. It presents intended Markdown, cannot independently recheck
@@ -290,7 +303,7 @@ and Work/final reports received every lifetime output as if current. Both are
 corrected locally; this case stays open for a real rerun and download check.
 
 After deploying this correction, rebuild `audrey` and `audrey-ui` on Tower;
-startup applies schema 39 without a configuration change or new upload. Rerun
+startup applies schema 40 without a configuration change or new upload. Rerun
 the same eligible purchasing Agent. Review can read needed selected ranges and
 save a corrected file; inspect any actual Review tool entries when it does so.
 Open the file marked **Current** in **Files** and check the downloaded Markdown contains
