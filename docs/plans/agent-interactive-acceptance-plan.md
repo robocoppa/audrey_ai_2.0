@@ -364,6 +364,29 @@ After the paused checks pass, try changing Knowledge during a model call.
 No late result or new file may publish after the change is acknowledged. If work
 finished first, that timing is inconclusive rather than a fence pass or failure.
 
+**Owner result, November 13:** the old Agent displays Project-context and selected
+CSV change warnings, with continuation/rerun blocked. The owner confirms changing
+Knowledge or removing/deleting the CSV, rather than only renaming the Project.
+The old-task input-change block portion passes. The supplied card is Completed;
+that card alone does not establish paused-task Resume behavior. A new Agent using
+current inputs, individual reattachment/deletion variants, retained plain notes
+and the change-during-execution check remain unconfirmed. An optional Title call
+failed after 9.6 seconds and Plan then started. The owner supplied backend metadata
+for task `c5c82622-9e39-425b-9c32-474ae3c79616` at 20:40:23 UTC confirming
+`error_type=TimeoutError`. The optional title's ten-second total deadline expired.
+The local correction makes `agent_tasks.title_timeout_seconds` configurable with
+a 60-second default, still within existing step/active-time budgets; local title
+success, fallback, resource-release and revocation checks pass.
+
+After syncing the correction, rebuild/recreate `audrey` on Tower from
+`/mnt/user/appdata/audrey_ai_2.0` with
+`docker compose up -d --build --force-recreate audrey`. No UI rebuild, migration or
+upload is needed. Start a fresh Agent without a Project using: “Make a three-item
+checklist for preparing a garden bed. Do not browse or create files.” Inspect
+Recent activity: Title should complete, a short generated heading should appear,
+and Plan/Work/Review should continue. This real-model title check remains pending.
+Its outcome does not close the remaining case-7 input-change checks above.
+
 ## 8. Project Watches through the real UI and fetcher
 
 From the Project, choose **New watch in Project**. Pick a public HTTP(S) page you

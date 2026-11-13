@@ -92,6 +92,8 @@ agent_tasks:
   # Worker claims per run; Run again renews this cap, retaining lifetime usage.
   max_attempts: 6
   step_timeout_seconds: 600.0
+  # Optional title: admission/startup/generation, within step and active budgets.
+  title_timeout_seconds: 60.0
   max_operations: 96
   max_active_seconds: 1800
   max_queued_per_user: 5

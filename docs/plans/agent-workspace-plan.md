@@ -1,6 +1,6 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, November 10, 2026. Saved task Agents, unified lexical
+**Status:** In progress, November 13, 2026. Saved task Agents, unified lexical
 Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner confirms Search
 returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
 
@@ -131,8 +131,17 @@ before the first incomplete step, using the same verified client, model admissio
 lease and cumulative operation allowance. A failed title leaves a short fallback
 and does not block task execution. Rerun keeps a generated title; untitled legacy agents
 receive a generation attempt on their next explicitly started run. The title call
-has a 64-token allowance, thinking disabled and a ten-second timeout; it uses no
-cloud fallback and does not alter the objective or saved Plan.
+has a 64-token allowance and thinking disabled. After the owner confirmed a
+November 13 title `TimeoutError`, `agent_tasks.title_timeout_seconds` replaces the
+hardcoded ten-second deadline with a configurable 60-second default (greater than
+zero, at most 120 seconds). The same total deadline covers admission, verification
+and generation; the HTTP request uses that configured timeout too. It consumes
+the existing step and active-time budgets rather than adding time to them, so a
+custom shorter parent budget still takes precedence. Timeout keeps the fallback
+and any reserved charge, releases admission and allows useful work to proceed when parent
+budgets remain. Local timeout/success/revocation checks pass; a real local-model
+title recheck remains pending. It uses no cloud fallback and does not alter the
+objective or saved Plan.
 
 Model failures identify the actual stage and distinguish output limits from empty
 report text. Per-call logs retain only stop/usage counts and text lengths;

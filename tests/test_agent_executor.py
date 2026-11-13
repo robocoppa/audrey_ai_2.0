@@ -1052,6 +1052,8 @@ async def test_first_local_title_is_budgeted_saved_before_plan_and_never_replace
     title, plan = requests
     assert title["model"] == _MODEL and title["think"] is False
     assert title["options"] == {"num_predict": 64, "temperature": 0}
+    title_request = next(request for request in state.provider_requests if request.url.path == "/api/chat")
+    assert title_request.extensions["timeout"]["read"] == 60.0
     assert not title.get("tools") and title["messages"][1]["content"] == task["objective"]
     assert json.loads(plan["messages"][1]["content"])["objective"] == task["objective"]
     assert reads[1]["title"] == "Public Release Notes Research"
@@ -1090,9 +1092,34 @@ async def test_title_does_not_consume_the_last_operation_needed_by_the_real_step
     assert tuple(row) == ("", 1, 2)
 
 
-async def test_title_timeout_is_optional_and_keeps_its_uncertain_operation_charge(state, monkeypatch):
+@pytest.mark.parametrize("invalid", [0, -1, 121, float("inf"), float("nan"), "60", True])
+def test_title_timeout_requires_a_bounded_numeric_duration(invalid):
+    with pytest.raises(ValueError):
+        AgentSettings(title_timeout_seconds=invalid)
+
+
+async def test_configured_title_timeout_allows_a_slow_title_to_complete(state):
+    state.app.state.cfg.raw["agent_tasks"]["title_timeout_seconds"] = 0.5
     task = await _step(state, generated_title=False)
-    monkeypatch.setattr("audrey.agent_executor._TITLE_TIMEOUT_SECONDS", 0.01)
+
+    async def slow_title():
+        await asyncio.sleep(0.03)
+
+    state.on_title = slow_title
+    assert await state.executor(task, "plan") == "Grounded report."
+    saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
+    assert saved["title"] == "Public Release Notes Research"
+    title_request = next(request for request in state.provider_requests if request.url.path == "/api/chat")
+    assert title_request.extensions["timeout"]["read"] == 0.5
+    events = await state.store.agents.events(user_id=state.owner.user_id, task_id=task["id"])
+    assert [(event["stage"], event["state"]) for event in events["items"] if event["kind"] == "model"] == [
+        ("plan", "completed"), ("title", "completed"),
+    ]
+
+
+async def test_title_timeout_is_optional_and_keeps_its_uncertain_operation_charge(state, caplog):
+    task = await _step(state, generated_title=False)
+    state.app.state.cfg.raw["agent_tasks"]["title_timeout_seconds"] = 0.01
 
     async def slow_title():
         await asyncio.sleep(1)
@@ -1102,6 +1129,13 @@ async def test_title_timeout_is_optional_and_keeps_its_uncertain_operation_charg
     row = state.store._conn.execute("SELECT title,title_attempted,operations FROM app_agent_tasks").fetchone()
     assert tuple(row) == ("", 1, 3)
     assert len(_content_requests(state, include_titles=True)) == 2
+    assert "error_type=TimeoutError" in caplog.text
+    assert not state.app.state.inflight.pressure_snapshot()["in_use"]
+    assert not state.app.state.gate.pressure_snapshot()["in_use"]
+    events = await state.store.agents.events(user_id=state.owner.user_id, task_id=task["id"])
+    assert [(event["stage"], event["state"]) for event in events["items"] if event["kind"] == "model"] == [
+        ("plan", "completed"), ("title", "failed"),
+    ]
 
 
 @pytest.mark.parametrize("kind", ["account", "bots"])
