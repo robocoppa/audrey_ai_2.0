@@ -476,6 +476,7 @@ class ResearchAgentExecutor:
         repository = self.app.state.application_store.agents
         lease = {"task_id": task["id"], "lease_token": task["lease_token"], "fence": task["fence"]}
         from audrey.agent_file_inputs import get_agent_file_inputs
+        from audrey.tools.agent_calculator import agent_calculator_scope, with_agent_calculator
         from audrey.tools.agent_file_reads import agent_file_read_scope, with_selected_file_read
 
         file_inputs = get_agent_file_inputs(self.app)
@@ -498,6 +499,7 @@ class ResearchAgentExecutor:
 
         file_outputs = []
         native_step = step_id in {"research", "review"}
+        native_calculator = native_step
         native_files = native_step and agent_files_available(self.app)
         selected_file_reads = bool(selected_files) and file_inputs is not None
         native_reads = native_step and selected_file_reads
@@ -509,6 +511,8 @@ class ResearchAgentExecutor:
             spec.description = spec.description.replace("in this reply", "for this task")
         if native_reads:
             tools = with_selected_file_read(tools)
+        if native_calculator:
+            tools = with_agent_calculator(tools)
         endpoints = {spec.name: (spec.server_url, spec.path) for spec in tools.specs()}
         previous = {
             step["id"]: step["result"] for step in task["steps"] if step["status"] == "completed"
@@ -588,7 +592,8 @@ class ResearchAgentExecutor:
             async def check_tool(name):
                 await authorize()
                 if ((name == "create_file" and native_files)
-                        or (name == "read_selected_file" and native_reads)):
+                        or (name == "read_selected_file" and native_reads)
+                        or (name == "calculate" and native_calculator)):
                     # Native capabilities have task-bound handlers, never HTTP
                     # endpoints from shared discovery. Recheck installed weights
                     # and the live task before rendering or returning source text.
@@ -630,8 +635,10 @@ class ResearchAgentExecutor:
                 if native_files else nullcontext(),
                 agent_file_read_scope(app=self.app, principal=principal, task=task)
                 if native_reads else nullcontext(),
+                agent_calculator_scope(app=self.app, principal=principal, task=task)
+                if native_calculator else nullcontext(),
             ):
-                if step_id == "research" or (step_id == "review" and (native_files or native_reads)):
+                if native_step:
                     report = await (self.react_runner or run_react)(
                         local,
                         self.app.state.health,

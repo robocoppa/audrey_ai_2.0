@@ -21,6 +21,22 @@ describe("AgentRecentActivity", () => {
     expect(await screen.findByText("Read selected file")).toBeVisible();
     expect(screen.getByText("Completed")).toBeVisible();
   });
+  it.each([
+    ["research", "Work", "completed", "Completed"], ["research", "Work", "failed", "Failed"],
+    ["review", "Review", "completed", "Completed"], ["review", "Review", "failed", "Failed"],
+  ] as const)("labels %s Calculate %s without displaying calculator content", async (stage, label, state, stateLabel) => {
+    const calculation = { ...event({ kind: "tool", tool: "calculate", stage, state, finished_at: "2026-11-03T14:00:01Z", duration_ms: 7 }),
+      expression: "472.35 - 260.30", result: "212.05", arguments: { expression: "472.35 - 260.30" }, output: { result: "212.05" } };
+    vi.spyOn(api, "listAgentEvents").mockResolvedValue(page([calculation]));
+    render(<AgentRecentActivity task={{ ...task, status: "completed" }} visible timezone="UTC" />);
+    const operations = await screen.findByRole("list", { name: "Agent operations" });
+    expect(within(operations).getByText("Calculate")).toBeVisible();
+    expect(within(operations).getByText(stateLabel)).toBeVisible();
+    expect(within(operations).getByText(new RegExp(`${label} · Attempt 1`))).toBeVisible();
+    expect(within(operations).getByText("7 ms")).toBeVisible();
+    expect(screen.queryByText("472.35 - 260.30")).not.toBeInTheDocument();
+    expect(screen.queryByText("212.05")).not.toBeInTheDocument();
+  });
   it("shows honest local operation states and compact token/timing metadata", async () => {
     vi.spyOn(api, "listAgentEvents").mockResolvedValue(page([
       event({ seq: 4, kind: "tool", tool: "web_search", state: "interrupted", finished_at: "2026-11-03T14:00:02Z", duration_ms: 2000 }),

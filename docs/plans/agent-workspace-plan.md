@@ -16,8 +16,9 @@ America/Denver. Recorded receipts also cover title generation, saved Knowledge
 answers and input-change blocks, public-page baseline creation and an unchanged
 manual check that stayed paused. Earlier per-slice verification limits below
 remain historical evidence; unrecorded scenarios are not newly asserted passes.
-The current slice extends saved user questions into Work, preserving the same task,
-completed Plan, frozen sources and cumulative resource limits.
+Work questions now pass the owner's live continuation check. The current slice
+adds the existing local calculator to Work and Review, so general tasks can check
+totals, percentages, conversions and simple equations using deterministic results.
 
 ## Current implementation slice
 
@@ -366,39 +367,83 @@ question must remain. Answer `Casual`. The same Agent resumes Work and completes
 a casual welcome message without a new Plan or task. Questions / answers labels
 it a Work question and retains the answer. Model activity uses only the local
 model. If Plan asks instead, the deferred Work path has not been exercised.
-This real-model/UI check remains owner-operated; isolated regressions supplement it.
+The November 16 owner receipt passes the live Work-question continuation:
+Work attempt 2 stopped for an answer, the header confirmed it would continue
+working, and attempt 3 completed Work and Review without another Plan call.
+The saved Plan stayed completed, and the final Result was the casual welcome
+message itself. Browser-reload persistence was not separately reported; local
+restart/persistence checks supplement the live continuation evidence.
 
-The November 16 owner receipt completed a casual welcome message, but its saved
-question was explicitly labelled Planning question. Plan completed on attempt 2
-after that answer: the first Plan had asked for input rather than committing a
-Plan. This exercises planning clarification, not Work-question continuation.
-The local correction tells Plan to defer choices assigned to Work when a useful
-outline can already be formed. Model context identifies the actual current stage
-and retains recorded question-stage metadata; absent provenance is not inferred.
-Review must use those observed stages, return the requested deliverable directly
-and avoid asserting that intended workflow steps happened. Executor regressions
-verify both Plan- and Work-question provenance, saved-Plan behavior and unchanged
-local model/tool scope; real-model deferral still needs the owner recheck.
-Retest with a fresh
-Agent using the same prompt; Run again on the answered task correctly reuses its
-tone answer and therefore cannot exercise a new missing-choice question.
+Plan defers execution-only choices when a useful outline can already be formed.
+Model context identifies the current stage and recorded question-stage metadata;
+absent provenance is not inferred. Review uses observed stages and returns the
+deliverable directly. Earlier planning-question and parser failures led to these
+corrections; the rejected Plan response was not retained, so its exact shape is
+unknown. The parser preserves ordinary Plan JSON/text and recognizes only the
+root question protocol. Root-key detection decodes escaped keys and skips nested
+or quoted examples; it does not infer intent from arbitrary malformed text.
+Only valid complete envelopes create questions. Rejection logs use fixed reason
+codes without model bodies or unknown JSON field names. Parser/privacy and full
+executor regressions pass. Run again reuses saved answers, so a future check of
+a new missing-choice question requires a fresh task or a genuinely unanswered
+choice within its existing scope.
 
-The next November 16 receipt stopped before saving Plan with “Plan returned an
-invalid input request,” despite a completed model call (134 output tokens). The
-rejected body was not retained, so its exact form is unknown. Source inspection
-reproduced a separate false-positive boundary: the Plan-only checks reject valid
-JSON outlines and ordinary prose containing a quoted `input_request` example.
-The correction recognizes only the root question protocol, while retaining
-strict actual-question validation and preserving ordinary Plan JSON/text.
-Root-key detection decodes escaped keys and skips nested/quoted examples. It
-does not infer question intent from arbitrary text or invalid syntax before an
-unestablished later field; only valid complete envelopes can create a question.
-Rejection diagnostics use fixed reason codes without model bodies or unknown
-JSON field names. Targeted parser/privacy checks and the full executor suite
-pass, including an ordinary JSON Plan followed by a real saved Work question and
-same-task answer continuation with scripted local replies. Retry this failed Agent with Run again after rebuilding the
-backend; no Plan or answer has been committed in this attempt. The real-model
-Work question and saved-Plan continuation checks remain open for this slice.
+### Local Agent calculations
+
+Work and Review can use the existing bounded `calculate` implementation directly
+in the backend. It supports decimal arithmetic, percentages, common unit
+conversions and linear/quadratic equations. Plan remains tool-free. There is no
+model-written Python execution, file or network access in this capability.
+The calculator checks the expression it receives; it does not establish that
+the model selected the correct source numbers or interpreted the task correctly.
+
+A fresh native tool spec and task-scoped binding prevent Agent calls from falling
+back to a discovered HTTP calculator or switching to Private handling after a
+processing-mode change. Ordinary chat and Private calculator paths
+retain their existing behavior. Each Agent invocation uses the existing
+operation/round/time limits and validates the live owner, exact Work/Review
+stage, lease, sources and local-model authority. Inherited callbacks expire when
+the attempt ends. Calculator failures remain tool failures, not invented values.
+The arithmetic engine's existing expression, syntax-node, precision, magnitude
+and exponent limits remain unchanged.
+
+Schema 42 preserves the event table and permits Calculate metadata during Work
+and Review only. Recent activity shows the actual status, stage and duration;
+arguments and tool replies remain transient, with no expressions or results added
+to activity history. A generated report or explicitly requested file can include
+the calculations as ordinary task output.
+
+Local integration checks exercise real calculations during Work and Review, an
+owned Markdown download with the 260.30 total and 212.05 remainder, division by
+zero as a failed tool call, operation exhaustion and source/model/lease changes.
+Native binding, executor, shared chat/Private dispatch, metadata/migration and
+frontend checks pass, including preserved source-change diagnostics. Type
+checking, lint and the UI production build pass. Model replies are scripted in
+these regressions; the real-Qwen interactive check below remains pending.
+
+#### Calculator interactive check
+
+On Tower, sync the slice and rebuild `audrey` and `audrey-ui` from
+`/mnt/user/appdata/audrey_ai_2.0` with
+`docker compose up -d --build audrey audrey-ui`. Schema 42 applies automatically;
+no configuration change or upload is needed. Start a new Agent without a Project
+or input files with:
+
+> Use the local calculator to total these purchases: 8 at 12.50, 6 at 3.25,
+> 4 at 7.75, 2 at 18.40, 5 at 9.60 and 4 at 6.25. Calculate the amount remaining
+> from 472.35. Also try 1/0 and report its error honestly. Save calculator-check.md
+> with the total, remaining amount and division-by-zero outcome. During Review,
+> use the calculator to check both valid figures again. Do not browse.
+
+Pass: the downloaded file and final Result show USD 260.30 total and USD 212.05
+remaining. Division by zero is reported as undefined/an error, never zero or a
+fabricated successful value. Recent activity has completed Calculate entries in
+Work and Review, plus an expected failed Calculate entry for the requested 1/0.
+Check older activity through Show more if needed. Reopen the Agent and download
+the same saved file again. The real local-model/UI/download check remains pending;
+isolated integration checks are supplemental evidence.
+
+### Project-linked Agents
 
 Schema 32 links agents to ordinary Projects. The composer offers
 an optional Project, and Project home lists its saved agents plus an explicit
@@ -968,7 +1013,7 @@ decision; then schedule a weekly check of a selected public release page.
 
 | Area | Already present | Work required |
 | --- | --- | --- |
-| Native runs | Saved agent objectives, three-stage plans/checkpoints, recent observed activity, planning questions, owned downloadable files, leases and restart dispatch | Adaptive steps and finer-grained within-step recovery |
+| Native runs | Saved agent objectives, three-stage plans/checkpoints, recent activity, Plan/Work questions, native local calculations, owned downloadable files, leases and restart dispatch | Adaptive steps and finer-grained within-step recovery |
 | Resource admission | Interactive preference, aged background fairness, cooperative queued handoffs and generation-boundary release | Live concurrent-chat/model acceptance and broader checkpoint-age monitoring |
 | Private tasks | Leases, revisions, source/model pins, budgets and committed-result delivery for Private tax reviews | General agent contracts and adapters; existing Private recovery currently pauses work |
 | Search | Local lexical API/sidebar, canonical reader and workspace links, exact message focus, bounded projection, approved notes and Project report filters | Semantic candidates and expanded native previews for retained text |

@@ -66,6 +66,22 @@ describe("Agent activity metadata", () => {
     expect(await listAgentEvents("owned")).toEqual({ items: [read], has_more: false, truncated: false });
   });
   it.each([
+    ["research", "completed"], ["research", "failed"], ["review", "completed"], ["review", "failed"],
+  ])("accepts %s Calculate %s metadata without retaining expressions or results", async (stage, state) => {
+    const calculation = { ...event, stage, state, kind: "tool", tool: "calculate", duration_ms: 7, input_tokens: null, output_tokens: null };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      items: [{ ...calculation, expression: "472.35 - 260.30", result: "212.05", arguments: { expression: "472.35 - 260.30" }, output: { result: "212.05" } }],
+      has_more: false, truncated: false,
+    })));
+    expect(await listAgentEvents("owned")).toEqual({ items: [calculation], has_more: false, truncated: false });
+  });
+  it.each(["plan", "title"])("rejects Calculate activity in %s", async (stage) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      items: [{ ...event, stage, kind: "tool", tool: "calculate", input_tokens: null, output_tokens: null }], has_more: false, truncated: false,
+    })));
+    await expect(listAgentEvents("owned")).rejects.toThrow("This agent’s activity could not be read.");
+  });
+  it.each([
     { seq: 0 }, { seq: 1.2 }, { attempt: 0 }, { stage: "prompt body" }, { kind: "reasoning" }, { state: "success" },
     { tool: "web_search" }, { kind: "tool", tool: null }, { kind: "tool", tool: "execute_code" },
     { created_at: "invalid" }, { finished_at: null }, { state: "started" }, { duration_ms: -1 }, { input_tokens: "5" }, { output_tokens: 2.3 },

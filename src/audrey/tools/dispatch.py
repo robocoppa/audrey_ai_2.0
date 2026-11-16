@@ -31,6 +31,7 @@ import httpx
 
 from audrey.agent_dispatch import (
     AgentDispatchStoppedError,
+    agent_dispatch_bound,
     agent_tool_execution,
     authorize_agent_tool,
 )
@@ -197,6 +198,24 @@ async def dispatch_one(
     policy = current_processing_policy()
     private_handler: PrivateToolHandler | None = None
     native_handler: PrivateToolHandler | None = None
+    if name == "calculate":
+        from audrey.tools.agent_calculator import agent_calculator_bound, agent_calculator_handler
+
+        spec = registry.get(name)
+        agent_bound = agent_calculator_bound() or agent_dispatch_bound()
+        if agent_bound or (policy is None and spec is not None and spec.in_process_only):
+            # Resolve authority before parsing/logging expressions. A native
+            # Agent request cannot fall back to an HTTP spec, including forged
+            # registry entries and callbacks inherited from an expired scope.
+            if policy is not None:
+                raise AgentDispatchStoppedError("Agents are unavailable in this processing mode.")
+            native_handler = agent_calculator_handler(user_id=user_id)
+            if native_handler is None:
+                tool_calls_total.labels(tool=name, outcome="error").inc()
+                return ToolResult(name=name, call_id=call_id, content=json.dumps({
+                    "error": "native_tool_unavailable",
+                    "detail": "Calculations require an active agent Work or Review step.",
+                }), elapsed_s=0.0, is_error=True)
     if name == "read_selected_file":
         # This capability has no chat, Private or HTTP fallback. Resolve its
         # server-owned task binding before parsing or logging source arguments.

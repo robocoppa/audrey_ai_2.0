@@ -65,6 +65,10 @@ def _search(name="web_search"):
     return _answer("", message={"tool_calls": [{"function": {"name": name, "arguments": {}}}]})
 
 
+def _calculate_call(**arguments):
+    return _answer("", message={"tool_calls": [{"function": {"name": "calculate", "arguments": arguments}}]})
+
+
 @pytest.fixture
 async def state(tmp_path, monkeypatch):
     store = ApplicationStore(tmp_path / "application.sqlite")
@@ -433,7 +437,10 @@ async def test_every_step_uses_only_local_qwen_and_only_research_has_public_tool
         assert not any(AGENT_PLAN_FILE_READS_SYSTEM in message["content"]
                        for message in payload["messages"])
         offered = {tool["function"]["name"] for tool in payload.get("tools", [])}
-        assert offered == ({"web_search", "web_fetch"} if step_id == "research" else set())
+        assert offered == (
+            {"web_search", "web_fetch", "calculate"} if step_id == "research"
+            else {"calculate"} if step_id == "review" else set()
+        )
     supplied = json.loads(
         next(row["content"] for row in requests[0]["messages"] if row["role"] == "user")
     )
@@ -688,7 +695,7 @@ async def test_work_creates_owned_download_without_http_and_review_keeps_canonic
     await s.store.agents.checkpoint(**lease, step_id="review", result=reviewed)
     completed = await s.store.agents.complete(**lease, result=reviewed)
     assert outputs[0]["download_url"] in completed["result"]
-    assert {tool["function"]["name"] for tool in _content_requests(s)[-1]["tools"]} == {"create_file"}
+    assert {tool["function"]["name"] for tool in _content_requests(s)[-1]["tools"]} == {"create_file", "calculate"}
     # Use the ASGI transport rather than the fixture's tool transport.
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=s.app), base_url="http://test") as client:
         downloaded = await client.get(outputs[0]["download_url"])
@@ -728,6 +735,108 @@ async def test_native_creation_consumes_the_saved_operation_allowance(file_state
     assert len(_content_requests(s)) == 1
     assert not await s.files_db.list_user(s.owner.storage_namespace)
     assert not s.tool_requests
+
+
+async def test_calculator_uses_actual_garden_totals_then_saves_and_reviews_owned_download(file_state):
+    s = file_state
+    s.app.state.cfg.raw["agent_tasks"] = {}
+    expression = "8*12.50 + 6*3.25 + 4*7.75 + 2*18.40 + 5*9.60 + 4*6.25"
+    task = await s.store.agents.create(
+        user_id=s.owner.user_id,
+        objective=("Calculate the supply total for 8 at12.50,6 at3.25,4 at7.75,2 at18.40,"
+                   "5 at9.60,4 at6.25, then the remainder from472.35. "
+                   "Save garden.md with both amounts and check them during Review. Do not browse."),
+        request_id="calculator-garden-download",
+    )
+    observed = []
+    output = "# Garden purchasing\n\nTotal: USD 260.30\nRemaining: USD 212.05\n"
+
+    async def respond():
+        payload = json.loads(s.provider_requests[-1].content)
+        system = payload["messages"][0]["content"]
+        if system.startswith("You create concise agent titles."):
+            return
+        tools = [message for message in payload["messages"] if message["role"] == "tool"]
+        if system.startswith(AGENT_PLAN_SYSTEM):
+            assert not payload.get("tools")
+            s.responses.append(_answer("1. Calculate the total and remainder.\n2. Save the checklist.\n3. Check the amounts."))
+        elif system.startswith(AGENT_RESEARCH_SYSTEM):
+            if not tools:
+                s.responses.append(_calculate_call(expression=expression))
+                return
+            result = json.loads(tools[-1]["content"])
+            if len(tools) == 1:
+                assert result["result"] == "260.3" and result["outcome"] == "value"
+                observed.append(result["result"])
+                s.responses.append(_calculate_call(expression=f"472.35 - {result['result']}"))
+            elif len(tools) == 2:
+                assert result["result"] == "212.05"
+                observed.append(result["result"])
+                s.responses.append(_file_call(filename="garden.md", content=output))
+            else:
+                assert result["file_id"] and result["download_url"]
+                s.responses.append(_answer("Saved total260.30 and remainder212.05. " + result["download_url"]))
+        else:
+            assert system.startswith(AGENT_REVIEW_SYSTEM)
+            if not tools:
+                s.responses.append(_calculate_call(expression=expression))
+            else:
+                result = json.loads(tools[-1]["content"])
+                assert result["result"] == "260.3"
+                observed.append(result["result"])
+                s.responses.append(_answer("Supply total: USD260.30. Remaining budget: USD212.05."))
+
+    s.on_chat = respond
+    assert await AgentRuntime(s.store.agents, s.executor).run_once()
+    completed = await s.store.agents.get(user_id=s.owner.user_id, task_id=task["id"])
+    assert completed["status"] == "completed" and observed == ["260.3", "212.05", "260.3"]
+    assert "260.30" in completed["result"] and "212.05" in completed["result"]
+    assert len(completed["outputs"]) == 1 and completed["outputs"][0]["current"] is True
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=s.app), base_url="http://test") as client:
+        downloaded = await client.get(completed["outputs"][0]["download_url"])
+    assert downloaded.status_code == 200 and downloaded.text == output
+    events = [event for event in await _activity(s, task) if event["kind"] == "tool" and event["tool"] == "calculate"]
+    assert len(events) == 3 and all(event["state"] == "completed" for event in events)
+    assert {event["stage"] for event in events} == {"research", "review"}
+    assert expression not in json.dumps(events) and "212.05" not in json.dumps(events)
+    assert not s.tool_requests and not s.responses
+    assert not s.app.state.inflight.pressure_snapshot()["in_use"]
+    assert not s.app.state.gate.pressure_snapshot()["in_use"]
+
+
+async def test_review_can_calculate_without_file_storage_and_has_no_public_or_personal_tools(state):
+    task = await _step(state, "review")
+    state.responses.extend([_calculate_call(expression="120*(1-15%)"), _answer("The discounted amount is102.")])
+    assert await state.executor(task, "review") == "The discounted amount is102."
+    requests = _content_requests(state)
+    assert len(requests) == 2
+    assert {item["function"]["name"] for item in requests[0]["tools"]} == {"calculate"}
+    result = json.loads(requests[1]["messages"][-1]["content"])
+    assert result["result"] == "102" and result["outcome"] == "value"
+    assert not state.tool_requests
+
+
+async def test_calculator_failure_is_a_failed_tool_event_and_keeps_the_limitation_explicit(state):
+    task = await _step(state, "research")
+    state.responses.extend([_calculate_call(expression="1/0"), _answer("Division by zero could not be calculated.")])
+    assert await state.executor(task, "research") == "Division by zero could not be calculated."
+    result = json.loads(_content_requests(state)[1]["messages"][-1]["content"])
+    assert result["error"] == "invalid_calculation" and "result" not in result
+    events = [event for event in await _activity(state, task) if event["kind"] == "tool"]
+    assert [(event["tool"], event["state"]) for event in events] == [("calculate", "failed")]
+    assert not state.tool_requests
+
+
+async def test_calculator_cannot_bypass_the_saved_operation_allowance(state, monkeypatch):
+    from audrey.tools import agent_calculator
+
+    task = await _step(state, "research", max_operations=3)
+    state.responses.append(_calculate_call(expression="6*7"))
+    monkeypatch.setattr(agent_calculator, "calculate_value",
+                        lambda _request: pytest.fail("Exhausted Agent reached calculation"))
+    with pytest.raises(AgentTaskError, match="operation allowance"):
+        await state.executor(task, "research")
+    assert not state.tool_requests
 
 
 @pytest.mark.parametrize("kind", ["account", "model", "pause", "bots", "digest"])
@@ -1325,7 +1434,10 @@ async def test_answered_clarifications_reach_every_step_with_saved_stage_and_sam
     payload = _content_requests(state)[0]
     assert payload["model"] == _MODEL
     offered = {item["function"]["name"] for item in payload.get("tools", [])}
-    assert offered == ({"web_search", "web_fetch"} if step_id == "research" else set())
+    assert offered == (
+        {"web_search", "web_fetch", "calculate"} if step_id == "research"
+        else {"calculate"} if step_id == "review" else set()
+    )
     supplied = json.loads(payload["messages"][1]["content"])
     assert supplied["objective"] == task["objective"]
     assert supplied["current_stage"] == {"plan": "Plan", "research": "Work", "review": "Review"}[step_id]
@@ -1465,7 +1577,10 @@ async def test_project_context_reaches_each_local_step_as_quoted_bounded_working
     assert "not independently verified evidence" in context["content"] and "Selected file excerpts" in context["content"]
     assert payload["model"] == _MODEL
     offered = {tool["function"]["name"] for tool in payload.get("tools", [])}
-    assert offered == ({"web_search", "web_fetch"} if step_id == "research" else set())
+    assert offered == (
+        {"web_search", "web_fetch", "calculate"} if step_id == "research"
+        else {"calculate"} if step_id == "review" else set()
+    )
 
 
 @pytest.mark.parametrize("source_kind", ["message", "agent"])
@@ -1495,7 +1610,7 @@ async def test_selected_knowledge_source_changes_stop_real_model_and_tool_paths(
         state.on_chat = change
     else:
         state.on_tool = change
-    with pytest.raises(AgentTaskError, match="Project context changed"):
+    with pytest.raises((AgentTaskError, AgentDispatchStoppedError), match="Project context changed"):
         await state.executor(task, "research")
     assert len(_content_requests(state)) == (timing != "metadata")
     assert len(state.tool_requests) == (timing == "tool")
@@ -1553,7 +1668,7 @@ async def test_knowledge_research_agent_runs_locally_and_reruns_without_completi
     for payload in _content_requests(state):
         assert payload["model"] == _MODEL and entry["text"] in json.dumps(payload["messages"])
         offered = {tool["function"]["name"] for tool in payload.get("tools", [])}
-        assert offered <= {"web_search", "web_fetch"}
+        assert offered <= {"web_search", "web_fetch", "calculate"}
     queued = await state.store.agents.control(
         user_id=state.owner.user_id, task_id=created["id"],
         expected_revision=completed["revision"], action="rerun",
@@ -1594,7 +1709,7 @@ async def test_origin_action_completion_during_transport_blocks_agent_work(state
         state.on_chat = change
     else:
         state.on_tool = change
-    with pytest.raises(AgentTaskError, match="Project context changed"):
+    with pytest.raises((AgentTaskError, AgentDispatchStoppedError), match="Project context changed"):
         await state.executor(task, "research")
     assert len(_content_requests(state)) == (timing != "metadata")
     assert len(state.tool_requests) == (timing == "tool")
@@ -1626,8 +1741,11 @@ async def test_general_tasks_complete_without_web_tools_or_forced_source_lists(s
     assert not state.tool_requests
     calls = _content_requests(state)
     assert len(calls) == 3
-    for call in calls:
-        assert call["model"] == _MODEL and not call.get("tools")
+    for step_id, call in zip(("plan", "research", "review"), calls, strict=True):
+        assert call["model"] == _MODEL
+        assert {tool["function"]["name"] for tool in call.get("tools", [])} == (
+            {"calculate"} if step_id != "plan" else set()
+        )
         assert json.loads(next(message["content"] for message in call["messages"] if message["role"] == "user"))["objective"] == objective
     assert all(client._client.is_closed for client in state.clients)
 
@@ -1875,7 +1993,7 @@ async def test_review_rereads_selected_appendix_and_publishes_corrected_immutabl
     async def review_reply():
         payload = json.loads(s.provider_requests[-1].content)
         assert payload["messages"][0]["content"].startswith(AGENT_REVIEW_SYSTEM)
-        assert {tool["function"]["name"] for tool in payload["tools"]} == {"create_file", "read_selected_file"}
+        assert {tool["function"]["name"] for tool in payload["tools"]} == {"create_file", "read_selected_file", "calculate"}
         quoted = next(message for message in payload["messages"] if message["content"].startswith("User-selected file excerpts"))
         assert "MOSS-7Q4-RIVER" not in quoted["content"] and "270.95" in json.dumps(payload)
         task_context = json.loads(next(message["content"] for message in payload["messages"]
@@ -2014,7 +2132,7 @@ async def test_existing_excerpt_question_can_recover_same_agent_and_read_real_ap
                 s.responses.append(_answer("Saved the inspected appendix checklist: " + result["download_url"]))
         else:
             assert system.startswith(AGENT_REVIEW_SYSTEM) and capabilities == []
-            assert {item["function"]["name"] for item in payload["tools"]} == {"create_file", "read_selected_file"}
+            assert {item["function"]["name"] for item in payload["tools"]} == {"create_file", "read_selected_file", "calculate"}
             objective = json.loads(next(message["content"] for message in reversed(payload["messages"])
                                         if message["role"] == "user"))
             s.responses.append(_answer(objective["saved_work"]["research"]))

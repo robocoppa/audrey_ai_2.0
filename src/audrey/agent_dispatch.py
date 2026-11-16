@@ -31,6 +31,11 @@ class _Scope:
 _scope: ContextVar[_Scope | None] = ContextVar("agent_dispatch_scope", default=None)
 
 
+def agent_dispatch_bound() -> bool:
+    """An inherited expired Agent scope must not silently become ordinary dispatch."""
+    return _scope.get() is not None
+
+
 @contextmanager
 def agent_dispatch_scope(
     check: Callable[[str], Awaitable[None]], *,
