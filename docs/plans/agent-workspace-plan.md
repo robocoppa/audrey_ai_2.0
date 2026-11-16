@@ -1,6 +1,6 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, November 13, 2026. Saved task Agents, unified lexical
+**Status:** In progress, November 16, 2026. Saved task Agents, unified lexical
 Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner closed the recent
 interactive acceptance work on November 13. Campaigns 1–4 remain closed.
 
@@ -366,6 +366,21 @@ a casual welcome message without a new Plan or task. Questions / answers labels
 it a Work question and retains the answer. Model activity uses only the local
 model. If Plan asks instead, the deferred Work path has not been exercised.
 This real-model/UI check remains owner-operated; isolated regressions supplement it.
+
+The November 16 owner receipt completed a casual welcome message, but its saved
+question was explicitly labelled Planning question. Plan completed on attempt 2
+after that answer: the first Plan had asked for input rather than committing a
+Plan. This exercises planning clarification, not Work-question continuation.
+The local correction tells Plan to defer choices assigned to Work when a useful
+outline can already be formed. Model context identifies the actual current stage
+and retains recorded question-stage metadata; absent provenance is not inferred.
+Review must use those observed stages, return the requested deliverable directly
+and avoid asserting that intended workflow steps happened. Executor regressions
+verify both Plan- and Work-question provenance, saved-Plan behavior and unchanged
+local model/tool scope; real-model deferral still needs the owner recheck.
+Retest with a fresh
+Agent using the same prompt; Run again on the answered task correctly reuses its
+tone answer and therefore cannot exercise a new missing-choice question.
 
 Schema 32 links agents to ordinary Projects. The composer offers
 an optional Project, and Project home lists its saved agents plus an explicit

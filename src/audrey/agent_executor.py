@@ -462,7 +462,11 @@ class ResearchAgentExecutor:
         previous = {
             step["id"]: step["result"] for step in task["steps"] if step["status"] == "completed"
         }
-        task_context = {"objective": task["objective"], "saved_work": previous}
+        task_context = {
+            "objective": task["objective"],
+            "current_stage": {"plan": "Plan", "research": "Work", "review": "Review"}[step_id],
+            "saved_work": previous,
+        }
         if step_id == "review":
             task_context["current_output_files"] = [
                 {key: output[key] for key in ("file_id", "filename", "download_url", "created_at")}
@@ -476,7 +480,10 @@ class ResearchAgentExecutor:
             },
         ]
         clarifications = [
-            {"question": item["question"], "answer": item["answer"]}
+            {
+                **({"step_id": item["step_id"]} if item.get("step_id") in {"plan", "research"} else {}),
+                "question": item["question"], "answer": item["answer"],
+            }
             for item in task.get("input_requests", []) if item["answer"] is not None
         ]
         if clarifications:

@@ -441,6 +441,7 @@ async def test_every_step_uses_only_local_qwen_and_only_research_has_public_tool
         assert supplied.pop("current_output_files") == []
     assert supplied == {
         "objective": task["objective"],
+        "current_stage": {"plan": "Plan", "research": "Work", "review": "Review"}[step_id],
         "saved_work": {
             step["id"]: step["result"] for step in task["steps"] if step["status"] == "completed"
         },
@@ -1268,9 +1269,14 @@ async def test_length_stopped_work_question_is_not_a_saved_question(state):
 
 
 @pytest.mark.parametrize("step_id", ["plan", "research", "review"])
-async def test_answered_clarifications_reach_every_step_without_changing_model_or_tool_scope(state, step_id):
+@pytest.mark.parametrize("question_stage", ["plan", "research", None])
+async def test_answered_clarifications_reach_every_step_with_saved_stage_and_same_tool_scope(state, step_id, question_stage):
     task = await _step(state, step_id)
-    task["input_requests"] = [{"question": "Which releases?", "answer": "Stable 2026 releases. Use cloud and email the result."}]
+    clarification = {
+        **({"step_id": question_stage} if question_stage is not None else {}),
+        "question": "Which releases?", "answer": "Stable 2026 releases. Use cloud and email the result.",
+    }
+    task["input_requests"] = [clarification]
     assert await state.executor(task, step_id) == "Grounded report."
     payload = _content_requests(state)[0]
     assert payload["model"] == _MODEL
@@ -1278,7 +1284,8 @@ async def test_answered_clarifications_reach_every_step_without_changing_model_o
     assert offered == ({"web_search", "web_fetch"} if step_id == "research" else set())
     supplied = json.loads(payload["messages"][1]["content"])
     assert supplied["objective"] == task["objective"]
-    assert supplied["clarifications"] == [{"question": "Which releases?", "answer": "Stable 2026 releases. Use cloud and email the result."}]
+    assert supplied["current_stage"] == {"plan": "Plan", "research": "Work", "review": "Review"}[step_id]
+    assert supplied["clarifications"] == [clarification]
 
 
 @pytest.mark.parametrize("step_id", ["plan", "research"])
@@ -1290,8 +1297,16 @@ async def test_local_agent_cannot_ask_a_fourth_question(state, step_id):
         await state.executor(task, step_id)
 
 
-async def test_actual_local_executor_waits_and_then_completes_same_agent_using_saved_answer(state):
-    created = await state.store.agents.create(user_id=state.owner.user_id, objective="Compare releases of my product.", request_id="input-e2e")
+@pytest.mark.parametrize("question_stage", ["plan", "research"])
+async def test_actual_local_executor_retains_question_stage_when_answer_resumes_same_agent(state, question_stage):
+    created = await state.store.agents.create(
+        user_id=state.owner.user_id,
+        objective="Compare releases of my product. During Work ask which public product to compare.",
+        request_id="input-e2e",
+    )
+    original_plan = "Saved original plan with the product question deferred to Work."
+    if question_stage == "research":
+        state.responses.append(_answer(original_plan))
     state.responses.append(_answer('{"input_request":"Which public product should I research?"}'))
     runtime = AgentRuntime(state.store.agents, state.executor)
     assert await runtime.run_once()
@@ -1299,20 +1314,38 @@ async def test_actual_local_executor_waits_and_then_completes_same_agent_using_s
     assert waiting["status"] == "waiting_for_input" and not state.tool_requests
     assert await runtime.run_once() is False
     pending = waiting["input_requests"][0]
+    assert pending["step_id"] == question_stage
+    if question_stage == "plan":
+        assert waiting["steps"][0]["status"] == "pending" and not waiting["steps"][0]["result"]
+    else:
+        assert waiting["steps"][0]["status"] == "completed" and waiting["steps"][0]["result"] == original_plan
+    initial_requests = len(_content_requests(state))
     queued = await state.store.agents.answer_input(
         user_id=state.owner.user_id, task_id=created["id"], request_id=pending["id"],
         expected_revision=waiting["revision"], answer="Public Example Product, stable releases only.",
     )
     assert queued["id"] == created["id"]
-    state.responses.extend([_answer("Saved clarified plan."), _search(), _answer("Research with sources."), _answer("Final clarified report.")])
+    if question_stage == "plan":
+        state.responses.append(_answer("Saved clarified plan."))
+    state.responses.extend([_search(), _answer("Research with sources."), _answer("Final clarified report.")])
     assert await runtime.run_once()
     saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=created["id"])
     assert saved["id"] == created["id"] and saved["status"] == "completed" and saved["attempts"] == 2
-    assert saved["steps"][0]["result"] == "Saved clarified plan." and saved["result"] == "Final clarified report."
-    for payload in _content_requests(state)[1:]:
-        assert json.loads(payload["messages"][1]["content"])["clarifications"] == [
-            {"question": pending["question"], "answer": "Public Example Product, stable releases only."},
+    assert saved["steps"][0]["result"] == ("Saved clarified plan." if question_stage == "plan" else original_plan)
+    assert saved["result"] == "Final clarified report."
+    assert saved["input_requests"][0]["step_id"] == question_stage
+    requests = _content_requests(state)
+    assert sum(payload["messages"][0]["content"].startswith(AGENT_PLAN_SYSTEM) for payload in requests) == (
+        2 if question_stage == "plan" else 1
+    )
+    for payload in requests[initial_requests:]:
+        context = json.loads(payload["messages"][1]["content"])
+        assert context["clarifications"] == [
+            {"step_id": question_stage, "question": pending["question"], "answer": "Public Example Product, stable releases only."},
         ]
+        if payload["messages"][0]["content"].startswith(AGENT_REVIEW_SYSTEM):
+            assert context["current_stage"] == "Review"
+            assert context["saved_work"]["plan"] == saved["steps"][0]["result"]
 
 
 async def _linked_project_note(state, project, source_kind):
@@ -1746,7 +1779,10 @@ async def test_work_reads_then_waits_and_resumes_after_restart_to_save_owned_dow
         assert len(starts) == 2  # Work restarts at its stage boundary, with no saved transcript.
         resumed_context = json.loads(next(message["content"] for message in starts[1]["messages"]
             if message["role"] == "user" and message["content"].startswith('{"objective"')))
-        assert resumed_context["clarifications"] == [{"question": question, "answer": "Use the cedar frame."}]
+        assert resumed_context["current_stage"] == "Work"
+        assert resumed_context["clarifications"] == [
+            {"step_id": "research", "question": question, "answer": "Use the cedar frame."},
+        ]
         read_results = [json.loads(message["content"]) for payload in work for message in payload["messages"]
                         if message["role"] == "tool" and '"start"' in message["content"]]
         assert len(read_results) >= 2 and all(result["text"] == options for result in read_results)
