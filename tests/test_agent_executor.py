@@ -1196,9 +1196,12 @@ async def test_escaped_child_tool_dispatch_loses_authority_after_scope_exit():
 
 @pytest.mark.parametrize("step_id", ["plan", "research"])
 @pytest.mark.parametrize("fenced", [False, True])
-async def test_question_is_a_typed_local_result_without_tool_dispatch(state, fenced, step_id):
+@pytest.mark.parametrize("escaped_key", [False, True])
+async def test_question_is_a_typed_local_result_without_tool_dispatch(state, fenced, step_id, escaped_key):
     task = await _step(state, step_id)
     content = json.dumps({"input_request": "Which product's releases should I compare?"})
+    if escaped_key:
+        content = content.replace('"input_request"', r'"\u0069nput_request"')
     state.responses.append(_answer(f"```json\n{content}\n```" if fenced else content))
     result = await state.executor(task, step_id)
     assert result == AgentInputRequest("Which product's releases should I compare?")
@@ -1212,6 +1215,11 @@ async def test_question_is_a_typed_local_result_without_tool_dispatch(state, fen
     '{"input_request":"Which one?"', json.dumps({"input_request": "é" * 1001}),
     '{"input_request":"\\ud800"}', '{"input_request":"Which one?"} More explanation.',
     '{"input_request":"First?","input_request":"Second?"}',
+    r'{"\u0069nput_request":"Which one?"',
+    r'{"input_request":"First?","\u0069nput_request":"Second?"}',
+    r'{"format":"ordinary","\u0069nput_request":',
+    '```json\n{"input_request":"Which one?"}',
+    '```json\n{"input_request":"Which one?"}\n```\nTrailing explanation.',
 ])
 async def test_malformed_or_oversized_question_stops_before_checkpoint(state, content, step_id):
     task = await _step(state, step_id)
@@ -1221,9 +1229,10 @@ async def test_malformed_or_oversized_question_stops_before_checkpoint(state, co
     assert not state.tool_requests
 
 
-@pytest.mark.parametrize("step_id", ["research", "review"])
+@pytest.mark.parametrize("step_id", ["plan", "research", "review"])
 @pytest.mark.parametrize("content", [
     '{"result":"A useful JSON deliverable","count":3}',
+    '{"steps":["Ask for the tone during Work","Draft the requested invitation"]}',
     '{"example":{"input_request":"This is nested task data"},"result":"Keep this JSON"}',
     '["input_request",{"input_request":"An example record"}]',
     'The "input_request": field is a protocol example, not a question.',
@@ -1231,8 +1240,14 @@ async def test_malformed_or_oversized_question_stops_before_checkpoint(state, co
     'Use this payload:\n```json\n{"input_request":"Example"}\n```',
     'An inline example is {"input_request":"Example"}; here is how to handle it.',
     '```json\n{"result":"The field \\"input_request\\" is an example"}\n```',
+    '```json\n{"steps":[{"input_request":"A future Work question"},"Draft afterwards"]}\n```',
+    '# Plan\n1. During Work return {"input_request":"Formal or casual?"}.\n2. Use the answer.',
+    '{"example":{"input_request":"Incomplete ordinary data"}',
+    r'{"example":"A quoted \"input_request\" key",',
+    r'{"example":"A quoted \"input_request\": field with an unfinished value',
+    '[{"input_request":"Unfinished ordinary list data"}',
 ])
-async def test_ordinary_work_and_review_json_and_field_mentions_remain_reports(state, step_id, content):
+async def test_ordinary_stage_output_json_and_question_examples_remain_reports(state, step_id, content):
     task = await _step(state, step_id)
     state.responses.append(_answer(content))
     assert await state.executor(task, step_id) == content
@@ -1245,13 +1260,6 @@ async def test_review_cannot_return_a_saved_question_envelope(state):
         await state.executor(task, "review")
 
 
-async def test_planner_keeps_its_strict_envelope_contract_for_prefixed_question(state):
-    task = await _step(state, "plan")
-    state.responses.append(_answer('Please clarify: {"input_request":"Which one?"}'))
-    with pytest.raises(AgentDispatchStoppedError, match="Plan returned an invalid input request"):
-        await state.executor(task, "plan")
-
-
 async def test_work_question_after_actual_public_lookup_has_no_appended_report_sources(state):
     task = await _step(state, "research")
     state.responses.extend([_search(), _answer('{"input_request":"Which version should I compare?"}')])
@@ -1261,11 +1269,47 @@ async def test_work_question_after_actual_public_lookup_has_no_appended_report_s
     assert not state.app.state.gate.pressure_snapshot()["in_use"]
 
 
-async def test_length_stopped_work_question_is_not_a_saved_question(state):
-    task = await _step(state, "research")
+@pytest.mark.parametrize("step_id,label", [("plan", "Plan"), ("research", "Work")])
+async def test_length_stopped_question_is_not_a_saved_question(state, step_id, label):
+    task = await _step(state, step_id)
     state.responses.append(_answer('{"input_request":"Which garden?"}', done_reason="length"))
-    with pytest.raises(AgentDispatchStoppedError, match="Work reached the local model's output limit"):
-        await state.executor(task, "research")
+    with pytest.raises(AgentDispatchStoppedError, match=f"{label} reached the local model's output limit"):
+        await state.executor(task, step_id)
+
+
+@pytest.mark.parametrize("step_id", ["plan", "research"])
+@pytest.mark.parametrize("question", ["x" * 2000, "é" * 1000])
+async def test_question_utf8_boundary_remains_allowed(state, step_id, question):
+    task = await _step(state, step_id)
+    state.responses.append(_answer(json.dumps({"input_request": question})))
+    assert await state.executor(task, step_id) == AgentInputRequest(question)
+
+
+@pytest.mark.parametrize("content,reason", [
+    ('{"input_request":"PRIVATE_QUESTION"', "malformed_json"),
+    ('{"input_request":"PRIVATE_QUESTION"} extra', "trailing_content"),
+    ('{"input_request":"PRIVATE_QUESTION","input_request":"PRIVATE_SECOND"}', "duplicate_fields"),
+    ('{"input_request":"PRIVATE_QUESTION","PRIVATE_KEY":"PRIVATE_VALUE"}', "invalid_envelope_shape"),
+    ('{"input_request":{"PRIVATE_KEY":"PRIVATE_VALUE"}}', "invalid_question_type"),
+    ('{"input_request":"   "}', "blank_question"),
+    (r'{"input_request":"\ud800"}', "invalid_question_encoding"),
+    (json.dumps({"input_request": "é" * 1001}), "question_too_large"),
+    ('```json\n{"input_request":"PRIVATE_QUESTION"}', "invalid_fence"),
+])
+async def test_question_rejection_logs_only_fixed_reason_and_metadata(state, caplog, content, reason):
+    task = await _step(state)
+    state.responses.append(_answer(content))
+    with pytest.raises(AgentDispatchStoppedError, match="Plan returned an invalid input request"):
+        await state.executor(task, "plan")
+    records = [record for record in caplog.records
+               if record.name == "audrey.agent_executor" and record.message.startswith("Agent input request rejected")]
+    assert len(records) == 1
+    assert records[0].getMessage() == (
+        f"Agent input request rejected task={task['id']} stage=plan reason={reason} chars={len(content)}"
+    )
+    for private in ("PRIVATE_QUESTION", "PRIVATE_SECOND", "PRIVATE_KEY", "PRIVATE_VALUE", r"\ud800", "é" * 10):
+        assert private not in caplog.text
+    assert not state.tool_requests
 
 
 @pytest.mark.parametrize("step_id", ["plan", "research", "review"])
@@ -1304,7 +1348,10 @@ async def test_actual_local_executor_retains_question_stage_when_answer_resumes_
         objective="Compare releases of my product. During Work ask which public product to compare.",
         request_id="input-e2e",
     )
-    original_plan = "Saved original plan with the product question deferred to Work."
+    original_plan = json.dumps({"steps": [
+        {"action": "Ask the product question during Work", "example": {"input_request": "Which public product?"}},
+        "Compare the selected product's releases after the answer",
+    ]})
     if question_stage == "research":
         state.responses.append(_answer(original_plan))
     state.responses.append(_answer('{"input_request":"Which public product should I research?"}'))

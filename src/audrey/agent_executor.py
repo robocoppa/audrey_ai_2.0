@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import time
 from contextlib import contextmanager, nullcontext, suppress
 from contextvars import ContextVar
@@ -59,55 +58,107 @@ def _require_complete_text(
         raise AgentDispatchStoppedError(f"{label} returned no report text{detail}.")
 
 
+def _has_root_input_request(candidate: str) -> bool:
+    """Recognize a decoded root key without scanning quoted or nested examples."""
+    if not candidate.startswith("{"):
+        return False
+    decoder = json.JSONDecoder()
+    position = 1
+
+    def whitespace(index):
+        while index < len(candidate) and candidate[index] in " \t\r\n":
+            index += 1
+        return index
+
+    while position < len(candidate):
+        position = whitespace(position)
+        try:
+            key, position = decoder.raw_decode(candidate, position)
+        except (ValueError, RecursionError):
+            return False
+        if not isinstance(key, str):
+            return False
+        if key == "input_request":
+            return True
+        position = whitespace(position)
+        if position >= len(candidate) or candidate[position] != ":":
+            return False
+        position = whitespace(position + 1)
+        try:
+            _value, position = decoder.raw_decode(candidate, position)
+        except (ValueError, RecursionError):
+            return False
+        position = whitespace(position)
+        if position >= len(candidate) or candidate[position] != ",":
+            return False
+        position += 1
+    return False
+
+
 def _clarification_result(result: str, task: dict, *, step_id: str) -> str | AgentInputRequest:
     """Recognize a final clarification envelope without consuming ordinary JSON."""
     label = "Work" if step_id == "research" else step_id.capitalize()
 
-    def invalid():
-        return AgentDispatchStoppedError(f"{label} returned an invalid input request.")
+    def invalid(reason, *, message=None):
+        # Reason codes are fixed protocol metadata. Never log the reply, its
+        # unknown keys, question text or decoder errors containing source data.
+        logger.warning(
+            "Agent input request rejected task=%s stage=%s reason=%s chars=%d",
+            task.get("id", ""), step_id, reason, len(result),
+        )
+        return AgentDispatchStoppedError(message or f"{label} returned an invalid input request.")
 
     text = result.strip()
     candidate = text
-    if candidate.startswith("```") and candidate.endswith("```"):
+    fenced = False
+    fence_closed = False
+    if candidate.startswith("```"):
         opening, separator, body = candidate.partition("\n")
         if separator and opening in {"```", "```json"}:
-            candidate = body[:-3].strip()
-    duplicates = False
+            fenced = True
+            fence_closed = body.rstrip().endswith("```")
+            candidate = (body.rstrip()[:-3] if fence_closed else body).strip()
+    duplicate_objects = []
 
     def object_pairs(pairs):
-        nonlocal duplicates
         value = dict(pairs)
-        duplicates |= len(value) != len(pairs)
+        if len(value) != len(pairs):
+            duplicate_objects.append(value)
         return value
 
     try:
-        payload = json.loads(candidate, object_pairs_hook=object_pairs)
+        payload, end = json.JSONDecoder(object_pairs_hook=object_pairs).raw_decode(candidate)
     except (ValueError, RecursionError):
-        # A malformed root protocol reply must not become completed work.
-        # Inline examples and explanatory prose are ordinary deliverables,
-        # even when they include the reserved field in a quoted example.
-        protocol_candidate = candidate.startswith("{") or text.startswith(("```json\n", "```\n{"))
-        if ((step_id == "plan" and (candidate.startswith("{") or '"input_request"' in text))
-                or (protocol_candidate and re.search(r'\{[\s\S]*"input_request"\s*:', candidate))):
-            raise invalid() from None
+        if _has_root_input_request(candidate):
+            raise invalid("malformed_json") from None
         return text
     if not isinstance(payload, dict) or "input_request" not in payload:
-        if step_id == "plan" and (candidate.startswith("{") or '"input_request"' in text):
-            raise invalid()
         return text
+    if candidate[end:].strip():
+        raise invalid("trailing_content")
+    if fenced and not fence_closed:
+        raise invalid("invalid_fence")
     if step_id not in {"plan", "research"}:
-        raise AgentDispatchStoppedError("Review cannot request user input.")
+        raise invalid("unsupported_stage", message="Review cannot request user input.")
+    if any(value is payload for value in duplicate_objects):
+        raise invalid("duplicate_fields")
+    if set(payload) != {"input_request"}:
+        raise invalid("invalid_envelope_shape")
+    question = payload["input_request"]
+    if not isinstance(question, str):
+        raise invalid("invalid_question_type")
+    question = question.strip()
+    if not question:
+        raise invalid("blank_question")
     try:
-        if duplicates or set(payload) != {"input_request"}:
-            raise ValueError
-        question = payload["input_request"]
-        if not isinstance(question, str) or not question.strip() or len(question.strip().encode("utf-8")) > 2000:
-            raise ValueError
-    except (ValueError, UnicodeEncodeError, RecursionError):
-        raise invalid() from None
+        question_bytes = len(question.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise invalid("invalid_question_encoding") from None
+    if question_bytes > 2000:
+        raise invalid("question_too_large")
     if len(task.get("input_requests", [])) >= 3:
-        raise AgentDispatchStoppedError("The agent reached its three-question clarification limit.")
-    return AgentInputRequest(question.strip())
+        raise invalid("question_limit", message="The agent reached its three-question clarification limit.")
+    return AgentInputRequest(question)
 
 
 def _plan_result(result: str, task: dict) -> str | AgentInputRequest:

@@ -322,8 +322,9 @@ Activity opens the exact waiting task and cannot reopen an answered/cancelled re
 Schema 41 extends the same flow to Work when execution reveals a required user
 choice. Work first uses available source reads for facts it can retrieve, then
 can return a complete standalone `{"input_request":"question"}` final response.
-Ordinary JSON deliverables remain ordinary output. Invalid, mixed or truncated
-requests do not become questions or completed Work. Review cannot request input.
+Ordinary JSON deliverables remain ordinary output. Recognized root question
+candidates with invalid fields, duplicates, trailing content or truncation stop
+before question creation or stage completion. Review cannot request input.
 The selected stage stays unfinished while the task waits; answering starts that
 same stage again with the saved Plan, answers and frozen source versions. There
 is no persisted within-stage model/tool transcript. Earlier immutable file
@@ -381,6 +382,23 @@ local model/tool scope; real-model deferral still needs the owner recheck.
 Retest with a fresh
 Agent using the same prompt; Run again on the answered task correctly reuses its
 tone answer and therefore cannot exercise a new missing-choice question.
+
+The next November 16 receipt stopped before saving Plan with “Plan returned an
+invalid input request,” despite a completed model call (134 output tokens). The
+rejected body was not retained, so its exact form is unknown. Source inspection
+reproduced a separate false-positive boundary: the Plan-only checks reject valid
+JSON outlines and ordinary prose containing a quoted `input_request` example.
+The correction recognizes only the root question protocol, while retaining
+strict actual-question validation and preserving ordinary Plan JSON/text.
+Root-key detection decodes escaped keys and skips nested/quoted examples. It
+does not infer question intent from arbitrary text or invalid syntax before an
+unestablished later field; only valid complete envelopes can create a question.
+Rejection diagnostics use fixed reason codes without model bodies or unknown
+JSON field names. Targeted parser/privacy checks and the full executor suite
+pass, including an ordinary JSON Plan followed by a real saved Work question and
+same-task answer continuation with scripted local replies. Retry this failed Agent with Run again after rebuilding the
+backend; no Plan or answer has been committed in this attempt. The real-model
+Work question and saved-Plan continuation checks remain open for this slice.
 
 Schema 32 links agents to ordinary Projects. The composer offers
 an optional Project, and Project home lists its saved agents plus an explicit
