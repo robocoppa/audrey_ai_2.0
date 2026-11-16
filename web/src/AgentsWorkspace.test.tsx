@@ -483,6 +483,47 @@ describe("AgentsWorkspace", () => {
     expect(screen.getByText(response)).toBeVisible(); expect(document.querySelector(".agents-input-history b")).toBeNull();
   });
 
+  it("answers a Work question on the same saved task while retaining its Plan and stage-labelled history", async () => {
+    const plan = task().steps[0];
+    const planningQuestion = { ...waitingTask().input_requests![0], id: "plan-input", question: "Which garden?", answer: "Fern Circle", answered_at: "2026-10-30T15:01:00Z" };
+    const workQuestion = { ...waitingTask().input_requests![0], id: "work-input", step_id: "research" as const, question: "Which delivery day should I use?" };
+    const saved = waitingTask({ objective: "Prepare the garden checklist", steps: [plan, { ...task().steps[1], status: "pending" }, task().steps[2]], input_requests: [planningQuestion, workQuestion] });
+    const response = "Wednesday <b>afternoon</b>";
+    const answered: AgentTask = { ...saved, revision: 7, status: "queued", input_requests: [planningQuestion, { ...workQuestion, answer: response, answered_at: saved.updated_at }] };
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
+    vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    vi.spyOn(api, "listWatches").mockResolvedValue({ items: [] });
+    const answer = vi.spyOn(api, "answerAgentInput").mockImplementation(async () => {
+      vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [answered] });
+      vi.mocked(api.getAgentTask).mockResolvedValue(answered);
+      return answered;
+    });
+    const create = vi.spyOn(api, "createAgentTask");
+    render(<AgentsWorkspace />);
+    expect(await screen.findByText("The saved Plan is retained. Answer to continue Work on this same task.")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Agent needs your input" })).toBeVisible();
+    fireEvent.change(screen.getByRole("textbox", { name: "Your answer" }), { target: { value: response } });
+    agentSection("Watches");
+    agentSection("Tasks");
+    expect(await screen.findByRole("textbox", { name: "Your answer" })).toHaveValue(response);
+    fireEvent.click(screen.getByLabelText("View saved plan"));
+    expect(screen.getByText(plan.result)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Answer and continue" }));
+    await waitFor(() => expect(answer).toHaveBeenCalledWith(saved.id, workQuestion.id, saved.revision, response));
+    const notice = await screen.findByText("Answer saved. This agent will continue working with your answer.");
+    expect(notice.closest(".agents-detail-header")).not.toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Your answer" })).not.toBeInTheDocument();
+    expect(screen.getByText(plan.result)).toBeVisible();
+    expect(screen.getAllByRole("button", { name: `Open agent: ${saved.objective}` })).toHaveLength(1);
+    expect(create).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText("Questions and answers"));
+    expect(screen.getByRole("heading", { name: "Planning question" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Work question" })).toBeVisible();
+    expect(screen.getByText("Fern Circle")).toBeVisible();
+    expect(screen.getByText(response)).toBeVisible();
+    expect(document.querySelector(".agents-input-history b")).toBeNull();
+  });
+
   it("keeps a delayed answer confirmation off another selected task", async () => {
     const first = waitingTask(), second = task({ id: "agent-second", objective: "Prepare a welcome note" });
     const answered = { ...first, status: "queued" as const, revision: 7, input_requests: first.input_requests!.map((input) => ({ ...input, answer: "Use 2026.", answered_at: first.updated_at })) };

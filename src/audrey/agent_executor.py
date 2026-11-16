@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from contextlib import contextmanager, nullcontext, suppress
 from contextvars import ContextVar
@@ -58,30 +59,60 @@ def _require_complete_text(
         raise AgentDispatchStoppedError(f"{label} returned no report text{detail}.")
 
 
-def _plan_result(result: str, task: dict) -> str | AgentInputRequest:
-    """Recognize only the planner's complete, bounded clarification envelope."""
+def _clarification_result(result: str, task: dict, *, step_id: str) -> str | AgentInputRequest:
+    """Recognize a final clarification envelope without consuming ordinary JSON."""
+    label = "Work" if step_id == "research" else step_id.capitalize()
+
+    def invalid():
+        return AgentDispatchStoppedError(f"{label} returned an invalid input request.")
+
     text = result.strip()
     candidate = text
     if candidate.startswith("```") and candidate.endswith("```"):
         opening, separator, body = candidate.partition("\n")
         if separator and opening in {"```", "```json"}:
             candidate = body[:-3].strip()
-    if not candidate.startswith("{"):
-        if '"input_request"' in text:
-            raise AgentDispatchStoppedError("Plan returned an invalid input request.")
-        return text
+    duplicates = False
+
+    def object_pairs(pairs):
+        nonlocal duplicates
+        value = dict(pairs)
+        duplicates |= len(value) != len(pairs)
+        return value
+
     try:
-        payload = json.loads(candidate)
-        if not isinstance(payload, dict) or set(payload) != {"input_request"}:
+        payload = json.loads(candidate, object_pairs_hook=object_pairs)
+    except (ValueError, RecursionError):
+        # A malformed root protocol reply must not become completed work.
+        # Inline examples and explanatory prose are ordinary deliverables,
+        # even when they include the reserved field in a quoted example.
+        protocol_candidate = candidate.startswith("{") or text.startswith(("```json\n", "```\n{"))
+        if ((step_id == "plan" and (candidate.startswith("{") or '"input_request"' in text))
+                or (protocol_candidate and re.search(r'\{[\s\S]*"input_request"\s*:', candidate))):
+            raise invalid() from None
+        return text
+    if not isinstance(payload, dict) or "input_request" not in payload:
+        if step_id == "plan" and (candidate.startswith("{") or '"input_request"' in text):
+            raise invalid()
+        return text
+    if step_id not in {"plan", "research"}:
+        raise AgentDispatchStoppedError("Review cannot request user input.")
+    try:
+        if duplicates or set(payload) != {"input_request"}:
             raise ValueError
         question = payload["input_request"]
         if not isinstance(question, str) or not question.strip() or len(question.strip().encode("utf-8")) > 2000:
             raise ValueError
     except (ValueError, UnicodeEncodeError, RecursionError):
-        raise AgentDispatchStoppedError("Plan returned an invalid input request.") from None
+        raise invalid() from None
     if len(task.get("input_requests", [])) >= 3:
         raise AgentDispatchStoppedError("The agent reached its three-question clarification limit.")
     return AgentInputRequest(question.strip())
+
+
+def _plan_result(result: str, task: dict) -> str | AgentInputRequest:
+    """Compatibility entry point for the planner's bounded protocol."""
+    return _clarification_result(result, task, step_id="plan")
 
 
 def _project_message(context: dict) -> dict:
@@ -587,8 +618,10 @@ class ResearchAgentExecutor:
             _require_complete_text(step_id, result, reason)
             if len(result.encode("utf-8")) > 60000:
                 raise AgentDispatchStoppedError("The report exceeded its saved-output limit.")
-            if step_id == "plan":
-                return _plan_result(result, task)
+            parsed = _clarification_result(result, task, step_id=step_id)
+            if isinstance(parsed, AgentInputRequest):
+                return parsed
+            result = parsed
             if step_id == "research":
                 urls, size = [], 0
                 for source in retrieved:

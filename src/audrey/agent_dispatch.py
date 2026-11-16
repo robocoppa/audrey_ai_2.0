@@ -15,7 +15,7 @@ class AgentDispatchStoppedError(RuntimeError):
 
 @dataclass(frozen=True)
 class AgentInputRequest:
-    """A planning result that needs a saved user answer before execution."""
+    """A Plan or Work result requiring a saved answer before that stage continues."""
 
     question: str
 

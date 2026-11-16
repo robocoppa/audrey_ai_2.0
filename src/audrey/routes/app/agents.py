@@ -32,7 +32,7 @@ class AgentStepResponse(BaseModel):
 
 class AgentInputResponse(BaseModel):
     id: str
-    step_id: Literal["plan"]
+    step_id: Literal["plan", "research"]
     question: str
     answer: str | None
     created_at: str

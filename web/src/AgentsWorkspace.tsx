@@ -707,7 +707,9 @@ function AgentTasksWorkspace({
       setAnswerDrafts((current) => {
         const next = { ...current }; delete next[inputDraftKey(task.id, request.id)]; return next;
       });
-      setNotice({ taskId: task.id, text: "Answer saved. This agent will continue planning with your answer." });
+      setNotice({ taskId: task.id, text: request.step_id === "research"
+        ? "Answer saved. This agent will continue working with your answer."
+        : "Answer saved. This agent will continue planning with your answer." });
     } catch (reason) {
       if (!mounted.current) return;
       if (reason instanceof ApiError && reason.status === 409) {
@@ -896,7 +898,7 @@ function AgentTasksWorkspace({
                   <h2>{agentTitle(selected)}</h2>
                   <div className="agents-detail-disclosures">
                     <details className="agents-original-prompt"><summary>Original prompt</summary><p>{selected.objective}</p></details>
-                    {selected.input_requests?.some((request) => request.answer !== null) ? <details className="agents-input-history"><summary aria-label="Questions and answers">Questions / answers</summary><ol>{selected.input_requests.filter((request) => request.answer !== null).map((request) => <li key={request.id}><h3>Planning question</h3><p>{request.question}</p><h4>Your answer</h4><p>{request.answer}</p></li>)}</ol></details> : null}
+                    {selected.input_requests?.some((request) => request.answer !== null) ? <details className="agents-input-history"><summary aria-label="Questions and answers">Questions / answers</summary><ol>{selected.input_requests.filter((request) => request.answer !== null).map((request) => <li key={request.id}><h3>{request.step_id === "research" ? "Work question" : "Planning question"}</h3><p>{request.question}</p><h4>Your answer</h4><p>{request.answer}</p></li>)}</ol></details> : null}
                   </div>
                 </header>
                 {selected.project_context && (!selected.project_context.available || !selected.project_context.current) ? <p className="agents-project-context-notice">
@@ -1003,6 +1005,9 @@ function AgentInputPanel({ request, revision, draft, busy, contextBlocked, onCha
   return <section className="agents-input-panel" aria-labelledby="agent-input-title">
     <h3 id="agent-input-title">Agent needs your input</h3>
     <p className="agents-input-question" id="agent-input-question">{request.question}</p>
+    <p className="agents-input-help">{request.step_id === "research"
+      ? "The saved Plan is retained. Answer to continue Work on this same task."
+      : "Answer to continue planning on this same task."}</p>
     <form aria-label="Answer agent question" onSubmit={(event) => { event.preventDefault(); if (!busy && !contextBlocked && !changed && bytes > 0 && bytes <= 8000) onAnswer(); }}>
       <label htmlFor="agent-input-answer">Your answer</label>
       <textarea id="agent-input-answer" rows={2} maxLength={8000} aria-describedby="agent-input-question agent-input-size" value={draft.text} disabled={busy} onChange={(event) => onChange(event.target.value)} />

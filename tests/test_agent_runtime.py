@@ -132,16 +132,55 @@ async def test_lost_question_acknowledgement_does_not_repeat_or_fail_the_waiting
     assert [item["kind"] for item in feed["items"]] == ["input_required"]
 
 
-async def test_nonplanning_executor_cannot_create_an_input_wait(state):
+async def test_review_executor_cannot_create_an_input_wait(state):
     task = await _create(state)
 
     async def execute(_task, step):
-        return "Saved plan" if step == "plan" else AgentInputRequest("A late question?")
+        return AgentInputRequest("A late question?") if step == "review" else f"Saved {step}"
 
     assert await _runtime(state, execute).run_once()
     saved = await _get(state, task)
-    assert saved["status"] == "failed" and saved["error"] == "Only planning can request user input."
+    assert saved["status"] == "failed" and saved["error"] == "Only Plan and Work can request user input."
     assert not saved["input_requests"] and saved["steps"][0]["status"] == "completed"
+
+
+async def test_work_question_survives_restart_and_answer_repeats_only_work(state):
+    task = await _create(state)
+    seen = []
+
+    async def execute(current, step_id):
+        seen.append((current["id"], step_id))
+        state.clock.advance(1)
+        if step_id == "research" and not current["input_requests"]:
+            return AgentInputRequest("Which garden name should the checklist use?")
+        if step_id == "research":
+            assert current["input_requests"][0]["step_id"] == "research"
+            assert current["input_requests"][0]["answer"] == "Fern Circle"
+        return f"Saved {step_id}"
+
+    assert await _runtime(state, execute).run_once()
+    waiting = await _get(state, task)
+    plan = waiting["steps"][0]
+    assert waiting["status"] == "waiting_for_input" and plan["result"] == "Saved plan"
+    assert [step["status"] for step in waiting["steps"]] == ["completed", "pending", "pending"]
+    before = dict(state.store._conn.execute("SELECT active_seconds,operations FROM app_agent_tasks").fetchone())
+    state.store.close()
+    state.clock.advance(86400)
+    state.store = ApplicationStore(state.path)
+    state.store.agents._clock = state.clock
+    assert not await _runtime(state, execute).run_once()
+    assert dict(state.store._conn.execute("SELECT active_seconds,operations FROM app_agent_tasks").fetchone()) == before
+    pending = waiting["input_requests"][0]
+    await state.store.agents.answer_input(user_id=state.owner.user_id, task_id=task["id"],
+        request_id=pending["id"], expected_revision=waiting["revision"], answer="Fern Circle")
+    assert await _runtime(state, execute).run_once()
+    completed = await _get(state, task)
+    assert completed["status"] == "completed" and completed["steps"][0] == plan
+    assert completed["attempts"] == 2 and completed["result"] == "Saved review"
+    assert seen == [(task["id"], stage) for stage in ("plan", "research", "research", "review")]
+    usage = state.store._conn.execute("SELECT active_seconds,operations FROM app_agent_tasks").fetchone()
+    assert usage["active_seconds"] == before["active_seconds"] + 2
+    assert usage["operations"] == before["operations"] + 2
 
 
 async def test_commits_the_plan_research_and_review_as_one_saved_result(state):

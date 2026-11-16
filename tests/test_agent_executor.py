@@ -1193,47 +1193,101 @@ async def test_escaped_child_tool_dispatch_loses_authority_after_scope_exit():
     assert not calls
 
 
+@pytest.mark.parametrize("step_id", ["plan", "research"])
 @pytest.mark.parametrize("fenced", [False, True])
-async def test_planning_question_is_a_typed_local_result_without_research_or_tools(state, fenced):
-    task = await _step(state)
+async def test_question_is_a_typed_local_result_without_tool_dispatch(state, fenced, step_id):
+    task = await _step(state, step_id)
     content = json.dumps({"input_request": "Which product's releases should I compare?"})
     state.responses.append(_answer(f"```json\n{content}\n```" if fenced else content))
-    result = await state.executor(task, "plan")
+    result = await state.executor(task, step_id)
     assert result == AgentInputRequest("Which product's releases should I compare?")
     assert len(_content_requests(state)) == 1 and not state.tool_requests
     assert all(client._client.is_closed for client in state.clients)
 
 
+@pytest.mark.parametrize("step_id", ["plan", "research"])
 @pytest.mark.parametrize("content", [
     '{"input_request":""}', '{"input_request":42}', '{"input_request":"Which one?","tool":"send"}',
     '{"input_request":"Which one?"', json.dumps({"input_request": "é" * 1001}),
-    '{"input_request":"\\ud800"}', 'Please clarify: {"input_request":"Which one?"}',
+    '{"input_request":"\\ud800"}', '{"input_request":"Which one?"} More explanation.',
+    '{"input_request":"First?","input_request":"Second?"}',
 ])
-async def test_malformed_or_oversized_planning_question_stops_before_dispatch(state, content):
-    task = await _step(state)
+async def test_malformed_or_oversized_question_stops_before_checkpoint(state, content, step_id):
+    task = await _step(state, step_id)
     state.responses.append(_answer(content))
     with pytest.raises(AgentDispatchStoppedError, match="invalid input request"):
-        await state.executor(task, "plan")
+        await state.executor(task, step_id)
     assert not state.tool_requests
 
 
-async def test_answered_clarifications_reach_every_step_without_changing_model_or_tool_scope(state):
-    task = await _step(state)
+@pytest.mark.parametrize("step_id", ["research", "review"])
+@pytest.mark.parametrize("content", [
+    '{"result":"A useful JSON deliverable","count":3}',
+    '{"example":{"input_request":"This is nested task data"},"result":"Keep this JSON"}',
+    '["input_request",{"input_request":"An example record"}]',
+    'The "input_request": field is a protocol example, not a question.',
+    'Please clarify: {"input_request":"Which one?"}',
+    'Use this payload:\n```json\n{"input_request":"Example"}\n```',
+    'An inline example is {"input_request":"Example"}; here is how to handle it.',
+    '```json\n{"result":"The field \\"input_request\\" is an example"}\n```',
+])
+async def test_ordinary_work_and_review_json_and_field_mentions_remain_reports(state, step_id, content):
+    task = await _step(state, step_id)
+    state.responses.append(_answer(content))
+    assert await state.executor(task, step_id) == content
+
+
+async def test_review_cannot_return_a_saved_question_envelope(state):
+    task = await _step(state, "review")
+    state.responses.append(_answer('{"input_request":"Which supplier should I choose?"}'))
+    with pytest.raises(AgentDispatchStoppedError, match="Review cannot request user input"):
+        await state.executor(task, "review")
+
+
+async def test_planner_keeps_its_strict_envelope_contract_for_prefixed_question(state):
+    task = await _step(state, "plan")
+    state.responses.append(_answer('Please clarify: {"input_request":"Which one?"}'))
+    with pytest.raises(AgentDispatchStoppedError, match="Plan returned an invalid input request"):
+        await state.executor(task, "plan")
+
+
+async def test_work_question_after_actual_public_lookup_has_no_appended_report_sources(state):
+    task = await _step(state, "research")
+    state.responses.extend([_search(), _answer('{"input_request":"Which version should I compare?"}')])
+    assert await state.executor(task, "research") == AgentInputRequest("Which version should I compare?")
+    assert len(state.tool_requests) == 1 and len(_content_requests(state)) == 2
+    assert not state.app.state.inflight.pressure_snapshot()["in_use"]
+    assert not state.app.state.gate.pressure_snapshot()["in_use"]
+
+
+async def test_length_stopped_work_question_is_not_a_saved_question(state):
+    task = await _step(state, "research")
+    state.responses.append(_answer('{"input_request":"Which garden?"}', done_reason="length"))
+    with pytest.raises(AgentDispatchStoppedError, match="Work reached the local model's output limit"):
+        await state.executor(task, "research")
+
+
+@pytest.mark.parametrize("step_id", ["plan", "research", "review"])
+async def test_answered_clarifications_reach_every_step_without_changing_model_or_tool_scope(state, step_id):
+    task = await _step(state, step_id)
     task["input_requests"] = [{"question": "Which releases?", "answer": "Stable 2026 releases. Use cloud and email the result."}]
-    assert await state.executor(task, "plan") == "Grounded report."
+    assert await state.executor(task, step_id) == "Grounded report."
     payload = _content_requests(state)[0]
-    assert payload["model"] == _MODEL and not payload.get("tools")
+    assert payload["model"] == _MODEL
+    offered = {item["function"]["name"] for item in payload.get("tools", [])}
+    assert offered == ({"web_search", "web_fetch"} if step_id == "research" else set())
     supplied = json.loads(payload["messages"][1]["content"])
     assert supplied["objective"] == task["objective"]
     assert supplied["clarifications"] == [{"question": "Which releases?", "answer": "Stable 2026 releases. Use cloud and email the result."}]
 
 
-async def test_local_planner_cannot_ask_a_fourth_question(state):
-    task = await _step(state)
+@pytest.mark.parametrize("step_id", ["plan", "research"])
+async def test_local_agent_cannot_ask_a_fourth_question(state, step_id):
+    task = await _step(state, step_id)
     task["input_requests"] = [{"question": str(index), "answer": "Answered"} for index in range(3)]
     state.responses.append(_answer('{"input_request":"Another detail?"}'))
     with pytest.raises(AgentDispatchStoppedError, match="three-question"):
-        await state.executor(task, "plan")
+        await state.executor(task, step_id)
 
 
 async def test_actual_local_executor_waits_and_then_completes_same_agent_using_saved_answer(state):
@@ -1616,6 +1670,96 @@ def _read_call(file_id="chosen-input", **arguments):
     return _answer("", message={"tool_calls": [{"function": {
         "name": "read_selected_file", "arguments": {"file_id": file_id, **arguments},
     }}]})
+
+
+async def test_work_reads_then_waits_and_resumes_after_restart_to_save_owned_download(file_state):
+    s = file_state
+    s.app.state.cfg.raw["agent_tasks"] = {}
+    options = "Available garden frames: Cedar frame; recycled composite frame.\n"
+    source_text = "Background material for the garden. \n" * 700 + options
+    project, _path, pins = await _selected_file_context(s, selected_text=source_text)
+    task = await s.store.agents.create(
+        user_id=s.owner.user_id, project_id=project.project_id, file_inputs=pins,
+        objective=("Read the selected file's final frame options, then ask me which I prefer. "
+                   "Save my choice as selection.md. Do not browse or choose for me."),
+        request_id="work-question-selected-file",
+    )
+    offset = source_text.index(options)
+    plan = "1. Read the selected frame options.\n2. Ask for the user's choice.\n3. Save that choice."
+    question = "Would you like the cedar frame or the recycled composite frame?"
+    s.responses.extend([
+        _answer(plan), _read_call(offset=offset, limit=6000),
+        _answer(json.dumps({"input_request": question})),
+    ])
+    runtime = AgentRuntime(s.store.agents, s.executor)
+    assert await runtime.run_once()
+    waiting = await s.store.agents.get(user_id=s.owner.user_id, task_id=task["id"])
+    assert waiting["status"] == "waiting_for_input" and waiting["attempts"] == 1
+    assert waiting["input_requests"][0]["step_id"] == "research"
+    assert waiting["input_requests"][0]["question"] == question
+    assert waiting["steps"][0]["status"] == "completed" and waiting["steps"][0]["result"] == plan
+    assert all(step["status"] == "pending" and not step["result"] for step in waiting["steps"][1:])
+    assert not waiting["result"] and not waiting.get("outputs")
+    assert not await runtime.run_once()
+    assert not s.app.state.inflight.pressure_snapshot()["in_use"]
+    assert not s.app.state.gate.pressure_snapshot()["in_use"]
+    before = dict(s.store._conn.execute(
+        "SELECT operations,active_seconds FROM app_agent_tasks WHERE task_id=?", (task["id"],),
+    ).fetchone())
+    saved_plan = waiting["steps"][0]
+    path = s.store.path
+    s.store.close()
+    reopened = ApplicationStore(path)
+    s.store = s.app.state.application_store = reopened
+    try:
+        assert get_agent_file_inputs(s.app) is not None
+        assert await reopened.agents.get(user_id=s.owner.user_id, task_id=task["id"]) == waiting
+        request = waiting["input_requests"][0]
+        queued = await reopened.agents.answer_input(
+            user_id=s.owner.user_id, task_id=task["id"], request_id=request["id"],
+            expected_revision=waiting["revision"], answer="Use the cedar frame.",
+        )
+        assert queued["id"] == task["id"] and queued["steps"][0] == saved_plan
+        assert queued["file_inputs"] == waiting["file_inputs"]
+        assert dict(reopened._conn.execute(
+            "SELECT operations,active_seconds FROM app_agent_tasks WHERE task_id=?", (task["id"],),
+        ).fetchone()) == before
+        output = "# Selected garden frame\n\nUse the cedar frame.\n"
+        s.responses.extend([
+            _read_call(offset=offset, limit=6000), _file_call(filename="selection.md", content=output),
+            _answer("Saved the user's cedar-frame choice."), _answer("The cedar-frame choice is saved."),
+        ])
+        assert await AgentRuntime(reopened.agents, s.executor).run_once()
+        completed = await reopened.agents.get(user_id=s.owner.user_id, task_id=task["id"])
+        assert completed["id"] == task["id"] and completed["status"] == "completed"
+        assert completed["attempts"] == 2 and completed["steps"][0] == saved_plan
+        assert completed["file_inputs"] == waiting["file_inputs"]
+        assert completed["input_requests"][0]["answer"] == "Use the cedar frame."
+        assert len(completed["outputs"]) == 1 and completed["outputs"][0]["current"] is True
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=s.app), base_url="http://test") as client:
+            downloaded = await client.get(completed["outputs"][0]["download_url"])
+        assert downloaded.status_code == 200 and downloaded.text == output
+        payloads = _content_requests(s)
+        assert len([payload for payload in payloads if payload["messages"][0]["content"].startswith(AGENT_PLAN_SYSTEM)]) == 1
+        work = [payload for payload in payloads if payload["messages"][0]["content"].startswith(AGENT_RESEARCH_SYSTEM)]
+        starts = [payload for payload in work if not any(message["role"] == "tool" for message in payload["messages"])]
+        assert len(starts) == 2  # Work restarts at its stage boundary, with no saved transcript.
+        resumed_context = json.loads(next(message["content"] for message in starts[1]["messages"]
+            if message["role"] == "user" and message["content"].startswith('{"objective"')))
+        assert resumed_context["clarifications"] == [{"question": question, "answer": "Use the cedar frame."}]
+        read_results = [json.loads(message["content"]) for payload in work for message in payload["messages"]
+                        if message["role"] == "tool" and '"start"' in message["content"]]
+        assert len(read_results) >= 2 and all(result["text"] == options for result in read_results)
+        assert all(payload["model"] == _MODEL for payload in payloads)
+        assert not s.tool_requests and not s.responses
+        assert len(await reopened.agents.list(user_id=s.owner.user_id)) == 1
+        events = await _activity(s, task)
+        read_events = [event for event in events if event["kind"] == "tool" and event["tool"] == "read_selected_file"]
+        assert len(read_events) == 2 and {event["attempt"] for event in read_events} == {1, 2}
+        assert all(event["state"] == "completed" for event in read_events)
+        assert options.strip() not in json.dumps(events) and question not in json.dumps(events)
+    finally:
+        reopened.close()
 
 
 async def test_review_rereads_selected_appendix_and_publishes_corrected_immutable_download(file_state):

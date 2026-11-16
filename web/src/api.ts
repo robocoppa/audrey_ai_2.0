@@ -522,7 +522,7 @@ export type AgentTaskStatus = "queued" | "running" | "paused" | "waiting_for_inp
 
 export interface AgentInputRequest {
   id: string;
-  step_id: "plan";
+  step_id: "plan" | "research";
   question: string;
   answer: string | null;
   created_at: string;
@@ -671,6 +671,24 @@ export function isAgentOutput(value: unknown): value is AgentOutput {
 }
 
 function readAgentTaskFiles(task: AgentTask): AgentTask {
+  if (task?.input_requests !== undefined) {
+    const requests = task.input_requests;
+    const bytes = (value: string) => new TextEncoder().encode(value).byteLength;
+    if (!Array.isArray(requests) || requests.length > 3 || requests.some((request) => (
+      !request || typeof request !== "object" || typeof request.id !== "string" || !request.id.trim()
+      || !["plan", "research"].includes(request.step_id)
+      || typeof request.question !== "string" || !request.question.trim() || bytes(request.question) > 2000
+      || (request.answer !== null && (typeof request.answer !== "string" || !request.answer.trim() || bytes(request.answer) > 8000))
+      || typeof request.created_at !== "string" || !Number.isFinite(Date.parse(request.created_at))
+      || (request.answer === null ? request.answered_at !== null
+        : typeof request.answered_at !== "string" || !Number.isFinite(Date.parse(request.answered_at)))
+    )) || new Set(requests.map(({ id }) => id)).size !== requests.length) {
+      throw new ApiError(502, "The saved agent questions could not be read. Refresh this agent.");
+    }
+    task = { ...task, input_requests: requests.map(({ id, step_id, question, answer, created_at, answered_at }) => (
+      { id, step_id, question, answer, created_at, answered_at }
+    )) };
+  }
   if (task?.file_inputs !== undefined) {
     const inputs = task.file_inputs;
     if (!inputs || typeof inputs !== "object" || typeof inputs.current !== "boolean"

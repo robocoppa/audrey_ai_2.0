@@ -381,11 +381,11 @@ async def test_native_agents_require_authentication():
         assert (await client.post("/api/agents/task/inputs/question/answer", json={"expected_revision": 1, "answer": "Example"})).status_code == 401
 
 
-async def _waiting_task(state):
+async def _waiting_task(state, step_id="plan"):
     created = (await _create(state)).json()
 
-    async def execute(_task, _step):
-        return AgentInputRequest("Which public product should I research?")
+    async def execute(_task, current_step):
+        return AgentInputRequest("Which public product should I research?") if current_step == step_id else "Saved plan."
 
     assert await AgentRuntime(state.store.agents, execute).run_once()
     return (await state.client.get(f"/api/agents/{created['id']}")).json()
@@ -395,9 +395,12 @@ def _answer_path(task, request_id=None):
     return f"/api/agents/{task['id']}/inputs/{request_id or task['input_requests'][0]['id']}/answer"
 
 
-async def test_native_input_wait_and_answer_resume_same_agent_and_invalidate_activity(agents):
-    waiting = await _waiting_task(agents)
-    assert waiting["status"] == "waiting_for_input" and waiting["steps"][0]["status"] == "pending"
+@pytest.mark.parametrize("step_id", ["plan", "research"])
+async def test_native_input_wait_and_answer_resume_same_agent_and_invalidate_activity(agents, step_id):
+    waiting = await _waiting_task(agents, step_id=step_id)
+    assert waiting["status"] == "waiting_for_input"
+    assert waiting["steps"][0]["status"] == ("pending" if step_id == "plan" else "completed")
+    assert waiting["input_requests"][0]["step_id"] == step_id
     listing = (await agents.client.get("/api/agents")).json()["items"]
     assert listing[0]["status"] == "waiting_for_input" and listing[0]["input_requests"] == []
     notice = (await agents.client.get("/api/activity")).json()["items"][0]
@@ -421,8 +424,9 @@ async def test_native_input_wait_and_answer_resume_same_agent_and_invalidate_act
 
 
 @pytest.mark.parametrize("kind", ["foreign", "stale", "wrong_request", "revoked", "scope"])
-async def test_input_answers_reject_foreign_stale_or_revoked_work(agents, kind):
-    waiting = await _waiting_task(agents)
+@pytest.mark.parametrize("step_id", ["plan", "research"])
+async def test_input_answers_reject_foreign_stale_or_revoked_work(agents, kind, step_id):
+    waiting = await _waiting_task(agents, step_id=step_id)
     body = {"expected_revision": waiting["revision"], "answer": "Example"}
     path = _answer_path(waiting)
     if kind == "foreign":
@@ -531,12 +535,13 @@ async def test_project_change_stops_queued_work_but_keeps_its_saved_report_and_p
     assert retained.json()["project_context"]["project_name"] is None and not retained.json()["project_context"]["available"]
 
 
-async def test_answer_cannot_continue_an_agent_after_its_project_context_changes(agents):
+@pytest.mark.parametrize("step_id", ["plan", "research"])
+async def test_answer_cannot_continue_an_agent_after_its_project_context_changes(agents, step_id):
     project = await agents.store.projects.create(user_id=agents.owners[0].user_id, name="Release scope")
     task = (await _create(agents, project_id=project.project_id)).json()
 
-    async def execute(_task, _step):
-        return AgentInputRequest("Which public product?")
+    async def execute(_task, current_step):
+        return AgentInputRequest("Which public product?") if current_step == step_id else "Saved plan."
 
     assert await AgentRuntime(agents.store.agents, execute).run_once()
     waiting = (await agents.client.get(f"/api/agents/{task['id']}")).json()

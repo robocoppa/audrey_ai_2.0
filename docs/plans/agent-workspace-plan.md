@@ -1,8 +1,8 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
 **Status:** In progress, November 13, 2026. Saved task Agents, unified lexical
-Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner confirms Search
-returned expected matches; full acceptance remains pending. Campaigns 1–4 remain closed.
+Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner closed the recent
+interactive acceptance work on November 13. Campaigns 1–4 remain closed.
 
 The owner selected unified search, saved background tasks, project working
 memory and scheduled monitoring. Background tasks mean a visible agentic
@@ -10,11 +10,14 @@ architecture: Agents should be a prominent part of Audrey's native UI.
 Backups and disaster recovery are outside this plan. Agent restart recovery is
 part of the requested background execution capability.
 
-Interactive acceptance now takes priority over another feature slice. The owner
-will exercise the [last ten changes](agent-interactive-acceptance-plan.md) through
-the real UI, worker, local models and downloads. Scripted smoke receipts remain
-regression evidence; full live acceptance remains pending. The unfinished
-Work-question changes were set aside before this handoff.
+The owner closed the recent interactive acceptance document and requested its
+removal on November 13 after confirming the scheduled Watch check at 16:12
+America/Denver. Recorded receipts also cover title generation, saved Knowledge
+answers and input-change blocks, public-page baseline creation and an unchanged
+manual check that stayed paused. Earlier per-slice verification limits below
+remain historical evidence; unrecorded scenarios are not newly asserted passes.
+The current slice extends saved user questions into Work, preserving the same task,
+completed Plan, frozen sources and cumulative resource limits.
 
 ## Current implementation slice
 
@@ -139,8 +142,8 @@ and generation; the HTTP request uses that configured timeout too. It consumes
 the existing step and active-time budgets rather than adding time to them, so a
 custom shorter parent budget still takes precedence. Timeout keeps the fallback
 and any reserved charge, releases admission and allows useful work to proceed when parent
-budgets remain. Local timeout/success/revocation checks pass; a real local-model
-title recheck remains pending. It uses no cloud fallback and does not alter the
+budgets remain. Local timeout/success/revocation checks pass; the owner confirmed the real local-model
+title recheck passed on November 13. It uses no cloud fallback and does not alter the
 objective or saved Plan.
 
 Model failures identify the actual stage and distinguish output limits from empty
@@ -299,11 +302,11 @@ external delivery. Affected storage/API/UI tests, lint, production build and moc
 desktop/phone browser flows pass; deployed acceptance remains manual. Rebuild both
 backend and UI for this slice; the backend applies schema 30 automatically.
 
-Schema 31 adds durable planning questions. The same verified local planning call
+Schema 31 introduced durable planning questions. The same verified local planning call
 can return one bounded question when an essential detail cannot reasonably be
 inferred. A complete, validated request saves the question, releases the lease and
-compute, and exposes Waiting for input plus a deduplicated Activity notice. No
-Work or Review starts while it waits. The stored task remains paused internally;
+compute, and exposes Waiting for input plus a deduplicated Activity notice.
+Further execution waits for an answer. The stored task remains paused internally;
 the public waiting state comes from its pending question, avoiding a task-table
 rewrite. Waiting time does not consume active execution allowance.
 
@@ -316,7 +319,25 @@ the waiting state; the selected task loads them separately. Drafts survive tab/t
 changes, and a changed revision requires review before using a retained draft.
 Activity opens the exact waiting task and cannot reopen an answered/cancelled request.
 
-This slice supports planning questions only, with at most three per task lifetime,
+Schema 41 extends the same flow to Work when execution reveals a required user
+choice. Work first uses available source reads for facts it can retrieve, then
+can return a complete standalone `{"input_request":"question"}` final response.
+Ordinary JSON deliverables remain ordinary output. Invalid, mixed or truncated
+requests do not become questions or completed Work. Review cannot request input.
+The selected stage stays unfinished while the task waits; answering starts that
+same stage again with the saved Plan, answers and frozen source versions. There
+is no persisted within-stage model/tool transcript. Earlier immutable file
+publications and activity remain; repeated identical files use existing receipts.
+The question's stage is saved and shown in pending help, answer notices and
+Questions / answers history. The schema upgrade preserves existing Plan questions,
+answers, revisions, read/dismissal state and ownership constraints.
+Local executor, store/runtime/API, migration and UI regressions pass, including
+selected-file read → Work question → restart → answer → owned download, with the
+original Plan and source pins retained. Type checking, lint and the production UI
+build pass. Scripted local replies verify this integration; the new Work-question
+flow still needs the real-model/browser check below.
+
+Plan and Work share at most three questions per task lifetime,
 2,000 UTF-8 bytes per question and 8,000 per answer. It preserves original objectives,
 completed Plans and all operation/attempt/time usage. Pending questions require an
 answer or Cancel; generic Resume cannot bypass them. Run again after cancellation
@@ -324,7 +345,27 @@ dismisses an unanswered question and retains answered history. Task/account dele
 erases these records. Strict output/answer validation, idempotent queued-answer retries,
 post-await ownership/deletion/revision fences and plain-text rendering cover stale or
 invalid requests. No extra classifier, cloud model, external delivery or additional
-tool authority was added. Rebuild backend and UI; schema 31 applies automatically.
+tool authority is added. Rebuild backend and UI; schema 41 applies automatically.
+
+#### Work-question interactive check
+
+On Tower, sync the slice and rebuild `audrey` and `audrey-ui` from
+`/mnt/user/appdata/audrey_ai_2.0` with
+`docker compose up -d --build audrey audrey-ui`. No configuration edit or upload
+is needed. In the real browser, start a fresh Agent without a Project using:
+
+> Prepare a short welcome message. For Plan, describe the steps without asking
+> questions. During Work, first ask whether the tone should be formal or casual
+> and wait for my answer. Then write the message using that tone. Do not browse
+> or create files.
+
+Pass: Plan completes once, Work exposes Waiting for input with the saved Plan
+retained, and Review has not started. Reload and reopen the same task; the Work
+question must remain. Answer `Casual`. The same Agent resumes Work and completes
+a casual welcome message without a new Plan or task. Questions / answers labels
+it a Work question and retains the answer. Model activity uses only the local
+model. If Plan asks instead, the deferred Work path has not been exercised.
+This real-model/UI check remains owner-operated; isolated regressions supplement it.
 
 Schema 32 links agents to ordinary Projects. The composer offers
 an optional Project, and Project home lists its saved agents plus an explicit

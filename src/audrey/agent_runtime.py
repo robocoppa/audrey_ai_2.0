@@ -177,8 +177,8 @@ class AgentRuntime:
             except TimeoutError:
                 raise _RejectedStepError("Agent step exceeded its time limit.") from None
             if isinstance(result, AgentInputRequest):
-                if step_id != "plan":
-                    raise _RejectedStepError("Only planning can request user input.")
+                if step_id not in {"plan", "research"}:
+                    raise _RejectedStepError("Only Plan and Work can request user input.")
                 await self.repository.request_input(**lease, step_id=step_id, question=result.question)
                 return
             if not isinstance(result, str) or not result.strip():

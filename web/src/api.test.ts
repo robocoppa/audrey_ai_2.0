@@ -305,6 +305,36 @@ describe("saved agent task requests", () => {
 
   const output = { file_id: "file_owned-1", filename: "task-checklist.md", download_url: "/api/files/file_owned-1/download", created_at: "2026-11-02T10:00:00Z" };
   const input = { file_id: "file-input", filename: "instructions.txt", artifact: "text", chars: 100, total_chars: 200, truncated: true, origin: "upload" };
+  const question = { id: "question-work", step_id: "research", question: "Which delivery day?", answer: null, created_at: "2026-11-13T15:00:00Z", answered_at: null };
+
+  it("reads Work questions and Planning answers across task responses without extra provider metadata", async () => {
+    const planningAnswer = { ...question, id: "question-plan", step_id: "plan", question: "Which garden?", answer: "Fern Circle", answered_at: "2026-11-13T15:00:10Z" };
+    const input_requests = [planningAnswer, question];
+    const value = { id: "agent-owned", input_requests: input_requests.map((item) => ({ ...item, provider_debug: "discard" })) };
+    const fetchMock = vi.fn().mockImplementation(async (path: string) => jsonResponse(path === "/api/agents" ? { items: [value] } : value));
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await listAgentTasks()).items[0].input_requests).toEqual(input_requests);
+    expect((await getAgentTask(value.id)).input_requests).toEqual(input_requests);
+    expect((await actOnAgentTask(value.id, "resume", 3)).input_requests).toEqual(input_requests);
+    expect((await answerAgentInput(value.id, question.id, 3, "Wednesday")).input_requests).toEqual(input_requests);
+    expect((await getActivityAgentTask("notice")).input_requests).toEqual(input_requests);
+    fetchMock.mockResolvedValueOnce(jsonResponse(value));
+    expect((await createAgentTask("Prepare the checklist", "new-task")).input_requests).toEqual(input_requests);
+  });
+
+  it.each([
+    [{ ...question, step_id: "review" }],
+    [{ ...question, question: "🙂".repeat(501) }],
+    [{ ...question, answer: "🙂".repeat(2001), answered_at: question.created_at }],
+    [{ ...question, answer: "Wednesday", answered_at: null }],
+    [{ ...question, answered_at: question.created_at }],
+    [{ ...question, created_at: "invalid" }],
+    [question, question],
+    Array.from({ length: 4 }, (_, index) => ({ ...question, id: `question-${index}` })),
+  ])("rejects unsupported, malformed or oversized agent questions %#", async (...input_requests) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ input_requests })));
+    await expect(getAgentTask("owned")).rejects.toThrow("The saved agent questions could not be read.");
+  });
 
   it("retains bounded input metadata and drops unexpected source bodies on every task read", async () => {
     const value = { id: "agent-owned", file_inputs: { current: false, files: [{ ...input, body: "Not response metadata" }] } };

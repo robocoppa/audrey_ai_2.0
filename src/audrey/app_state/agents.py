@@ -1024,16 +1024,16 @@ class AgentsRepository:
         self, *, task_id: str, lease_token: str, fence: int, question: str, step_id: str = "plan",
     ) -> dict:
         question = _text(question, maximum=2000, name="agent question")
-        if step_id != "plan":
-            raise AgentTaskError("Agent clarification is supported during Plan only.")
+        if step_id not in {"plan", "research"}:
+            raise AgentTaskError("Agent clarification is supported during Plan and Work only.")
 
         def work() -> dict:
             record = self._lease(task_id, lease_token, fence)
             self._context(record)
             self._account(record)
             self._budget(record)
-            if self._internal(record)["current_step"] != "plan":
-                raise AgentTaskConflictError("The agent has already completed its Plan.")
+            if self._internal(record)["current_step"] != step_id:
+                raise AgentTaskConflictError("The agent's question stage has changed.")
             count = self._conn.execute(
                 "SELECT COUNT(*) FROM app_agent_input_requests WHERE task_id=?", (task_id,),
             ).fetchone()[0]
@@ -1044,16 +1044,16 @@ class AgentsRepository:
             # consumes its existing reservation and never resets cumulative use.
             self._conn.execute(
                 "UPDATE app_agent_operations SET status='committed',committed_at=? "
-                "WHERE task_id=? AND fence=? AND step_id='plan' AND status='reserved'",
-                (now, task_id, fence),
+                "WHERE task_id=? AND fence=? AND step_id=? AND status='reserved'",
+                (now, task_id, fence, step_id),
             )
             record.update(status="paused", error="", fence=record["fence"] + 1)
             self._clear_lease(record)
             self._save(record)
             self._conn.execute(
                 "INSERT INTO app_agent_input_requests (request_id,user_id,task_id,task_revision,"
-                "sequence_no,step_id,question,created_at,notice_title) VALUES (?,?,?,?,?,'plan',?,?,?)",
-                (request_id, record["user_id"], task_id, record["revision"], count + 1, question, now,
+                "sequence_no,step_id,question,created_at,notice_title) VALUES (?,?,?,?,?,?,?,?,?)",
+                (request_id, record["user_id"], task_id, record["revision"], count + 1, step_id, question, now,
                  _agent_notice_title(record)),
             )
             return self._public(self._load(task_id, record["user_id"]))

@@ -1,4 +1,4 @@
-"""Planning clarification releases compute and resumes the same fenced task."""
+"""Plan and Work clarification release compute and resume the same fenced task."""
 
 from __future__ import annotations
 
@@ -48,11 +48,14 @@ async def _create(state, **changes):
     return await state.store.agents.create(**values)
 
 
-async def _waiting(state, question="Which date range should I cover?", **changes):
+async def _waiting(state, question="Which date range should I cover?", step_id="plan", **changes):
     await _create(state, **changes)
     task = await state.store.agents.claim()
-    await state.store.agents.reserve_operation(**_lease(task), step_id="plan")
-    return await state.store.agents.request_input(**_lease(task), question=question), task
+    if step_id == "research":
+        await state.store.agents.reserve_operation(**_lease(task), step_id="plan")
+        task = await state.store.agents.checkpoint(**_lease(task), step_id="plan", result="Saved plan.")
+    await state.store.agents.reserve_operation(**_lease(task), step_id=step_id)
+    return await state.store.agents.request_input(**_lease(task), step_id=step_id, question=question), task
 
 
 async def _answer(state, task, **changes):
@@ -106,8 +109,75 @@ async def test_question_and_waiting_state_survive_restart_and_answer_resumes_sam
         second.close()
 
 
-async def test_question_activity_has_fixed_body_current_revision_and_idempotent_read(state):
-    waiting, _ = await _waiting(state, question="Private question body never belongs in the notice.")
+async def test_work_question_preserves_plan_and_charges_and_revokes_late_worker(state):
+    waiting, task = await _waiting(state, step_id="research", question="Which garden name should I use?")
+    saved_plan = waiting["steps"][0]
+    assert saved_plan["status"] == "completed" and saved_plan["result"] == "Saved plan."
+    assert [step["status"] for step in waiting["steps"]] == ["completed", "pending", "pending"]
+    assert waiting["input_requests"][0]["step_id"] == "research"
+    assert waiting["status"] == "waiting_for_input"
+    row = state.store._conn.execute("SELECT * FROM app_agent_tasks").fetchone()
+    assert row["lease_token"] == "" and row["accounted_at"] is None and row["operations"] == 2
+    assert {row[0] for row in state.store._conn.execute("SELECT status FROM app_agent_operations")} == {"committed"}
+    for callback in (
+        state.store.agents.checkpoint(**_lease(task), step_id="research", result="A late result."),
+        state.store.agents.reserve_operation(**_lease(task), step_id="research"),
+        state.store.agents.fail(**_lease(task), error="A late failure."),
+    ):
+        with pytest.raises(AgentTaskConflictError):
+            await callback
+    state.clock.advance(86400)
+    assert await state.store.agents.claim() is None
+    second = ApplicationStore(state.store.path)
+    second.agents._clock = state.clock
+    try:
+        assert await second.agents.get(user_id=state.owner.user_id, task_id=waiting["id"]) == waiting
+        pending = waiting["input_requests"][0]
+        await second.agents.answer_input(user_id=state.owner.user_id, task_id=waiting["id"],
+            request_id=pending["id"], expected_revision=waiting["revision"], answer="Fern Circle")
+        resumed = await second.agents.claim()
+        assert resumed["id"] == task["id"] and resumed["steps"][0] == saved_plan
+        assert resumed["current_step"] == "research" and resumed["attempts"] == 2
+        assert resumed["operations"] == 2 and resumed["active_seconds"] == 0
+    finally:
+        second.close()
+
+
+async def test_plan_and_work_questions_share_one_lifetime_limit(state):
+    waiting, _ = await _waiting(state)
+    await _answer(state, waiting)
+    task = await state.store.agents.claim()
+    await state.store.agents.reserve_operation(**_lease(task), step_id="plan")
+    task = await state.store.agents.checkpoint(**_lease(task), step_id="plan", result="Saved plan.")
+    for number in (2, 3):
+        await state.store.agents.reserve_operation(**_lease(task), step_id="research")
+        waiting = await state.store.agents.request_input(**_lease(task), step_id="research", question=f"Work choice {number}?")
+        await _answer(state, waiting)
+        task = await state.store.agents.claim()
+    assert [item["step_id"] for item in task["input_requests"]] == ["plan", "research", "research"]
+    with pytest.raises(AgentTaskError, match="clarification allowance"):
+        await state.store.agents.request_input(**_lease(task), step_id="research", question="A fourth choice?")
+    assert state.store._conn.execute("SELECT COUNT(*) FROM app_agent_input_requests").fetchone()[0] == 3
+
+
+async def test_only_the_live_plan_or_work_stage_may_request_input(state):
+    await _create(state)
+    task = await state.store.agents.claim()
+    with pytest.raises(AgentTaskConflictError, match="stage"):
+        await state.store.agents.request_input(**_lease(task), step_id="research", question="Premature Work question?")
+    for stage in ("plan", "research"):
+        await state.store.agents.reserve_operation(**_lease(task), step_id=stage)
+        task = await state.store.agents.checkpoint(**_lease(task), step_id=stage, result=f"Saved {stage}.")
+    with pytest.raises(AgentTaskConflictError, match="stage"):
+        await state.store.agents.request_input(**_lease(task), step_id="research", question="A stale Work question?")
+    with pytest.raises(AgentTaskError, match="Plan and Work"):
+        await state.store.agents.request_input(**_lease(task), step_id="review", question="An unsupported Review question?")
+    assert not task["input_requests"]
+
+
+@pytest.mark.parametrize("step_id", ["plan", "research"])
+async def test_question_activity_has_fixed_body_current_revision_and_idempotent_read(state, step_id):
+    waiting, _ = await _waiting(state, step_id=step_id, question="Private question body never belongs in the notice.")
     feed = await state.store.notifications.feed(user_id=state.owner.user_id)
     assert feed["unread_count"] == 1 and len(feed["items"]) == 1
     notice = feed["items"][0]
@@ -126,16 +196,18 @@ async def test_question_activity_has_fixed_body_current_revision_and_idempotent_
         state.store.notifications.fence_response(user_id=state.owner.user_id, notices=[notice])
 
 
-async def test_summary_reports_waiting_without_copying_question_or_answer_bodies(state):
-    waiting, _ = await _waiting(state, question="Unique clarification body.")
+@pytest.mark.parametrize("step_id", ["plan", "research"])
+async def test_summary_reports_waiting_without_copying_question_or_answer_bodies(state, step_id):
+    waiting, _ = await _waiting(state, step_id=step_id, question="Unique clarification body.")
     summary = (await state.store.agents.list(user_id=state.owner.user_id, summary=True))[0]
     assert summary["status"] == "waiting_for_input" and summary["input_requests"] == []
     assert "Unique clarification" not in repr(summary)
     state.store.agents.fence_response(user_id=state.owner.user_id, tasks=[waiting, summary])
 
 
-async def test_answer_retry_is_idempotent_until_new_work_and_never_queues_twice(state):
-    waiting, _ = await _waiting(state)
+@pytest.mark.parametrize("step_id", ["plan", "research"])
+async def test_answer_retry_is_idempotent_until_new_work_and_never_queues_twice(state, step_id):
+    waiting, _ = await _waiting(state, step_id=step_id)
     first, second = await asyncio.gather(_answer(state, waiting), _answer(state, waiting))
     assert first == second and first["revision"] == waiting["revision"] + 1
     assert state.store._conn.execute("SELECT COUNT(*) FROM app_agent_input_requests").fetchone()[0] == 1
@@ -148,8 +220,9 @@ async def test_answer_retry_is_idempotent_until_new_work_and_never_queues_twice(
 
 
 @pytest.mark.parametrize("change", ["revision", "request", "owner", "cancel"])
-async def test_stale_foreign_and_cancelled_answers_cannot_resume_work(state, change):
-    waiting, _ = await _waiting(state)
+@pytest.mark.parametrize("step_id", ["plan", "research"])
+async def test_stale_foreign_and_cancelled_answers_cannot_resume_work(state, change, step_id):
+    waiting, _ = await _waiting(state, step_id=step_id)
     if change == "cancel":
         await state.store.agents.control(user_id=state.owner.user_id, task_id=waiting["id"],
                                          expected_revision=waiting["revision"], action="cancel")
@@ -160,14 +233,15 @@ async def test_stale_foreign_and_cancelled_answers_cannot_resume_work(state, cha
     assert state.store._conn.execute("SELECT answer FROM app_agent_input_requests").fetchone()[0] is None
 
 
-async def test_resume_cannot_skip_question_cancel_is_allowed_and_rerun_dismisses_only_unanswered(state):
-    waiting, _ = await _waiting(state)
+@pytest.mark.parametrize("step_id", ["plan", "research"])
+async def test_resume_cannot_skip_question_cancel_is_allowed_and_rerun_dismisses_only_unanswered(state, step_id):
+    waiting, _ = await _waiting(state, step_id=step_id)
     with pytest.raises(AgentTaskConflictError, match="Answer"):
         await state.store.agents.control(user_id=state.owner.user_id, task_id=waiting["id"],
                                          expected_revision=waiting["revision"], action="resume")
     queued = await _answer(state, waiting)
     task = await state.store.agents.claim()
-    waiting = await state.store.agents.request_input(**_lease(task), question="Which region?")
+    waiting = await state.store.agents.request_input(**_lease(task), step_id=step_id, question="Which region?")
     cancelled = await state.store.agents.control(user_id=state.owner.user_id, task_id=task["id"],
                                                 expected_revision=waiting["revision"], action="cancel")
     assert cancelled["status"] == "cancelled" and len(cancelled["input_requests"]) == 2
@@ -192,7 +266,7 @@ async def test_answered_clarifications_survive_saved_plan_and_completed_task_rer
     assert rerun["input_requests"] == answered["input_requests"]
     task = await state.store.agents.claim()
     assert task["current_step"] == "research" and task["input_requests"] == answered["input_requests"]
-    with pytest.raises(AgentTaskConflictError, match="Plan"):
+    with pytest.raises(AgentTaskConflictError, match="stage"):
         await state.store.agents.request_input(**_lease(task), question="Too late to ask?")
 
 
@@ -253,8 +327,9 @@ async def test_answer_capacity_excludes_its_already_counted_waiting_task(state):
     assert queued["status"] == "queued"
 
 
-async def test_current_reduced_capacity_rejects_answer_without_losing_pending_question(state):
-    waiting, _ = await _waiting(state)
+@pytest.mark.parametrize("step_id", ["plan", "research"])
+async def test_current_reduced_capacity_rejects_answer_without_losing_pending_question(state, step_id):
+    waiting, _ = await _waiting(state, step_id=step_id)
     await _create(state, request_id="second-task")
     with pytest.raises(AgentTaskError, match="capacity"):
         await _answer(state, waiting, admission_limits={"max_queued_per_user": 1})
@@ -262,8 +337,9 @@ async def test_current_reduced_capacity_rejects_answer_without_losing_pending_qu
 
 
 @pytest.mark.parametrize("limit", ["attempts", "operations", "active_seconds"])
-async def test_answer_cannot_reset_or_escape_cumulative_execution_limits(state, limit):
-    waiting, _ = await _waiting(state)
+@pytest.mark.parametrize("step_id", ["plan", "research"])
+async def test_answer_cannot_reset_or_escape_cumulative_execution_limits(state, limit, step_id):
+    waiting, _ = await _waiting(state, step_id=step_id)
     with state.store._lock, state.store._conn:
         sql = {
             "attempts": "UPDATE app_agent_tasks SET attempts=6",
@@ -277,12 +353,16 @@ async def test_answer_cannot_reset_or_escape_cumulative_execution_limits(state, 
 
 
 @pytest.mark.parametrize("operation", ["question", "answer"])
-async def test_question_or_answer_and_task_transition_roll_back_together(state, operation):
+@pytest.mark.parametrize("step_id", ["plan", "research"])
+async def test_question_or_answer_and_task_transition_roll_back_together(state, operation, step_id):
     if operation == "question":
         await _create(state)
         task = await state.store.agents.claim()
+        if step_id == "research":
+            await state.store.agents.reserve_operation(**_lease(task), step_id="plan")
+            task = await state.store.agents.checkpoint(**_lease(task), step_id="plan", result="Saved plan.")
     else:
-        task, _ = await _waiting(state)
+        task, _ = await _waiting(state, step_id=step_id)
     before = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
     with state.store._lock, state.store._conn:
         state.store._conn.execute(
@@ -293,15 +373,16 @@ async def test_question_or_answer_and_task_transition_roll_back_together(state, 
         )
     with pytest.raises(sqlite3.IntegrityError):
         if operation == "question":
-            await state.store.agents.request_input(**_lease(task), question="Which period?")
+            await state.store.agents.request_input(**_lease(task), step_id=step_id, question="Which period?")
         else:
             await _answer(state, task)
     assert await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"]) == before
     assert not state.store._conn.in_transaction
 
 
-async def test_task_response_fence_rejects_answered_or_deleted_question_bodies(state):
-    waiting, _ = await _waiting(state)
+@pytest.mark.parametrize("step_id", ["plan", "research"])
+async def test_task_response_fence_rejects_answered_or_deleted_question_bodies(state, step_id):
+    waiting, _ = await _waiting(state, step_id=step_id)
     await _answer(state, waiting)
     with pytest.raises(AgentTaskConflictError):
         state.store.agents.fence_response(user_id=state.owner.user_id, tasks=[waiting])
@@ -318,10 +399,10 @@ async def test_additive_migration_preserves_existing_tasks_notices_and_no_input_
     failed = await state.store.agents.fail(**_lease(task), error="A saved failure.")
     with state.store._lock, state.store._conn:
         state.store._conn.execute("DROP TABLE app_agent_input_requests")
-        state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=31")
+        state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version IN (31,41)")
     second = ApplicationStore(state.store.path)
     try:
-        assert second.schema_version == 40
+        assert second.schema_version == 41
         assert await second.agents.get(user_id=state.owner.user_id, task_id=task["id"]) == failed
         assert (await second.notifications.feed(user_id=state.owner.user_id))["unread_count"] == 1
         assert second._conn.execute("SELECT COUNT(*) FROM app_agent_input_requests").fetchone()[0] == 0

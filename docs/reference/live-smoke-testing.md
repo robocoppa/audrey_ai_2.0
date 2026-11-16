@@ -63,8 +63,8 @@ Never print credentials, commit them, or paste them into chat.
 For user-facing capabilities, hand off an owner-operated interactive test in the
 real browser with exact actions, prompts and visible pass criteria. Exercise the
 running worker and local model, inspect actual content and open real downloads.
-The [last ten workspace changes](../plans/agent-interactive-acceptance-plan.md)
-have a prepared interactive acceptance plan and known-answer input files.
+Reusable [Agent workspace inputs](../../tests/manual/agent-workspace/README.md)
+provide fictional source files with known answers for relevant manual checks.
 Scripted/isolated smokes below are supplemental regression tools and do not
 close live feature acceptance.
 
