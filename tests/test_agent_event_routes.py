@@ -102,6 +102,20 @@ async def test_calculate_event_api_keeps_only_owned_metadata(state, stage):
     assert (await state.client.get(url)).status_code == 404
 
 
+async def test_progress_event_api_excludes_the_saved_note_body(state):
+    lease, _seq = await started(state)
+    await state.store.agents.checkpoint(**lease, step_id="plan", result="Prepare a draft.")
+    await state.store.agents.save_work_progress(**lease, note="A saved working draft body marker.")
+    seq = await state.store.agents.start_event(**lease, stage="research", kind="tool", tool="save_progress")
+    await state.store.agents.finish_event(**lease, seq=seq, duration_ms=2)
+    response = await state.client.get(f"/api/agents/{state.task['id']}/events")
+    assert response.status_code == 200, response.text
+    assert "working draft body marker" not in response.text
+    event = response.json()["items"][0]
+    assert event["tool"] == "save_progress" and event["stage"] == "research" and event["state"] == "completed"
+    assert not {"note", "saved_at", "progress", "arguments", "result", "text"} & event.keys()
+
+
 async def test_late_event_completion_invalidates_a_captured_response(state, monkeypatch):
     lease, seq = await started(state)
     original = state.store.agents.events

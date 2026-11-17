@@ -81,6 +81,17 @@ describe("Agent activity metadata", () => {
     })));
     await expect(listAgentEvents("owned")).rejects.toThrow("This agent’s activity could not be read.");
   });
+  it.each(["completed", "failed"])("reads Save progress %s activity without retaining its note or receipt", async (state) => {
+    const progress = { ...event, state, kind: "tool", tool: "save_progress", input_tokens: null, output_tokens: null };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ items: [{ ...progress,
+      note: "A model-generated working draft", saved_at: "2026-11-16T20:01:00+00:00", arguments: { note: "A model-generated working draft" } }], has_more: false, truncated: false })));
+    expect(await listAgentEvents("owned")).toEqual({ items: [progress], has_more: false, truncated: false });
+  });
+  it.each(["plan", "review", "title"])("rejects Save progress activity in %s", async (stage) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ items: [{ ...event,
+      stage, kind: "tool", tool: "save_progress", input_tokens: null, output_tokens: null }], has_more: false, truncated: false })));
+    await expect(listAgentEvents("owned")).rejects.toThrow("This agent’s activity could not be read.");
+  });
   it.each([
     { seq: 0 }, { seq: 1.2 }, { attempt: 0 }, { stage: "prompt body" }, { kind: "reasoning" }, { state: "success" },
     { tool: "web_search" }, { kind: "tool", tool: null }, { kind: "tool", tool: "execute_code" },
@@ -322,6 +333,45 @@ describe("saved agent task requests", () => {
   const output = { file_id: "file_owned-1", filename: "task-checklist.md", download_url: "/api/files/file_owned-1/download", created_at: "2026-11-02T10:00:00Z" };
   const input = { file_id: "file-input", filename: "instructions.txt", artifact: "text", chars: 100, total_chars: 200, truncated: true, origin: "upload" };
   const question = { id: "question-work", step_id: "research", question: "Which delivery day?", answer: null, created_at: "2026-11-13T15:00:00Z", answered_at: null };
+  const progress = { note: "**Supply count:** six rows.", saved_at: "2026-11-16T20:01:00.123456+00:00" };
+  const work = { id: "research", label: "Work", status: "pending", result: "" };
+
+  it("reads saved Work progress on full task responses while leaving summaries and old payloads note-free", async () => {
+    const full = { id: "agent-owned", steps: [{ ...work, progress }] };
+    const summary = { id: full.id, summary: true, steps: [work] };
+    const fetchMock = vi.fn().mockImplementation(async (path: string, init: RequestInit) => jsonResponse(path === "/api/agents" && init.method !== "POST" ? { items: [summary] } : full));
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await listAgentTasks()).items[0].steps[0]).not.toHaveProperty("progress");
+    expect((await getAgentTask(full.id)).steps[0].progress).toEqual(progress);
+    expect((await actOnAgentTask(full.id, "pause", 3)).steps[0].progress).toEqual(progress);
+    expect((await answerAgentInput(full.id, question.id, 3, "Wednesday")).steps[0].progress).toEqual(progress);
+    expect((await getActivityAgentTask("notice")).steps[0].progress).toEqual(progress);
+    expect((await createAgentTask("Prepare the checklist", "new-task")).steps[0].progress).toEqual(progress);
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: "legacy", steps: [work] }));
+    expect((await getAgentTask("legacy")).steps[0]).not.toHaveProperty("progress");
+  });
+
+  it.each(["2026-11-16T20:01:00Z", "2026-11-16T20:01:00.123+00:00"])("accepts exactly 4,000 UTF-8 bytes and a UTC saved timestamp %s", async (saved_at) => {
+    const bounded = { note: "🙂".repeat(1000), saved_at };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ steps: [{ ...work, progress: bounded }] })));
+    expect((await getAgentTask("owned")).steps[0].progress).toEqual(bounded);
+  });
+
+  it.each([
+    { id: "plan", progress }, { id: "review", progress },
+    { progress: null }, { progress: {} }, { progress: { ...progress, extra: "unexpected" } },
+    { progress: { ...progress, note: " " } }, { progress: { ...progress, note: "🙂".repeat(1001) } },
+    { progress: { ...progress, note: 3 } }, { progress: { note: progress.note } },
+    ...["invalid", "2026-11-16", "2026-11-16T20:01:00", "2026-11-16T20:01:00+01:00", "2026-02-30T20:01:00Z", "2026-11-16T24:00:00Z", "0000-01-01T00:00:00Z"].map((saved_at) => ({ progress: { ...progress, saved_at } })),
+  ])("rejects unsupported or malformed saved Work progress %#", async (patch) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ steps: [{ ...work, ...patch }] })));
+    await expect(getAgentTask("owned")).rejects.toThrow("The saved Work progress could not be read.");
+  });
+
+  it("rejects a summary that includes a working-draft body", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ items: [{ summary: true, steps: [{ ...work, progress }] }] })));
+    await expect(listAgentTasks()).rejects.toThrow("The saved Work progress could not be read.");
+  });
 
   it("reads Work questions and Planning answers across task responses without extra provider metadata", async () => {
     const planningAnswer = { ...question, id: "question-plan", step_id: "plan", question: "Which garden?", answer: "Fern Circle", answered_at: "2026-11-13T15:00:10Z" };

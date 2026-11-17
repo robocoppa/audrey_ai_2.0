@@ -16,9 +16,9 @@ America/Denver. Recorded receipts also cover title generation, saved Knowledge
 answers and input-change blocks, public-page baseline creation and an unchanged
 manual check that stayed paused. Earlier per-slice verification limits below
 remain historical evidence; unrecorded scenarios are not newly asserted passes.
-Work questions now pass the owner's live continuation check. The current slice
-adds the existing local calculator to Work and Review, so general tasks can check
-totals, percentages, conversions and simple equations using deterministic results.
+Work questions and the local calculator now pass the owner's live checks. The
+current slice adds a saved Work draft, so an Agent can retain useful intermediate
+work when it pauses or asks a question.
 
 ## Current implementation slice
 
@@ -419,7 +419,7 @@ zero as a failed tool call, operation exhaustion and source/model/lease changes.
 Native binding, executor, shared chat/Private dispatch, metadata/migration and
 frontend checks pass, including preserved source-change diagnostics. Type
 checking, lint and the UI production build pass. Model replies are scripted in
-these regressions; the real-Qwen interactive check below remains pending.
+these regressions; live arithmetic/file/activity evidence is recorded below.
 
 #### Calculator interactive check
 
@@ -440,8 +440,93 @@ remaining. Division by zero is reported as undefined/an error, never zero or a
 fabricated successful value. Recent activity has completed Calculate entries in
 Work and Review, plus an expected failed Calculate entry for the requested 1/0.
 Check older activity through Show more if needed. Reopen the Agent and download
-the same saved file again. The real local-model/UI/download check remains pending;
-isolated integration checks are supplemental evidence.
+the same saved file again. Isolated integration checks are supplemental evidence.
+
+The November 16 owner-provided reports match all six line-item products, the
+260.30 total and 212.05 remainder. They report the expected `invalid_calculation`
+error for 1/0 with no numeric value, and link the same calculator-check.md output.
+The arithmetic/error portion passes. The actual 1,234-byte downloaded
+`/home/bart/Downloads/calculator-check.md` was then inspected directly; all six
+line-item products, total, remainder and nonnumeric 1/0 error match the test.
+The owner then supplied actual activity for attempt 1 at 14:28 America/Denver:
+ten completed Work calculations, two completed Review calculations, one failed
+Work calculation consistent with the requested 1/0 test, and successful file
+creation. The live arithmetic/error/file/activity check passes. The receipt is
+separate from the model's independent-check claims. A second download after
+reopening and live conversion/equation cases were not separately reported;
+restart/persistence and conversion/equation coverage remain local-test evidence.
+
+### Saved Work progress
+
+Work can call the native `save_progress` tool to replace one concise working
+draft, up to 4,000 UTF-8 bytes. The server supplies its timestamp. Saving does
+not complete Work. The latest note appears in a compact Saved progress disclosure
+within the Work row, including while the Agent waits for an answer. It is generated
+working data, separate from Project knowledge, source evidence and the final result.
+
+The note survives questions, pause, restart and rerunning unfinished work. Running
+a completed task again clears it while retaining the Plan. Work receives the note
+on continuation only after the saved input and Project context pass their current
+checks; current instructions and answers take precedence. Old tool transcripts
+are not restored. A note cannot verify a fresh source read or calculation.
+
+Every save uses existing operation, time, owner, source, lease and verified local
+model checks. The final publication check runs inside the storage transaction,
+including retries of an identical note. Identical text retains its original
+timestamp; changed text replaces the note and advances the task revision. Native
+bindings expire with the attempt, without an HTTP or Private fallback. Plan and
+Review cannot save progress. Schema 43 preserves existing events and permits
+metadata-only Save progress activity during Work.
+
+Task summaries, Search and Project knowledge exclude the draft. It has the same
+owner-readable retention as saved Plan/work output; changed sources block further
+execution rather than turning the note into another source reader. Task/account
+deletion removes it with the task. This does not add general memory or arbitrary
+within-stage execution replay.
+
+Local checks pass for persistence, questions/answers, restart, reruns, atomic
+publication fences, bounded notes, metadata-only events and schema-42 upgrade
+rollback. A real runtime/dispatcher regression saves a generated label, waits,
+reopens storage, resumes Work with the note and server timestamp, and creates an
+owned downloadable invitation without restoring the old tool transcript or
+rerunning Plan. Model replies in that regression are scripted. Canonical-source
+checks exclude the draft from Search and report-backed Knowledge. The full
+existing executor suite, calculator/Private dispatch regressions, frontend tests,
+type checking, changed-file lint and production build pass. Browser fixtures at
+320, 390 and 1,366 pixels retain compact independently scrolling panels without
+horizontal overflow. These checks supplement the owner-operated test below.
+
+#### Saved-progress interactive check
+
+On Tower, sync and rebuild `audrey` and `audrey-ui` from
+`/mnt/user/appdata/audrey_ai_2.0` using
+`docker compose up -d --build audrey audrey-ui`. Schema 43 applies automatically;
+no configuration change or upload is needed. In the browser, start a fresh Agent
+without a Project or input files:
+
+> Prepare a short event invitation. Plan only the steps. During Work, invent a
+> short event label and save it in your progress. Then ask whether the tone should
+> be formal or casual without revealing the label in the question. Wait for my
+> answer. After I answer, reuse the exact saved label and the server's saved-progress
+> timestamp in invitation.md, and use my chosen tone. Do not overwrite the saved
+> progress after my answer. Do not browse.
+
+Before answering, check that Plan is completed, Work is waiting, Saved progress
+contains the generated label and timestamp, and Recent activity has a completed
+Save progress entry in Work. Record those two values; hovering the displayed
+time shows the exact server timestamp. While it waits, run on Tower from the same
+checkout:
+
+```bash
+docker compose restart audrey
+```
+
+Reload and reopen the same Agent. The note and question must remain. Answer
+`Casual`, then open the downloaded invitation.md. It must reuse the exact saved
+label and timestamp, use a casual tone and belong to the same Agent with the same
+completed Plan. A question asked by Plan does not exercise this Work path. Live
+local-model and actual service-restart acceptance remain pending until the owner
+performs this check; storage-reopen regressions are separate evidence.
 
 ### Project-linked Agents
 
@@ -1013,7 +1098,7 @@ decision; then schedule a weekly check of a selected public release page.
 
 | Area | Already present | Work required |
 | --- | --- | --- |
-| Native runs | Saved agent objectives, three-stage plans/checkpoints, recent activity, Plan/Work questions, native local calculations, owned downloadable files, leases and restart dispatch | Adaptive steps and finer-grained within-step recovery |
+| Native runs | Saved agent objectives, three-stage plans/checkpoints, recent activity, Plan/Work questions, native local calculations, a saved Work draft, owned downloadable files, leases and restart dispatch | Adaptive steps and execution replay within a step |
 | Resource admission | Interactive preference, aged background fairness, cooperative queued handoffs and generation-boundary release | Live concurrent-chat/model acceptance and broader checkpoint-age monitoring |
 | Private tasks | Leases, revisions, source/model pins, budgets and committed-result delivery for Private tax reviews | General agent contracts and adapters; existing Private recovery currently pauses work |
 | Search | Local lexical API/sidebar, canonical reader and workspace links, exact message focus, bounded projection, approved notes and Project report filters | Semantic candidates and expanded native previews for retained text |

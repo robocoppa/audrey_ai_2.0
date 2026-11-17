@@ -73,7 +73,11 @@ function mergeTasks(current: AgentTask[], incoming: AgentTask[], deleted: Readon
         outputs: task.outputs ?? saved.outputs,
         file_inputs: task.file_inputs ?? saved.file_inputs,
         input_requests: task.revision === saved.revision ? saved.input_requests : task.input_requests,
-        steps: task.steps.map((step) => ({ ...step, result: saved.steps.find(({ id }) => id === step.id)?.result ?? "" })),
+        steps: task.steps.map((step) => {
+          const previous = saved.steps.find(({ id }) => id === step.id);
+          return { ...step, result: previous?.result ?? "",
+            ...(task.revision === saved.revision && previous?.progress ? { progress: previous.progress } : {}) };
+        }),
         summary: task.revision === saved.revision ? saved.summary : true,
       });
     } else tasks.set(task.id, task);
@@ -917,7 +921,7 @@ function AgentTasksWorkspace({
                     <header className="agents-panel-header"><h3 id="agent-plan-title">Plan and progress</h3></header>
                     <div className="agents-plan-scroll" role="region" aria-label="Saved plan and progress" tabIndex={0}>
                       <ol className="agents-step-list">
-                        {selected.steps.map((step) => <AgentStepProgress key={step.id} step={step} />)}
+                        {selected.steps.map((step) => <AgentStepProgress key={step.id} step={step} timestamp={timestamp} />)}
                       </ol>
                     </div>
                   </section>
@@ -958,16 +962,21 @@ function AgentTasksWorkspace({
   );
 }
 
-function AgentStepProgress({ step }: { step: AgentTask["steps"][number] }) {
+function AgentStepProgress({ step, timestamp }: { step: AgentTask["steps"][number]; timestamp: (value: string) => string }) {
   const label = stepLabel(step);
   const status = step.status === "completed" ? "Completed" : step.status === "running" ? "In progress" : "Pending";
   const saved = step.id === "plan" ? "plan" : step.id === "research" ? "work" : "review";
   const progress = <><span className="agents-step-mark" aria-hidden="true">{step.status === "completed" ? "✓" : step.status === "running" ? "●" : "○"}</span><strong>{label}</strong><span className="agents-step-status">{status}</span></>;
+  const workingDraft = step.id === "research" ? step.progress : undefined;
   return <li className={`agents-step agents-step-${step.status}`}>
     {step.result ? <details className="agents-step-details">
       <summary className="agents-step-summary" aria-label={`View saved ${saved}`} aria-description={`${label} · ${status}`}>{progress}<span className="agents-step-save-action">View</span></summary>
       <div className="agents-step-saved-text"><AgentMarkdown text={step.result} /></div>
     </details> : <div className="agents-step-summary">{progress}</div>}
+    {workingDraft ? <details className="agents-work-progress">
+      <summary aria-label="View saved Work progress"><span>Saved progress</span><time dateTime={workingDraft.saved_at} title={workingDraft.saved_at}>{timestamp(workingDraft.saved_at)}</time></summary>
+      <div className="agents-step-saved-text"><p className="agents-work-progress-caption">Unverified working draft</p><AgentMarkdown text={workingDraft.note} /></div>
+    </details> : null}
   </li>;
 }
 

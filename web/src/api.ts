@@ -568,6 +568,11 @@ export async function generateAgentKnowledgeDrafts(taskId: string, expectedRevis
     suggestions: result.suggestions.map(({ kind, text }) => ({ kind, text })) };
 }
 
+export interface AgentWorkProgress {
+  note: string;
+  saved_at: string;
+}
+
 export interface AgentTask {
   title?: string;
   summary?: boolean;
@@ -582,6 +587,7 @@ export interface AgentTask {
     label: string;
     status: "pending" | "running" | "completed";
     result: string;
+    progress?: AgentWorkProgress;
   }>;
   result: string;
   error: string;
@@ -598,7 +604,7 @@ export interface AgentEvent {
   stage: "plan" | "research" | "review" | "title";
   kind: "stage" | "model" | "tool";
   state: "started" | "completed" | "failed" | "interrupted";
-  tool: "web_search" | "web_fetch" | "create_file" | "read_selected_file" | "calculate" | null;
+  tool: "web_search" | "web_fetch" | "create_file" | "read_selected_file" | "calculate" | "save_progress" | null;
   created_at: string;
   finished_at: string | null;
   duration_ms: number | null;
@@ -626,8 +632,9 @@ export async function listAgentEvents(taskId: string, signal?: AbortSignal, befo
       || !["plan", "research", "review", "title"].includes(event.stage)
       || !["stage", "model", "tool"].includes(event.kind)
       || !["started", "completed", "failed", "interrupted"].includes(event.state)
-      || (event.kind === "tool" ? !["web_search", "web_fetch", "create_file", "read_selected_file", "calculate"].includes(event.tool ?? "") : event.tool !== null)
+      || (event.kind === "tool" ? !["web_search", "web_fetch", "create_file", "read_selected_file", "calculate", "save_progress"].includes(event.tool ?? "") : event.tool !== null)
       || (event.tool === "calculate" && !["research", "review"].includes(event.stage))
+      || (event.tool === "save_progress" && event.stage !== "research")
       || !date(event.created_at) || (event.finished_at !== null && !date(event.finished_at))
       || (event.state === "started" ? event.finished_at !== null : event.finished_at === null)
       || !count(event.duration_ms) || !count(event.input_tokens) || !count(event.output_tokens))) {
@@ -671,7 +678,25 @@ export function isAgentOutput(value: unknown): value is AgentOutput {
     && (output.current === undefined || output.current === null || typeof output.current === "boolean");
 }
 
+function utcProgressTime(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)$/u.test(value)) return false;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) && date.getUTCFullYear() >= 1 && date.toISOString().slice(0, 19) === value.slice(0, 19);
+}
+
 function readAgentTaskFiles(task: AgentTask): AgentTask {
+  if (Array.isArray(task?.steps)) {
+    task = { ...task, steps: task.steps.map((step) => {
+      if (step?.progress === undefined) return step;
+      const progress = step.progress;
+      if (task.summary === true || step.id !== "research" || !progress || typeof progress !== "object"
+        || Object.keys(progress).length !== 2 || typeof progress.note !== "string" || !progress.note.trim()
+        || new TextEncoder().encode(progress.note).byteLength > 4000 || !utcProgressTime(progress.saved_at)) {
+        throw new ApiError(502, "The saved Work progress could not be read. Refresh this agent.");
+      }
+      return { ...step, progress: { note: progress.note, saved_at: progress.saved_at } };
+    }) };
+  }
   if (task?.input_requests !== undefined) {
     const requests = task.input_requests;
     const bytes = (value: string) => new TextEncoder().encode(value).byteLength;

@@ -39,6 +39,7 @@ const knowledgeRequest = { project, entry: knowledgeEntry, serial: 1 };
 const savedOutput: api.AgentOutput = { file_id: "file_checklist", filename: "task-checklist.md", download_url: "/api/files/file_checklist/download", created_at: "2026-11-02T10:00:00Z" };
 const selectedProjectFile: api.AudreyProjectFile = { id: "file-input", filename: "project-instructions.txt", mime: "text/plain", kind: "text", bytes: 900, status: "ready", uploaded_at: project.created_at, added_at: project.created_at };
 const fileInputs: api.AgentFileInputs = { current: true, files: [{ file_id: selectedProjectFile.id, filename: selectedProjectFile.filename, artifact: "text", chars: 500, total_chars: 900, truncated: true, origin: "upload" }] };
+const workProgress: api.AgentWorkProgress = { note: "**Draft supply total:** USD 260.30.", saved_at: "2026-11-16T20:01:00.123456+00:00" };
 
 beforeEach(() => {
   vi.spyOn(api, "listProjects").mockResolvedValue({ items: [], next_cursor: null, limits: { max_name_chars: 100, max_instructions_chars: 4000, max_files: 20 } });
@@ -56,6 +57,73 @@ afterEach(() => {
 });
 
 describe("AgentsWorkspace", () => {
+  it.each(["paused", "waiting_for_input", "completed"] as const)("shows saved Work progress on a %s task without completing or replacing the Work result", async (status) => {
+    const note = `${workProgress.note}\n\n[Source](https://example.com/source)\n<script>alert('unsafe')</script>\n[unsafe](javascript:alert)\n![tracking](https://example.com/tracker.png)`;
+    const saved = task({ status, result: status === "completed" ? "Reviewed final result." : "",
+      steps: task().steps.map((step) => step.id === "research" ? { ...step,
+        status: status === "completed" ? "completed" : "pending", result: status === "completed" ? "Completed Work result." : "", progress: { ...workProgress, note } }
+        : status === "completed" ? { ...step, status: "completed" } : step),
+      input_requests: status === "waiting_for_input" ? [{ ...waitingTask().input_requests![0], step_id: "research" }] : [],
+    });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
+    vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    render(<AgentsWorkspace timezone="UTC" />);
+    const disclosure = await screen.findByLabelText("View saved Work progress");
+    expect(disclosure).toHaveTextContent("Saved progress");
+    expect(screen.getByTitle(workProgress.saved_at)).toHaveAttribute("datetime", workProgress.saved_at);
+    expect(screen.getByTitle(workProgress.saved_at)).toBeVisible();
+    expect(screen.getByText("Draft supply total:")).not.toBeVisible();
+    fireEvent.click(disclosure);
+    expect(screen.getByText("Unverified working draft")).toBeVisible();
+    expect(screen.getByText("Draft supply total:")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Source" })).toHaveAttribute("rel", "noopener noreferrer");
+    expect(document.querySelector("script")).toBeNull();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getByText("unsafe").closest("a")).toHaveAttribute("href", "");
+    const work = disclosure.closest("li");
+    expect(work).toHaveClass(status === "completed" ? "agents-step-completed" : "agents-step-pending");
+    if (status === "completed") {
+      fireEvent.click(screen.getByLabelText("View saved work"));
+      expect(screen.getByText("Completed Work result.")).toBeVisible();
+      expect(screen.getByText("Reviewed final result.")).toBeVisible();
+    } else expect(screen.queryByLabelText("View saved work")).not.toBeInTheDocument();
+  });
+
+  it("retains a full saved Work note through same-revision summaries without copying it into list state", async () => {
+    const saved = task({ status: "paused", steps: task().steps.map((step) => step.id === "research" ? { ...step, status: "pending", progress: workProgress } : step) });
+    const summary = { ...saved, summary: true, steps: saved.steps.map((step) => ({ id: step.id, label: step.label, status: step.status, result: "" })) };
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [summary] });
+    vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    render(<AgentsWorkspace />);
+    agentSection("Tasks");
+    fireEvent.click(await screen.findByLabelText("View saved Work progress"));
+    expect(screen.getByText("Draft supply total:")).toBeVisible();
+    vi.mocked(api.getAgentTask).mockImplementation(() => new Promise(() => {}));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh agent tasks" })).toBeEnabled());
+    expect(screen.getByText("Draft supply total:")).toBeVisible();
+    expect(screen.getByTitle(workProgress.saved_at)).toBeVisible();
+    expect(screen.getAllByLabelText("View saved Work progress")).toHaveLength(1);
+  });
+
+  it("drops an old Work note when a newer rerun summary arrives before its full detail", async () => {
+    const saved = task({ status: "completed", steps: task().steps.map((step) => step.id === "research" ? { ...step, status: "completed", result: "Saved Work result.", progress: workProgress } : step) });
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
+    vi.mocked(api.getAgentTask).mockResolvedValue(saved);
+    render(<AgentsWorkspace />);
+    agentSection("Tasks");
+    fireEvent.click(await screen.findByLabelText("View saved Work progress"));
+    expect(screen.getByText("Draft supply total:")).toBeVisible();
+    const next = { ...saved, status: "queued" as const, revision: saved.revision + 1, summary: true,
+      steps: saved.steps.map((step) => ({ id: step.id, label: step.label, status: step.id === "plan" ? "completed" as const : "pending" as const, result: "" })),
+    };
+    vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [next] });
+    vi.mocked(api.getAgentTask).mockImplementation(() => new Promise(() => {}));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh agent tasks" }));
+    await waitFor(() => expect(screen.queryByLabelText("View saved Work progress")).not.toBeInTheDocument());
+    expect(screen.queryByText("Draft supply total:")).not.toBeInTheDocument();
+  });
+
   it("defaults to New and keeps the draft when switching to saved Tasks and back", async () => {
     const saved = task();
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });

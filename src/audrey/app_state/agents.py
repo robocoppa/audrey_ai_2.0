@@ -45,7 +45,7 @@ _EVENT_FIELDS = (
     "seq", "attempt", "stage", "kind", "state", "tool", "created_at", "finished_at",
     "duration_ms", "input_tokens", "output_tokens",
 )
-_EVENT_TOOLS = frozenset({"web_search", "web_fetch", "create_file", "read_selected_file", "calculate"})
+_EVENT_TOOLS = frozenset({"web_search", "web_fetch", "create_file", "read_selected_file", "calculate", "save_progress"})
 _REVIEW_EVENT_TOOLS = frozenset({"create_file", "read_selected_file", "calculate"})
 _PUBLIC_FIELDS = (
     "objective", "title", "status", "revision", "created_at", "updated_at", "result", "error", "attempts",
@@ -922,6 +922,37 @@ class AgentsRepository:
 
         return await asyncio.to_thread(self._transaction, work)
 
+    async def save_work_progress(
+        self, *, task_id: str, lease_token: str, fence: int, note: str,
+        scope_guard: Callable[[], None] | None = None,
+    ) -> dict:
+        """Replace one generated Work draft without completing or replaying work."""
+        note = _text(note, maximum=4000, name="Work progress")
+        if scope_guard is not None and not callable(scope_guard):
+            raise AgentTaskError("Invalid Work progress scope.")
+
+        def work() -> dict:
+            record = self._lease(task_id, lease_token, fence)
+            self._context(record)
+            self._account(record)
+            self._budget(record)
+            if self._internal(record)["current_step"] != "research":
+                raise AgentTaskConflictError("Only the active Work stage can save progress.")
+            step = next(item for item in record["steps"] if item["id"] == "research")
+            # The native binding can expire while this transaction waits for
+            # the write lock. Recheck it here, including identical-note retries.
+            if scope_guard is not None:
+                scope_guard()
+            previous = step.get("progress")
+            if previous is not None and previous["note"] == note:
+                return dict(previous)
+            progress = {"note": note, "saved_at": _stamp(self._clock())}
+            step["progress"] = progress
+            self._save(record)
+            return dict(progress)
+
+        return await asyncio.to_thread(self._transaction, work)
+
     async def checkpoint(
         self, *, task_id: str, lease_token: str, fence: int, step_id: str, result: str,
     ) -> dict:
@@ -1190,6 +1221,7 @@ class AgentsRepository:
                         if step["id"] != "plan":
                             step.update(status="pending", result="", output_ids=[])
                             step.pop("output_history_unknown", None)
+                            step.pop("progress", None)
                 record.update(result="", error="")
                 if not record["title"]:
                     record["title_attempted"] = 0

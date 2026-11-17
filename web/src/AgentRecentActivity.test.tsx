@@ -37,6 +37,18 @@ describe("AgentRecentActivity", () => {
     expect(screen.queryByText("472.35 - 260.30")).not.toBeInTheDocument();
     expect(screen.queryByText("212.05")).not.toBeInTheDocument();
   });
+  it.each([["completed", "Completed"], ["failed", "Failed"]] as const)("labels Save progress %s without displaying the draft body", async (state, label) => {
+    const progress = { ...event({ kind: "tool", tool: "save_progress", state, finished_at: "2026-11-03T14:00:01Z", duration_ms: 5 }),
+      note: "A model-generated working draft", saved_at: "2026-11-16T20:01:00+00:00" };
+    vi.spyOn(api, "listAgentEvents").mockResolvedValue(page([progress]));
+    render(<AgentRecentActivity task={{ ...task, status: "completed" }} visible timezone="UTC" />);
+    expect(await screen.findByText("Save progress")).toBeVisible();
+    expect(screen.getByText(label)).toBeVisible();
+    expect(screen.getByText(/Work · Attempt 1/)).toBeVisible();
+    expect(screen.getByText("5 ms")).toBeVisible();
+    expect(screen.queryByText(progress.note)).not.toBeInTheDocument();
+    expect(screen.queryByTitle(progress.saved_at)).not.toBeInTheDocument();
+  });
   it("shows honest local operation states and compact token/timing metadata", async () => {
     vi.spyOn(api, "listAgentEvents").mockResolvedValue(page([
       event({ seq: 4, kind: "tool", tool: "web_search", state: "interrupted", finished_at: "2026-11-03T14:00:02Z", duration_ms: 2000 }),

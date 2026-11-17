@@ -120,8 +120,9 @@ async def test_dispatch_one_happy_path():
 
 @pytest.mark.parametrize("registered", [False, True])
 @pytest.mark.parametrize("private", [False, True])
-async def test_selected_file_read_cannot_fallback_to_chat_private_or_forged_http(registered, private, caplog):
-    registry = _registry([_spec("read_selected_file")]) if registered else ToolRegistry()
+@pytest.mark.parametrize("name", ["read_selected_file", "save_progress"])
+async def test_agent_native_source_and_progress_cannot_fallback_to_chat_private_or_http(registered, private, caplog, name):
+    registry = _registry([_spec(name)]) if registered else ToolRegistry()
     requests = []
 
     def transport(request):
@@ -132,7 +133,7 @@ async def test_selected_file_read_cannot_fallback_to_chat_private_or_forged_http
     async with _client(transport) as client:
         with processing_scope(policy) if private else nullcontext():
             result = await dispatch_one(client, registry,
-                _call("read_selected_file", "HIDDEN_SOURCE_ARGUMENTS_NOT_JSON"),
+                _call(name, "HIDDEN_SOURCE_ARGUMENTS_NOT_JSON"),
                 max_result_chars=6000, timeout_s=2, user_id="owner")
     assert result.is_error and json.loads(result.content)["error"] == "native_tool_unavailable"
     assert not requests and "HIDDEN_SOURCE" not in result.content + caplog.text

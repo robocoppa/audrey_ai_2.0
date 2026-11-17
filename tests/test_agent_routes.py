@@ -95,6 +95,46 @@ async def test_native_agents_create_idempotently_and_hide_worker_authority(agent
     assert len(agents.wakes) == 2
 
 
+async def test_saved_work_progress_is_owned_typed_and_excluded_from_task_summaries(agents):
+    task = (await _create(agents)).json()
+    claimed = await agents.store.agents.claim()
+    lease = {"task_id": task["id"], "lease_token": claimed["lease_token"], "fence": claimed["fence"]}
+    await agents.store.agents.reserve_operation(**lease, step_id="plan")
+    await agents.store.agents.checkpoint(**lease, step_id="plan", result="Write a draft.")
+    progress = await agents.store.agents.save_work_progress(**lease, note="A working draft marker.")
+    response = await agents.client.get(f"/api/agents/{task['id']}")
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "private, no-store"
+    steps = response.json()["steps"]
+    assert steps[1]["progress"] == progress and steps[1]["status"] == "running"
+    assert "progress" not in steps[0] and "progress" not in steps[2]
+    listing = await agents.client.get("/api/agents")
+    assert listing.status_code == 200 and "working draft marker" not in listing.text
+    assert all("progress" not in step for step in listing.json()["items"][0]["steps"])
+    agents.current[0] = agents.owners[1]
+    foreign = await agents.client.get(f"/api/agents/{task['id']}")
+    assert foreign.status_code == 404 and "working draft marker" not in foreign.text
+
+
+@pytest.mark.parametrize("timestamp", ["", "not a date", "2026-11-16T13:00:00", "2026-11-16T13:00:00-07:00",
+    "2026-11-16T13:00:00Z", "2026-11-16 13:00:00+00:00"])
+def test_progress_response_requires_canonical_server_utc_timestamp(timestamp):
+    from audrey.routes.app.agents import AgentStepResponse
+
+    with pytest.raises(ValueError):
+        AgentStepResponse.model_validate({"id": "research", "label": "Work", "status": "running", "result": "",
+            "progress": {"note": "A saved draft.", "saved_at": timestamp}})
+
+
+@pytest.mark.parametrize("stage", ["plan", "review"])
+def test_progress_response_cannot_attach_note_to_another_stage(stage):
+    from audrey.routes.app.agents import AgentStepResponse
+
+    with pytest.raises(ValueError):
+        AgentStepResponse.model_validate({"id": stage, "label": stage, "status": "running", "result": "",
+            "progress": {"note": "A saved draft.", "saved_at": "2026-11-16T13:00:00+00:00"}})
+
+
 @pytest.mark.parametrize("files,project", [
     (["file"], None), (["a", "b", "c", "d"], "project"),
     (["a", "a"], "project"), ([123], "project"), ([""], "project"),

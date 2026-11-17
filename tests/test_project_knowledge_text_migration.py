@@ -96,7 +96,7 @@ async def test_schema38_preserves_populated_schema37_and_rolls_back_failed_rebui
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 42 and rows(upgraded._conn) == before
+        assert upgraded.schema_version == 43 and rows(upgraded._conn) == before
         assert await upgraded.agents.get(user_id=owner.user_id, task_id=frozen["id"]) == frozen
         assert await upgraded.knowledge.get(**args, entry_id=proposal["id"]) == proposal
         assert await upgraded.knowledge.get(**args, entry_id=rejected["id"]) == rejected

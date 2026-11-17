@@ -69,6 +69,10 @@ def _calculate_call(**arguments):
     return _answer("", message={"tool_calls": [{"function": {"name": "calculate", "arguments": arguments}}]})
 
 
+def _progress_call(note):
+    return _answer("", message={"tool_calls": [{"function": {"name": "save_progress", "arguments": {"note": note}}}]})
+
+
 @pytest.fixture
 async def state(tmp_path, monkeypatch):
     store = ApplicationStore(tmp_path / "application.sqlite")
@@ -438,7 +442,7 @@ async def test_every_step_uses_only_local_qwen_and_only_research_has_public_tool
                        for message in payload["messages"])
         offered = {tool["function"]["name"] for tool in payload.get("tools", [])}
         assert offered == (
-            {"web_search", "web_fetch", "calculate"} if step_id == "research"
+            {"web_search", "web_fetch", "calculate", "save_progress"} if step_id == "research"
             else {"calculate"} if step_id == "review" else set()
         )
     supplied = json.loads(
@@ -1435,7 +1439,7 @@ async def test_answered_clarifications_reach_every_step_with_saved_stage_and_sam
     assert payload["model"] == _MODEL
     offered = {item["function"]["name"] for item in payload.get("tools", [])}
     assert offered == (
-        {"web_search", "web_fetch", "calculate"} if step_id == "research"
+        {"web_search", "web_fetch", "calculate", "save_progress"} if step_id == "research"
         else {"calculate"} if step_id == "review" else set()
     )
     supplied = json.loads(payload["messages"][1]["content"])
@@ -1578,7 +1582,7 @@ async def test_project_context_reaches_each_local_step_as_quoted_bounded_working
     assert payload["model"] == _MODEL
     offered = {tool["function"]["name"] for tool in payload.get("tools", [])}
     assert offered == (
-        {"web_search", "web_fetch", "calculate"} if step_id == "research"
+        {"web_search", "web_fetch", "calculate", "save_progress"} if step_id == "research"
         else {"calculate"} if step_id == "review" else set()
     )
 
@@ -1668,7 +1672,7 @@ async def test_knowledge_research_agent_runs_locally_and_reruns_without_completi
     for payload in _content_requests(state):
         assert payload["model"] == _MODEL and entry["text"] in json.dumps(payload["messages"])
         offered = {tool["function"]["name"] for tool in payload.get("tools", [])}
-        assert offered <= {"web_search", "web_fetch", "calculate"}
+        assert offered <= {"web_search", "web_fetch", "calculate", "save_progress"}
     queued = await state.store.agents.control(
         user_id=state.owner.user_id, task_id=created["id"],
         expected_revision=completed["revision"], action="rerun",
@@ -1744,7 +1748,8 @@ async def test_general_tasks_complete_without_web_tools_or_forced_source_lists(s
     for step_id, call in zip(("plan", "research", "review"), calls, strict=True):
         assert call["model"] == _MODEL
         assert {tool["function"]["name"] for tool in call.get("tools", [])} == (
-            {"calculate"} if step_id != "plan" else set()
+            {"calculate", "save_progress"} if step_id == "research"
+            else {"calculate"} if step_id == "review" else set()
         )
         assert json.loads(next(message["content"] for message in call["messages"] if message["role"] == "user"))["objective"] == objective
     assert all(client._client.is_closed for client in state.clients)

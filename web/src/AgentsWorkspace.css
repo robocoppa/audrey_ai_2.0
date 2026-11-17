@@ -232,6 +232,13 @@ button.agents-context-project:focus-visible { outline: 2px solid var(--accent); 
 .agents-step-save-action::after { display: inline-block; margin-left: 0.25rem; content: "›"; }
 .agents-step-details[open] > summary .agents-step-save-action::after { transform: rotate(90deg); }
 .agents-step-saved-text { margin: 0.5rem 0 0.65rem; padding: 0.6rem; border: 1px solid var(--border); border-radius: 0.5rem; background: rgb(9 20 37 / 40%); }
+.agents-work-progress { margin-left: 1.55rem; }
+.agents-work-progress > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.6rem; padding-block: 0.2rem; color: var(--accent); cursor: pointer; font-size: 0.7rem; line-height: 1.6; }
+.agents-work-progress > summary time, .agents-work-progress-caption { color: var(--muted); font-size: 0.68rem; }
+.agents-work-progress > summary > span::after { display: inline-block; margin-left: 0.25rem; content: "›"; }
+.agents-work-progress[open] > summary > span::after { transform: rotate(90deg); }
+.agents-work-progress > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 0.3rem; }
+.agents-work-progress-caption { margin: 0 0 0.4rem; }
 .agents-result { min-width: 0; margin-top: 1.3rem; overflow: hidden; border: 1px solid var(--border); border-radius: 0.85rem; background: rgb(9 20 37 / 38%); }
 .agents-result-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.65rem 1rem; padding: 0.85rem 1.1rem; border-bottom: 1px solid var(--border); }
 .agents-result-body { min-width: 0; padding: 1.2rem; }

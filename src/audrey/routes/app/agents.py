@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import logging
 import sqlite3
 from collections.abc import Coroutine
@@ -23,11 +24,38 @@ _agents_access = require_scope("compat:full")
 logger = logging.getLogger(__name__)
 
 
+class AgentWorkProgressResponse(BaseModel):
+    note: str = Field(min_length=1, max_length=4000)
+    saved_at: str = Field(min_length=1, max_length=40)
+
+    @model_validator(mode="after")
+    def bounded_note(self):
+        try:
+            if not self.note.strip() or len(self.note.encode("utf-8")) > 4000:
+                raise ValueError("Invalid saved Work progress.")
+        except UnicodeEncodeError:
+            raise ValueError("Invalid saved Work progress.") from None
+        try:
+            timestamp = dt.datetime.fromisoformat(self.saved_at)
+        except ValueError:
+            raise ValueError("Invalid saved Work progress timestamp.") from None
+        if timestamp.tzinfo is None or timestamp.utcoffset() != dt.timedelta(0) or self.saved_at != timestamp.isoformat():
+            raise ValueError("Invalid saved Work progress timestamp.")
+        return self
+
+
 class AgentStepResponse(BaseModel):
     id: Literal["plan", "research", "review"]
     label: str
     status: Literal["pending", "running", "completed"]
     result: str
+    progress: AgentWorkProgressResponse | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def work_progress_only(self):
+        if self.progress is not None and self.id != "research":
+            raise ValueError("Saved progress belongs to Work only.")
+        return self
 
 
 class AgentInputResponse(BaseModel):
@@ -112,7 +140,7 @@ class AgentEventResponse(BaseModel):
     stage: Literal["plan", "research", "review", "title"]
     kind: Literal["stage", "model", "tool"]
     state: Literal["started", "completed", "failed", "interrupted"]
-    tool: Literal["web_search", "web_fetch", "create_file", "read_selected_file", "calculate"] | None
+    tool: Literal["web_search", "web_fetch", "create_file", "read_selected_file", "calculate", "save_progress"] | None
     created_at: str
     finished_at: str | None
     duration_ms: int | None = Field(ge=0)

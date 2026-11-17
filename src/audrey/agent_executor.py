@@ -478,6 +478,7 @@ class ResearchAgentExecutor:
         from audrey.agent_file_inputs import get_agent_file_inputs
         from audrey.tools.agent_calculator import agent_calculator_scope, with_agent_calculator
         from audrey.tools.agent_file_reads import agent_file_read_scope, with_selected_file_read
+        from audrey.tools.agent_progress import agent_progress_scope, with_agent_progress
 
         file_inputs = get_agent_file_inputs(self.app)
         principal = await research_authority(self.app, task["user_id"])
@@ -500,6 +501,7 @@ class ResearchAgentExecutor:
         file_outputs = []
         native_step = step_id in {"research", "review"}
         native_calculator = native_step
+        native_progress = step_id == "research"
         native_files = native_step and agent_files_available(self.app)
         selected_file_reads = bool(selected_files) and file_inputs is not None
         native_reads = native_step and selected_file_reads
@@ -513,6 +515,8 @@ class ResearchAgentExecutor:
             tools = with_selected_file_read(tools)
         if native_calculator:
             tools = with_agent_calculator(tools)
+        if native_progress:
+            tools = with_agent_progress(tools)
         endpoints = {spec.name: (spec.server_url, spec.path) for spec in tools.specs()}
         previous = {
             step["id"]: step["result"] for step in task["steps"] if step["status"] == "completed"
@@ -522,6 +526,15 @@ class ResearchAgentExecutor:
             "current_stage": {"plan": "Plan", "research": "Work", "review": "Review"}[step_id],
             "saved_work": previous,
         }
+        if step_id == "research":
+            # Read canonical progress only after fresh source validation. The
+            # incoming task may predate a saved note or be a copied snapshot.
+            with self.app.state.application_store._lock:
+                repository.fence_execution(**lease)
+                current = repository._lease(**lease)
+                progress = next(step for step in current["steps"] if step["id"] == "research").get("progress")
+                if progress is not None:
+                    task_context["saved_progress"] = {key: progress[key] for key in ("note", "saved_at")}
         if step_id == "review":
             task_context["current_output_files"] = [
                 {key: output[key] for key in ("file_id", "filename", "download_url", "created_at")}
@@ -593,7 +606,8 @@ class ResearchAgentExecutor:
                 await authorize()
                 if ((name == "create_file" and native_files)
                         or (name == "read_selected_file" and native_reads)
-                        or (name == "calculate" and native_calculator)):
+                        or (name == "calculate" and native_calculator)
+                        or (name == "save_progress" and native_progress)):
                     # Native capabilities have task-bound handlers, never HTTP
                     # endpoints from shared discovery. Recheck installed weights
                     # and the live task before rendering or returning source text.
@@ -637,6 +651,8 @@ class ResearchAgentExecutor:
                 if native_reads else nullcontext(),
                 agent_calculator_scope(app=self.app, principal=principal, task=task)
                 if native_calculator else nullcontext(),
+                agent_progress_scope(app=self.app, principal=principal, task=task)
+                if native_progress else nullcontext(),
             ):
                 if native_step:
                     report = await (self.react_runner or run_react)(

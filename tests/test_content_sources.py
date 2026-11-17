@@ -432,6 +432,35 @@ async def test_saved_agent_final_report_is_generated_and_revision_fenced(state):
     assert not state.reader.is_current(docs[0])
 
 
+async def test_saved_work_progress_is_not_a_search_or_knowledge_source(state):
+    task = await state.store.agents.create(
+        user_id=state.owner.user_id, objective="Prepare an invitation.", request_id="progress-source"
+    )
+    claimed = await state.store.agents.claim()
+    lease = {"task_id": task["id"], "lease_token": claimed["lease_token"], "fence": claimed["fence"]}
+    await state.store.agents.reserve_operation(**lease, step_id="plan")
+    await state.store.agents.checkpoint(**lease, step_id="plan", result="Draft, then review.")
+    await state.store.agents.reserve_operation(**lease, step_id="research")
+    await state.store.agents.save_work_progress(**lease, note="Unverified draft: HIDDEN-CEDAR-31.")
+
+    docs, _, _ = await state.reader.list_page(*args(state), "agent")
+    assert docs == []
+    assert await state.reader.resolve(*args(state), f"agent:{task['id']}:progress") is None
+    assert await state.reader.resolve(*args(state), f"agent:{task['id']}:report") is None
+
+    # Existing report consumers share this canonical reader. Publishing a final
+    # result must expose only that result, never the draft stored in steps_json.
+    with state.store._lock, state.store._conn:
+        state.store._conn.execute(
+            "UPDATE app_agent_tasks SET result=?,revision=revision+1 WHERE task_id=?",
+            ("Final invitation.", task["id"]),
+        )
+    docs, _, _ = await state.reader.list_page(*args(state), "agent")
+    assert len(docs) == 1 and docs[0].text == "Final invitation."
+    assert "HIDDEN-CEDAR-31" not in json.dumps(dataclasses.asdict(docs[0]))
+    assert (await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"]))["steps"][1]["progress"]
+
+
 @pytest.mark.parametrize("kind", ["message", "agent"])
 async def test_shared_db_source_rows_preserve_existing_exact_revision_shape(state, kind):
     from audrey.canonical_db_sources import database_source_rows

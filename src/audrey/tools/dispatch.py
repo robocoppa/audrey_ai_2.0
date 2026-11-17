@@ -198,6 +198,16 @@ async def dispatch_one(
     policy = current_processing_policy()
     private_handler: PrivateToolHandler | None = None
     native_handler: PrivateToolHandler | None = None
+    if name == "save_progress":
+        from audrey.tools.agent_progress import agent_progress_handler
+
+        native_handler = agent_progress_handler(user_id=user_id)
+        if native_handler is None or policy is not None:
+            tool_calls_total.labels(tool=name, outcome="error").inc()
+            return ToolResult(name=name, call_id=call_id, content=json.dumps({
+                "error": "native_tool_unavailable",
+                "detail": "Saving progress requires an active agent Work step.",
+            }), elapsed_s=0.0, is_error=True)
     if name == "calculate":
         from audrey.tools.agent_calculator import agent_calculator_bound, agent_calculator_handler
 
