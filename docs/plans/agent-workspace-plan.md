@@ -49,14 +49,32 @@ publication records the current version per filename; Review corrections replace
 that selection while retaining older immutable files under Previous files.
 Legacy outputs without attribution remain labelled Saved. A repeated earlier file
 identity can become current again; creation time does not determine the winner.
-Agents has New, Watches and Tasks tabs at the top of its left sidebar, with New
-selected initially. New holds the compact composer; Tasks holds running and past
-work with explicit status labels, active controls and an expandable Updates inbox.
-The former Tasks/Watches/Activity bar is removed. Switching sections preserves
-task/Watch drafts and saved workflow selection; starting selects Tasks. Workflow
+Agents has Agents and Watches tabs at the top of its left sidebar. Agents opens
+saved history by default, with status labels, active controls and an expandable
+Updates inbox. New agent reveals the compact Project picker and prompt composer;
+Back to agents returns to history while retaining the draft and workflow selection.
+Watches also opens saved history, with New watch revealing its form and Back to
+watches retaining the draft. Clicking either tab returns to its history; a
+Project's New agent/New watch actions explicitly open the corresponding form. The New and Tasks tabs
+are removed. Switching sections preserves drafts and saved workflow selection;
+starting an Agent selects it in history. Workflow
 and sidebar scroll independently. Small screens keep section switching inside the
 controls drawer, closing it when opening saved work. Terminal
 Run again and the red two-click Delete remain at the workflow card's top right.
+
+The history-first change is UI-only. Local Agent/Watch/App navigation checks,
+type checking, lint and the production build pass. Browser fixtures at 320, 390
+and 1,366 pixels verify the two tabs, history-first entry, New/Back flows, retained
+Project and prompt/title drafts, open mobile navigation and no hidden focus or
+horizontal overflow. Owner verification remains manual: rebuild `audrey-ui` on
+Tower, open Agents and confirm history appears without a form. Open New agent,
+choose a Project and enter a draft, then Back and New agent again; both choices
+must remain. Start a new Agent with “Write a short welcome message for a new
+community member. Do not browse.” It must select the saved Agent in history and
+complete normally. In Watches, open New watch, enter a draft title, then Back and
+New watch again; the draft must remain without creating or running a watch.
+No upload, backend rebuild, configuration edit or migration is required.
+
 Top-bar hover uses the filled, soft glow of My Files, with distinct keyboard focus
 retained. Agent headings/history use a saved
 short title, and the unchanged original objective is available in an expandable
@@ -252,7 +270,7 @@ summaries. Local tests and mocked browser flows pass; real-model reuse
 and deployed acceptance remain manual.
 
 Public-page Watches use the Watches sidebar tab inside Agents; activity is in
-Tasks → Updates. Creating a
+Agents → Updates. Creating a
 watch explicitly saves one public HTTP(S) URL, a criterion and a previewed interval,
 daily or weekly schedule in an IANA timezone. Query parameters, URL credentials,
 fragments, nonstandard ports and local destinations are excluded. Saving schedules
@@ -319,8 +337,9 @@ request to ask a question still applies; the tone questions in the interactive
 checks below deliberately exercise that exception, rather than normal behavior.
 For a normal live check, start a fresh Agent with “Write a short welcome message
 for a new community member. Do not browse.” It should finish without asking for
-a tone choice. This prompt-policy change needs only a backend rebuild; live
-default-choice acceptance remains pending.
+a tone choice. The November 17 owner receipt confirms a completed welcome message
+without a question, passing this normal default-choice check. The explicit
+question/restart checks remain separate.
 
 The owner answers inside the existing agent card. The answer transaction checks
 question identity, current task revision, owner access, remaining cumulative limits

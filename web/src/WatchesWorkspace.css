@@ -22,6 +22,7 @@
 .watch-project > button { min-height: 2rem; padding: 0.35rem 0.65rem; font-size: 0.75rem; }
 .watch-project > p { flex-basis: 100%; margin: 0; }
 .watch-resume-draft { margin-bottom: 1rem; }
+.watch-back-history { margin-bottom: 1rem; }
 .watch-history, .watch-run { margin-top: 1.6rem; padding-top: 1.4rem; border-top: 1px solid var(--border); }
 .watch-history h3, .watch-run h3 { margin: 0; font-size: 0.95rem; }
 .watch-history ul { display: flex; flex-wrap: wrap; gap: 0.6rem; padding: 0; list-style: none; }

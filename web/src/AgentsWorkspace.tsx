@@ -118,8 +118,9 @@ interface AnswerDraft { text: string; revision: number }
 function inputDraftKey(taskId: string, requestId: string) { return JSON.stringify([taskId, requestId]); }
 
 export function AgentsWorkspace(props: AgentsWorkspaceProps) {
-  const [view, setView] = useState<"new" | "watches" | "tasks">("new");
+  const [view, setView] = useState<"new" | "watches" | "agents">("agents");
   const [watchesOpened, setWatchesOpened] = useState(false);
+  const [watchHistoryRequest, setWatchHistoryRequest] = useState(0);
   const [updatesOpened, setUpdatesOpened] = useState(false);
   const [updatesOpen, setUpdatesOpen] = useState(false);
   const [internalNavigationOpen, setInternalNavigationOpen] = useState(false);
@@ -155,7 +156,7 @@ export function AgentsWorkspace(props: AgentsWorkspaceProps) {
     let current = true;
     queueMicrotask(() => {
       if (!current) return;
-      setAgentRequest({ task: request.task, serial: ++requestSerial.current }); setView("tasks");
+      setAgentRequest({ task: request.task, serial: ++requestSerial.current }); setView("agents");
     });
     return () => { current = false; };
   }, [props.externalAgentRequest]);
@@ -211,33 +212,33 @@ export function AgentsWorkspace(props: AgentsWorkspaceProps) {
     };
   }, [visible]);
   function navigate(next: typeof view) {
-    if (next === "watches") setWatchesOpened(true);
+    if (next === "watches") { setWatchesOpened(true); setWatchHistoryRequest((value) => value + 1); }
     setView(next);
     window.requestAnimationFrame(() => hubRef.current?.querySelector<HTMLButtonElement>(
       '.agents-hub-view:not([hidden]) .agents-sidebar-tabs button[aria-current="page"]',
     )?.focus({ preventScroll: true }));
   }
   const sidebarTabs = <nav className="agents-sidebar-tabs" aria-label="Agent sections">
-    {([['new', 'New'], ['watches', 'Watches'], ['tasks', 'Tasks']] as const).map(([tab, label]) => <button
-      key={tab} type="button" aria-current={view === tab ? "page" : undefined} onClick={() => navigate(tab)}
-      aria-description={tab === "tasks" && unread ? `${unread} unread updates` : undefined}
-    >{label}{tab === "tasks" && unread ? <span className="agents-active-count" aria-label={`${unread} unread notifications`}>{unread}</span> : null}</button>)}
+    {([['agents', 'Agents'], ['watches', 'Watches']] as const).map(([tab, label]) => <button
+      key={tab} type="button" aria-current={(tab === "agents" ? view !== "watches" : view === tab) ? "page" : undefined} onClick={() => navigate(tab)}
+      aria-description={tab === "agents" && unread ? `${unread} unread updates` : undefined}
+    >{label}{tab === "agents" && unread ? <span className="agents-active-count" aria-label={`${unread} unread notifications`}>{unread}</span> : null}</button>)}
   </nav>;
   const updates = <details className="agents-task-updates" open={updatesOpen} onToggle={(event) => {
     const open = event.currentTarget.open;
     setUpdatesOpen(open);
     if (open) setUpdatesOpened(true);
   }}><summary>Updates{unread ? <span className="agents-active-count">{unread}</span> : null}</summary>
-    {updatesOpened ? <ActivityWorkspace compact visible={visible && view === "tasks" && updatesOpen} timezone={props.timezone} onUnreadChange={receiveUnread}
+    {updatesOpened ? <ActivityWorkspace compact visible={visible && view === "agents" && updatesOpen} timezone={props.timezone} onUnreadChange={receiveUnread}
       isAgentResultCurrent={(task) => (taskRevisions.current.get(task.id) ?? -1) <= task.revision}
-      onOpenAgent={(task) => { setAgentRequest({ task, serial: ++requestSerial.current }); setView("tasks"); setNavigationOpen(false); }}
+      onOpenAgent={(task) => { setAgentRequest({ task, serial: ++requestSerial.current }); setView("agents"); setNavigationOpen(false); }}
       onOpenWatch={(watch, run) => { setWatchRequest({ watch, run, serial: ++requestSerial.current }); setWatchesOpened(true); setView("watches"); setNavigationOpen(false); }}
     /> : null}
   </details>;
   return <section className="agents-hub" aria-label="Agents workspace" ref={hubRef}>
     <div className="agents-hub-view" hidden={view === "watches"}><AgentTasksWorkspace {...props}
       navigationOpen={navigationOpen} onNavigationOpenChange={setNavigationOpen}
-      sidebarMode={view === "new" ? "new" : "tasks"} sidebarTabs={sidebarTabs} updates={updates}
+      sidebarMode={view === "new" ? "new" : "agents"} sidebarTabs={sidebarTabs} updates={updates}
       onSidebarModeChange={setView} onTasksChange={receiveTasks} openRequest={agentRequest} visible={visible && view !== "watches"} /></div>
     {watchesOpened ? <div className="agents-hub-view" hidden={view !== "watches"}><WatchesWorkspace
       visible={visible && view === "watches"}
@@ -249,6 +250,7 @@ export function AgentsWorkspace(props: AgentsWorkspaceProps) {
       externalWatchRequest={props.externalWatchRequest}
       onOpenProject={props.onOpenProject}
       sidebarTabs={sidebarTabs}
+      historyRequest={watchHistoryRequest}
     /></div> : null}
   </section>;
 }
@@ -271,10 +273,10 @@ function AgentTasksWorkspace({
 }: AgentsWorkspaceProps & {
   openRequest?: { task: AgentTask; serial: number };
   onTasksChange: (tasks: AgentTask[]) => void;
-  sidebarMode: "new" | "tasks";
+  sidebarMode: "new" | "agents";
   sidebarTabs: ReactNode;
   updates: ReactNode;
-  onSidebarModeChange: (mode: "new" | "tasks") => void;
+  onSidebarModeChange: (mode: "new" | "agents") => void;
 }) {
   const [compactNavigation, setCompactNavigation] = useState(() =>
     window.matchMedia?.("(max-width: 760px)").matches ?? false);
@@ -309,6 +311,7 @@ function AgentTasksWorkspace({
   const busyRef = useRef(false);
   const objectiveRef = useRef<HTMLTextAreaElement>(null);
   const newProjectRef = useRef<HTMLButtonElement>(null);
+  const newAgentRef = useRef<HTMLButtonElement>(null);
   const detailRef = useRef<HTMLElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
@@ -416,7 +419,7 @@ function AgentTasksWorkspace({
       if (!current) return;
       openedComposerRequest.current = request.serial;
       let needsChoice = false;
-      if (request.project.private_required) { setError("Private Projects are not available for agent tasks."); return; }
+      if (request.project.private_required) { setError("Private Projects are not available for agents."); return; }
       if (knowledgeRequest) {
         if (!canAssignKnowledge(knowledgeRequest.project, knowledgeRequest.entry)) { setError("This entry is unavailable for an agent task. Refresh and review it before trying again."); return; }
         const nextObjective = knowledgeTaskObjective(knowledgeRequest.entry);
@@ -588,7 +591,7 @@ function AgentTasksWorkspace({
         if (!mounted.current) return;
         if (current.private_required) {
           setUnavailableProjectId(requestedProject.id);
-          throw new ApiError(422, "This Project is Private. Choose another Project or None before starting an agent task.");
+          throw new ApiError(422, "This Project is Private. Choose another Project or None before starting an agent.");
         }
         setComposerProject(current);
         projectVerified = true;
@@ -605,7 +608,7 @@ function AgentTasksWorkspace({
       knownIds.current?.add(task.id);
       setTasks((current) => mergeTasks(current, [task], deletedIds.current));
       setSelectedId(task.id);
-      onSidebarModeChange("tasks");
+      onSidebarModeChange("agents");
       showWorkflow(true);
       setFilter("all");
       if (key.startsWith("new:")) { setObjective(""); setComposerOrigin(null); setComposerFiles(null); }
@@ -641,7 +644,7 @@ function AgentTasksWorkspace({
         setTasks((current) => mergeTasks(current, [updated], deletedIds.current));
         if (action === "rerun") {
           setSelectedId(updated.id);
-          onSidebarModeChange("tasks");
+          onSidebarModeChange("agents");
           setFilter("all");
           showWorkflow(true);
         }
@@ -760,7 +763,7 @@ function AgentTasksWorkspace({
           className="agents-sidebar"
           id="agents-navigation"
           ref={sidebarRef}
-          aria-label="Agent tasks"
+          aria-label="Agents"
           role={compactNavigation ? "dialog" : undefined}
           aria-modal={sidebarOpen ? true : undefined}
           aria-hidden={compactNavigation && !sidebarOpen ? true : undefined}
@@ -769,7 +772,7 @@ function AgentTasksWorkspace({
           {sidebarTabs}
           <header className="agents-header">
             <div>
-              <h1 id="agents-title">{sidebarMode === "new" ? "New agent" : "Tasks"}</h1>
+              <h1 id="agents-title">{sidebarMode === "new" ? "New agent" : "Agents"}</h1>
               <p className="agents-sidebar-caption">{sidebarMode === "new" ? "Describe what you want done." : "Running and past work."}</p>
             </div>
             {compactNavigation
@@ -780,6 +783,10 @@ function AgentTasksWorkspace({
             {sidebarOpen && error ? <p className="agents-error" role="alert">{error}</p> : null}
             {sidebarOpen && notice && !notice.taskId ? <p className="agents-notice" role="status">{notice.text}</p> : null}
             <div hidden={sidebarMode !== "new"}>
+            <button className="agents-refresh agents-back-history" type="button" disabled={busy} onClick={() => {
+              onSidebarModeChange("agents");
+              window.requestAnimationFrame(() => newAgentRef.current?.focus({ preventScroll: true }));
+            }}>Back to agents</button>
             <form className="agents-composer" onSubmit={submit}>
               <div className="agents-project-heading">
                 <label htmlFor="agent-project">Project <span className="agents-optional">Optional</span></label>
@@ -832,7 +839,12 @@ function AgentTasksWorkspace({
               {objective || composerOrigin || composerFiles?.files.length ? <button className="agents-secondary" type="button" disabled={busy} onClick={() => { setObjective(""); setComposerOrigin(null); setComposerFiles(null); setPendingKnowledgeRequest(null); createRequest.current = null; objectiveRef.current?.focus(); }}>Clear draft</button> : null}
             </form>
             </div>
-            <div hidden={sidebarMode !== "tasks"}>
+            <div hidden={sidebarMode !== "agents"}>
+            <button ref={newAgentRef} className="agents-primary agents-new-agent" type="button" disabled={busy} onClick={() => {
+              onSidebarModeChange("new");
+              setError(""); setNotice(null);
+              window.requestAnimationFrame(() => objectiveRef.current?.focus({ preventScroll: true }));
+            }}>New agent</button>
             {selected && !isFinished(selected) ? (
               <section className="agents-current-controls" aria-labelledby="agent-current-controls-title">
                 <h2 id="agent-current-controls-title">Current agent</h2>
@@ -848,16 +860,16 @@ function AgentTasksWorkspace({
             ) : null}
 
             <div className="agents-task-list-header">
-              <h2>Saved tasks</h2>
-              <button type="button" className="agents-refresh" onClick={() => { setError(""); setRefreshToken((value) => value + 1); }} disabled={refreshing} aria-label="Refresh agent tasks">{refreshing ? "Refreshing…" : "Refresh"}</button>
+              <h2>History</h2>
+              <button type="button" className="agents-refresh" onClick={() => { setError(""); setRefreshToken((value) => value + 1); }} disabled={refreshing} aria-label="Refresh agents">{refreshing ? "Refreshing…" : "Refresh"}</button>
             </div>
-            <div className="agents-filters" role="group" aria-label="Filter agent tasks">
+            <div className="agents-filters" role="group" aria-label="Filter agents">
               {([['all', 'All'], ['active', 'Active'], ['finished', 'Finished']] as const).map(([value, label]) => (
                 <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
               ))}
             </div>
             {loading ? <p className="agents-empty" role="status">Loading your agents…</p> : !shownTasks.length ? (
-              <p className="agents-empty">{tasks.length ? "No tasks in this view." : "No tasks yet. Use New to start an agent."}</p>
+              <p className="agents-empty">{tasks.length ? "No agents in this view." : "No agents yet. Choose New agent to start."}</p>
             ) : (
               <ul className="agents-task-list">
                 {shownTasks.map((task) => (
@@ -941,7 +953,7 @@ function AgentTasksWorkspace({
               <div className="agents-welcome">
                 <span className="agents-welcome-mark" aria-hidden="true">✦</span>
                 <h2>Work that continues while you’re away</h2>
-                <p>Start a task or select a saved agent to see its objective, completed steps and result.</p>
+                <p>Choose New agent to start, or open a saved agent to see its prompt, progress and result.</p>
                 <ol><li>Plan the work</li><li>Work on the task</li><li>Review and save the result</li></ol>
               </div>
             )}

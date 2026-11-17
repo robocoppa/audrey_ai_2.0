@@ -23,7 +23,7 @@ function scheduleLabel(watch: Pick<PublicWatch, "schedule">) {
   return `${cadence} · ${schedule.timezone}`;
 }
 
-export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigationOpenChange, openRequest, composerProjectRequest, externalWatchRequest, onOpenProject, sidebarTabs }: {
+export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigationOpenChange, openRequest, composerProjectRequest, externalWatchRequest, onOpenProject, sidebarTabs, historyRequest }: {
   visible: boolean;
   timezone?: string;
   navigationOpen?: boolean;
@@ -33,6 +33,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
   externalWatchRequest?: { watch: PublicWatch; serial: number };
   onOpenProject?: (id: string) => void;
   sidebarTabs?: ReactNode;
+  historyRequest?: number;
 }) {
   const [watches, setWatches] = useState<PublicWatch[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -63,6 +64,8 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
   const openedRequest = useRef<number | null>(null);
   const openedComposerRequest = useRef<number | null>(null);
   const openedExternalRequest = useRef<number | null>(null);
+  const openedHistoryRequest = useRef(historyRequest);
+  const historyNavigationRequests = useRef([openRequest?.serial, composerProjectRequest?.serial, externalWatchRequest?.serial]);
   const externalRead = useRef<AbortController | null>(null);
   const formActive = Boolean(editing && formVisible);
   const hasScheduled = watches.some((watch) => watch.enabled || watch.active_run_id);
@@ -176,7 +179,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
       const focused = document.activeElement;
       const focusInSidebar = focused instanceof HTMLElement && sidebar.current?.contains(focused);
       setCompact(event.matches);
-      // Hidden workspaces share the app drawer state with Chat and Tasks.
+      // Hidden workspaces share the app drawer state with Chat and Agents.
       if (!visible) return;
       setDrawerOpen(false);
       if (event.matches && focusInSidebar) window.requestAnimationFrame(() => sidebarButton.current?.focus());
@@ -206,6 +209,29 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
     setDrawerOpen(false);
     window.requestAnimationFrame(() => { if (detail.current) { detail.current.scrollTop = 0; if (compact) detail.current.focus({ preventScroll: true }); } });
   }
+
+  useEffect(() => {
+    const previousRequests = historyNavigationRequests.current;
+    const currentRequests = [openRequest?.serial, composerProjectRequest?.serial, externalWatchRequest?.serial];
+    historyNavigationRequests.current = currentRequests;
+    if (!visible || historyRequest === undefined || openedHistoryRequest.current === historyRequest) return;
+    openedHistoryRequest.current = historyRequest;
+    // An explicit Project or saved-watch request takes precedence over a tab
+    // history request delivered in the same render. Initial historyRequest is
+    // already marked seen, so mounting cannot dismiss a requested composer.
+    if (currentRequests.some((serial, index) => serial !== undefined && serial !== previousRequests[index])) return;
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      externalRead.current?.abort(); generation.current += 1;
+      setFormVisible(false); setError(""); setNotice("");
+      window.requestAnimationFrame(() => {
+        if (detail.current) detail.current.scrollTop = 0;
+        if (compact && !sidebarOpen) detail.current?.focus({ preventScroll: true });
+      });
+    });
+    return () => controller.abort();
+  }, [visible, historyRequest, openRequest, composerProjectRequest, externalWatchRequest, compact, sidebarOpen]);
 
   useEffect(() => {
     if (!visible || !openRequest || openedRequest.current === openRequest.serial) return;
@@ -332,13 +358,17 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
         <div className="watch-sidebar-scroll"><button className="agents-primary" type="button" disabled={busy} onClick={newWatch}>New watch</button><p className="watch-help">Scheduled checks continue while you’re away. Only public pages are supported.</p><button className="agents-refresh" type="button" onClick={() => setToken((value) => value + 1)}>Refresh watches</button>{loading ? <p role="status">Loading watches…</p> : !watches.length ? <p className="agents-empty">No watches yet. Create one to follow a public page.</p> : <ul className="agents-task-list">{watches.map((watch) => <li key={watch.id}><button type="button" className="agents-task-card" aria-pressed={!formActive && selectedId === watch.id} onClick={() => selectWatch(watch.id)} aria-label={`Open watch: ${watch.title}`}><span className={`agents-status agents-status-${watch.enabled ? "running" : "paused"}`}>{watch.enabled ? "Scheduled" : "Paused"}</span><strong>{watch.title}</strong><span className="agents-task-stage">{watch.active_run_id ? "Check in progress" : watch.latest_run ? runLabel(watch.latest_run) : "Awaiting baseline"}</span><span className="agents-task-stage">Next: {timestamp(watch.next_run_at)}</span></button></li>)}</ul>}</div>
       </aside>
       <section className="watch-detail-scroll" aria-label="Selected watch" tabIndex={0} ref={detail} inert={sidebarOpen ? true : undefined}>{errors}<div className="watch-detail">
+        {formActive ? <button className="agents-secondary watch-back-history" type="button" disabled={busy} onClick={() => {
+          setFormVisible(false); setError(""); setNotice(""); showDetail();
+          window.requestAnimationFrame(() => detail.current?.focus({ preventScroll: true }));
+        }}>Back to watches</button> : null}
         {editing ? <div hidden={!formActive}><WatchForm key={formKey} watch={editing === "new" ? undefined : editing} timezone={timezone} busy={busy} conflict={conflict} visible={visible && formActive} projectRequest={formProjectRequest} onSave={save} onCancel={() => { setEditing(null); setFormVisible(false); setFormProjectRequest(undefined); setConflict(undefined); }} /></div> : null}
         {!formActive && editing ? <button className="agents-secondary watch-resume-draft" type="button" disabled={busy} onClick={() => { externalRead.current?.abort(); setFormVisible(true); showDetail(); }}>Resume draft</button> : null}
         {formActive ? null : selected ? <>
           <header className="watch-detail-header"><div className="agents-detail-toolbar"><span className={`agents-status agents-status-${selected.enabled ? "running" : "paused"}`}>{selected.enabled ? "Scheduled" : "Paused"}</span><WatchControls key={`${selected.id}:${selected.revision}:${visible}`} watch={selected} busy={busy} onAction={(action) => void act(selected, action)} onEdit={() => { externalRead.current?.abort(); setFormKey((value) => value + 1); setEditing(selected); setFormVisible(true); setFormProjectRequest(undefined); setConflict(undefined); }} /></div><h2>{selected.title}</h2><a href={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a><p>{selected.criterion}</p><WatchProjectView project={selected.project} onOpenProject={onOpenProject} /><p>{scheduleLabel(selected)}</p><p>Next scheduled check: <strong>{timestamp(selected.next_run_at)}</strong></p>{!selected.enabled ? <p>Run now checks this page once and leaves the schedule paused.</p> : null}</header>
           <section className="watch-history" aria-labelledby="watch-history-title"><h3 id="watch-history-title">Check history</h3><p className="watch-help">The first successful check saves a baseline. Later successful checks compare normalized page text; failed checks leave the baseline unchanged. Showing up to 50 recent checks.</p>{runs.length ? <ul>{runs.map((item) => <li key={item.id}><button type="button" aria-pressed={runId === item.id} onClick={() => { setRunId(item.id); setRun(null); }}><strong>{runLabel(item)}</strong><span>{item.kind === "catchup" ? "Catch-up after downtime" : item.kind === "manual" ? "Run now" : "Scheduled"}</span><time dateTime={item.scheduled_at}>{timestamp(item.scheduled_at)}</time></button></li>)}</ul> : <p className="agents-empty">No saved checks yet. Run now to establish a baseline, or wait for the first scheduled check.</p>}</section>
           {run && run.id === runId && run.watch_id === selected.id ? <WatchRunDetail run={run} timestamp={timestamp} onOpenProject={onOpenProject} /> : loadingRun ? <p role="status">Loading saved check…</p> : null}
-        </> : <div className="agents-welcome"><span className="agents-welcome-mark" aria-hidden="true">◉</span><h2>Follow a public page</h2><p>Save a schedule and a criterion for the changes you care about. Audrey keeps check history and adds relevant changes to task updates.</p><button className="agents-primary" type="button" onClick={newWatch}>Create a watch</button></div>}
+        </> : <div className="agents-welcome"><span className="agents-welcome-mark" aria-hidden="true">◉</span><h2>Watch history</h2><p>Your saved watches and checks appear here. Create a watch to follow a public page and receive relevant changes in Updates.</p><button className="agents-primary" type="button" onClick={newWatch}>Create a watch</button></div>}
       </div></section>
     </div>
   </section>;

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AgentsWorkspace } from "./AgentsWorkspace";
 import * as api from "./api";
@@ -10,10 +10,16 @@ beforeEach(() => {
   vi.spyOn(api, "listActivity").mockResolvedValue({ items: [], unread_count: 2 });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers(); });
-it("shows saved unread activity on a fresh Tasks view without loading watch or notification bodies", async () => {
+it("opens Agents history with unread updates and keeps creation and watch bodies closed", async () => {
   render(<AgentsWorkspace />);
   expect(await screen.findByLabelText("2 unread notifications")).toBeVisible();
-  expect(screen.getByRole("button", { name: "Tasks" })).toHaveAttribute("aria-current", "page");
+  const sections = within(screen.getByRole("navigation", { name: "Agent sections" }));
+  expect(sections.getByRole("button", { name: /^Agents/ })).toHaveAttribute("aria-current", "page");
+  expect(sections.getAllByRole("button")).toHaveLength(2);
+  expect(sections.queryByRole("button", { name: "Tasks" })).not.toBeInTheDocument();
+  expect(sections.queryByRole("button", { name: "New" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "New agent" })).toBeVisible();
+  expect(screen.queryByRole("textbox", { name: "Task objective" })).not.toBeInTheDocument();
   expect(api.getActivityUnreadCount).toHaveBeenCalledWith(expect.any(AbortSignal));
   expect(api.listWatches).not.toHaveBeenCalled();
   expect(api.listActivity).not.toHaveBeenCalled();
@@ -35,20 +41,25 @@ it("refreshes only the unread count while visible and stops when Agents is hidde
   expect(api.listActivity).not.toHaveBeenCalled();
 });
 
-it("keeps task and watch drafts across Tasks, Watches and Activity navigation", async () => {
+it("keeps Agent and Watch drafts while their tabs return to history and Updates stays inside Agents", async () => {
   render(<AgentsWorkspace />);
+  fireEvent.click(screen.getByRole("button", { name: "New agent" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Unsent task objective" } });
   expect(api.listWatches).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Watches" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Create a watch" }));
+  fireEvent.click(await screen.findByRole("button", { name: "New watch" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Unsent watch title" } });
-  fireEvent.click(screen.getByRole("button", { name: /^Activity/ }));
-  expect(await screen.findByRole("heading", { name: "Activity" })).toBeVisible();
-  expect(screen.getByLabelText("2 unread notifications")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Watches" }));
-  expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Unsent watch title");
-  fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Agent sections" })).getByRole("button", { name: /^Agents/ }));
+  expect(screen.queryByRole("textbox", { name: "Task objective" })).not.toBeInTheDocument();
+  const updates = document.querySelector<HTMLDetailsElement>(".agents-task-updates")!;
+  fireEvent.click(updates.querySelector("summary")!);
+  expect(await screen.findByRole("heading", { name: "Updates" })).toBeVisible();
+  expect(api.listActivity).toHaveBeenCalledWith(expect.any(AbortSignal));
+  expect(screen.queryByRole("button", { name: /^Activity/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "New agent" }));
   expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Unsent task objective");
   fireEvent.click(screen.getByRole("button", { name: "Watches" }));
+  // The Watch workspace retains its draft without creating or checking a page.
+  fireEvent.click(screen.getByRole("button", { name: "New watch" }));
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Unsent watch title");
 });

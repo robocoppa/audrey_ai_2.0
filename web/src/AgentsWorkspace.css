@@ -356,3 +356,6 @@ button.agents-context-project:focus-visible { outline: 2px solid var(--accent); 
 .agents-knowledge-confirm, .agents-knowledge-origin { min-width: 0; border: 1px solid var(--border); border-radius: 0.65rem; padding: 0.7rem; }
 .agents-knowledge-confirm blockquote { margin: 0.6rem 0; padding-left: 0.6rem; border-left: 2px solid var(--border); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 10rem; overflow-y: auto; font-size: 0.8rem; }
 .agents-knowledge-confirm > div { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+
+.agents-new-agent { width: 100%; margin-bottom: 0.9rem; }
+.agents-back-history { margin-bottom: 0.8rem; }

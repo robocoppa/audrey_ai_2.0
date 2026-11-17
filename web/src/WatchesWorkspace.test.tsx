@@ -35,6 +35,88 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
+describe("watch history navigation", () => {
+  it("opens saved watches and check history before showing any creation fields", async () => {
+    const create = vi.spyOn(api, "createWatch");
+    const action = vi.spyOn(api, "actOnWatch");
+    workspace({ historyRequest: 0 });
+    expect(await screen.findByRole("heading", { name: "Release announcements" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Check history" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open watch: Release announcements" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "New watch" })).toBeVisible();
+    expect(screen.queryByRole("form", { name: "Create watch" })).not.toBeInTheDocument();
+    expect(api.previewWatchSchedule).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(action).not.toHaveBeenCalled();
+  });
+
+  it("keeps an empty history until New watch is explicitly selected", async () => {
+    vi.mocked(api.listWatches).mockResolvedValue({ items: [] });
+    const create = vi.spyOn(api, "createWatch");
+    workspace({ historyRequest: 0 });
+    expect(await screen.findByText("No watches yet. Create one to follow a public page.")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Watch history" })).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New watch" }));
+    expect(await screen.findByRole("textbox", { name: "Title" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Project" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Create watch" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Back to watches" }));
+    expect(screen.getByRole("heading", { name: "Watch history" })).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
+    expect(create).not.toHaveBeenCalled();
+    expect(api.previewWatchSchedule).not.toHaveBeenCalled();
+  });
+
+  it("returns to the selected history without losing a draft and keeps Cancel as explicit discard", async () => {
+    const create = vi.spyOn(api, "createWatch");
+    workspace();
+    await screen.findByRole("heading", { name: "Release announcements" });
+    fireEvent.click(screen.getByRole("button", { name: "New watch" }));
+    fillNewWatch();
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "My unsaved watch" } });
+    fireEvent.click(screen.getByRole("button", { name: "Back to watches" }));
+    expect(screen.getByRole("heading", { name: "Release announcements" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Check history" })).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("region", { name: "Selected watch" })).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "Resume draft" }));
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("My unsaved watch");
+    expect(screen.getByRole("textbox", { name: "Public page URL" })).toHaveValue("https://example.com/releases");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("heading", { name: "Release announcements" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Resume draft" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New watch" }));
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("");
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("returns explicit Watches tab requests to history and reopens the retained new draft", async () => {
+    const view = workspace({ historyRequest: 0 });
+    await screen.findByRole("heading", { name: "Release announcements" });
+    fireEvent.click(screen.getByRole("button", { name: "New watch" }));
+    fillNewWatch();
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Retained through tabs" } });
+    view.rerender(<WatchesWorkspace visible={false} historyRequest={0} />);
+    view.rerender(<WatchesWorkspace visible historyRequest={1} />);
+    expect(await screen.findByRole("heading", { name: "Release announcements" })).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New watch" }));
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Retained through tabs");
+  });
+
+  it("lets an explicit Project composer request take precedence over an initial or concurrent history request", async () => {
+    const first = { project: project(), serial: 1 };
+    const view = workspace({ historyRequest: 0, composerProjectRequest: first });
+    const selector = await screen.findByRole("combobox", { name: "Project" });
+    await waitFor(() => expect(selector).toHaveValue("project-1"));
+    const second = { project: project({ id: "project-2", name: "Second Project" }), serial: 2 };
+    view.rerender(<WatchesWorkspace visible historyRequest={1} composerProjectRequest={second} />);
+    await waitFor(() => expect(selector).toHaveValue("project-2"));
+    expect(screen.getByRole("textbox", { name: "Title" })).toBeVisible();
+  });
+});
+
 describe("watch creation and schedules", () => {
   it("requires a current UTC preview, saves explicitly and never runs at creation", async () => {
     const create = vi.spyOn(api, "createWatch").mockResolvedValue(watch({ latest_run: null }));
@@ -189,11 +271,11 @@ describe("watch activity and visibility", () => {
 
   it.each([false, true])("opens mobile controls with trapped focus and closes them after selecting a watch (sidebar tabs: %s)", async (integrated) => {
     vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
-    workspace({ sidebarTabs: integrated ? <nav aria-label="Agent sections"><button type="button">New</button><button type="button">Watches</button><button type="button">Tasks</button></nav> : undefined });
+    workspace({ sidebarTabs: integrated ? <nav aria-label="Agent sections"><button type="button">Agents</button><button type="button">Watches</button></nav> : undefined });
     await screen.findByRole("heading", { name: "Release announcements" }); fireEvent.click(screen.getByRole("button", { name: "Watch controls" }));
     const dialog = screen.getByRole("dialog", { name: "Saved watches" }); const close = within(dialog).getByRole("button", { name: "Close watch controls" }); expect(close).toHaveFocus();
     if (integrated) {
-      const firstTab = within(dialog).getByRole("button", { name: "New" });
+      const firstTab = within(dialog).getByRole("button", { name: "Agents" });
       firstTab.focus(); fireEvent.keyDown(firstTab, { key: "Tab", shiftKey: true });
       expect(within(dialog).getByRole("button", { name: "Open watch: Release announcements" })).toHaveFocus();
       fireEvent.keyDown(document.activeElement!, { key: "Tab" });
