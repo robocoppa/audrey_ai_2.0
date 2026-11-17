@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from contextlib import contextmanager, nullcontext, suppress
 from contextvars import ContextVar
@@ -95,6 +96,57 @@ def _has_root_input_request(candidate: str) -> bool:
     return False
 
 
+def _bare_input_request(text: str) -> str | None:
+    """Find a reserved bare paragraph, never inline, quoted or nested examples.
+
+    Qwen can introduce a question before its final protocol object. Only an
+    unindented object after a paragraph break can recover that format. Once a
+    reserved paragraph starts, the usual validator owns its entire remainder,
+    so conflicting objects or trailing text cannot silently replace a question.
+    """
+    if text.startswith(("{", "[", '"')):
+        return None
+    offset, fence_length = 0, 0
+    fence = ""
+    previous_blank = False
+    brackets: list[str] = []
+    quoted = escaped = False
+    for line in text.splitlines(keepends=True):
+        content = line.rstrip("\r\n")
+        marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", content)
+        if fence:
+            if (marker and marker[1][0] == fence and len(marker[1]) >= fence_length
+                    and not marker[2].strip()):
+                fence = ""
+        elif marker:
+            fence, fence_length = marker[1][0], len(marker[1])
+        elif not content.startswith(("    ", "\t")) and not content.lstrip().startswith(">"):
+            if (previous_blank and not brackets and not quoted and content.startswith("{")
+                    and _has_root_input_request(text[offset:])):
+                return text[offset:]
+            # Balanced structured data in an introduction is harmless. An
+            # unfinished object/string suppresses recovery inside its contents.
+            for character in content:
+                if quoted:
+                    if escaped:
+                        escaped = False
+                    elif character == "\\":
+                        escaped = True
+                    elif character == '"':
+                        quoted = False
+                elif character == '"':
+                    quoted = True
+                elif character in "{[":
+                    brackets.append(character)
+                elif character in "}]" and brackets:
+                    if (brackets[-1], character) not in {("{", "}"), ("[", "]")}:
+                        return None
+                    brackets.pop()
+        previous_blank = not content.strip()
+        offset += len(line)
+    return None
+
+
 def _clarification_result(result: str, task: dict, *, step_id: str) -> str | AgentInputRequest:
     """Recognize a final clarification envelope without consuming ordinary JSON."""
     label = "Work" if step_id == "research" else step_id.capitalize()
@@ -126,12 +178,23 @@ def _clarification_result(result: str, task: dict, *, step_id: str) -> str | Age
             duplicate_objects.append(value)
         return value
 
+    decoder = json.JSONDecoder(object_pairs_hook=object_pairs)
     try:
-        payload, end = json.JSONDecoder(object_pairs_hook=object_pairs).raw_decode(candidate)
+        payload, end = decoder.raw_decode(candidate)
     except (ValueError, RecursionError):
         if _has_root_input_request(candidate):
             raise invalid("malformed_json") from None
-        return text
+        candidate = _bare_input_request(text)
+        if candidate is None:
+            return text
+        # Recovery already established that this paragraph is outside fences;
+        # an earlier introductory code block does not wrap the recovered object.
+        fenced = False
+        duplicate_objects.clear()
+        try:
+            payload, end = decoder.raw_decode(candidate)
+        except (ValueError, RecursionError):
+            raise invalid("malformed_json") from None
     if not isinstance(payload, dict) or "input_request" not in payload:
         return text
     if candidate[end:].strip():

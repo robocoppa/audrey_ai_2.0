@@ -1,6 +1,6 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, November 16, 2026. Saved task Agents, unified lexical
+**Status:** In progress, November 17, 2026. Saved task Agents, unified lexical
 Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner closed the recent
 interactive acceptance work on November 13. Campaigns 1–4 remain closed.
 
@@ -311,6 +311,17 @@ Further execution waits for an answer. The stored task remains paused internally
 the public waiting state comes from its pending question, avoiding a task-table
 rewrite. Waiting time does not consume active execution allowance.
 
+Clarification is for missing information that materially affects correct
+completion. Agents follow a style supplied in the prompt and otherwise choose
+a suitable tone, wording and presentation without asking routine preference
+questions. Plan does not schedule those questions for Work. An explicit user
+request to ask a question still applies; the tone questions in the interactive
+checks below deliberately exercise that exception, rather than normal behavior.
+For a normal live check, start a fresh Agent with “Write a short welcome message
+for a new community member. Do not browse.” It should finish without asking for
+a tone choice. This prompt-policy change needs only a backend rebuild; live
+default-choice acceptance remains pending.
+
 The owner answers inside the existing agent card. The answer transaction checks
 question identity, current task revision, owner access, remaining cumulative limits
 and queue capacity before queuing that same task. Dispatch revalidates model/tool
@@ -379,9 +390,15 @@ Model context identifies the current stage and recorded question-stage metadata;
 absent provenance is not inferred. Review uses observed stages and returns the
 deliverable directly. Earlier planning-question and parser failures led to these
 corrections; the rejected Plan response was not retained, so its exact shape is
-unknown. The parser preserves ordinary Plan JSON/text and recognizes only the
-root question protocol. Root-key detection decodes escaped keys and skips nested
-or quoted examples; it does not infer intent from arbitrary malformed text.
+unknown. The parser preserves ordinary Plan JSON/text and recognizes the root
+question protocol. It also recovers an unindented reserved question paragraph
+after an introduction and blank line. That paragraph is control data, not a place
+for unfenced protocol examples; examples should be quoted, indented or fenced.
+Root-key detection decodes escaped keys and skips nested or quoted examples.
+The recovery scanner excludes code fences and unfinished structured data, and
+does not extract inline JSON. Conflicting objects or trailing text fail existing
+validation rather than silently choosing a question. It does not infer intent
+from prose or manufacture questions from a plain-language report.
 Only valid complete envelopes create questions. Rejection logs use fixed reason
 codes without model bodies or unknown JSON field names. Parser/privacy and full
 executor regressions pass. Run again reuses saved answers, so a future check of
@@ -495,6 +512,21 @@ existing executor suite, calculator/Private dispatch regressions, frontend tests
 type checking, changed-file lint and production build pass. Browser fixtures at
 320, 390 and 1,366 pixels retain compact independently scrolling panels without
 horizontal overflow. These checks supplement the owner-operated test below.
+
+The November 17 live attempt saved `Event label: Autumn Social`, with two
+completed Save progress calls, but failed the question handoff. Work prefaced its
+valid final `input_request` object with an introduction and bold tone question.
+The root-only parser treated that reply as completed Work; Review ran and the
+task finished with a request to reply but no saved question or answer form. Draft
+saving is observed; live continuation and restart acceptance remain unproven.
+The parser correction above accepts that reserved standalone paragraph and the
+Work prompt reinforces returning only the envelope after saving progress. Local
+regressions reproduce the actual reply, ensure Review does not run while waiting,
+reopen storage, answer through the native API and download an invitation using
+the saved values. They also reject malformed questions without completing Work.
+Model replies are scripted. This correction needs only a backend rebuild and no
+migration. An already-completed task cannot gain a question by refreshing: Run
+again keeps its Plan but creates a new Work draft/timestamp, as designed.
 
 #### Saved-progress interactive check
 
