@@ -1,0 +1,36 @@
+.sidebar-create-button {
+  display: flex;
+  width: 100%;
+  min-height: var(--control-height-create);
+  align-items: center;
+  justify-content: center;
+  gap: var(--control-gap-create);
+  padding: var(--control-padding-create);
+  border: 0;
+  border-radius: var(--radius-button);
+  background: var(--brand-gradient);
+  color: var(--on-accent);
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-bold);
+  box-shadow: var(--shadow-sm);
+  transition: filter var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.sidebar-create-button:hover:not(:disabled) {
+  filter: brightness(var(--hover-brightness));
+  box-shadow: var(--shadow-create-hover);
+}
+
+.sidebar-create-button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sidebar-create-button:disabled {
+  cursor: not-allowed;
+  opacity: var(--opacity-disabled);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-create-button { transition: none; }
+}

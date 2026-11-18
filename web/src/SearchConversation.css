@@ -1,7 +1,7 @@
 .message.search-message-target {
   outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   outline-offset: .35rem;
-  border-radius: .65rem;
+  border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--surface-active) 45%, transparent);
   scroll-margin-block: 2rem;
 }
@@ -14,6 +14,6 @@
 .conversation-drafts h2 {
   margin: 0 0 .3rem;
   color: var(--muted);
-  font-size: .7rem;
+  font-size: var(--font-size-xs);
   font-weight: 650;
 }

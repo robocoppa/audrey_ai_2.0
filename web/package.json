@@ -8,11 +8,12 @@
   },
   "packageManager": "npm@11.19.0",
   "scripts": {
-    "build": "tsc -b && vite build",
+    "build": "node scripts/check-style-tokens.mjs && tsc -b && vite build",
     "dev": "vite",
     "pree2e": "npm run build",
     "e2e": "playwright test",
     "lint": "eslint .",
+    "check:styles": "node scripts/check-style-tokens.mjs",
     "prepreview": "npm run build",
     "preview": "vite preview",
     "test": "vitest run",

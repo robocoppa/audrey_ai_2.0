@@ -1,31 +1,9 @@
+@import "./theme.css";
+
 :root {
-  color: #f4f8ff;
-  background: #07101f;
-  color-scheme: dark;
-  --surface-deep: #07101f;
-  --surface: #0f1c31;
-  --surface-raised: #152641;
-  --surface-active: #183153;
-  --input-surface: #101f36;
-  --text: #f4f8ff;
-  --text-soft: #d7e2f1;
-  --muted: #9bacc4;
-  --muted-deep: #879ab5;
-  --accent: #63b5ff;
-  --accent-soft: #3499fa;
-  --danger: #ff91a4;
-  --warning: #efc071;
-  --success: #68d391;
-  --border: rgb(155 172 196 / 20%);
-  --border-strong: rgb(99 181 255 / 62%);
-  --scrollbar-thumb: #4d6e95;
-  --scrollbar-thumb-hover: #789ac0;
-  --brand-gradient: linear-gradient(135deg, #3499fa 0%, #4676f2 52%, #5158ec 100%);
-  --focus-glow: 0 0 0 0.2rem rgb(70 118 242 / 18%), 0 0 1.5rem rgb(52 153 250 / 20%);
-  --shadow-sm: 0 5px 18px rgb(0 0 0 / 24%);
-  --shadow-md: 0 16px 42px rgb(0 0 0 / 34%);
-  --workspace-sidebar-width: 17rem;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--text);
+  background: var(--surface-deep);
+  font-family: var(--font-sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -50,7 +28,7 @@
 
   ::-webkit-scrollbar-thumb {
     border: 2px solid transparent;
-    border-radius: 1rem;
+    border-radius: var(--radius-panel);
     background: var(--scrollbar-thumb);
     background-clip: padding-box;
   }
@@ -79,8 +57,8 @@ body,
 body {
   min-width: 320px;
   background:
-    radial-gradient(circle at 82% 12%, rgb(52 153 250 / 14%), transparent 31rem),
-    radial-gradient(circle at 12% 78%, rgb(81 88 236 / 10%), transparent 30rem),
+    radial-gradient(circle at 82% 12%, color-mix(in srgb, var(--accent-soft) 14%, transparent), transparent 31rem),
+    radial-gradient(circle at 12% 78%, color-mix(in srgb, var(--brand-end) 10%, transparent), transparent 30rem),
     var(--surface-deep);
 }
 
@@ -128,14 +106,14 @@ a {
   flex-direction: column;
   padding: 1.1rem 0.8rem;
   border-right: 1px solid var(--border);
-  background: rgb(9 20 37 / 88%);
+  background: color-mix(in srgb, var(--surface-overlay) 88%, transparent);
 }
 
 .thread-header > div > span,
 .thread-empty > span {
   color: var(--muted);
   font-size: 0.66rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -164,36 +142,14 @@ button {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.48;
-}
-
-.new-conversation {
-  display: flex;
-  width: 100%;
-  min-height: 2.65rem;
-  align-items: center;
-  justify-content: center;
-  gap: 0.45rem;
-  padding: 0.65rem 0.85rem;
-  border: 0;
-  border-radius: 0.75rem;
-  background: var(--brand-gradient);
-  color: #fff;
-  font-size: 0.78rem;
-  font-weight: 700;
-  box-shadow: var(--shadow-sm);
-}
-
-.new-conversation:hover {
-  filter: brightness(1.12);
-  box-shadow: 0 7px 22px rgb(52 153 250 / 24%);
+  opacity: var(--opacity-disabled);
 }
 
 .sidebar-status,
 .sidebar-error {
-  margin: 0.7rem 0.5rem;
+  margin: 0.7rem var(--space-2);
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: var(--font-size-body-sm);
   line-height: 1.5;
 }
 
@@ -210,7 +166,7 @@ button:disabled {
 .conversation-search span {
   color: var(--muted);
   font-size: 0.66rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -218,12 +174,12 @@ button:disabled {
 .conversation-search input,
 .rename-conversation input {
   min-width: 0;
-  padding: 0.5rem 0.65rem;
+  padding: var(--space-2) 0.65rem;
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-button);
   outline: none;
   background: var(--input-surface);
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
 }
 
 .conversation-search input::placeholder {
@@ -241,12 +197,12 @@ button:disabled {
 .conversation-views {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.25rem;
+  gap: var(--space-1);
   margin: 0 0.4rem 0.7rem;
   padding: 0.2rem;
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  background: rgb(4 11 22 / 44%);
+  border-radius: var(--radius-button);
+  background: color-mix(in srgb, var(--surface-inset) 44%, transparent);
 }
 
 .conversation-views button,
@@ -262,7 +218,7 @@ button:disabled {
 }
 
 .conversation-views button[aria-pressed="true"] {
-  border-color: rgb(99 181 255 / 20%);
+  border-color: color-mix(in srgb, var(--accent) 20%, transparent);
   background: var(--surface-raised);
   color: var(--accent);
   box-shadow: var(--shadow-sm);
@@ -289,7 +245,7 @@ button:disabled {
 .conversation {
   display: block;
   width: 100%;
-  padding: 0.72rem 2.8rem 0.72rem 0.75rem;
+  padding: 0.72rem 2.8rem 0.72rem var(--space-3);
   border: 1px solid transparent;
   border-radius: 0.6rem;
   background: transparent;
@@ -305,7 +261,7 @@ button:disabled {
   height: 2rem;
   place-items: center;
   border: 1px solid transparent;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
   opacity: 0;
@@ -320,7 +276,7 @@ button:disabled {
 
 .conversation-delete:hover,
 .conversation-delete:focus-visible {
-  border-color: rgb(255 145 164 / 30%);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
   outline: none;
   background: var(--surface-raised);
   color: var(--danger);
@@ -334,7 +290,7 @@ button:disabled {
 }
 
 .conversation:hover {
-  background: rgb(52 153 250 / 8%);
+  background: color-mix(in srgb, var(--accent-soft) 8%, transparent);
 }
 
 .conversation.active {
@@ -345,24 +301,24 @@ button:disabled {
 
 .conversation[data-private="true"],
 .project-conversation[data-private="true"] {
-  background: rgb(220 88 100 / 8%);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
 .conversation[data-private="true"]:hover,
 .project-conversation[data-private="true"]:hover {
-  background: rgb(220 88 100 / 13%);
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
 }
 
 .conversation[data-private="true"].active,
 .project-conversation[data-private="true"].active {
-  border-color: rgb(220 120 130 / 16%);
-  background: rgb(220 88 100 / 17%);
-  box-shadow: inset 0.18rem 0 0 rgb(220 120 130 / 75%), var(--shadow-sm);
+  border-color: color-mix(in srgb, var(--danger) 16%, transparent);
+  background: color-mix(in srgb, var(--danger) 17%, transparent);
+  box-shadow: inset 0.18rem 0 0 color-mix(in srgb, var(--danger) 75%, transparent), var(--shadow-sm);
 }
 
 .conversation[data-private="true"].active:hover,
 .project-conversation[data-private="true"].active:hover {
-  background: rgb(220 88 100 / 21%);
+  background: color-mix(in srgb, var(--danger) 21%, transparent);
 }
 
 .conversation span,
@@ -414,7 +370,7 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--space-4);
   padding: 1rem clamp(1rem, 3vw, 2.4rem);
 }
 
@@ -473,8 +429,8 @@ button:disabled {
 }
 
 button.confirming-delete {
-  border-color: rgb(255 145 164 / 56%);
-  background: rgb(255 145 164 / 12%);
+  border-color: color-mix(in srgb, var(--danger) 56%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
   color: var(--danger) !important;
   font-weight: 800;
 }
@@ -487,7 +443,7 @@ button.confirming-delete {
 
 .conversation-mutation-error {
   margin: 0;
-  padding: 0 2.4rem 0.75rem;
+  padding: 0 2.4rem var(--space-3);
   color: var(--danger);
   font-size: 0.76rem;
 }
@@ -497,7 +453,7 @@ button.confirming-delete {
   overflow: hidden;
   margin: 0.2rem 0 0;
   font-family: inherit;
-  font-size: 1rem;
+  font-size: var(--font-size-base);
   font-weight: 650;
   letter-spacing: 0;
   line-height: 1.2;
@@ -543,13 +499,13 @@ a:focus-visible {
   display: grid;
   place-items: center;
   align-content: center;
-  padding: 2rem;
+  padding: var(--space-8);
   text-align: center;
 }
 
 .thread-empty {
   min-height: clamp(5rem, 18vh, 9rem);
-  padding-block: 1rem;
+  padding-block: var(--space-4);
 }
 
 .thread-empty h2 {
@@ -557,14 +513,14 @@ a:focus-visible {
   margin: 0;
   font-family: inherit;
   font-size: clamp(2rem, 5vw, 3.8rem);
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: -0.045em;
   line-height: 1;
 }
 
 .thread-empty p {
   max-width: 40ch;
-  margin: 1rem 0 1.5rem;
+  margin: var(--space-4) 0 var(--space-6);
   color: var(--muted);
   line-height: 1.6;
 }
@@ -580,10 +536,10 @@ a:focus-visible {
   width: fit-content;
   max-width: min(86%, 42rem);
   margin-right: 0;
-  padding: 0.72rem 1rem;
-  border: 1px solid rgb(99 181 255 / 18%);
+  padding: 0.72rem var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
   border-radius: 1rem 1rem 0.25rem 1rem;
-  background: rgb(52 153 250 / 12%);
+  background: color-mix(in srgb, var(--accent-soft) 12%, transparent);
 }
 
 .message-user .chat-attachment {
@@ -608,7 +564,7 @@ a:focus-visible {
   height: auto;
   max-height: 20rem;
   object-fit: contain;
-  background: #081426;
+  background: var(--surface-code);
 }
 
 .chat-image-unavailable {
@@ -653,9 +609,9 @@ a:focus-visible {
   flex: 0 0 auto;
   place-items: center;
   border-radius: 0.55rem;
-  background: rgb(52 153 250 / 14%);
+  background: color-mix(in srgb, var(--accent-soft) 14%, transparent);
   color: var(--accent);
-  font-size: 0.85rem;
+  font-size: var(--font-size-body);
 }
 
 .chat-file-attachment > span:nth-child(2) {
@@ -674,8 +630,8 @@ a:focus-visible {
 
 .chat-file-attachment strong {
   overflow: hidden;
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -700,7 +656,7 @@ a:focus-visible {
 .markdown-content blockquote,
 .markdown-content pre,
 .markdown-content table {
-  margin: 0.75rem 0;
+  margin: var(--space-3) 0;
 }
 
 .markdown-content p {
@@ -709,11 +665,11 @@ a:focus-visible {
 
 .markdown-content ul,
 .markdown-content ol {
-  padding-left: 1.5rem;
+  padding-left: var(--space-6);
 }
 
 .markdown-content li + li {
-  margin-top: 0.25rem;
+  margin-top: var(--space-1);
 }
 
 .markdown-content h1,
@@ -723,9 +679,9 @@ a:focus-visible {
 .markdown-content h5,
 .markdown-content h6 {
   max-width: none;
-  margin: 1.25rem 0 0.55rem;
+  margin: var(--space-5) 0 0.55rem;
   font-family: inherit;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: -0.018em;
   line-height: 1.25;
 }
@@ -744,34 +700,34 @@ a:focus-visible {
 
 .markdown-content blockquote {
   padding-left: 0.9rem;
-  border-left: 0.18rem solid rgb(70 118 242 / 55%);
+  border-left: 0.18rem solid color-mix(in srgb, var(--brand-middle) 55%, transparent);
   color: var(--muted);
 }
 
 .markdown-content code {
   padding: 0.12rem 0.3rem;
   border-radius: 0.28rem;
-  background: rgb(52 153 250 / 13%);
-  color: #a9d5ff;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  background: color-mix(in srgb, var(--accent-soft) 13%, transparent);
+  color: var(--accent-text);
+  font-family: var(--font-mono);
   font-size: 0.88em;
 }
 
 .markdown-content pre {
   overflow-x: auto;
-  padding: 0.85rem 1rem;
+  padding: 0.85rem var(--space-4);
   border: 1px solid var(--border);
-  border-radius: 0.65rem;
-  background: #081426;
+  border-radius: var(--radius-control);
+  background: var(--surface-code);
   box-shadow: var(--shadow-sm);
 }
 
 .markdown-code-block {
   overflow: hidden;
-  margin: 0.75rem 0;
+  margin: var(--space-3) 0;
   border: 1px solid var(--border);
-  border-radius: 0.65rem;
-  background: #081426;
+  border-radius: var(--radius-control);
+  background: var(--surface-code);
   box-shadow: var(--shadow-sm);
 }
 
@@ -780,11 +736,11 @@ a:focus-visible {
   min-height: 2.25rem;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 0.35rem 0.55rem 0.35rem 0.75rem;
+  gap: var(--space-4);
+  padding: 0.35rem 0.55rem 0.35rem var(--space-3);
   border-bottom: 1px solid var(--border);
   color: var(--muted);
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.68rem;
 }
 
@@ -798,7 +754,7 @@ a:focus-visible {
 .markdown-content pre code {
   padding: 0;
   background: transparent;
-  color: #edf4ff;
+  color: var(--text);
   font-size: 0.82rem;
 }
 
@@ -847,13 +803,13 @@ a:focus-visible {
   margin-bottom: 0.3rem;
   color: var(--muted-deep);
   font-size: 0.66rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
 .message-user .message-label {
-  color: #79bfff;
+  color: var(--accent);
 }
 
 .message-actions {
@@ -864,7 +820,7 @@ a:focus-visible {
 
 .copy-action {
   min-width: 3.65rem;
-  padding: 0.3rem 0.5rem;
+  padding: 0.3rem var(--space-2);
   border: 1px solid transparent;
   border-radius: 0.45rem;
   background: transparent;
@@ -888,12 +844,12 @@ a:focus-visible {
   z-index: 4;
   bottom: 0;
   width: min(100%, 56rem);
-  margin: 1rem auto 0;
+  margin: var(--space-4) auto 0;
   padding: 0.5rem 0 max(1rem, env(safe-area-inset-bottom));
   background: linear-gradient(
     to bottom,
     transparent,
-    rgb(7 16 31 / 96%) 2rem,
+    color-mix(in srgb, var(--surface-deep) 96%, transparent) 2rem,
     var(--surface-deep) 100%
   );
 }
@@ -908,8 +864,8 @@ a:focus-visible {
   justify-items: center;
   gap: 0.6rem;
   width: min(100%, 36rem);
-  margin: 0 auto 1rem;
-  padding: 0.25rem 1rem 0;
+  margin: 0 auto var(--space-4);
+  padding: var(--space-1) var(--space-4) 0;
   color: var(--text-soft);
   text-align: center;
 }
@@ -918,20 +874,20 @@ a:focus-visible {
   width: 12.6rem;
   height: 12.6rem;
   margin-bottom: 0.65rem;
-  border: 2px solid rgb(99 181 255 / 36%);
-  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--accent) 36%, transparent);
+  border-radius: var(--radius-pill);
   opacity: 0.8;
   object-fit: cover;
-  box-shadow: 0 0.75rem 2.1rem rgb(0 0 0 / 26%);
-  transition: border-color 180ms ease, box-shadow 180ms ease;
+  box-shadow: 0 0.75rem 2.1rem color-mix(in srgb, var(--shadow-color) 26%, transparent);
+  transition: border-color var(--duration-normal) ease, box-shadow var(--duration-normal) ease;
 }
 
 .composer-model-picker img:hover {
-  border-color: rgb(99 181 255 / 72%);
+  border-color: color-mix(in srgb, var(--accent) 72%, transparent);
   box-shadow:
-    0 0 0.3rem rgb(99 181 255 / 68%),
-    0 0 1rem rgb(99 181 255 / 42%),
-    0 0 2rem rgb(52 153 250 / 26%);
+    0 0 0.3rem color-mix(in srgb, var(--accent) 68%, transparent),
+    0 0 1rem color-mix(in srgb, var(--accent) 42%, transparent),
+    0 0 2rem color-mix(in srgb, var(--accent-soft) 26%, transparent);
 }
 
 .model-description {
@@ -950,14 +906,14 @@ a:focus-visible {
   gap: 0.8rem;
   margin: clamp(1.25rem, 4vh, 2.5rem) auto;
   padding: clamp(1.5rem, 4vw, 2rem);
-  border: 1px solid rgb(99 181 255 / 18%);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
   border-radius: 1.15rem;
   background:
-    radial-gradient(circle at 50% 32%, rgb(52 153 250 / 13%), transparent 8rem),
-    rgb(15 28 49 / 72%);
+    radial-gradient(circle at 50% 32%, color-mix(in srgb, var(--accent-soft) 13%, transparent), transparent 8rem),
+    color-mix(in srgb, var(--surface) 72%, transparent);
   color: var(--text-soft);
   text-align: center;
-  box-shadow: 0 1.25rem 3.5rem rgb(0 0 0 / 22%);
+  box-shadow: 0 1.25rem 3.5rem color-mix(in srgb, var(--shadow-color) 22%, transparent);
 }
 
 .recovered-run-orb {
@@ -965,12 +921,12 @@ a:focus-visible {
   width: 4rem;
   height: 4rem;
   margin: 0.3rem 0 0.2rem;
-  border: 1px solid rgb(99 181 255 / 28%);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   border-radius: 50%;
   box-shadow:
-    0 0 1.5rem rgb(52 153 250 / 30%),
-    inset 0 0 1.15rem rgb(52 153 250 / 12%);
-  filter: drop-shadow(0 0 0.65rem rgb(52 153 250 / 34%));
+    0 0 1.5rem color-mix(in srgb, var(--accent-soft) 30%, transparent),
+    inset 0 0 1.15rem color-mix(in srgb, var(--accent-soft) 12%, transparent);
+  filter: drop-shadow(0 0 0.65rem color-mix(in srgb, var(--accent-soft) 34%, transparent));
   animation: audrey-loading-orbit 2.4s linear infinite;
 }
 
@@ -982,21 +938,21 @@ a:focus-visible {
   height: 0.72rem;
   transform: translateX(-50%);
   border-radius: 50%;
-  background: #b9ddff;
+  background: var(--accent-text);
   box-shadow:
-    0 0 0.65rem rgb(185 221 255 / 92%),
-    0 0 1.35rem rgb(52 153 250 / 76%);
+    0 0 0.65rem color-mix(in srgb, var(--accent-text) 92%, transparent),
+    0 0 1.35rem color-mix(in srgb, var(--accent-soft) 76%, transparent);
   content: "";
 }
 
 .recovered-run-copy {
   display: grid;
-  gap: 0.25rem;
+  gap: var(--space-1);
 }
 
 .recovered-run-copy strong {
   color: var(--text);
-  font-size: 1rem;
+  font-size: var(--font-size-base);
   font-weight: 650;
   letter-spacing: -0.01em;
 }
@@ -1012,7 +968,7 @@ a:focus-visible {
   margin-top: 0.1rem;
   padding: 0.48rem 0.85rem;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-deep);
   color: var(--text-soft);
   font-size: 0.76rem;
@@ -1038,7 +994,7 @@ a:focus-visible {
   max-width: 100%;
   margin: 0 0 0.55rem 0.65rem;
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
 }
 
 .run-activity strong {
@@ -1050,9 +1006,9 @@ a:focus-visible {
   width: 0.45rem;
   height: 0.45rem;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--warning);
-  box-shadow: 0 0 0 0.2rem rgb(201 155 88 / 10%);
+  box-shadow: 0 0 0 0.2rem color-mix(in srgb, var(--warning) 10%, transparent);
 }
 
 .run-activity[data-status="running"] .run-activity-dot {
@@ -1124,7 +1080,7 @@ a:focus-visible {
   margin: 0;
   padding: 0.45rem 0.7rem;
   border: 1px solid var(--border);
-  border-radius: 0.65rem;
+  border-radius: var(--radius-control);
   background: var(--surface-deep);
   box-shadow: var(--shadow-sm);
   list-style: none;
@@ -1149,13 +1105,13 @@ a:focus-visible {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .run-models li span,
 .run-tools li span {
   color: var(--text-soft);
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .run-models li small,
@@ -1178,7 +1134,7 @@ a:focus-visible {
   padding-top: 0.55rem;
   border-top: 1px solid var(--border);
   color: var(--text-soft);
-  font-size: 0.75rem;
+  font-size: var(--font-size-sm);
 }
 
 .saved-sources,
@@ -1203,7 +1159,7 @@ a:focus-visible {
 }
 
 .saved-sources p {
-  margin: 0.5rem 0;
+  margin: var(--space-2) 0;
   color: var(--muted);
 }
 
@@ -1227,7 +1183,7 @@ a:focus-visible {
 .saved-models li span,
 .saved-tools li span {
   color: var(--text-soft);
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .saved-models li small,
@@ -1246,9 +1202,9 @@ a:focus-visible {
   gap: 0;
   padding: 0.55rem;
   border: 1px solid var(--border);
-  border-radius: 1rem;
+  border-radius: var(--radius-panel);
   background: var(--surface);
-  box-shadow: 0 1.2rem 4rem rgb(0 0 0 / 30%);
+  box-shadow: 0 1.2rem 4rem color-mix(in srgb, var(--shadow-color) 30%, transparent);
 }
 
 .composer-input-row {
@@ -1256,7 +1212,7 @@ a:focus-visible {
   min-width: 0;
   align-items: flex-end;
   gap: 0.55rem;
-  padding: 0.1rem 0.1rem 0.5rem;
+  padding: 0.1rem 0.1rem var(--space-2);
 }
 
 .composer-control-rail {
@@ -1264,7 +1220,7 @@ a:focus-visible {
   min-width: 0;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.45rem;
-  padding-top: 0.5rem;
+  padding-top: var(--space-2);
   border-top: 1px solid var(--border);
 }
 
@@ -1282,11 +1238,11 @@ a:focus-visible {
   gap: 0.35rem;
   padding: 0.32rem 0.58rem;
   overflow: hidden;
-  border: 1px solid rgb(99 181 255 / 28%);
-  border-radius: 999px;
-  background: rgb(52 153 250 / 11%);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent-soft) 11%, transparent);
   color: var(--text-soft);
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1298,7 +1254,7 @@ a:focus-visible {
 
 .selected-attachments button span {
   color: var(--accent);
-  font-size: 1rem;
+  font-size: var(--font-size-base);
   line-height: 0.7;
 }
 
@@ -1312,7 +1268,7 @@ a:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--space-2);
   margin: 0 0 0.45rem 0.65rem;
   color: var(--danger);
   font-size: 0.72rem;
@@ -1356,7 +1312,7 @@ a:focus-visible {
   background: var(--surface-raised);
   color: var(--text-soft);
   font-size: 0.74rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
 }
 
 .attachment-upload input {
@@ -1369,7 +1325,7 @@ a:focus-visible {
 
 .composer-picker {
   position: fixed;
-  z-index: 30;
+  z-index: var(--z-popover);
   display: flex;
   min-height: 0;
   max-height: 22rem;
@@ -1378,7 +1334,7 @@ a:focus-visible {
   flex-direction: column;
   border: 1px solid var(--border-strong);
   border-radius: 0.8rem;
-  background: rgb(10 24 45 / 98%);
+  background: color-mix(in srgb, var(--surface-panel) 98%, transparent);
   box-shadow: var(--shadow-md);
   color: var(--text-soft);
   visibility: hidden;
@@ -1394,7 +1350,7 @@ a:focus-visible {
   display: flex;
   flex: none;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--space-4);
   margin-bottom: 0.55rem;
   color: var(--text-soft);
   font-size: 0.76rem;
@@ -1460,7 +1416,7 @@ a:focus-visible {
   display: flex;
   flex: none;
   gap: 0.3rem;
-  padding-bottom: 0.5rem;
+  padding-bottom: var(--space-2);
   overflow-x: auto;
   scrollbar-width: thin;
 }
@@ -1472,7 +1428,7 @@ a:focus-visible {
   flex: 0 0 auto;
   padding: 0.3rem 0.48rem;
   border: 1px solid transparent;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
   font-size: 0.68rem;
@@ -1521,7 +1477,7 @@ a:focus-visible {
   gap: 0.04rem 0.45rem;
   padding: 0.38rem 0.45rem;
   border: 1px solid transparent;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-soft);
   text-align: left;
@@ -1533,9 +1489,9 @@ a:focus-visible {
 }
 
 .attachment-options button[aria-pressed="true"] {
-  border-color: rgb(99 181 255 / 35%);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
   background: var(--surface-active);
-  box-shadow: inset 0 0 0 1px rgb(99 181 255 / 10%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .attachment-file-kind,
@@ -1549,9 +1505,9 @@ a:focus-visible {
 .attachment-file-kind {
   width: 1.7rem;
   height: 1.7rem;
-  border: 1px solid rgb(99 181 255 / 20%);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-radius: 0.42rem;
-  background: rgb(52 153 250 / 8%);
+  background: color-mix(in srgb, var(--accent-soft) 8%, transparent);
   font-size: 0.72rem;
   font-weight: 800;
 }
@@ -1562,7 +1518,7 @@ a:focus-visible {
   height: 1.35rem;
   justify-self: end;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--muted);
   font-size: 0.72rem;
 }
@@ -1570,7 +1526,7 @@ a:focus-visible {
 .attachment-options button[aria-pressed="true"] .attachment-file-selection {
   border-color: var(--accent-soft);
   background: var(--accent);
-  color: rgb(5 15 30);
+  color: var(--on-accent-dark);
 }
 
 .attachment-file-name {
@@ -1604,7 +1560,7 @@ a:focus-visible {
   min-width: 0;
   overflow-wrap: anywhere;
   width: 100%;
-  min-height: 2.75rem;
+  min-height: var(--control-height-lg);
   gap: 0.2rem;
   padding: 0.65rem 0.72rem;
   border: 1px solid var(--border);
@@ -1625,21 +1581,21 @@ a:focus-visible {
 .skill-options button[aria-pressed="true"],
 .composer-choice-options button[aria-pressed="true"],
 .composer-choice-options button[aria-checked="true"] {
-  border-color: rgb(99 181 255 / 42%);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
   background: var(--surface-active);
-  box-shadow: inset 0 0 0 1px rgb(99 181 255 / 10%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .skill-options button strong,
 .composer-choice-options button strong {
   color: var(--text);
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
 }
 
 .skill-options button span,
 .composer-choice-options button span {
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   line-height: 1.35;
 }
 
@@ -1647,12 +1603,12 @@ a:focus-visible {
   width: 100%;
   min-height: 2.6rem;
   margin-top: 0.55rem;
-  padding: 0.5rem 0.7rem;
+  padding: var(--space-2) 0.7rem;
   border: 1px solid var(--border);
   border-radius: 0.62rem;
   background: var(--surface-raised);
   color: var(--accent);
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
   font-weight: 650;
   text-align: left;
 }
@@ -1671,7 +1627,7 @@ a:focus-visible {
   padding: 0.38rem 0.58rem;
   border: 1px solid var(--border);
   border-radius: 0.62rem;
-  background: rgb(255 255 255 / 1.5%);
+  background: color-mix(in srgb, var(--on-accent) 1.5%, transparent);
   color: var(--accent);
   text-align: left;
 }
@@ -1695,7 +1651,7 @@ a:focus-visible {
   padding-right: 1.2rem;
   color: var(--accent);
   font-size: 0.88rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1729,18 +1685,18 @@ a:focus-visible {
 }
 
 .composer-rail-control:disabled {
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
   cursor: not-allowed;
 }
 
 .composer:has(.composer-input:focus) {
   border-color: var(--border-strong);
   background: var(--surface-raised);
-  box-shadow: 0 1.2rem 4rem rgb(0 0 0 / 30%), var(--focus-glow);
+  box-shadow: 0 1.2rem 4rem color-mix(in srgb, var(--shadow-color) 30%, transparent), var(--focus-glow);
 }
 
 .composer-input {
-  min-height: 2.5rem;
+  min-height: var(--control-height-md);
   max-height: 10rem;
   min-width: 0;
   flex: 1;
@@ -1767,7 +1723,7 @@ a:focus-visible {
 .cancel-button,
 .scroll-bottom {
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .send-button,
@@ -1778,7 +1734,7 @@ a:focus-visible {
   width: 2.35rem;
   height: 2.35rem;
   padding: 0;
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .send-button {
@@ -1796,7 +1752,7 @@ a:focus-visible {
 }
 
 .cancel-button {
-  background: linear-gradient(135deg, #d7445f 0%, #bb2d48 100%);
+  background: linear-gradient(135deg, var(--danger-strong) 0%, var(--danger-deep) 100%);
 }
 
 .cancel-button svg {
@@ -1807,13 +1763,13 @@ a:focus-visible {
 
 .archived-notice {
   margin: 0;
-  padding: 0.9rem 1rem;
-  border: 1px solid rgb(201 155 88 / 20%);
-  border-radius: 0.75rem;
-  background: rgb(239 192 113 / 10%);
+  padding: 0.9rem var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--warning) 20%, transparent);
+  border-radius: var(--radius-button);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
   color: var(--warning);
   text-align: center;
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
 }
 
 .scroll-bottom {
@@ -1829,7 +1785,7 @@ a:focus-visible {
   border: 1px solid var(--border-strong);
   background: var(--surface-raised);
   color: var(--accent);
-  box-shadow: var(--shadow-md), 0 0 0 0.25rem rgb(52 153 250 / 8%);
+  box-shadow: var(--shadow-md), 0 0 0 0.25rem color-mix(in srgb, var(--accent-soft) 8%, transparent);
   transition:
     opacity 140ms ease,
     visibility 140ms ease,
@@ -1890,14 +1846,14 @@ a:focus-visible {
   font-size: 0.9rem;
   font-weight: 550;
   letter-spacing: 0.035em;
-  text-shadow: 0 0 1rem rgb(99 181 255 / 28%);
+  text-shadow: 0 0 1rem color-mix(in srgb, var(--accent) 28%, transparent);
   white-space: nowrap;
 }
 
 .audrey-loader-copy {
   display: grid;
   max-width: min(30rem, calc(100vw - 3rem));
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .audrey-loader-copy strong {
@@ -1918,9 +1874,9 @@ a:focus-visible {
   min-height: 100vh;
   min-height: 100dvh;
   place-items: center;
-  padding: 2rem;
+  padding: var(--space-8);
   background:
-    radial-gradient(circle at 50% 44%, rgb(52 153 250 / 10%), transparent 22rem),
+    radial-gradient(circle at 50% 44%, color-mix(in srgb, var(--accent-soft) 10%, transparent), transparent 22rem),
     var(--surface-deep);
 }
 
@@ -1936,17 +1892,17 @@ a:focus-visible {
   display: grid;
   width: 4rem;
   height: 4rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--space-6);
   place-items: center;
-  border: 1px solid rgb(99 181 255 / 28%);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   border-radius: 50%;
-  box-shadow: 0 0 2.5rem rgb(52 153 250 / 16%);
+  box-shadow: 0 0 2.5rem color-mix(in srgb, var(--accent-soft) 16%, transparent);
 }
 
 .session-timeout-mark::before {
   position: absolute;
   inset: 0.45rem;
-  border: 1px solid rgb(99 181 255 / 16%);
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
   border-radius: inherit;
   content: "";
 }
@@ -1956,14 +1912,14 @@ a:focus-visible {
   height: 0.65rem;
   border-radius: 50%;
   background: var(--warning);
-  box-shadow: 0 0 1.15rem rgb(239 192 113 / 58%);
+  box-shadow: 0 0 1.15rem color-mix(in srgb, var(--warning) 58%, transparent);
 }
 
 .session-timeout-kicker {
   margin: 0 0 0.7rem;
   color: var(--muted-deep);
   font-size: 0.68rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -1978,7 +1934,7 @@ a:focus-visible {
 
 .session-timeout-detail {
   max-width: 28rem;
-  margin: 1rem 0 0;
+  margin: var(--space-4) 0 0;
   color: var(--muted);
   font-size: 0.88rem;
   line-height: 1.6;
@@ -1998,7 +1954,7 @@ a:focus-visible {
   inset: 0;
   min-height: 100dvh;
   background:
-    radial-gradient(circle at 50% 50%, rgb(52 153 250 / 10%), transparent 23rem),
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent-soft) 10%, transparent), transparent 23rem),
     var(--surface-deep);
 }
 
@@ -2008,7 +1964,7 @@ a:focus-visible {
   width: clamp(8rem, 18vw, 13rem);
   aspect-ratio: 1;
   border-radius: 50%;
-  box-shadow: 0 1.2rem 3.5rem rgb(0 0 0 / 48%);
+  box-shadow: 0 1.2rem 3.5rem color-mix(in srgb, var(--shadow-color) 48%, transparent);
 }
 
 /* An opaque photo layer hides the inner half of the light on its edge. */
@@ -2027,7 +1983,7 @@ a:focus-visible {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border: 1px solid rgb(99 181 255 / 28%);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   border-radius: inherit;
   opacity: 0.8;
 }
@@ -2046,14 +2002,14 @@ a:focus-visible {
 
 .audrey-loading-rim-fill {
   fill: none;
-  stroke: #78c6ff;
+  stroke: var(--accent);
   stroke-width: 1.2;
   stroke-linecap: butt;
   stroke-dasharray: 100 100;
   stroke-dashoffset: 100;
   filter:
-    drop-shadow(0 0 0.5rem rgb(99 181 255 / 64%))
-    drop-shadow(0 0 1.1rem rgb(52 153 250 / 36%));
+    drop-shadow(0 0 0.5rem color-mix(in srgb, var(--accent) 64%, transparent))
+    drop-shadow(0 0 1.1rem color-mix(in srgb, var(--accent-soft) 36%, transparent));
   animation: audrey-loading-rim-sweep var(--audrey-rim-cycle, 4s) linear infinite;
 }
 
@@ -2063,7 +2019,7 @@ a:focus-visible {
   inset: 0;
   border-radius: 50%;
   pointer-events: none;
-  filter: drop-shadow(0 0 0.7rem rgb(52 153 250 / 28%));
+  filter: drop-shadow(0 0 0.7rem color-mix(in srgb, var(--accent-soft) 28%, transparent));
   animation: audrey-loading-orbit var(--audrey-rim-pass, 2s) linear infinite;
 }
 
@@ -2075,11 +2031,11 @@ a:focus-visible {
   height: 0.8rem;
   transform: translateX(-50%);
   border-radius: 50%;
-  background: #b9ddff;
+  background: var(--accent-text);
   box-shadow:
-    0 0 0.7rem rgb(185 221 255 / 84%),
-    0 0 1.8rem rgb(52 153 250 / 62%),
-    0 0 2.4rem rgb(52 153 250 / 30%);
+    0 0 0.7rem color-mix(in srgb, var(--accent-text) 84%, transparent),
+    0 0 1.8rem color-mix(in srgb, var(--accent-soft) 62%, transparent),
+    0 0 2.4rem color-mix(in srgb, var(--accent-soft) 30%, transparent);
   content: "";
 }
 
@@ -2118,7 +2074,7 @@ a:focus-visible {
 
 .topbar {
   border-bottom: 1px solid var(--border);
-  background: rgb(9 20 37 / 92%);
+  background: color-mix(in srgb, var(--surface-overlay) 92%, transparent);
   box-shadow: var(--shadow-sm);
 }
 
@@ -2135,7 +2091,7 @@ a:focus-visible {
   width: max-content;
   align-items: center;
   min-width: 0;
-  border-radius: 0.75rem;
+  border-radius: var(--radius-button);
   color: var(--text);
   text-decoration: none;
 }
@@ -2162,7 +2118,7 @@ a:focus-visible {
 
 .brand-product {
   display: flex;
-  min-height: 2.75rem;
+  min-height: var(--control-height-lg);
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
@@ -2171,7 +2127,7 @@ a:focus-visible {
   border-left: 1px solid var(--border);
   color: var(--muted);
   font-size: 1.05rem;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   line-height: 1.2;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -2187,9 +2143,9 @@ a:focus-visible {
   display: inline-flex;
   align-items: center;
   min-height: 2rem;
-  padding: 0.35rem 0.75rem;
+  padding: 0.35rem var(--space-3);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--text-soft);
   font-size: 0.76rem;
   letter-spacing: 0.08em;
@@ -2225,21 +2181,21 @@ a:focus-visible {
   align-items: center;
   gap: 0.45rem;
   padding: 0.48rem 0.85rem;
-  border: 1px solid rgb(99 181 255 / 42%);
-  border-radius: 0.75rem;
-  background: rgb(52 153 250 / 14%);
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  border-radius: var(--radius-button);
+  background: color-mix(in srgb, var(--accent-soft) 14%, transparent);
   color: var(--text);
   font-size: 0.76rem;
   font-weight: 750;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--on-accent) 5%, transparent);
 }
 
 .my-files-button:hover,
 .my-files-button:focus-visible {
   outline: none;
   border-color: var(--border-strong);
-  background: rgb(52 153 250 / 22%);
-  color: #fff;
+  background: color-mix(in srgb, var(--accent-soft) 22%, transparent);
+  color: var(--on-accent);
   box-shadow: var(--focus-glow);
 }
 
@@ -2253,17 +2209,17 @@ a:focus-visible {
   max-width: 11rem;
   overflow: hidden;
   padding: 0.32rem 0.6rem;
-  border: 1px solid rgb(239 192 113 / 38%);
-  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--warning) 38%, transparent);
+  border-radius: var(--radius-pill);
   color: var(--warning);
   font-size: 0.68rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .capability-badge-unavailable {
-  border-color: rgb(255 145 164 / 45%);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
   color: var(--danger);
 }
 
@@ -2301,12 +2257,12 @@ a:focus-visible {
 
 .admin-button {
   padding: 0.42rem 0.72rem;
-  border: 1px solid rgb(99 181 255 / 35%);
-  border-radius: 999px;
-  background: rgb(52 153 250 / 10%);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent-soft) 10%, transparent);
   color: var(--accent);
   font-size: 0.72rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
 }
 
 .admin-button:hover,
@@ -2326,13 +2282,13 @@ a:focus-visible {
 
 .account-settings-backdrop {
   position: fixed;
-  z-index: 40;
+  z-index: var(--z-search);
   inset: 0;
   display: grid;
   overflow-y: auto;
   place-items: center;
-  padding: 1.25rem;
-  background: rgb(2 7 16 / 82%);
+  padding: var(--space-5);
+  background: color-mix(in srgb, var(--surface-inset) 82%, transparent);
   backdrop-filter: blur(0.5rem);
 }
 
@@ -2340,12 +2296,12 @@ a:focus-visible {
   width: min(45rem, 100%);
   max-height: min(52rem, calc(100dvh - 2.5rem));
   overflow-y: auto;
-  border: 1px solid rgb(99 181 255 / 28%);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   border-radius: 1.15rem;
   background:
-    radial-gradient(circle at 88% 0%, rgb(52 153 250 / 14%), transparent 24rem),
+    radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--accent-soft) 14%, transparent), transparent 24rem),
     var(--surface);
-  box-shadow: 0 2rem 6rem rgb(0 0 0 / 62%);
+  box-shadow: 0 2rem 6rem color-mix(in srgb, var(--shadow-color) 62%, transparent);
 }
 
 .account-settings-header {
@@ -2355,23 +2311,23 @@ a:focus-visible {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 1.3rem 1.4rem 1rem;
+  gap: var(--space-4);
+  padding: 1.3rem 1.4rem var(--space-4);
   border-bottom: 1px solid var(--border);
-  background: rgb(15 28 49 / 96%);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
   backdrop-filter: blur(0.75rem);
 }
 
 .account-settings-header span {
   color: var(--accent);
   font-size: 0.66rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .account-settings-header h2 {
-  margin: 0.25rem 0 0;
+  margin: var(--space-1) 0 0;
   font-size: 1.45rem;
   letter-spacing: -0.03em;
 }
@@ -2383,7 +2339,7 @@ a:focus-visible {
   padding: 0;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--input-surface);
   color: var(--muted);
   font-size: 1.25rem;
@@ -2407,14 +2363,14 @@ a:focus-visible {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.65rem;
-  padding: 1rem 1.4rem 0;
+  padding: var(--space-4) 1.4rem 0;
 }
 
 .admin-tabs button {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 0.15rem 0.5rem;
-  padding: 0.75rem 0.85rem;
+  gap: 0.15rem var(--space-2);
+  padding: var(--space-3) 0.85rem;
   border: 1px solid var(--border);
   border-radius: 0.8rem;
   background: var(--surface-deep);
@@ -2515,10 +2471,10 @@ a:focus-visible {
 .admin-role-guide,
 .admin-inventory-status {
   margin: 0;
-  padding: 0.75rem 0.85rem;
+  padding: var(--space-3) 0.85rem;
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  background: rgb(7 16 31 / 46%);
+  border-radius: var(--radius-button);
+  background: color-mix(in srgb, var(--surface-deep) 46%, transparent);
   color: var(--muted);
   font-size: 0.74rem;
   line-height: 1.5;
@@ -2543,15 +2499,15 @@ a:focus-visible {
   width: fit-content;
   padding: 0.2rem 0.42rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--muted);
   font-size: 0.62rem;
   font-style: normal;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
 }
 
 .admin-source.ollama {
-  border-color: rgb(104 211 145 / 35%);
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
   color: var(--success);
 }
 
@@ -2561,7 +2517,7 @@ a:focus-visible {
 
 .admin-loading,
 .admin-error {
-  margin: 1.25rem 1.4rem;
+  margin: var(--space-5) 1.4rem;
 }
 
 .admin-record-list {
@@ -2580,7 +2536,7 @@ a:focus-visible {
   gap: 0.55rem;
   padding: 0.45rem 0.7rem;
   border-bottom: 1px solid var(--border);
-  background: rgb(7 16 31 / 25%);
+  background: color-mix(in srgb, var(--surface-deep) 25%, transparent);
 }
 
 .admin-record:last-child {
@@ -2588,7 +2544,7 @@ a:focus-visible {
 }
 
 .admin-record:hover {
-  background: rgb(52 153 250 / 5%);
+  background: color-mix(in srgb, var(--accent-soft) 5%, transparent);
 }
 
 .admin-user-record {
@@ -2689,22 +2645,22 @@ a:focus-visible {
 
 .account-status {
   flex: 0 0 auto;
-  padding: 0.25rem 0.45rem;
+  padding: var(--space-1) 0.45rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 0.62rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .account-status.active {
-  border-color: rgb(104 211 145 / 35%);
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
   color: var(--success);
 }
 
 .account-status.pending {
-  border-color: rgb(239 192 113 / 35%);
+  border-color: color-mix(in srgb, var(--warning) 35%, transparent);
   color: var(--warning);
 }
 
@@ -2724,11 +2680,11 @@ a:focus-visible {
 .admin-model-controls > button {
   padding: 0.45rem 0.65rem;
   border: 1px solid var(--border);
-  border-radius: 0.65rem;
+  border-radius: var(--radius-control);
   background: var(--surface-raised);
   color: var(--text-soft);
-  font-size: 0.7rem;
-  font-weight: 700;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
 }
 
 .admin-record-actions button:hover,
@@ -2741,7 +2697,7 @@ a:focus-visible {
 
 .admin-record-actions .danger-button,
 .admin-account-controls .danger-button {
-  border-color: rgb(255 145 164 / 30%);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
   color: var(--danger);
 }
 
@@ -2784,8 +2740,8 @@ a:focus-visible {
   width: 2rem;
   height: 2rem;
   padding: 0;
-  border: 1px solid rgb(255 145 164 / 30%);
-  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: var(--radius-sm);
   background: var(--surface-raised);
   color: var(--danger);
 }
@@ -2872,12 +2828,12 @@ a:focus-visible {
   border: 1px solid var(--border-strong);
   border-radius: 0.8rem;
   background: var(--surface-raised);
-  box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 40%);
+  box-shadow: 0 1rem 2.5rem color-mix(in srgb, var(--shadow-color) 40%, transparent);
   color: var(--text);
-  font-size: 0.8rem;
+  font-size: var(--font-size-body-sm);
 }
 
-.admin-model-role-options { display: grid; gap: 0.25rem; }
+.admin-model-role-options { display: grid; gap: var(--space-1); }
 .admin-model-role-options label {
   display: flex;
   align-items: center;
@@ -2890,15 +2846,15 @@ a:focus-visible {
 .admin-model-role-options input { accent-color: var(--accent); }
 .admin-model-role-options small { margin-left: auto; color: var(--muted); }
 .admin-model-role-picker p { margin: 0; color: var(--muted); font-size: 0.72rem; line-height: 1.5; }
-.admin-model-role-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+.admin-model-role-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
 .admin-model-role-actions button {
-  padding: 0.5rem 0.75rem;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: 0.55rem;
   background: var(--input-surface);
   color: var(--text);
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
 }
 .admin-model-role-actions button:last-child { border-color: var(--accent); color: var(--accent); }
 
@@ -2941,7 +2897,7 @@ a:focus-visible {
 .admin-editor-actions button,
 .admin-portrait-editor button {
   min-height: 2.4rem;
-  padding: 0.4rem 0.75rem;
+  padding: 0.4rem var(--space-3);
   border: 1px solid var(--border);
   border-radius: 0.6rem;
   background: var(--surface-raised);
@@ -2959,8 +2915,8 @@ a:focus-visible {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 1rem;
-  background: rgb(2 7 16 / 82%);
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--surface-inset) 82%, transparent);
 }
 
 .admin-model-editor {
@@ -2969,9 +2925,9 @@ a:focus-visible {
   overflow-y: auto;
   padding: 1.3rem;
   border: 1px solid var(--border-strong);
-  border-radius: 1rem;
+  border-radius: var(--radius-panel);
   background: var(--surface);
-  box-shadow: 0 2rem 6rem rgb(0 0 0 / 62%);
+  box-shadow: 0 2rem 6rem color-mix(in srgb, var(--shadow-color) 62%, transparent);
 }
 
 .admin-editor-heading,
@@ -2983,12 +2939,12 @@ a:focus-visible {
 }
 
 .admin-editor-heading h3 {
-  margin: 0.2rem 0 1rem;
+  margin: 0.2rem 0 var(--space-4);
 }
 
 .admin-model-editor form {
   display: grid;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .admin-portrait-editor {
@@ -3014,7 +2970,7 @@ a:focus-visible {
 }
 
 .admin-model-editor fieldset {
-  padding: 0.75rem;
+  padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: 0.7rem;
 }
@@ -3027,7 +2983,7 @@ a:focus-visible {
 .admin-role-checks {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .admin-role-checks label {
@@ -3086,7 +3042,7 @@ a:focus-visible {
 
 .admin-empty {
   margin: 0;
-  padding: 1.5rem;
+  padding: var(--space-6);
   border: 1px dashed var(--border);
   border-radius: 0.8rem;
   color: var(--muted);
@@ -3097,7 +3053,7 @@ a:focus-visible {
   align-self: center;
   justify-self: center;
   max-width: 28rem;
-  padding: 2rem;
+  padding: var(--space-8);
   text-align: center;
 }
 
@@ -3115,7 +3071,7 @@ a:focus-visible {
 .settings-section {
   display: grid;
   gap: 0.95rem;
-  padding: 1.25rem 1.4rem 1.4rem;
+  padding: var(--space-5) 1.4rem 1.4rem;
 }
 
 .settings-section + .settings-section {
@@ -3128,32 +3084,32 @@ a:focus-visible {
 }
 
 .settings-section-heading h3 {
-  font-size: 1rem;
+  font-size: var(--font-size-base);
 }
 
 .settings-section-heading p {
   margin-top: 0.3rem;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
   line-height: 1.5;
 }
 
 .settings-section-heading .settings-account-access {
   color: var(--text-soft);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .settings-section label {
   display: grid;
   gap: 0.4rem;
   color: var(--text-soft);
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
   font-weight: 650;
 }
 
 .settings-section label > small {
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   font-weight: 450;
 }
 
@@ -3198,13 +3154,13 @@ a:focus-visible {
   background: var(--surface-raised);
   color: var(--text-soft);
   font-size: 0.76rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
 }
 
 .settings-section > button[type="submit"] {
   border-color: transparent;
   background: var(--brand-gradient);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .settings-section > button:focus-visible,
@@ -3232,8 +3188,8 @@ a:focus-visible {
   gap: 0.65rem;
   padding: 0.7rem;
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  background: rgb(7 16 31 / 46%);
+  border-radius: var(--radius-button);
+  background: color-mix(in srgb, var(--surface-deep) 46%, transparent);
 }
 
 .settings-checkbox input {
@@ -3246,7 +3202,7 @@ a:focus-visible {
 .settings-error {
   margin: 0;
   color: var(--danger);
-  font-size: 0.75rem;
+  font-size: var(--font-size-sm);
 }
 .token-manager,
 .token-create-form {
@@ -3255,10 +3211,10 @@ a:focus-visible {
 }
 
 .token-create-form {
-  padding: 1rem;
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: 0.9rem;
-  background: rgb(7 16 31 / 38%);
+  background: color-mix(in srgb, var(--surface-deep) 38%, transparent);
 }
 
 .token-scope-fieldset {
@@ -3272,7 +3228,7 @@ a:focus-visible {
 .token-scope-fieldset legend {
   margin-bottom: 0.45rem;
   color: var(--text-soft);
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
   font-weight: 650;
 }
 
@@ -3286,13 +3242,13 @@ a:focus-visible {
   background: var(--surface-raised);
   color: var(--text-soft);
   font-size: 0.76rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
 }
 
 .token-create-form > button {
   border-color: transparent;
   background: var(--brand-gradient);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .token-create-form > button:hover,
@@ -3319,11 +3275,11 @@ a:focus-visible {
 
 .token-secret {
   display: grid;
-  gap: 0.75rem;
+  gap: var(--space-3);
   padding: 0.9rem;
-  border: 1px solid rgb(104 211 145 / 42%);
+  border: 1px solid color-mix(in srgb, var(--success) 42%, transparent);
   border-radius: 0.85rem;
-  background: rgb(104 211 145 / 8%);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
 }
 
 .token-secret strong {
@@ -3333,8 +3289,8 @@ a:focus-visible {
 
 .token-secret textarea {
   min-height: 4.2rem;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
 }
 
@@ -3346,19 +3302,19 @@ a:focus-visible {
 
 .token-actions .danger-button,
 .token-revoke-button {
-  border-color: rgb(255 145 164 / 34%);
+  border-color: color-mix(in srgb, var(--danger) 34%, transparent);
   color: var(--danger);
 }
 
 .token-empty {
   margin: 0;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
 }
 
 .token-list {
   display: grid;
-  gap: 0.75rem;
+  gap: var(--space-3);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3366,18 +3322,18 @@ a:focus-visible {
 
 .token-list > li {
   display: grid;
-  gap: 0.75rem;
+  gap: var(--space-3);
   padding: 0.9rem;
   border: 1px solid var(--border);
   border-radius: 0.85rem;
-  background: rgb(7 16 31 / 38%);
+  background: color-mix(in srgb, var(--surface-deep) 38%, transparent);
 }
 
 .token-record-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .token-record-heading strong {
@@ -3388,8 +3344,8 @@ a:focus-visible {
 .token-status {
   flex: none;
   padding: 0.2rem 0.45rem;
-  border: 1px solid rgb(104 211 145 / 34%);
-  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--success) 34%, transparent);
+  border-radius: var(--radius-pill);
   color: var(--success);
   font-size: 0.62rem;
   font-weight: 750;
@@ -3398,7 +3354,7 @@ a:focus-visible {
 }
 
 .token-status.expired {
-  border-color: rgb(239 192 113 / 34%);
+  border-color: color-mix(in srgb, var(--warning) 34%, transparent);
   color: var(--warning);
 }
 
@@ -3421,7 +3377,7 @@ a:focus-visible {
 .token-list dt {
   color: var(--muted-deep);
   font-size: 0.62rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
@@ -3474,7 +3430,7 @@ a:focus-visible {
 }
 
 .memory-key {
-  font-size: 0.8rem;
+  font-size: var(--font-size-body-sm);
 }
 
 .memory-value,
@@ -3486,7 +3442,7 @@ a:focus-visible {
 
 .memory-value {
   color: var(--text-soft);
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
 }
 
 .memory-tags {
@@ -3506,7 +3462,7 @@ a:focus-visible {
   background: var(--surface-raised);
   color: var(--text-soft);
   font-size: 0.76rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
 }
 
 .memory-manager > button:focus-visible {
@@ -3533,12 +3489,12 @@ a:focus-visible {
   padding: 0.95rem;
   border: 1px solid var(--border);
   border-radius: 0.9rem;
-  background: rgb(7 16 31 / 38%);
+  background: color-mix(in srgb, var(--surface-deep) 38%, transparent);
 }
 
 .data-danger-zone {
-  border-color: rgb(255 145 164 / 28%);
-  background: rgb(255 95 126 / 5%);
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
 }
 
 .data-export-control strong,
@@ -3564,11 +3520,11 @@ a:focus-visible {
   background: var(--surface-raised);
   color: var(--text-soft);
   font-size: 0.76rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
 }
 
 .data-danger-zone > .danger-button {
-  border-color: rgb(255 145 164 / 34%);
+  border-color: color-mix(in srgb, var(--danger) 34%, transparent);
   color: var(--danger);
 }
 
@@ -3595,14 +3551,14 @@ a:focus-visible {
 .purge-confirmation code {
   overflow-wrap: anywhere;
   color: var(--danger);
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
 }
 
 .data-message {
   margin: 0;
   color: var(--success);
-  font-size: 0.75rem;
+  font-size: var(--font-size-sm);
 }
 
 .purge-progress {
@@ -3615,8 +3571,8 @@ a:focus-visible {
 .purge-progress > div {
   padding: 0.8rem;
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  background: rgb(7 16 31 / 38%);
+  border-radius: var(--radius-button);
+  background: color-mix(in srgb, var(--surface-deep) 38%, transparent);
 }
 
 .purge-progress dt,
@@ -3627,16 +3583,16 @@ a:focus-visible {
 .purge-progress dt {
   color: var(--muted-deep);
   font-size: 0.62rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
 .purge-progress dd {
-  margin-top: 0.25rem;
+  margin-top: var(--space-1);
   color: var(--text-soft);
-  font-size: 0.85rem;
-  font-weight: 700;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-bold);
 }
 
 .session-retry-button,
@@ -3646,7 +3602,7 @@ a:focus-visible {
   justify-content: center;
   padding: 0.42rem 0.72rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--accent);
   font-size: 0.72rem;
@@ -3663,21 +3619,21 @@ a:focus-visible {
 .session-timeout-actions .session-retry-button,
 .session-timeout-actions .logout-button {
   min-width: 7.5rem;
-  padding: 0.65rem 1rem;
+  padding: 0.65rem var(--space-4);
   font-size: 0.76rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
 }
 
 .session-timeout-actions .session-retry-button {
   border-color: transparent;
   background: var(--brand-gradient);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .session-timeout-actions .session-retry-button:hover {
   border-color: transparent;
   background: var(--brand-gradient);
-  color: #fff;
+  color: var(--on-accent);
   box-shadow: var(--focus-glow);
 }
 
@@ -3687,12 +3643,12 @@ a:focus-visible {
 
 .file-manager-backdrop {
   position: fixed;
-  z-index: 30;
+  z-index: var(--z-popover);
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 1.25rem;
-  background: rgb(2 7 16 / 78%);
+  padding: var(--space-5);
+  background: color-mix(in srgb, var(--surface-inset) 78%, transparent);
   backdrop-filter: blur(0.45rem);
 }
 
@@ -3702,19 +3658,19 @@ a:focus-visible {
   max-height: min(52rem, calc(100dvh - 2.5rem));
   overflow: hidden;
   flex-direction: column;
-  border: 1px solid rgb(99 181 255 / 28%);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   border-radius: 1.15rem;
   background:
-    radial-gradient(circle at 90% 0%, rgb(52 153 250 / 13%), transparent 22rem),
+    radial-gradient(circle at 90% 0%, color-mix(in srgb, var(--accent-soft) 13%, transparent), transparent 22rem),
     var(--surface);
-  box-shadow: 0 2rem 6rem rgb(0 0 0 / 58%);
+  box-shadow: 0 2rem 6rem color-mix(in srgb, var(--shadow-color) 58%, transparent);
 }
 
 .file-manager-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--space-4);
   padding: 1.3rem 1.4rem 0.9rem;
   border-bottom: 1px solid var(--border);
 }
@@ -3722,13 +3678,13 @@ a:focus-visible {
 .file-manager-header span {
   color: var(--accent);
   font-size: 0.66rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .file-manager-header h2 {
-  margin: 0.25rem 0 0;
+  margin: var(--space-1) 0 0;
   font-size: 1.45rem;
   letter-spacing: -0.03em;
 }
@@ -3740,7 +3696,7 @@ a:focus-visible {
   padding: 0;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--input-surface);
   color: var(--muted);
   font-size: 1.25rem;
@@ -3769,8 +3725,8 @@ a:focus-visible {
 .file-quota-track {
   height: 0.35rem;
   overflow: hidden;
-  border-radius: 999px;
-  background: rgb(4 11 22 / 68%);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--surface-inset) 68%, transparent);
 }
 
 .file-quota-track span {
@@ -3778,17 +3734,17 @@ a:focus-visible {
   height: 100%;
   border-radius: inherit;
   background: var(--brand-gradient);
-  box-shadow: 0 0 1rem rgb(52 153 250 / 34%);
+  box-shadow: 0 0 1rem color-mix(in srgb, var(--accent-soft) 34%, transparent);
 }
 
 .file-add-panel {
   overflow: hidden;
   flex: none;
   margin: 0.9rem 1.4rem 0;
-  border: 1px solid rgb(99 181 255 / 30%);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   border-radius: 0.8rem;
-  background: linear-gradient(110deg, rgb(52 153 250 / 11%), rgb(123 92 255 / 7%));
-  box-shadow: 0 0.65rem 1.6rem rgb(0 0 0 / 14%);
+  background: linear-gradient(110deg, color-mix(in srgb, var(--accent-soft) 11%, transparent), color-mix(in srgb, var(--private) 7%, transparent));
+  box-shadow: 0 0.65rem 1.6rem color-mix(in srgb, var(--shadow-color) 14%, transparent);
 }
 
 .file-add-panel > summary {
@@ -3807,11 +3763,11 @@ a:focus-visible {
 }
 
 .file-add-panel > summary:hover {
-  background: linear-gradient(110deg, rgb(52 153 250 / 17%), rgb(123 92 255 / 11%));
+  background: linear-gradient(110deg, color-mix(in srgb, var(--accent-soft) 17%, transparent), color-mix(in srgb, var(--private) 11%, transparent));
 }
 
 .file-add-panel > summary:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--focus-ring);
   outline-offset: -2px;
 }
 
@@ -3821,7 +3777,7 @@ a:focus-visible {
 }
 
 .file-add-panel > summary strong {
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
 }
 
 .file-add-panel > summary small {
@@ -3834,9 +3790,9 @@ a:focus-visible {
   width: 1.65rem;
   height: 1.65rem;
   place-items: center;
-  border: 1px solid rgb(99 181 255 / 25%);
-  border-radius: 0.5rem;
-  background: rgb(52 153 250 / 9%);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-soft) 9%, transparent);
   color: var(--accent);
   font-size: 0.9rem;
 }
@@ -3854,7 +3810,7 @@ a:focus-visible {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
   border-top: 1px solid var(--border);
-  background: rgb(4 11 22 / 22%);
+  background: color-mix(in srgb, var(--surface-inset) 22%, transparent);
 }
 
 .file-explorer {
@@ -3871,11 +3827,11 @@ a:focus-visible {
   flex-direction: column;
   gap: 0.16rem;
   border-right: 1px solid var(--border);
-  background: rgb(4 11 22 / 24%);
+  background: color-mix(in srgb, var(--surface-inset) 24%, transparent);
 }
 
 .file-explorer-sidebar > span {
-  padding: 0.2rem 0.55rem 0.5rem;
+  padding: 0.2rem 0.55rem var(--space-2);
   color: var(--muted-deep);
   font-size: 0.62rem;
   font-weight: 750;
@@ -3889,9 +3845,9 @@ a:focus-visible {
   grid-template-columns: 1.25rem minmax(0, 1fr) auto;
   gap: 0.38rem;
   width: 100%;
-  padding: 0.45rem 0.5rem;
+  padding: 0.45rem var(--space-2);
   border: 1px solid transparent;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
   font-size: 0.72rem;
@@ -3932,7 +3888,7 @@ a:focus-visible {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--space-4);
   padding: 1.1rem;
 }
 
@@ -3952,9 +3908,9 @@ a:focus-visible {
   width: 2rem;
   height: 2rem;
   place-items: center;
-  border: 1px solid rgb(99 181 255 / 22%);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 0.6rem;
-  background: rgb(52 153 250 / 8%);
+  background: color-mix(in srgb, var(--accent-soft) 8%, transparent);
   color: var(--accent);
 }
 
@@ -3967,7 +3923,7 @@ a:focus-visible {
   margin: 0;
   color: var(--text-soft);
   font-size: 0.84rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   line-height: 1.45;
 }
 
@@ -3992,7 +3948,7 @@ a:focus-visible {
   height: 2.75rem;
   padding: 0.7rem 0.8rem;
   border: 1px solid var(--border);
-  border-radius: 0.65rem;
+  border-radius: var(--radius-control);
   outline: none;
   background: var(--input-surface);
   color: var(--text-soft);
@@ -4012,13 +3968,13 @@ a:focus-visible {
   gap: 0.65rem;
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--border);
-  border-radius: 0.65rem;
+  border-radius: var(--radius-control);
   background: var(--input-surface);
 }
 
 .file-drop-zone.dragging {
   border-color: var(--accent);
-  background: rgb(52 153 250 / 14%);
+  background: color-mix(in srgb, var(--accent-soft) 14%, transparent);
 }
 
 .file-drop-zone:focus-within {
@@ -4033,7 +3989,7 @@ a:focus-visible {
   flex: 0 0 auto;
   padding: 0;
   place-items: center;
-  border: 1px solid rgb(99 181 255 / 30%);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   border-radius: 0.45rem;
   background: var(--surface-raised);
   color: var(--accent);
@@ -4051,15 +4007,15 @@ a:focus-visible {
 }
 
 .file-picker-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 .file-picker-name {
   min-width: 0;
   overflow: hidden;
   color: var(--text-soft);
-  font-size: 0.8rem;
+  font-size: var(--font-size-body-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4069,21 +4025,21 @@ a:focus-visible {
   min-height: 2.6rem;
   margin-top: auto;
   padding: 0.65rem 0.9rem;
-  border: 1px solid rgb(99 181 255 / 25%);
-  border-radius: 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: var(--radius-control);
   background: var(--brand-gradient);
-  color: #fff;
-  font-size: 0.8rem;
-  font-weight: 700;
+  color: var(--on-accent);
+  font-size: var(--font-size-body-sm);
+  font-weight: var(--font-weight-bold);
 }
 
 .file-add-action:hover:not(:disabled) {
-  box-shadow: 0 0 1rem rgb(52 153 250 / 25%);
+  box-shadow: 0 0 1rem color-mix(in srgb, var(--accent-soft) 25%, transparent);
 }
 
 .file-add-action:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset-wide);
 }
 
 .file-add-action:disabled,
@@ -4101,7 +4057,7 @@ a:focus-visible {
 .file-upload-limits summary {
   width: fit-content;
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   cursor: pointer;
 }
 
@@ -4112,7 +4068,7 @@ a:focus-visible {
 .file-upload-hint {
   margin: 0.55rem 0 0;
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -4120,7 +4076,7 @@ a:focus-visible {
 .file-add-success {
   margin: 0;
   color: var(--success);
-  font-size: 0.75rem;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
 }
 
@@ -4130,9 +4086,9 @@ a:focus-visible {
   overflow-y: auto;
   gap: 0.3rem;
   margin: 0;
-  padding: 0.65rem 0.75rem;
+  padding: 0.65rem var(--space-3);
   border: 1px solid var(--border);
-  border-radius: 0.65rem;
+  border-radius: var(--radius-control);
   color: var(--text-soft);
   font-size: 0.72rem;
   list-style: none;
@@ -4145,21 +4101,21 @@ a:focus-visible {
 .upload-status {
   display: grid;
   min-width: 0;
-  gap: 0.5rem;
-  margin: 0.5rem 0;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
   color: var(--text-soft);
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
   line-height: 1.5;
 }
 
 .upload-status-label {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .upload-status-label > span:last-child {
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .upload-status-filename {
@@ -4178,7 +4134,7 @@ a:focus-visible {
   flex: 0 0 auto;
   width: 0.85rem;
   height: 0.85rem;
-  border: 2px solid rgb(99 181 255 / 20%);
+  border: 2px solid color-mix(in srgb, var(--accent) 20%, transparent);
   border-top-color: var(--accent);
   border-radius: 50%;
 }
@@ -4226,7 +4182,7 @@ a:focus-visible {
 .file-browser-controls label > span {
   color: var(--muted);
   font-size: 0.68rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -4241,7 +4197,7 @@ a:focus-visible {
   outline: none;
   background: var(--input-surface);
   color: var(--text-soft);
-  font-size: 0.75rem;
+  font-size: var(--font-size-sm);
 }
 
 .file-browser-controls input:focus-visible,
@@ -4254,7 +4210,7 @@ a:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--space-2);
   min-height: 1.9rem;
   color: var(--muted);
   font-size: 0.72rem;
@@ -4291,7 +4247,7 @@ a:focus-visible {
   align-content: start;
   gap: 0.14rem;
   margin: 0;
-  padding: 0.5rem 0.55rem 0.75rem;
+  padding: var(--space-2) 0.55rem var(--space-3);
   list-style: none;
   scrollbar-width: thin;
 }
@@ -4301,10 +4257,10 @@ a:focus-visible {
   align-items: center;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 0.62rem;
-  padding: 0.5rem 0.6rem;
+  padding: var(--space-2) 0.6rem;
   border: 1px solid transparent;
   border-radius: 0.58rem;
-  background: rgb(7 16 31 / 40%);
+  background: color-mix(in srgb, var(--surface-deep) 40%, transparent);
 }
 
 .file-list li:hover {
@@ -4317,9 +4273,9 @@ a:focus-visible {
   width: 1.9rem;
   height: 1.9rem;
   place-items: center;
-  border: 1px solid rgb(99 181 255 / 24%);
-  border-radius: 0.5rem;
-  background: rgb(52 153 250 / 10%);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-soft) 10%, transparent);
   color: var(--accent);
   font-weight: 800;
 }
@@ -4351,7 +4307,7 @@ a:focus-visible {
 }
 
 .file-summary p {
-  margin: 0.5rem 0 0;
+  margin: var(--space-2) 0 0;
   color: var(--text-soft);
   line-height: 1.5;
   white-space: pre-wrap;
@@ -4366,7 +4322,7 @@ a:focus-visible {
 }
 
 .file-details strong {
-  font-size: 0.8rem;
+  font-size: var(--font-size-body-sm);
 }
 
 .file-row-meta {
@@ -4432,10 +4388,10 @@ a:focus-visible {
 .file-actions > a {
   padding: 0.34rem 0.46rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
   text-decoration: none;
 }
 
@@ -4447,7 +4403,7 @@ a:focus-visible {
 }
 
 .file-remove:hover {
-  border-color: rgb(255 145 164 / 45%);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
   color: var(--danger);
 }
 
@@ -4455,13 +4411,13 @@ a:focus-visible {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  padding: 1rem 1.4rem 1.4rem;
+  padding: var(--space-4) 1.4rem 1.4rem;
 }
 
 .file-artifact-heading {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: var(--space-4);
   min-width: 0;
 }
 
@@ -4471,7 +4427,7 @@ a:focus-visible {
   flex: none;
   padding: 0.45rem 0.7rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   background: var(--input-surface);
   color: var(--accent);
 }
@@ -4492,7 +4448,7 @@ a:focus-visible {
 .file-artifact-heading h3 {
   overflow: hidden;
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--font-size-base);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4507,7 +4463,7 @@ a:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin: 1rem 0 0.8rem;
+  margin: var(--space-4) 0 0.8rem;
 }
 
 .file-artifact-tabs button {
@@ -4520,7 +4476,7 @@ a:focus-visible {
 
 .file-artifact-tabs button[aria-pressed="true"] {
   border-color: var(--accent);
-  background: rgb(52 153 250 / 12%);
+  background: color-mix(in srgb, var(--accent-soft) 12%, transparent);
   color: var(--accent);
 }
 
@@ -4530,15 +4486,15 @@ a:focus-visible {
   overflow-y: auto;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.75rem;
+  gap: var(--space-3);
   padding: 0.9rem;
   border: 1px solid var(--border);
-  border-radius: 0.65rem;
-  background: rgb(7 16 31 / 56%);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-deep) 56%, transparent);
 }
 
 .file-artifact-heading + .file-artifact-body {
-  margin-top: 1rem;
+  margin-top: var(--space-4);
 }
 
 .file-image-preview {
@@ -4580,7 +4536,7 @@ a:focus-visible {
 .eyebrow {
   margin-bottom: 1.2rem;
   color: var(--accent);
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
   font-weight: 650;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -4591,14 +4547,14 @@ a:focus-visible {
   margin: 0;
   font-family: inherit;
   font-size: clamp(3.2rem, 9vw, 7rem);
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: -0.065em;
   line-height: 0.92;
 }
 
 .welcome > p {
   max-width: 58ch;
-  margin: 2rem 0 0;
+  margin: var(--space-8) 0 0;
   color: var(--muted);
   font-size: clamp(1rem, 2vw, 1.18rem);
   line-height: 1.7;
@@ -4609,7 +4565,7 @@ a:focus-visible {
   align-items: center;
   gap: 0.9rem;
   width: fit-content;
-  margin-top: 2.5rem;
+  margin-top: var(--space-10);
   padding: 0.9rem 1.1rem;
   border: 1px solid var(--border);
   border-radius: 0.85rem;
@@ -4630,26 +4586,26 @@ a:focus-visible {
 .session-card div > span {
   margin-top: 0.2rem;
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: var(--font-size-body-sm);
 }
 
 .signal {
   width: 0.65rem;
   height: 0.65rem;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--success);
-  box-shadow: 0 0 0 0.3rem rgb(104 211 145 / 12%);
+  box-shadow: 0 0 0 0.3rem color-mix(in srgb, var(--success) 12%, transparent);
 }
 
 .notice {
-  padding: 1rem 1.1rem;
+  padding: var(--space-4) 1.1rem;
   border-left: 3px solid var(--warning);
-  background: rgb(239 192 113 / 10%);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
 }
 
 .notice-error {
   border-color: var(--danger);
-  background: rgb(255 145 164 / 10%);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 .footer {
@@ -4685,7 +4641,7 @@ a:focus-visible {
   }
 
   .admin-tabs {
-    padding-inline: 1rem;
+    padding-inline: var(--space-4);
   }
 
   .timezone-control button {
@@ -4765,7 +4721,7 @@ a:focus-visible {
   }
 
   .composer-model-picker {
-    padding-inline: 0.5rem;
+    padding-inline: var(--space-2);
   }
 
   .composer-model-picker img {
@@ -4805,7 +4761,7 @@ a:focus-visible {
   max-height: min(42%, 22rem);
   flex: none;
   flex-direction: column;
-  margin: 0 0.4rem 0.75rem;
+  margin: 0 0.4rem var(--space-3);
   padding: 0 0 0.7rem;
   border-bottom: 1px solid var(--border);
 }
@@ -4837,7 +4793,7 @@ a:focus-visible {
 .project-load-more {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: var(--space-1);
   padding: 0.28rem 0.42rem;
   border: 1px solid transparent;
   border-radius: 0.45rem;
@@ -4876,7 +4832,7 @@ a:focus-visible {
 }
 
 .project-sidebar-row.current {
-  background: rgb(52 153 250 / 6%);
+  background: color-mix(in srgb, var(--accent-soft) 6%, transparent);
 }
 
 .project-sidebar-main {
@@ -4897,8 +4853,8 @@ a:focus-visible {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.52rem 0.35rem 0.52rem 0.5rem;
+  gap: var(--space-2);
+  padding: 0.52rem 0.35rem 0.52rem var(--space-2);
   text-align: left;
 }
 
@@ -4912,7 +4868,7 @@ a:focus-visible {
 
 .project-sidebar-link > span:last-child {
   color: var(--text);
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
 }
 
 .project-icon {
@@ -4928,7 +4884,7 @@ a:focus-visible {
   height: 2rem;
   place-items: center;
   border-radius: 0.45rem;
-  font-size: 1rem;
+  font-size: var(--font-size-base);
 }
 
 .project-sidebar-link:hover,
@@ -4949,7 +4905,7 @@ a:focus-visible {
 .project-conversation-list {
   display: grid;
   gap: 0.12rem;
-  padding: 0 0.25rem 0.35rem 1.2rem;
+  padding: 0 var(--space-1) 0.35rem 1.2rem;
 }
 
 .project-conversation {
@@ -4985,17 +4941,17 @@ a:focus-visible {
 .projects-sidebar .sidebar-status,
 .projects-sidebar .sidebar-error {
   margin: 0.35rem 0.3rem;
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
 }
 
 .project-dialog-backdrop {
   position: fixed;
-  z-index: 70;
+  z-index: var(--z-dialog);
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 1rem;
-  background: rgb(1 7 15 / 76%);
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--surface-inset) 76%, transparent);
   backdrop-filter: blur(0.35rem);
 }
 
@@ -5004,7 +4960,7 @@ a:focus-visible {
   max-height: min(42rem, calc(100dvh - 2rem));
   overflow-y: auto;
   border: 1px solid var(--border-strong);
-  border-radius: 1rem;
+  border-radius: var(--radius-panel);
   background: var(--surface);
   box-shadow: var(--shadow-md);
 }
@@ -5015,7 +4971,7 @@ a:focus-visible {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .project-editor-dialog > header {
@@ -5059,7 +5015,7 @@ a:focus-visible {
 .project-editor-dialog form,
 .project-edit-form {
   display: grid;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .project-editor-dialog form {
@@ -5073,7 +5029,7 @@ a:focus-visible {
   gap: 0.4rem;
   color: var(--muted);
   font-size: 0.74rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
 }
 
 .project-editor-dialog label > span,
@@ -5082,7 +5038,7 @@ a:focus-visible {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .project-editor-dialog input,
@@ -5094,7 +5050,7 @@ a:focus-visible {
   min-width: 0;
   padding: 0.62rem 0.72rem;
   border: 1px solid var(--border);
-  border-radius: 0.65rem;
+  border-radius: var(--radius-control);
   outline: none;
   background: var(--input-surface);
   color: var(--text);
@@ -5124,9 +5080,9 @@ a:focus-visible {
 }
 
 .project-processing-choice legend {
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--space-2);
   color: var(--text-soft);
-  font-size: 0.8rem;
+  font-size: var(--font-size-body-sm);
 }
 
 .project-processing-choice > div {
@@ -5137,10 +5093,10 @@ a:focus-visible {
 
 .project-processing-choice button {
   display: grid;
-  gap: 0.25rem;
-  padding: 0.75rem;
+  gap: var(--space-1);
+  padding: var(--space-3);
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-button);
   background: var(--surface-raised);
   color: var(--text-soft);
   text-align: left;
@@ -5148,7 +5104,7 @@ a:focus-visible {
 
 .project-processing-choice button[aria-pressed="true"] {
   border-color: var(--border-strong);
-  background: rgb(76 142 198 / 12%);
+  background: color-mix(in srgb, var(--accent-soft) 12%, transparent);
   color: var(--text);
 }
 
@@ -5183,7 +5139,7 @@ a:focus-visible {
 .project-home-actions button,
 .project-manage-files,
 .project-picker-footer button {
-  padding: 0.55rem 0.75rem;
+  padding: 0.55rem var(--space-3);
   border: 1px solid var(--border);
   border-radius: 0.58rem;
   background: transparent;
@@ -5202,9 +5158,9 @@ a:focus-visible {
 }
 
 .project-home-actions button {
-  min-height: 2.75rem;
-  border-radius: 0.65rem;
-  font-size: 0.85rem;
+  min-height: var(--control-height-lg);
+  border-radius: var(--radius-control);
+  font-size: var(--font-size-body);
   font-weight: 650;
 }
 
@@ -5220,27 +5176,27 @@ a:focus-visible {
 }
 
 .project-management-actions .danger-button {
-  border-color: rgb(255 145 164 / 30%);
-  background: rgb(255 145 164 / 6%);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
 }
 
 .project-management-actions .danger-button:hover:not(:disabled),
 .project-management-actions .confirming-delete {
-  border-color: rgb(255 145 164 / 56%);
-  background: rgb(255 145 164 / 12%);
+  border-color: color-mix(in srgb, var(--danger) 56%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
 .project-primary-button {
-  border-color: rgb(99 181 255 / 38%) !important;
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent) !important;
   background: var(--brand-gradient) !important;
-  color: #fff !important;
+  color: var(--on-accent) !important;
   font-weight: 750;
 }
 
 .project-error,
 .project-page-error {
   color: var(--danger);
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
 }
 
 .project-home {
@@ -5270,8 +5226,8 @@ a:focus-visible {
 }
 
 .project-edit-form {
-  margin-top: 1rem;
-  padding: 1rem;
+  margin-top: var(--space-4);
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: 0.85rem;
   background: var(--surface-raised);
@@ -5280,30 +5236,30 @@ a:focus-visible {
 .project-home-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-  margin-top: 1rem;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
 }
 
 .project-panel {
   border: 1px solid var(--border);
   border-radius: 0.9rem;
-  background: rgb(9 20 37 / 54%);
+  background: color-mix(in srgb, var(--surface-overlay) 54%, transparent);
 }
 
 .project-panel {
   min-width: 0;
-  padding: 1rem;
+  padding: var(--space-4);
 }
 
 .project-panel > header {
   align-items: center;
-  padding-bottom: 0.75rem;
+  padding-bottom: var(--space-3);
   border-bottom: 1px solid var(--border);
 }
 
 .project-panel h2 {
   margin-top: 0.2rem;
-  font-size: 1rem;
+  font-size: var(--font-size-base);
 }
 
 .project-panel > header > small {
@@ -5322,7 +5278,7 @@ a:focus-visible {
 .project-file-summary {
   display: grid;
   gap: 0.4rem;
-  margin-top: 0.75rem;
+  margin-top: var(--space-3);
 }
 
 .project-home-conversations {
@@ -5330,7 +5286,7 @@ a:focus-visible {
 }
 
 .project-home-conversation {
-  padding-right: 0.75rem;
+  padding-right: var(--space-3);
 }
 
 .project-file-actions {
@@ -5342,21 +5298,21 @@ a:focus-visible {
 
 .project-file-actions button {
   display: flex;
-  min-height: 2.75rem;
+  min-height: var(--control-height-lg);
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
   padding: 0.65rem 0.85rem;
   border-radius: 0.6rem;
   font-size: 0.9rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   line-height: 1.4;
 }
 
 .project-upload-files {
   border-color: transparent;
   background: var(--brand-gradient);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .project-upload-files > span {
@@ -5407,7 +5363,7 @@ a:focus-visible {
 .project-file-details > span {
   overflow: hidden;
   color: var(--text);
-  font-size: 0.75rem;
+  font-size: var(--font-size-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5418,7 +5374,7 @@ a:focus-visible {
 }
 
 .project-file-summary button {
-  padding: 0.25rem;
+  padding: var(--space-1);
   border: 0;
   background: transparent;
   color: var(--muted);
@@ -5431,13 +5387,13 @@ a:focus-visible {
   height: 1.35rem;
   place-items: center;
   border-radius: 0.35rem;
-  background: rgb(52 153 250 / 12%);
+  background: color-mix(in srgb, var(--accent-soft) 12%, transparent);
   color: var(--accent);
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
 }
 
 .project-file-backdrop {
-  z-index: 80;
+  z-index: var(--z-source-preview);
 }
 
 .project-file-picker {
@@ -5446,14 +5402,14 @@ a:focus-visible {
 
 .project-file-picker-copy {
   margin: 0;
-  padding: 0.8rem 1rem;
+  padding: 0.8rem var(--space-4);
   border-bottom: 1px solid var(--border);
   color: var(--muted);
   font-size: 0.76rem;
 }
 
 .project-file-search {
-  margin-bottom: 0.75rem;
+  margin-bottom: var(--space-3);
 }
 
 .project-picker-files {
@@ -5475,7 +5431,7 @@ a:focus-visible {
 }
 
 .project-picker-files button[aria-pressed="true"] {
-  border-color: rgb(99 181 255 / 44%);
+  border-color: color-mix(in srgb, var(--accent) 44%, transparent);
   background: var(--surface-active);
 }
 
@@ -5491,7 +5447,7 @@ a:focus-visible {
 
 .project-picker-files strong {
   color: var(--text);
-  font-size: 0.78rem;
+  font-size: var(--font-size-label);
 }
 
 .project-picker-files small {
@@ -5502,12 +5458,12 @@ a:focus-visible {
 
 .project-file-check {
   color: var(--accent);
-  font-size: 1rem;
+  font-size: var(--font-size-base);
   text-align: center;
 }
 
 .project-picker-footer {
-  padding: 0.8rem 1rem;
+  padding: 0.8rem var(--space-4);
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: 0.74rem;
@@ -5520,7 +5476,7 @@ a:focus-visible {
   margin-bottom: 0.18rem;
   color: var(--muted);
   font-size: 0.66rem;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -5560,14 +5516,14 @@ a:focus-visible {
   bottom: 1rem;
   max-width: 32rem;
   padding: 0.7rem 0.85rem;
-  border: 1px solid rgb(255 145 164 / 32%);
-  border-radius: 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 32%, transparent);
+  border-radius: var(--radius-control);
   background: var(--surface);
 }
 
 @media (max-width: 560px) {
   .project-home {
-    padding: 1rem;
+    padding: var(--space-4);
   }
 
   .project-home-header {
@@ -5670,13 +5626,13 @@ body,
   left: 50%;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
   padding: 0.65rem 0.9rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-raised);
   color: var(--text-soft);
-  font-size: 0.8rem;
+  font-size: var(--font-size-body-sm);
   font-weight: 650;
   box-shadow: var(--shadow-md);
   pointer-events: none;
@@ -5745,7 +5701,7 @@ body,
     grid-template-columns: 2.65rem minmax(0, 1fr) 2.65rem;
     align-items: center;
     gap: 0.85rem;
-    padding: 0.65rem 1rem;
+    padding: 0.65rem var(--space-4);
   }
 
   .brand {
@@ -5772,8 +5728,8 @@ body,
     place-items: center;
     padding: 0;
     border: 1px solid var(--border-strong);
-    border-radius: 0.75rem;
-    background: rgb(52 153 250 / 9%);
+    border-radius: var(--radius-button);
+    background: color-mix(in srgb, var(--accent-soft) 9%, transparent);
     color: var(--text-soft);
   }
 
@@ -5832,16 +5788,16 @@ body,
     display: flex;
     width: 100%;
     max-width: none;
-    min-height: 2.75rem;
+    min-height: var(--control-height-lg);
     align-items: center;
     justify-content: flex-start;
     gap: 0.6rem;
-    padding: 0.65rem 0.75rem;
+    padding: 0.65rem var(--space-3);
     border: 1px solid transparent;
     border-radius: 0.6rem;
     background: transparent;
     color: var(--text-soft);
-    font-size: 0.85rem;
+    font-size: var(--font-size-body);
     font-weight: 650;
     line-height: 1.35;
     letter-spacing: 0;
@@ -5881,7 +5837,7 @@ body,
   }
 
   .sidebar-menu-footer .projects-sidebar > header {
-    gap: 0.25rem;
+    gap: var(--space-1);
     padding: 0;
   }
 
@@ -5927,7 +5883,7 @@ body,
     padding: 0;
     border: 0;
     border-radius: 0;
-    background: rgb(2 7 16 / 70%);
+    background: color-mix(in srgb, var(--surface-inset) 70%, transparent);
     cursor: default;
   }
 
@@ -5954,7 +5910,7 @@ body,
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
+    gap: var(--space-4);
     margin-bottom: 0.8rem;
     padding-inline: 0.4rem;
   }
@@ -5963,7 +5919,7 @@ body,
     min-width: 0;
     overflow: hidden;
     color: var(--text);
-    font-size: 1rem;
+    font-size: var(--font-size-base);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -5975,7 +5931,7 @@ body,
     place-items: center;
     padding: 0;
     border: 1px solid var(--border);
-    border-radius: 0.65rem;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--text-soft);
   }
@@ -6011,12 +5967,12 @@ body,
     right: 0.8rem;
     left: 0.8rem;
     margin: 0;
-    padding: 0.75rem;
+    padding: var(--space-3);
     border: 1px solid var(--danger);
     border-radius: 0.6rem;
     background: var(--surface);
     color: var(--danger);
-    font-size: 0.8rem;
+    font-size: var(--font-size-body-sm);
   }
 
   .chat-column {
@@ -6027,7 +5983,7 @@ body,
     align-items: stretch;
     flex-direction: column;
     gap: 0.6rem;
-    padding: 0.65rem 1rem;
+    padding: 0.65rem var(--space-4);
   }
 
   .thread-controls,
@@ -6048,7 +6004,7 @@ body,
   }
 
   .sidebar .conversation {
-    padding-right: 0.75rem;
+    padding-right: var(--space-3);
   }
 
   .swipe-conversation-row[data-enabled="true"] {
@@ -6078,28 +6034,28 @@ body,
     justify-content: center;
     gap: 0.35rem;
     padding: 0.35rem;
-    background: rgb(255 145 164 / 12%);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
     color: var(--danger);
-    font-size: 0.78rem;
+    font-size: var(--font-size-label);
     font-weight: 650;
   }
 
   .swipe-conversation-preview[data-direction="archive"],
   .swipe-conversation-actions[data-action="archive"] {
     inset: 0 auto 0 0;
-    background: rgb(52 153 250 / 14%);
+    background: color-mix(in srgb, var(--accent-soft) 14%, transparent);
     color: var(--accent);
   }
 
   .swipe-conversation-action,
   .swipe-conversation-cancel {
     min-height: 2.65rem;
-    padding: 0.5rem 0.65rem;
+    padding: var(--space-2) 0.65rem;
     border: 1px solid currentColor;
-    border-radius: 0.5rem;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: inherit;
-    font-size: 0.75rem;
+    font-size: var(--font-size-sm);
     font-weight: 650;
   }
 
@@ -6110,7 +6066,7 @@ body,
 
   .swipe-conversation-action:focus-visible,
   .swipe-conversation-cancel:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: var(--focus-ring);
     outline-offset: -2px;
   }
 
@@ -6192,13 +6148,13 @@ body,
 /* Desktop controls: larger actions and one focus ring per composer control. */
 @media (min-width: 1101px) {
   .conversation-actions button {
-    min-height: 2.75rem;
-    padding: 0.65rem 1rem;
+    min-height: var(--control-height-lg);
+    padding: 0.65rem var(--space-4);
     border-color: var(--border-strong);
-    border-radius: 0.65rem;
+    border-radius: var(--radius-control);
     background: var(--surface-raised);
     color: var(--text-soft);
-    font-size: 0.85rem;
+    font-size: var(--font-size-body);
     font-weight: 650;
   }
 
@@ -6209,20 +6165,20 @@ body,
   }
 
   .conversation-actions .danger-button {
-    border-color: rgb(255 145 164 / 30%);
-    background: rgb(255 145 164 / 6%);
+    border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+    background: color-mix(in srgb, var(--danger) 6%, transparent);
     color: var(--danger);
   }
 
   .conversation-actions .danger-button:hover:not(:disabled) {
     border-color: var(--danger);
-    background: rgb(255 145 164 / 12%);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
     color: var(--danger);
   }
 
   .composer-rail-control {
     min-height: 3.75rem;
-    padding: 0.55rem 0.75rem;
+    padding: 0.55rem var(--space-3);
   }
 
   .composer-control-label {

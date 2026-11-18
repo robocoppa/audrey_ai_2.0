@@ -97,6 +97,7 @@ import {
 import { latestActionFetch } from "./agentTransport";
 import { upsertConversation } from "./conversationHistory";
 import { NewProjectDialog, ProjectHome } from "./ProjectWorkspace";
+import { SidebarCreateButton } from "./SidebarCreateButton";
 import "./SearchConversation.css";
 
 const PRIVATE_MODEL: AudreyModel = {
@@ -1113,17 +1114,13 @@ export function ChatWorkspace({
         <div className="sidebar-content">
           {compactNavigation ? menuActions : null}
           <div className="sidebar-primary-action">
-            <button
+            <SidebarCreateButton
               className="new-conversation"
-              type="button"
               onClick={() => void startConversation({ focusComposer: true })}
               disabled={creating || loading || catalogUnavailable}
             >
-              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-              <span>{creating ? "Creating…" : "New conversation"}</span>
-            </button>
+              {creating ? "Creating…" : "New conversation"}
+            </SidebarCreateButton>
           </div>
 
           {!compactNavigation ? projectNavigation : null}

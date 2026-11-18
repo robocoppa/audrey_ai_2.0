@@ -3,7 +3,7 @@
 }
 
 .project-home.project-home {
-  padding: 1rem 1.2rem;
+  padding: var(--space-4) 1.2rem;
 }
 
 .project-home .project-home-header {
@@ -17,13 +17,13 @@
   flex: 1;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.3rem 0.75rem;
+  gap: 0.3rem var(--space-3);
   min-width: 0;
 }
 
 .project-private-label {
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: var(--font-size-xs);
 }
 
 .project-home .project-home-header h1 {
@@ -38,8 +38,8 @@
   margin: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.78rem;
-  line-height: 1.5;
+  font-size: var(--font-size-label);
+  line-height: var(--line-height-ui);
   overflow-wrap: anywhere;
 }
 
@@ -63,9 +63,9 @@
 }
 
 .project-home .project-home-actions button {
-  min-height: 2.2rem;
+  min-height: var(--control-height-sm);
   padding: 0.45rem 0.65rem;
-  font-size: 0.75rem;
+  font-size: var(--font-size-sm);
   white-space: nowrap;
 }
 
@@ -91,17 +91,17 @@
 }
 
 .project-conversation-actions > button {
-  min-height: 2.2rem;
+  min-height: var(--control-height-sm);
   padding: 0.45rem 0.65rem;
   border-radius: 0.6rem;
-  font-size: 0.75rem;
+  font-size: var(--font-size-sm);
   white-space: nowrap;
 }
 
 .project-home .project-home-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-  margin-top: 0.75rem;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
 }
 
 .project-home-overview > .project-panel {
@@ -116,7 +116,7 @@
 
 .project-home .project-panel {
   padding: 0.8rem;
-  border-radius: 0.75rem;
+  border-radius: var(--radius-button);
 }
 
 .project-home .project-panel > header {
@@ -155,9 +155,9 @@
 }
 
 .project-home .project-file-actions button {
-  min-height: 2.2rem;
+  min-height: var(--control-height-sm);
   padding: 0.45rem 0.55rem;
-  font-size: 0.75rem;
+  font-size: var(--font-size-sm);
 }
 
 .project-home .project-upload-files {
@@ -166,7 +166,7 @@
 
 .project-home .project-file-summary li {
   gap: 0.4rem;
-  padding: 0.4rem 0.5rem;
+  padding: 0.4rem var(--space-2);
 }
 
 .project-home-details > .project-panel {
@@ -219,9 +219,9 @@
 
 .project-home-details .project-agents > header > button,
 .project-home-details .project-agents > button {
-  min-height: 2.2rem;
+  min-height: var(--control-height-sm);
   padding: 0.45rem 0.65rem;
-  font-size: 0.75rem;
+  font-size: var(--font-size-sm);
 }
 
 .project-home-details .project-agents > button {

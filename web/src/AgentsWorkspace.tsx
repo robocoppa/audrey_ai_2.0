@@ -30,6 +30,7 @@ import { WatchesWorkspace } from "./WatchesWorkspace";
 import { ActivityWorkspace } from "./ActivityWorkspace";
 import { canAssignKnowledge, knowledgeTaskObjective, type KnowledgeAgentRequest } from "./knowledgeAgents";
 import { NewProjectDialog } from "./ProjectWorkspace";
+import { SidebarCreateButton } from "./SidebarCreateButton";
 
 const STATUS_LABELS: Record<AgentTaskStatus, string> = {
   queued: "Queued", running: "Running", paused: "Paused", completed: "Completed",
@@ -840,11 +841,11 @@ function AgentTasksWorkspace({
             </form>
             </div>
             <div hidden={sidebarMode !== "agents"}>
-            <button ref={newAgentRef} className="agents-primary agents-new-agent" type="button" disabled={busy} onClick={() => {
+            <SidebarCreateButton ref={newAgentRef} className="agents-new-agent" disabled={busy} onClick={() => {
               onSidebarModeChange("new");
               setError(""); setNotice(null);
               window.requestAnimationFrame(() => objectiveRef.current?.focus({ preventScroll: true }));
-            }}>New agent</button>
+            }}>New agent</SidebarCreateButton>
             {selected && !isFinished(selected) ? (
               <section className="agents-current-controls" aria-labelledby="agent-current-controls-title">
                 <h2 id="agent-current-controls-title">Current agent</h2>

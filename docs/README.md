@@ -3,6 +3,7 @@
 | Area | Entry point |
 | --- | --- |
 | Current application and architecture | [Project README](../README.md) |
+| Native app colors, components and layout | [Style guide](reference/style-guide.md) |
 | Agents, unified search, Project knowledge and watches | [Implementation plan](plans/agent-workspace-plan.md) |
 | Maintainer lessons | [AI/codebase course](lesson-ai/README.md) |
 | Python companion course | [Python course](lesson-python/README.md) |
