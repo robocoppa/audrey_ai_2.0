@@ -6,6 +6,7 @@ import {
 } from "./api";
 import { WatchForm } from "./WatchForm";
 import { SidebarCreateButton } from "./SidebarCreateButton";
+import { SidebarHeader } from "./SidebarHeader";
 import "./WatchesWorkspace.css";
 
 function messageOf(reason: unknown) { return reason instanceof Error ? reason.message : "The request could not be completed."; }
@@ -185,7 +186,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
       setDrawerOpen(false);
       if (event.matches && focusInSidebar) window.requestAnimationFrame(() => sidebarButton.current?.focus());
       else if (!event.matches && focused === sidebarButton.current) {
-        window.requestAnimationFrame(() => sidebar.current?.querySelector<HTMLButtonElement>(".watch-sidebar-scroll > button")?.focus());
+        window.requestAnimationFrame(() => sidebar.current?.querySelector<HTMLButtonElement>(".sidebar-create-button")?.focus());
       }
     };
     query.addEventListener("change", update);
@@ -354,9 +355,10 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
     {sidebarOpen ? <button className="agents-sidebar-backdrop" type="button" tabIndex={-1} aria-label="Dismiss watch controls" onClick={closeSidebar} /> : null}
     <div className="watch-columns">
       <aside className="watch-sidebar" id="watches-navigation" ref={sidebar} aria-label="Saved watches" role={compact ? "dialog" : undefined} aria-modal={sidebarOpen ? true : undefined} aria-hidden={compact && !sidebarOpen ? true : undefined} inert={compact && !sidebarOpen ? true : undefined}>
-        {sidebarTabs}
-        <header className="agents-header"><div>{!sidebarTabs ? <p className="agents-eyebrow">Keep an eye on what matters</p> : null}<h1 id="watches-title">Watches</h1></div>{compact ? <button type="button" className="agents-secondary watch-sidebar-close" aria-label="Close watch controls" onClick={closeSidebar}>✕</button> : null}</header>
-        <div className="watch-sidebar-scroll"><SidebarCreateButton disabled={busy} onClick={newWatch}>New watch</SidebarCreateButton><p className="watch-help">Scheduled checks continue while you’re away. Only public pages are supported.</p><button className="agents-refresh" type="button" onClick={() => setToken((value) => value + 1)}>Refresh watches</button>{loading ? <p role="status">Loading watches…</p> : !watches.length ? <p className="agents-empty">No watches yet. Create one to follow a public page.</p> : <ul className="agents-task-list">{watches.map((watch) => <li key={watch.id}><button type="button" className="agents-task-card" aria-pressed={!formActive && selectedId === watch.id} onClick={() => selectWatch(watch.id)} aria-label={`Open watch: ${watch.title}`}><span className={`agents-status agents-status-${watch.enabled ? "running" : "paused"}`}>{watch.enabled ? "Scheduled" : "Paused"}</span><strong>{watch.title}</strong><span className="agents-task-stage">{watch.active_run_id ? "Check in progress" : watch.latest_run ? runLabel(watch.latest_run) : "Awaiting baseline"}</span><span className="agents-task-stage">Next: {timestamp(watch.next_run_at)}</span></button></li>)}</ul>}</div>
+        {compact ? <header className="workspace-sidebar-mobile-heading"><h1 id="watches-title">Watches</h1><button type="button" className="agents-secondary watch-sidebar-close" aria-label="Close watch controls" onClick={closeSidebar}>✕</button></header> : null}
+        <SidebarHeader action={<SidebarCreateButton disabled={busy} onClick={newWatch}>New watch</SidebarCreateButton>}>{sidebarTabs}</SidebarHeader>
+        {!compact ? <header className="agents-header"><div>{!sidebarTabs ? <p className="agents-eyebrow">Keep an eye on what matters</p> : null}<h1 id="watches-title">Watches</h1></div></header> : null}
+        <div className="watch-sidebar-scroll"><p className="watch-help">Scheduled checks continue while you’re away. Only public pages are supported.</p><button className="agents-refresh" type="button" onClick={() => setToken((value) => value + 1)}>Refresh watches</button>{loading ? <p role="status">Loading watches…</p> : !watches.length ? <p className="agents-empty">No watches yet. Create one to follow a public page.</p> : <ul className="agents-task-list">{watches.map((watch) => <li key={watch.id}><button type="button" className="agents-task-card" aria-pressed={!formActive && selectedId === watch.id} onClick={() => selectWatch(watch.id)} aria-label={`Open watch: ${watch.title}`}><span className={`agents-status agents-status-${watch.enabled ? "running" : "paused"}`}>{watch.enabled ? "Scheduled" : "Paused"}</span><strong>{watch.title}</strong><span className="agents-task-stage">{watch.active_run_id ? "Check in progress" : watch.latest_run ? runLabel(watch.latest_run) : "Awaiting baseline"}</span><span className="agents-task-stage">Next: {timestamp(watch.next_run_at)}</span></button></li>)}</ul>}</div>
       </aside>
       <section className="watch-detail-scroll" aria-label="Selected watch" tabIndex={0} ref={detail} inert={sidebarOpen ? true : undefined}>{errors}<div className="watch-detail">
         {formActive ? <button className="agents-secondary watch-back-history" type="button" disabled={busy} onClick={() => {

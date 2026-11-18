@@ -1,12 +1,12 @@
 .watches-workspace { display: grid; height: 100%; min-height: 0; min-width: 0; overflow: hidden; color: var(--text); }
 .watches-workspace[hidden] { display: none; }
-.watch-columns { display: grid; grid-template-columns: minmax(17rem, 22rem) minmax(0, 1fr); min-height: 0; min-width: 0; }
+.watch-columns { display: grid; grid-template-columns: var(--workspace-sidebar-width) minmax(0, 1fr); min-height: 0; min-width: 0; }
 .watch-sidebar { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--surface-overlay) 88%, transparent); }
-.watch-sidebar-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 1.1rem 1.1rem; }
-.watches-workspace-integrated .watch-sidebar .agents-header { align-items: center; gap: var(--space-2); padding: 0.7rem 0.9rem 0.65rem; }
+.watch-sidebar-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--workspace-sidebar-inset) var(--workspace-sidebar-inset); }
+.watches-workspace-integrated .watch-sidebar .agents-header { align-items: center; gap: var(--space-2); padding: var(--space-3) var(--workspace-sidebar-inset); }
 .watches-workspace-integrated .watch-sidebar .agents-header h1 { font-size: var(--font-size-base); }
-.watches-workspace-integrated .watch-sidebar-scroll { padding: 0 0.9rem 0.9rem; }
-.watches-workspace-integrated .watch-columns { grid-template-columns: minmax(17rem, 20rem) minmax(0, 1fr); }
+.watches-workspace-integrated .watch-sidebar-scroll { padding: 0 var(--workspace-sidebar-inset) var(--workspace-sidebar-inset); }
+.watches-workspace-integrated .watch-columns { grid-template-columns: var(--workspace-sidebar-width) minmax(0, 1fr); }
 .watch-help { color: var(--muted); font-size: 0.77rem; line-height: 1.65; }
 .watch-detail-scroll { min-height: 0; min-width: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: clamp(1rem, 2.5vw, 2rem); }
 .watch-detail-scroll:focus-visible { outline: var(--focus-ring); outline-offset: -3px; }
@@ -51,15 +51,15 @@
 .watch-schedule-preview { color: var(--text-soft); font-size: 0.77rem; line-height: 1.7; }
 .watch-schedule-preview ol { padding-left: 1.3rem; margin-bottom: 0; }
 .watch-conflict { padding: var(--space-4); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); border-radius: var(--radius-button); color: var(--text-soft); font-size: 0.82rem; line-height: 1.7; }
-.watches-workspace button:hover:not(:disabled):not(:where(.sidebar-create-button)) { box-shadow: 0 0 1rem color-mix(in srgb, var(--accent-soft) 10%, transparent); background-color: color-mix(in srgb, var(--accent-soft) 18%, transparent); }
+.watches-workspace button:hover:not(:disabled):not(:where(.sidebar-create-button, .sidebar-section-tabs button)) { box-shadow: 0 0 1rem color-mix(in srgb, var(--accent-soft) 10%, transparent); background-color: color-mix(in srgb, var(--accent-soft) 18%, transparent); }
 .watches-workspace .danger-button:hover:not(:disabled) { background-color: color-mix(in srgb, var(--danger) 12%, transparent); box-shadow: 0 0 1rem color-mix(in srgb, var(--danger) 9%, transparent); }
-.watches-workspace :is(button, input, textarea, select, summary):focus-visible:not(:where(.sidebar-create-button)) { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
-.watches-workspace button:disabled:not(:where(.sidebar-create-button)) { cursor: default; opacity: var(--opacity-disabled); }
+.watches-workspace :is(button, input, textarea, select, summary):focus-visible:not(:where(.sidebar-create-button, .sidebar-section-tabs button)) { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+.watches-workspace button:disabled:not(:where(.sidebar-create-button, .sidebar-section-tabs button)) { cursor: default; opacity: var(--opacity-disabled); }
 @media (max-width: 760px) {
   .watches-workspace { grid-template-rows: auto minmax(0, 1fr); }
   .watch-columns { grid-template-columns: minmax(0, 1fr); }
   .watches-workspace-integrated .watch-columns { grid-template-columns: minmax(0, 1fr); }
-  .watch-sidebar { display: none; position: fixed; z-index: var(--z-drawer); inset: 0 auto 0 0; width: min(23rem, calc(100% - 2rem)); height: 100dvh; box-shadow: 1rem 0 3rem color-mix(in srgb, var(--shadow-color) 25%, transparent); background: var(--surface-deep); }
+  .watch-sidebar { display: none; position: fixed; z-index: var(--z-drawer); inset: 0 auto 0 0; width: var(--workspace-sidebar-drawer-width); height: 100dvh; box-shadow: 1rem 0 3rem color-mix(in srgb, var(--shadow-color) 25%, transparent); background: var(--surface-deep); }
   .watches-workspace[data-sidebar-open="true"] .watch-sidebar { display: flex; }
   .watch-detail-scroll, .watch-detail { padding: var(--space-4); }
   .watch-form fieldset { padding: var(--space-3); }

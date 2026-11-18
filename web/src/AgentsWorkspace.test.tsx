@@ -129,7 +129,7 @@ describe("AgentsWorkspace", () => {
     expect(screen.queryByText("Draft supply total:")).not.toBeInTheDocument();
   });
 
-  it("defaults to Agents history and opens a retained draft only through New agent", async () => {
+  it("defaults to Agents history and keeps its creation entry available without replacing the draft", async () => {
     const saved = task();
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
     const create = vi.spyOn(api, "createAgentTask");
@@ -147,6 +147,8 @@ describe("AgentsWorkspace", () => {
     expect(navigation.getByRole("button", { name: "Agents" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("combobox", { name: "Project" })).toBeVisible();
     fireEvent.change(screen.getByRole("textbox", { name: "Task objective" }), { target: { value: "Keep my next task" } });
+    fireEvent.click(screen.getByRole("button", { name: "New agent" }));
+    expect(screen.getByRole("textbox", { name: "Task objective" })).toHaveValue("Keep my next task");
     fireEvent.click(screen.getByRole("button", { name: "Back to agents" }));
     expect(screen.getByRole("button", { name: `Open agent: ${saved.objective}` })).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "Task objective" })).not.toBeInTheDocument();
@@ -897,12 +899,12 @@ describe("AgentsWorkspace", () => {
     agentSection("Agents");
     expect(screen.getByRole("dialog", { name: "Agents" })).toBe(drawer);
     expect(within(drawer).getByRole("button", { name: `Open agent: ${saved.objective}` })).toBeVisible();
-    const firstTab = within(drawer).getByRole("button", { name: "Agents" });
+    const firstControl = close;
     const lastControl = within(drawer).getByText("Updates", { selector: "summary" });
-    firstTab.focus(); fireEvent.keyDown(firstTab, { key: "Tab", shiftKey: true });
+    firstControl.focus(); fireEvent.keyDown(firstControl, { key: "Tab", shiftKey: true });
     expect(lastControl).toHaveFocus();
     fireEvent.keyDown(lastControl, { key: "Tab" });
-    expect(firstTab).toHaveFocus();
+    expect(firstControl).toHaveFocus();
     fireEvent.keyDown(close, { key: "Escape" });
     await waitFor(() => expect(toggle).toHaveFocus());
     expect(toggle).toHaveAttribute("aria-expanded", "false");

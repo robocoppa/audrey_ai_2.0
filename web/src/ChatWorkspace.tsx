@@ -98,6 +98,7 @@ import { latestActionFetch } from "./agentTransport";
 import { upsertConversation } from "./conversationHistory";
 import { NewProjectDialog, ProjectHome } from "./ProjectWorkspace";
 import { SidebarCreateButton } from "./SidebarCreateButton";
+import { SidebarHeader, SidebarSectionTabs } from "./SidebarHeader";
 import "./SearchConversation.css";
 
 const PRIVATE_MODEL: AudreyModel = {
@@ -1101,7 +1102,7 @@ export function ChatWorkspace({
         aria-hidden={compactNavigation && !navigationOpen ? true : undefined}
         inert={compactNavigation && !navigationOpen ? true : undefined}
       >
-        <div className="conversation-drawer-header">
+        <div className="conversation-drawer-header workspace-sidebar-mobile-heading">
           <strong className="drawer-user-name" title={user.display_name || user.email}>
             {user.display_name.trim() || user.email.split("@", 1)[0]} - My chats
           </strong>
@@ -1111,9 +1112,7 @@ export function ChatWorkspace({
             </svg>
           </button>
         </div>
-        <div className="sidebar-content">
-          {compactNavigation ? menuActions : null}
-          <div className="sidebar-primary-action">
+        <SidebarHeader action={
             <SidebarCreateButton
               className="new-conversation"
               onClick={() => void startConversation({ focusComposer: true })}
@@ -1121,7 +1120,26 @@ export function ChatWorkspace({
             >
               {creating ? "Creating…" : "New conversation"}
             </SidebarCreateButton>
-          </div>
+        }>
+          <SidebarSectionTabs label="Conversation view" className="conversation-views">
+            <button
+              type="button"
+              aria-pressed={view === "active"}
+              onClick={() => changeView("active")}
+            >
+              Active
+            </button>
+            <button
+              type="button"
+              aria-pressed={view === "archived"}
+              onClick={() => changeView("archived")}
+            >
+              Archived
+            </button>
+          </SidebarSectionTabs>
+        </SidebarHeader>
+        <div className="sidebar-content">
+          {compactNavigation ? menuActions : null}
 
           {!compactNavigation ? projectNavigation : null}
 
@@ -1156,23 +1174,6 @@ export function ChatWorkspace({
               maxLength={200}
             />
           </label>
-          <div className="conversation-views" aria-label="Conversation view">
-            <button
-              type="button"
-              aria-pressed={view === "active"}
-              onClick={() => changeView("active")}
-            >
-              Active
-            </button>
-            <button
-              type="button"
-              aria-pressed={view === "archived"}
-              onClick={() => changeView("archived")}
-            >
-              Archived
-            </button>
-          </div>
-
           {!catalogUnavailable && loading ? (
             <p className="sidebar-status">Loading conversations…</p>
           ) : null}

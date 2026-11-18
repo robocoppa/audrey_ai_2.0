@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import { NewProjectDialog, ProjectHome } from "./ProjectWorkspace";
+import { SidebarCreateButton } from "./SidebarCreateButton";
+import { SidebarHeader } from "./SidebarHeader";
 import {
   getProject, listProjects, listProjectConversations, listProjectFiles,
   type AudreyModel, type AudreyProject, type AudreyProjectFile, type Conversation,
@@ -151,7 +153,9 @@ export function ProjectsWorkspace({ visible, models, openRequest, onOpenConversa
 
   return <div className="projects-workspace">
     <aside className="projects-directory" aria-label="Projects" inert={creating ? true : undefined}>
-      <header><h2>Projects</h2><button type="button" onClick={() => setCreating(true)}>New project</button></header>
+      <SidebarHeader action={<SidebarCreateButton onClick={() => setCreating(true)}>New project</SidebarCreateButton>} />
+      <div className="projects-directory-scroll">
+      <header><h2>Projects</h2></header>
       <select className="projects-compact-picker" aria-label="Choose project" value={selectedId ?? ""} onChange={(event) => select(event.target.value)}>
         <option value="">Choose a project</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select>
@@ -170,6 +174,7 @@ export function ProjectsWorkspace({ visible, models, openRequest, onOpenConversa
       </div> : null}
       {!loading && projects.length === 0 ? <p className="project-empty">No projects yet.</p> : null}
       {nextCursor ? <button type="button" disabled={loadingMore} onClick={() => void loadMoreProjects()}>{loadingMore ? "Loading…" : "More projects"}</button> : null}
+      </div>
     </aside>
     <section className="projects-selected" aria-label="Selected project" inert={creating ? true : undefined}>
       {error ? <div className="projects-workspace-error" role="alert"><p>{error}</p><button type="button" onClick={() => setRefresh((value) => value + 1)}>Retry</button></div> : null}

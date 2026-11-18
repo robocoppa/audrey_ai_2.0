@@ -49,7 +49,12 @@ publication records the current version per filename; Review corrections replace
 that selection while retaining older immutable files under Previous files.
 Legacy outputs without attribution remain labelled Saved. A repeated earlier file
 identity can become current again; creation time does not determine the winner.
-Agents has Agents and Watches tabs at the top of its left sidebar. Agents opens
+Agents uses a shared fixed sidebar header: New agent first, then the Agents and
+Watches navigation row. Chat uses the same layout for New conversation followed
+by Active/Archived; its Projects, drafts and search follow below. Projects uses
+the same first-row New project button. Shared widths and insets keep the docked
+creation buttons and segmented navigation aligned; the [style guide](../reference/style-guide.md)
+owns these layout tokens. Agents opens
 saved history by default, with status labels, active controls and an expandable
 Updates inbox. New agent reveals the compact Project picker and prompt composer;
 Back to agents returns to history while retaining the draft and workflow selection.

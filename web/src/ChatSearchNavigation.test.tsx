@@ -21,12 +21,12 @@ function props(): ComponentProps<typeof ChatWorkspace> {
   };
 }
 
-function mockApi(options: { delayedHistory?: boolean; initialDraft?: Conversation } = {}) {
+function mockApi(options: { delayedHistory?: boolean; initialDraft?: Conversation; history?: Conversation[] } = {}) {
   let finishHistory: ((value: Response) => void) | undefined;
   const requests = vi.fn(async (path: string, requestOptions?: RequestInit) => {
     if (requestOptions?.method && requestOptions.method !== "GET") throw new Error(`Unexpected mutation: ${requestOptions.method} ${path}`);
     const payload = path.startsWith("/api/conversations?")
-      ? { items: [options.initialDraft ?? draft, saved], next_cursor: null }
+      ? { items: options.history ?? [options.initialDraft ?? draft, saved], next_cursor: null }
       : path === "/api/conversations/draft/messages" ? { items: [] }
         : /\/api\/conversations\/(saved|private)\/messages/.test(path) ? { items: [userMessage, answerMessage] }
           : /\/api\/conversations\/[^/]+\/(tax-review|private-task)/.test(path) ? null
@@ -41,6 +41,28 @@ function mockApi(options: { delayedHistory?: boolean; initialDraft?: Conversatio
 }
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it("keeps creation and view controls before Projects and search while switching saved history", async () => {
+  const { requests } = mockApi({ history: [saved] });
+  render(<ChatWorkspace {...props()} />);
+  await screen.findByRole("textbox", { name: "Ask Audrey" });
+  const sidebar = within(screen.getByRole("complementary", { name: "Conversations" }));
+  const create = sidebar.getByRole("button", { name: "New conversation" });
+  const active = sidebar.getByRole("button", { name: "Active" });
+  const archived = sidebar.getByRole("button", { name: "Archived" });
+  const projects = sidebar.getByRole("region", { name: "Projects" });
+  const search = sidebar.getByRole("searchbox", { name: "Search titles" });
+  expect(create.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(archived.compareDocumentPosition(projects) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(archived.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(archived);
+  expect(archived).toHaveAttribute("aria-pressed", "true");
+  await waitFor(() => expect(requests.mock.calls.some(([url]) => url.startsWith("/api/conversations?archived=true"))).toBe(true));
+  fireEvent.click(active);
+  expect(active).toHaveAttribute("aria-pressed", "true");
+  await waitFor(() => expect(requests.mock.calls.filter(([url]) => url.startsWith("/api/conversations?archived=false")).length).toBeGreaterThan(1));
+  expect(requests.mock.calls.some(([, init]) => init?.method && init.method !== "GET")).toBe(false);
+});
 
 it("opens the exact saved message repeatedly while keeping an existing unsent draft mounted", async () => {
   const { requests } = mockApi();
@@ -88,6 +110,7 @@ it("makes a retained Private draft reachable from the mobile Menu after Search n
   expect(screen.queryByRole("navigation", { name: "Draft conversations" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Menu" }));
   const drawer = screen.getByRole("dialog", { name: "Conversations" });
+  expect(within(drawer).getByRole("button", { name: "New conversation" })).toBeVisible();
   const drafts = within(drawer).getByRole("navigation", { name: "Draft conversations" });
   const resume = within(drafts).getByRole("button", { name: "Open draft conversation Draft conversation" });
   expect(resume).toHaveAttribute("data-private", "true");

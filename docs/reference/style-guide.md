@@ -11,7 +11,8 @@ Use the shared system when adding or changing a screen.
 | --- | --- |
 | [theme.css](../../web/src/theme.css) | Shared colors, typography, spacing, radii, control sizes, shadows, motion and layers |
 | [styles.css](../../web/src/styles.css) | Global defaults, app shell and established Chat/account/file layouts |
-| [SidebarCreateButton.tsx](../../web/src/SidebarCreateButton.tsx) | Shared sidebar creation action for conversations, Agents and Watches |
+| [SidebarCreateButton.tsx](../../web/src/SidebarCreateButton.tsx) | Shared sidebar creation action for conversations, Agents, Watches and Projects |
+| [SidebarHeader.tsx](../../web/src/SidebarHeader.tsx) | Fixed creation row and shared segmented navigation below it |
 | Feature CSS beside each component | Component arrangement, responsive layout and role-specific token usage |
 
 Theme tokens are CSS custom properties on `:root`. Components reference those
@@ -125,6 +126,8 @@ new shadow recipes to make an ordinary panel look more prominent.
 | Control height | `--control-height-sm` 2.2rem; `--control-height-md` 2.5rem; `--control-height-lg` 2.75rem |
 | Sidebar creation | `--control-height-create` 2.65rem; `--control-gap-create` 0.45rem; `--control-padding-create` 0.65rem 0.85rem |
 | Navigation width | `--workspace-sidebar-width` 17rem |
+| Sidebar controls | `--workspace-sidebar-top` / `--workspace-sidebar-inset` 0.9rem; `--workspace-sidebar-row-gap` 0.75rem |
+| Drawer heading | `--workspace-sidebar-mobile-heading-height` 3.25rem; shared `--workspace-sidebar-drawer-width` |
 | Elevation | `--shadow-sm`, `--shadow-md`, `--shadow-create-hover` |
 
 ## Buttons and controls
@@ -138,7 +141,8 @@ new shadow recipes to make an ordinary panel look more prominent.
 | Destructive action | Danger text/border/fill; preserve the existing two-click checkmark confirmation flow where present |
 | Text action | Quiet text treatment for Refresh, disclosure links and low-emphasis navigation |
 
-Use the shared creation component for New conversation, New agent and New watch.
+Use the shared creation component for New conversation, New agent, New watch and
+the Projects workspace's New project action.
 Pass the action, disabled state and accessible name through normal button props.
 Do not layer another primary-button paint class over it: one component owns the
 normal, hover, focus and disabled appearance.
@@ -159,8 +163,21 @@ or deletion behavior.
 
 ## Panels, navigation and responsive layout
 
-Use the shared sidebar-width token where Chat, Projects and Search share that
-navigation width. Keep headings fixed when a panel owns a scrolling body.
+Chat, Agents, Watches and Projects use the shared 17rem sidebar width when docked.
+Place `SidebarCreateButton` in `SidebarHeader`'s `action` slot, then put any
+`SidebarSectionTabs` immediately below it. Creation is the first row; Active/Archived
+and Agents/Watches share the second row's dimensions, selection, hover and focus
+styles. The shared tabs preserve native `aria-pressed` filter and `aria-current`
+navigation semantics. Keep headings, Project lists, drafts and search below those
+fixed rows so content cannot move the controls. Projects has no invented second
+navigation row. Shared tokens set the header inset, top spacing and row gap.
+
+Open Chat/Agent/Watch drawers use the same width and 3.25rem close-heading row above
+the creation/navigation rows. The compact Projects view retains its picker beneath
+the creation action. At widths where workspaces use different responsive modes,
+compare controls within their respective navigation containers.
+
+Search also uses the shared sidebar-width token. Keep headings fixed when a panel owns a scrolling body.
 Independent sidebar, workflow and activity scrolling should stay independent.
 Use `min-width: 0` and `min-height: 0` where flex/grid children need to shrink;
 do not mask broken layout with a global horizontal-overflow rule.

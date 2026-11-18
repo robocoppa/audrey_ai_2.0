@@ -71,11 +71,6 @@
 .app-workspace-view[hidden] { display: none; }
 
 .agents-hub { height: 100%; min-height: 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
-.agents-sidebar-tabs { display: flex; flex: none; gap: 0.2rem; margin: 0.85rem var(--space-4) 0; padding: 0.2rem; border: 1px solid var(--border); border-radius: var(--radius-control); background: color-mix(in srgb, var(--surface-panel) 60%, transparent); }
-.agents-sidebar-tabs button { display: inline-flex; flex: 1; min-width: 0; align-items: center; justify-content: center; gap: 0.3rem; min-height: 2.15rem; padding: 0.35rem 0.45rem; border: 0; border-radius: 0.45rem; color: var(--muted); background: transparent; font-size: var(--font-size-label); font-weight: 650; }
-.agents-sidebar-tabs button[aria-current="page"] { background: color-mix(in srgb, var(--accent-soft) 16%, transparent); color: var(--text); }
-.agents-sidebar-tabs button:hover { background: color-mix(in srgb, var(--accent-soft) 22%, transparent); color: var(--text); box-shadow: 0 0 0.7rem color-mix(in srgb, var(--accent-soft) 10%, transparent); }
-.agents-sidebar-tabs button:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 .agents-sidebar-tabs .agents-active-count { padding: 0.05rem 0.3rem; font-size: 0.65rem; }
 .agents-hub-view { flex: 1; min-height: 0; min-width: 0; }
 .agents-hub-view[hidden] { display: none; }
@@ -95,7 +90,7 @@
   justify-content: space-between;
   gap: 0.65rem;
   flex: none;
-  padding: 0.85rem var(--space-4) var(--space-3);
+  padding: var(--space-3) var(--workspace-sidebar-inset);
 }
 
 .agents-eyebrow {
@@ -109,9 +104,9 @@
 
 .agents-header h1 { margin: 0; font-size: 1.12rem; }
 .agents-sidebar-caption { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.73rem; line-height: 1.5; }
-.agents-columns { display: grid; min-height: 0; min-width: 0; grid-template-columns: minmax(17rem, 20rem) minmax(0, 1fr); }
+.agents-columns { display: grid; min-height: 0; min-width: 0; grid-template-columns: var(--workspace-sidebar-width) minmax(0, 1fr); }
 .agents-sidebar { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; border-right: 1px solid var(--border); background: color-mix(in srgb, var(--surface-overlay) 88%, transparent); }
-.agents-sidebar-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 1.1rem 1.1rem; }
+.agents-sidebar-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--workspace-sidebar-inset) var(--workspace-sidebar-inset); }
 .agents-mobile-toolbar { display: none; }
 .agents-sidebar-backdrop { position: fixed; z-index: var(--z-drawer-backdrop); inset: 0; width: 100%; height: 100%; border: 0; background: color-mix(in srgb, var(--shadow-color) 55%, transparent); }
 .agents-sidebar-toggle { display: inline-flex; align-items: center; gap: 0.55rem; }
@@ -344,7 +339,7 @@ button.agents-context-project:focus-visible { outline: var(--focus-ring); outlin
   .agents-mobile-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 0.65rem var(--space-4); border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--surface-overlay) 72%, transparent); }
   .agents-mobile-toolbar > span { color: var(--muted); font-size: var(--font-size-sm); }
   .agents-columns { grid-template-columns: minmax(0, 1fr); }
-  .agents-sidebar { display: none; position: fixed; z-index: var(--z-drawer); inset: 0 auto 0 0; width: min(23rem, calc(100% - 2rem)); height: 100dvh; box-shadow: 1rem 0 3rem color-mix(in srgb, var(--shadow-color) 25%, transparent); background: var(--surface-deep); }
+  .agents-sidebar { display: none; position: fixed; z-index: var(--z-drawer); inset: 0 auto 0 0; width: var(--workspace-sidebar-drawer-width); height: 100dvh; box-shadow: 1rem 0 3rem color-mix(in srgb, var(--shadow-color) 25%, transparent); background: var(--surface-deep); }
   .agents-workspace[data-sidebar-open="true"] .agents-sidebar { display: flex; }
   .agents-header { gap: 0.7rem; }
   .agents-eyebrow { font-size: 0.65rem; }
@@ -357,5 +352,4 @@ button.agents-context-project:focus-visible { outline: var(--focus-ring); outlin
 .agents-knowledge-confirm blockquote { margin: 0.6rem 0; padding-left: 0.6rem; border-left: 2px solid var(--border); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 10rem; overflow-y: auto; font-size: var(--font-size-body-sm); }
 .agents-knowledge-confirm > div { display: flex; flex-wrap: wrap; gap: 0.45rem; }
 
-.agents-new-agent { margin-bottom: 0.9rem; }
 .agents-back-history { margin-bottom: 0.8rem; }

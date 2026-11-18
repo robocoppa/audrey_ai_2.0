@@ -1,0 +1,74 @@
+.workspace-sidebar-header {
+  display: grid;
+  flex: none;
+  min-width: 0;
+  gap: var(--workspace-sidebar-row-gap);
+  padding: var(--workspace-sidebar-top) var(--workspace-sidebar-inset) var(--workspace-sidebar-row-gap);
+}
+
+.workspace-sidebar-header > .sidebar-create-button { margin: 0; }
+
+.sidebar-section-tabs {
+  display: flex;
+  flex: none;
+  min-width: 0;
+  gap: var(--sidebar-section-gap);
+  margin: 0;
+  padding: var(--sidebar-section-padding);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 60%, transparent);
+}
+
+.sidebar-section-tabs > button {
+  display: inline-flex;
+  flex: 1;
+  min-width: 0;
+  min-height: var(--sidebar-section-control-height);
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.45rem;
+  border: 0;
+  border-radius: var(--radius-segment);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+.sidebar-section-tabs > button:is([aria-current="page"], [aria-pressed="true"]) {
+  background: color-mix(in srgb, var(--accent-soft) 16%, transparent);
+  color: var(--text);
+}
+
+.sidebar-section-tabs > button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-soft) 22%, transparent);
+  color: var(--text);
+  box-shadow: 0 0 0.7rem color-mix(in srgb, var(--accent-soft) 10%, transparent);
+}
+
+.sidebar-section-tabs > button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.workspace-sidebar-mobile-heading {
+  display: flex;
+  flex: none;
+  height: var(--workspace-sidebar-mobile-heading-height);
+  min-height: var(--workspace-sidebar-mobile-heading-height);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0 var(--workspace-sidebar-inset);
+  color: var(--text-soft);
+  font-size: var(--font-size-body);
+}
+
+.workspace-sidebar-mobile-heading > :first-child { min-width: 0; }
+.workspace-sidebar-mobile-heading :is(h1, h2) { margin: 0; font-size: var(--font-size-base); line-height: var(--line-height-ui); }
+.workspace-sidebar-mobile-heading > button { flex: none; min-width: var(--control-height-lg); min-height: var(--control-height-lg); padding: 0; }

@@ -275,11 +275,10 @@ describe("watch activity and visibility", () => {
     await screen.findByRole("heading", { name: "Release announcements" }); fireEvent.click(screen.getByRole("button", { name: "Watch controls" }));
     const dialog = screen.getByRole("dialog", { name: "Saved watches" }); const close = within(dialog).getByRole("button", { name: "Close watch controls" }); expect(close).toHaveFocus();
     if (integrated) {
-      const firstTab = within(dialog).getByRole("button", { name: "Agents" });
-      firstTab.focus(); fireEvent.keyDown(firstTab, { key: "Tab", shiftKey: true });
+      close.focus(); fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
       expect(within(dialog).getByRole("button", { name: "Open watch: Release announcements" })).toHaveFocus();
       fireEvent.keyDown(document.activeElement!, { key: "Tab" });
-      expect(firstTab).toHaveFocus();
+      expect(close).toHaveFocus();
     }
     fireEvent.click(within(dialog).getByRole("button", { name: "Open watch: Release announcements" }));
     expect(screen.queryByRole("dialog", { name: "Saved watches" })).not.toBeInTheDocument();

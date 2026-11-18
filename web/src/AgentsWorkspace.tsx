@@ -31,6 +31,7 @@ import { ActivityWorkspace } from "./ActivityWorkspace";
 import { canAssignKnowledge, knowledgeTaskObjective, type KnowledgeAgentRequest } from "./knowledgeAgents";
 import { NewProjectDialog } from "./ProjectWorkspace";
 import { SidebarCreateButton } from "./SidebarCreateButton";
+import { SidebarHeader, SidebarSectionTabs } from "./SidebarHeader";
 
 const STATUS_LABELS: Record<AgentTaskStatus, string> = {
   queued: "Queued", running: "Running", paused: "Paused", completed: "Completed",
@@ -219,12 +220,12 @@ export function AgentsWorkspace(props: AgentsWorkspaceProps) {
       '.agents-hub-view:not([hidden]) .agents-sidebar-tabs button[aria-current="page"]',
     )?.focus({ preventScroll: true }));
   }
-  const sidebarTabs = <nav className="agents-sidebar-tabs" aria-label="Agent sections">
+  const sidebarTabs = <SidebarSectionTabs className="agents-sidebar-tabs" label="Agent sections">
     {([['agents', 'Agents'], ['watches', 'Watches']] as const).map(([tab, label]) => <button
       key={tab} type="button" aria-current={(tab === "agents" ? view !== "watches" : view === tab) ? "page" : undefined} onClick={() => navigate(tab)}
       aria-description={tab === "agents" && unread ? `${unread} unread updates` : undefined}
     >{label}{tab === "agents" && unread ? <span className="agents-active-count" aria-label={`${unread} unread notifications`}>{unread}</span> : null}</button>)}
-  </nav>;
+  </SidebarSectionTabs>;
   const updates = <details className="agents-task-updates" open={updatesOpen} onToggle={(event) => {
     const open = event.currentTarget.open;
     setUpdatesOpen(open);
@@ -770,16 +771,21 @@ function AgentTasksWorkspace({
           aria-hidden={compactNavigation && !sidebarOpen ? true : undefined}
           inert={compactNavigation && !sidebarOpen ? true : undefined}
         >
-          {sidebarTabs}
-          <header className="agents-header">
+          {compactNavigation ? <header className="workspace-sidebar-mobile-heading">
+            <h1 id="agents-title">{sidebarMode === "new" ? "New agent" : "Agents"}</h1>
+            <button type="button" className="agents-secondary agents-sidebar-close" aria-label="Close agent controls" onClick={closeSidebar}>✕</button>
+          </header> : null}
+          <SidebarHeader action={<SidebarCreateButton ref={newAgentRef} className="agents-new-agent" disabled={busy} onClick={() => {
+            onSidebarModeChange("new");
+            setError(""); setNotice(null);
+            window.requestAnimationFrame(() => objectiveRef.current?.focus({ preventScroll: true }));
+          }}>New agent</SidebarCreateButton>}>{sidebarTabs}</SidebarHeader>
+          {!compactNavigation ? <header className="agents-header">
             <div>
               <h1 id="agents-title">{sidebarMode === "new" ? "New agent" : "Agents"}</h1>
               <p className="agents-sidebar-caption">{sidebarMode === "new" ? "Describe what you want done." : "Running and past work."}</p>
             </div>
-            {compactNavigation
-              ? <button type="button" className="agents-secondary agents-sidebar-close" aria-label="Close agent controls" onClick={closeSidebar}>✕</button>
-              : null}
-          </header>
+          </header> : null}
           <div className="agents-sidebar-scroll">
             {sidebarOpen && error ? <p className="agents-error" role="alert">{error}</p> : null}
             {sidebarOpen && notice && !notice.taskId ? <p className="agents-notice" role="status">{notice.text}</p> : null}
@@ -841,11 +847,6 @@ function AgentTasksWorkspace({
             </form>
             </div>
             <div hidden={sidebarMode !== "agents"}>
-            <SidebarCreateButton ref={newAgentRef} className="agents-new-agent" disabled={busy} onClick={() => {
-              onSidebarModeChange("new");
-              setError(""); setNotice(null);
-              window.requestAnimationFrame(() => objectiveRef.current?.focus({ preventScroll: true }));
-            }}>New agent</SidebarCreateButton>
             {selected && !isFinished(selected) ? (
               <section className="agents-current-controls" aria-labelledby="agent-current-controls-title">
                 <h2 id="agent-current-controls-title">Current agent</h2>
