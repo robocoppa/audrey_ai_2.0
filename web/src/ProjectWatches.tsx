@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listWatches, type AudreyProject, type PublicWatch } from "./api";
+import { SidebarItemButton } from "./SidebarItemButton";
 import "./ProjectWatches.css";
 
 interface ProjectWatchesProps {
@@ -49,14 +50,20 @@ export function ProjectWatches({ project, visible, onNew, onOpen }: ProjectWatch
   }
 
   return <section className="project-panel project-watches" aria-labelledby="project-watches-title">
-    <header><div><span>Public-page monitoring</span><h2 id="project-watches-title">Project watches</h2></div>
-      {onNew ? <button className="project-primary-button" type="button" disabled={opening} onClick={() => void follow()}>New watch in Project</button> : null}
+    <header>
+      <h2 id="project-watches-title">Project watches</h2>
+      <div className="project-watch-actions">
+        <button type="button" className="project-watch-refresh" aria-label="Refresh Project watches" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>Refresh</button>
+        {onNew ? <button className="project-primary-button" type="button" aria-label="New watch in Project" disabled={opening} onClick={() => void follow()}>New watch</button> : null}
+      </div>
     </header>
     {error ? <p className="project-error" role="alert">{error}</p> : null}
-    {loading ? <p role="status">Loading Project watches…</p> : items.length ? <ul className="project-home-conversations">{items.map((watch) => <li key={watch.id} className="conversation-row">
-      <button className="conversation project-home-conversation" type="button" disabled={opening || !onOpen} onClick={() => void follow(watch)}><span>{watch.title}</span><small>{watch.active_run_id ? "Checking" : watch.enabled ? "Scheduled" : "Paused"}</small></button>
+    {loading ? <p className="project-empty" role="status">Loading Project watches…</p> : items.length ? <ul className="project-home-conversations">{items.map((watch) => <li key={watch.id} className="conversation-row">
+      <SidebarItemButton className="project-watch-card" disabled={opening || !onOpen} onClick={() => void follow(watch)}>
+        <span className="sidebar-item-title">{watch.title}</span>
+        <small className="sidebar-item-meta project-watch-status">{watch.active_run_id ? "Checking" : watch.enabled ? "Scheduled" : "Paused"}</small>
+      </SidebarItemButton>
     </li>)}</ul> : <p className="project-empty">No watches in this Project yet. Create one to monitor a public page for changes.</p>}
-    <button type="button" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>Refresh Project watches</button>
   </section>;
 }
 

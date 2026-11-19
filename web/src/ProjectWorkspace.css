@@ -3,6 +3,8 @@
 }
 
 .project-home.project-home {
+  display: flex;
+  flex-direction: column;
   padding: var(--workspace-content-inset);
 }
 
@@ -100,28 +102,27 @@
   white-space: nowrap;
 }
 
-.project-home .project-home-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.project-home > :is(.project-home-header, .project-edit-form, .project-error, .tax-project) {
+  flex: none;
+}
+
+.project-home-layout {
+  display: grid;
+  flex: 1;
+  min-height: 28rem;
+  grid-template-columns: minmax(0, 1.5fr) minmax(18rem, 1fr);
   gap: var(--space-3);
   margin-top: var(--space-3);
 }
 
-.project-home-overview > .project-panel {
-  display: flex;
-  height: clamp(14rem, 32dvh, 18rem);
-  flex-direction: column;
-}
-
-.project-home-overview > .project-panel > :is(header, .project-panel-copy, .project-file-actions, .project-upload-notice, .upload-status) {
-  flex-shrink: 0;
-}
-
 .project-home .project-panel {
+  min-width: 0;
   padding: 0.8rem;
   border-radius: var(--radius-button);
 }
 
 .project-home .project-panel > header {
+  flex: none;
   gap: 0.55rem;
   padding-bottom: 0.55rem;
 }
@@ -132,26 +133,164 @@
 
 .project-home .project-panel-copy,
 .project-home .project-empty {
+  flex: none;
   margin: 0.55rem 0;
-  font-size: 0.74rem;
+  font-size: var(--font-size-sm);
   line-height: 1.45;
 }
 
-.project-home .project-home-conversations,
-.project-home .project-file-summary {
-  max-height: 9rem;
+.project-activity {
+  display: flex;
   min-height: 0;
-  overflow-y: auto;
-  margin-top: 0.55rem;
-  margin-bottom: 0;
-  scrollbar-width: thin;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
-.project-home .project-home-conversation {
-  padding-block: 0.45rem;
+.project-activity-tabs {
+  display: flex;
+  flex: none;
+  min-width: 0;
+  gap: var(--sidebar-section-gap);
+  padding: var(--sidebar-section-padding);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 60%, transparent);
+}
+
+.project-activity-tabs > button {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--sidebar-section-control-height);
+  padding: 0.35rem 0.45rem;
+  border: 0;
+  border-radius: var(--radius-segment);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+.project-activity-tabs > button[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accent-soft) 16%, transparent);
+  color: var(--text);
+}
+
+.project-activity-tabs > button:hover {
+  background: color-mix(in srgb, var(--accent-soft) 22%, transparent);
+  color: var(--text);
+  box-shadow: 0 0 0.7rem color-mix(in srgb, var(--accent-soft) 10%, transparent);
+}
+
+.project-activity-tabs > button:focus-visible,
+.project-activity-panel:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.project-activity-panel:not([hidden]) {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.project-activity-panel > .project-panel {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.project-home .project-home-conversations {
+  flex: 1;
+  min-height: 0;
+  align-content: start;
+  gap: var(--sidebar-item-list-gap);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  margin: 0.35rem -0.4rem 0;
+  padding: 0.4rem;
+}
+
+.project-home .conversation.sidebar-item {
+  padding-right: var(--space-3);
+}
+
+.project-home .project-home-conversation .sidebar-item-title {
+  display: -webkit-box;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.project-context {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: minmax(14rem, 1fr) minmax(12rem, 1fr);
+  gap: var(--space-3);
+}
+
+.project-home .project-knowledge,
+.project-files {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.project-home .project-knowledge-form {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.project-home .project-knowledge-form > :not(textarea),
+.project-files > :not(.project-file-summary) {
+  flex: none;
+}
+
+.project-home .project-knowledge-form > textarea {
+  flex: 1;
+  min-height: 4rem;
+  resize: none;
+}
+
+/* Recovery controls grow the layout instead of being clipped by a fixed card. */
+.project-home-layout:has(.knowledge-error, .knowledge-conflict) {
+  flex: none;
+}
+
+.project-context:has(.knowledge-error, .knowledge-conflict) {
+  grid-template-rows: auto minmax(12rem, 1fr);
+}
+
+.project-home .project-knowledge:has(.knowledge-error, .knowledge-conflict) .project-knowledge-form {
+  flex: none;
+  min-height: auto;
+}
+
+.project-home .project-knowledge:has(.knowledge-error, .knowledge-conflict) textarea {
+  min-height: 7rem;
+}
+
+.project-home-layout:has(.knowledge-error, .knowledge-conflict) .project-activity {
+  min-height: 28rem;
+  max-height: max(28rem, calc(100dvh - 13rem));
 }
 
 .project-home .project-file-actions {
+  flex: none;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.4rem;
 }
@@ -166,68 +305,21 @@
   white-space: nowrap;
 }
 
+.project-home .project-file-summary {
+  flex: 1;
+  min-height: 0;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-top: 0.55rem;
+  margin-bottom: 0;
+  padding: 0.4rem;
+  scrollbar-gutter: stable;
+}
+
 .project-home .project-file-summary li {
   gap: 0.4rem;
   padding: 0.4rem var(--space-2);
-}
-
-.project-home-details > .project-panel {
-  max-height: clamp(16rem, 34dvh, 20rem);
-  overflow-y: auto;
-  margin-top: 0;
-  scrollbar-width: thin;
-}
-
-.project-home .project-knowledge {
-  display: flex;
-  flex-direction: column;
-  height: clamp(14rem, 32dvh, 18rem);
-}
-
-.project-home .project-knowledge > header {
-  flex: none;
-}
-
-.project-home .project-knowledge-form {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.project-home .project-knowledge:has(.knowledge-error, .knowledge-conflict) {
-  height: auto;
-  min-height: clamp(14rem, 32dvh, 18rem);
-}
-
-.project-home .project-knowledge:has(.knowledge-error, .knowledge-conflict) .project-knowledge-form {
-  flex: none;
-  min-height: auto;
-}
-
-.project-home .project-knowledge-form > :not(textarea) {
-  flex-shrink: 0;
-}
-
-.project-home .project-knowledge-form > textarea {
-  flex: 1;
-  min-height: 4rem;
-  resize: none;
-}
-
-.project-home-details > .project-panel:only-child {
-  grid-column: 1 / -1;
-}
-
-.project-home-details .project-agents > header > button,
-.project-home-details .project-agents > button {
-  min-height: var(--control-height-sm);
-  padding: 0.45rem 0.65rem;
-  font-size: var(--font-size-sm);
-}
-
-.project-home-details .project-agents > button {
-  margin-top: 0.6rem;
 }
 
 @container (max-width: 42rem) {
@@ -252,28 +344,35 @@
   .project-action-label-compact {
     display: inline;
   }
+}
 
-  .project-home .project-home-grid {
+@container (max-width: 44rem) {
+  .project-home-layout {
+    flex: none;
+    min-height: 0;
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .project-home-overview > .project-panel {
-    height: auto;
-    max-height: none;
+  .project-home .project-activity {
+    height: clamp(22rem, 60dvh, 36rem);
+    min-height: 0;
   }
 
-  .project-home-details > .project-panel {
-    max-height: none;
-    overflow-y: visible;
-  }
-
-  .project-home .project-knowledge {
-    height: auto;
+  .project-context {
+    grid-template-rows: auto auto;
   }
 
   .project-home .project-knowledge-form > textarea {
-    min-height: 9rem;
+    min-height: 8rem;
     resize: vertical;
+  }
+
+  .project-home .project-files {
+    max-height: 25rem;
+  }
+
+  .project-home .project-file-summary {
+    max-height: 13rem;
   }
 }
 

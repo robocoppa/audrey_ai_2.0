@@ -191,6 +191,20 @@ content; Agent status and Project activity can require extra rows. Chat's deskto
 delete target retains its reserved right-hand space. Private conversations retain
 their labelled tint through local state-token overrides.
 
+Project details use one larger activity panel on the left, with Chats, Agents and
+Watches as accessible tabs. Show one activity panel at a time; keep its creation
+and refresh controls above the scrolling list. Agent/Watch cards use the same
+shared item styling as conversations. Inactive tabs pause their reads and pending
+navigation; switching tabs must preserve the Knowledge draft. Private Projects
+retain Chats and their existing local tools, with no Agent/Watch tabs.
+
+The right column contains separate Knowledge and Files panels. Start with a
+60/40 activity/context split, give long lists their own scrolling area, and grow
+the Knowledge panel when validation or conflict controls appear. Stack activity
+above Knowledge and Files when the Project content container is at most 44rem
+wide; do not squeeze three small columns into the available space. The compact
+Project header keeps instructions beside its title and management actions close.
+
 Selected workspace titles use `workspace-page-title` at the common content
 inset, with optional breadcrumbs/status below and actions alongside. Project
 instructions remain inline beside its title. Framed Agent/Watch panels split

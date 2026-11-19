@@ -14,6 +14,8 @@ it("lists and opens the same Project watch before its first check and prefills w
   const listing = vi.spyOn(api, "listWatches").mockResolvedValue({ items: [watch, { ...watch, id: "other", title: "Other Project watch", project: { ...watch.project!, id: "other-project" } }] });
   const create = vi.spyOn(api, "createWatch"), action = vi.spyOn(api, "actOnWatch"), onNew = vi.fn(), onOpen = vi.fn();
   render(<ProjectHome {...props()} onNewProjectWatch={onNew} onOpenProjectWatch={onOpen} />);
+  expect(listing).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("tab", { name: "Watches" }));
   expect(listing).toHaveBeenCalledWith(expect.any(AbortSignal), project.id);
   fireEvent.click(await screen.findByRole("button", { name: /Release announcements/ }));
   expect(onOpen).toHaveBeenCalledWith(watch, expect.any(AbortSignal));
@@ -27,6 +29,7 @@ it("lists and opens the same Project watch before its first check and prefills w
 it("keeps Private Projects outside public-page watches and explains ordinary Project deletion", () => {
   const listing = vi.spyOn(api, "listWatches");
   const base = props(); const { rerender } = render(<ProjectHome {...base} project={{ ...project, private_required: true }} onNewProjectWatch={vi.fn()} onOpenProjectWatch={vi.fn()} />);
+  expect(screen.queryByRole("tab", { name: "Watches" })).not.toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Project watches" })).not.toBeInTheDocument(); expect(listing).not.toHaveBeenCalled();
   rerender(<ProjectHome {...base} />);
   expect(screen.getByRole("button", { name: "Delete project" }).title).toContain("Linked watches stop; saved checks");
@@ -41,6 +44,7 @@ it("aborts hidden links and late list responses, then recovers on refresh", asyn
   let signal: AbortSignal | undefined;
   const onOpen = vi.fn((_watch: api.PublicWatch, current?: AbortSignal) => { signal = current; return new Promise<void>(() => {}); });
   const base = props(); const { rerender } = render(<ProjectHome {...base} onOpenProjectWatch={onOpen} onNewProjectWatch={vi.fn()} />);
+  fireEvent.click(screen.getByRole("tab", { name: "Watches" }));
   fireEvent.click(await screen.findByRole("button", { name: /Release announcements/ }));
   rerender(<ProjectHome {...base} visible={false} onOpenProjectWatch={onOpen} onNewProjectWatch={vi.fn()} />);
   expect(signal?.aborted).toBe(true);
@@ -60,6 +64,23 @@ it("aborts hidden links and late list responses, then recovers on refresh", asyn
 it("blocks a saved watch whose Project is unavailable", async () => {
   vi.spyOn(api, "listWatches").mockResolvedValue({ items: [{ ...watch, project: { ...watch.project!, available: false } }] });
   const onOpen = vi.fn(); render(<ProjectHome {...props()} onOpenProjectWatch={onOpen} />);
+  fireEvent.click(screen.getByRole("tab", { name: "Watches" }));
   fireEvent.click(await screen.findByRole("button", { name: /Release announcements/ }));
   expect(await screen.findByRole("alert")).toHaveTextContent("unavailable in this Project"); expect(onOpen).not.toHaveBeenCalled();
+});
+
+it("aborts a watch link when switching activity tabs and reopens with enabled controls", async () => {
+  const listing = vi.spyOn(api, "listWatches").mockResolvedValue({ items: [watch] });
+  let signal: AbortSignal | undefined;
+  const onOpen = vi.fn((_watch: api.PublicWatch, request?: AbortSignal) => { signal = request; return new Promise<void>(() => {}); });
+  render(<ProjectHome {...props()} onOpenProjectWatch={onOpen} onNewProjectWatch={vi.fn()} />);
+  fireEvent.click(screen.getByRole("tab", { name: "Watches" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Release announcements/ }));
+  expect(signal?.aborted).toBe(false);
+  fireEvent.click(screen.getByRole("tab", { name: "Chats" }));
+  expect(signal?.aborted).toBe(true);
+  expect(screen.queryByRole("button", { name: /Release announcements/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: "Watches" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "New watch in Project" })).toBeEnabled());
+  expect(listing).toHaveBeenCalledTimes(2);
 });

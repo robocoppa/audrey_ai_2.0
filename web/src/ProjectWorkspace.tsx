@@ -1,6 +1,6 @@
 import { FileDownloadLink } from "./FileDownloadLink";
 import { FilePreviewButton } from "./FilePreview";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import {
   addProjectFile,
@@ -8,7 +8,6 @@ import {
   createProjectConversation,
   deleteProject,
   listFiles,
-  listAgentTasks,
   listProjectFiles,
   removeProjectFile,
   updateProject,
@@ -30,7 +29,8 @@ import { TaxProjectSection } from "./TaxProjectSection";
 import { ProjectKnowledgeSection } from "./ProjectKnowledgeSection";
 import { type KnowledgeEntry } from "./api";
 import { ProjectWatches } from "./ProjectWatches";
-import "./ProjectAgents.css";
+import { ProjectAgents } from "./ProjectAgents";
+import { SidebarItemButton } from "./SidebarItemButton";
 import "./ProjectWorkspace.css";
 
 type ProjectFileKind = "all" | AudreyFile["kind"];
@@ -484,125 +484,125 @@ export function ProjectHome({
 
       {error ? <p className="project-error" role="alert">{error}</p> : null}
 
-      <div className="project-home-grid project-home-overview">
-        <section className="project-panel project-conversations" aria-labelledby="project-conversations-title">
-          <header>
-            <div>
-              <span>Conversations</span>
-              <h2 id="project-conversations-title">Project conversations</h2>
-            </div>
-            <div className="project-conversation-actions">
-              <small>{conversations.length}</small>
+      <div className="project-home-layout">
+        <ProjectActivity key={project.id}
+          agents={!isPrivate && (onNewProjectAgent || onOpenProjectAgent) ? (active) => <ProjectAgents
+            project={project} visible={visible && active}
+            onNew={onNewProjectAgent} onOpen={onOpenProjectAgent} /> : undefined}
+          watches={!isPrivate && (onNewProjectWatch || onOpenProjectWatch) ? (active) => <ProjectWatches
+            project={project} visible={visible && active}
+            onNew={onNewProjectWatch} onOpen={onOpenProjectWatch} /> : undefined}
+          chats={
+            <section className="project-panel project-conversations" aria-labelledby="project-conversations-title">
+              <header>
+                <div>
+                  <h2 id="project-conversations-title">Project conversations</h2>
+                </div>
+                <div className="project-conversation-actions">
+                  <small>{conversations.length}</small>
+                  <button
+                    className="project-primary-button"
+                    type="button"
+                    aria-label={creatingConversation ? "Creating…" : "New conversation in project"}
+                    onClick={() => void startConversation()}
+                    disabled={creatingConversation || deleting}
+                  >{creatingConversation ? "Creating…" : "New conversation"}</button>
+                </div>
+              </header>
+              {conversations.length ? (
+                <ul className="project-home-conversations">
+                  {conversations.map((conversation) => (
+                    <li className="conversation-row" key={conversation.id}>
+                      <SidebarItemButton
+                        className="conversation project-home-conversation"
+                        data-private={conversation.private_required ? "true" : undefined}
+                        type="button"
+                        onClick={() => onConversationSelected(conversation)}
+                        title={conversation.title || "New conversation"}
+                      >
+                        <span className="sidebar-item-title">{conversation.title || "New conversation"}</span>
+                        <small className="sidebar-item-meta">{conversation.archived_at ? "Archived" : formatActivity(conversation)}</small>
+                      </SidebarItemButton>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="project-empty">No conversations in this view.</p>
+              )}
+            </section>
+          }
+        />
+        <div className="project-context">
+          <ProjectKnowledgeSection project={project} visible={visible} />
+          <section className="project-panel project-files" aria-labelledby="project-files-title">
+            <header>
+              <div>
+                <h2 id="project-files-title">Project files</h2>
+              </div>
+              <small>{files.length}/{limits.max_files}</small>
+            </header>
+            <p className="project-panel-copy">
+              {isPrivate
+                ? "Local models use this project's instructions and ready Private documents. Upload a text document or choose from your Private files."
+                : "Upload here or select Ready files already in My Files. Processing uploads become shared context when Ready."}
+            </p>
+            <div className="project-file-actions">
+              <input
+                ref={projectUploadRef}
+                type="file"
+                accept={isPrivate ? PRIVATE_DOCUMENT_EXTENSIONS.join(",") : undefined}
+                multiple
+                hidden
+                disabled={uploadingFiles || files.length >= limits.max_files}
+                onChange={(event) => event.target.files ? void uploadToProject(event.target.files) : undefined}
+              />
               <button
-                className="project-primary-button"
+                className="project-upload-files"
                 type="button"
-                aria-label={creatingConversation ? "Creating…" : "New conversation in project"}
-                onClick={() => void startConversation()}
-                disabled={creatingConversation || deleting}
-              >{creatingConversation ? "Creating…" : "New conversation"}</button>
+                onClick={() => projectUploadRef.current?.click()}
+                disabled={uploadingFiles || files.length >= limits.max_files}
+              >
+                <span aria-hidden="true">＋</span>
+                {uploadingFiles ? (uploadProgress >= 1 ? "Processing…" : "Uploading…") : "Upload file"}
+              </button>
+              <button className="project-manage-files" type="button" onClick={() => setFilesOpen(true)} disabled={uploadingFiles}>
+                Choose from My Files
+              </button>
             </div>
-          </header>
-          {conversations.length ? (
-            <ul className="project-home-conversations">
-              {conversations.map((conversation) => (
-                <li className="conversation-row" key={conversation.id}>
-                  <button
-                    className="conversation project-home-conversation"
-                    data-private={conversation.private_required ? "true" : undefined}
-                    type="button"
-                    onClick={() => onConversationSelected(conversation)}
-                    title={conversation.title || "New conversation"}
-                  >
-                    <span>{conversation.title || "New conversation"}</span>
-                    <small>{conversation.archived_at ? "Archived" : formatActivity(conversation)}</small>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="project-empty">No conversations in this view.</p>
-          )}
-        </section>
-
-        <ProjectKnowledgeSection project={project} visible={visible} />
+            {uploadingFiles ? (
+              <UploadProgress filename={uploadingName} progress={uploadProgress} ariaLabel="Project file upload progress" />
+            ) : null}
+            {uploadNotice ? <p className="project-upload-notice" role="status">{uploadNotice}</p> : null}
+            {filesLoading ? <p className="project-empty" role="status">Loading project files…</p> : null}
+            {!filesLoading && files.length === 0 ? (
+              <p className="project-empty">No files selected.</p>
+            ) : null}
+            {files.length ? (
+              <ul className="project-file-summary">
+                {files.map((file) => (
+                  <li key={file.id}>
+                    <span className="project-file-symbol" aria-hidden="true">{kindSymbol(file.kind)}</span>
+                    <span className="project-file-details" title={file.filename}>
+                      <span>{file.origin === "generated" ? <FileDownloadLink href={`/api/files/${encodeURIComponent(file.id)}/download`}>{file.filename}</FileDownloadLink> : file.filename}</span>
+                      {file.origin !== "generated" && file.mime === "application/pdf" && file.status === "ready" ? <FilePreviewButton fileId={file.id} label={`Preview ${file.filename}`} /> : null}
+                      {file.origin === "generated" ? <small>Created by Audrey</small> : null}
+                      {file.status === "ready" ? null : <small>{projectFileStatus(file.status)}</small>}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void removeFile(file)}
+                      disabled={removingFileId !== null}
+                      aria-label={`Remove ${file.filename} from project`}
+                    >
+                      {removingFileId === file.id ? "…" : "Remove"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+        </div>
       </div>
-
-      <div className="project-home-grid project-home-details">
-        <section className="project-panel" aria-labelledby="project-files-title">
-          <header>
-            <div>
-              <span>Shared context</span>
-              <h2 id="project-files-title">Project files</h2>
-            </div>
-            <small>{files.length}/{limits.max_files}</small>
-          </header>
-          <p className="project-panel-copy">
-            {isPrivate
-              ? "Local models use this project's instructions and ready Private documents. Upload a text document or choose from your Private files."
-              : "Upload here or select Ready files already in My Files. Processing uploads become shared context when Ready."}
-          </p>
-          <div className="project-file-actions">
-            <input
-              ref={projectUploadRef}
-              type="file"
-              accept={isPrivate ? PRIVATE_DOCUMENT_EXTENSIONS.join(",") : undefined}
-              multiple
-              hidden
-              disabled={uploadingFiles || files.length >= limits.max_files}
-              onChange={(event) => event.target.files ? void uploadToProject(event.target.files) : undefined}
-            />
-            <button
-              className="project-upload-files"
-              type="button"
-              onClick={() => projectUploadRef.current?.click()}
-              disabled={uploadingFiles || files.length >= limits.max_files}
-            >
-              <span aria-hidden="true">＋</span>
-              {uploadingFiles ? (uploadProgress >= 1 ? "Processing…" : "Uploading…") : "Upload file"}
-            </button>
-            <button className="project-manage-files" type="button" onClick={() => setFilesOpen(true)} disabled={uploadingFiles}>
-              Choose from My Files
-            </button>
-          </div>
-          {uploadingFiles ? (
-            <UploadProgress filename={uploadingName} progress={uploadProgress} ariaLabel="Project file upload progress" />
-          ) : null}
-          {uploadNotice ? <p className="project-upload-notice" role="status">{uploadNotice}</p> : null}
-          {filesLoading ? <p className="project-empty" role="status">Loading project files…</p> : null}
-          {!filesLoading && files.length === 0 ? (
-            <p className="project-empty">No files selected.</p>
-          ) : null}
-          {files.length ? (
-            <ul className="project-file-summary">
-              {files.map((file) => (
-                <li key={file.id}>
-                  <span className="project-file-symbol" aria-hidden="true">{kindSymbol(file.kind)}</span>
-                  <span className="project-file-details" title={file.filename}>
-                    <span>{file.origin === "generated" ? <FileDownloadLink href={`/api/files/${encodeURIComponent(file.id)}/download`}>{file.filename}</FileDownloadLink> : file.filename}</span>
-                    {file.origin !== "generated" && file.mime === "application/pdf" && file.status === "ready" ? <FilePreviewButton fileId={file.id} label={`Preview ${file.filename}`} /> : null}
-                    {file.origin === "generated" ? <small>Created by Audrey</small> : null}
-                    {file.status === "ready" ? null : <small>{projectFileStatus(file.status)}</small>}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void removeFile(file)}
-                    disabled={removingFileId !== null}
-                    aria-label={`Remove ${file.filename} from project`}
-                  >
-                    {removingFileId === file.id ? "…" : "Remove"}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </section>
-        {!isPrivate && (onNewProjectAgent || onOpenProjectAgent) ? <ProjectAgents
-          key={project.id} project={project} visible={visible}
-          onNew={onNewProjectAgent} onOpen={onOpenProjectAgent} /> : null}
-      </div>
-      {!isPrivate && (onNewProjectWatch || onOpenProjectWatch) ? <ProjectWatches
-        key={project.id} project={project} visible={visible}
-        onNew={onNewProjectWatch} onOpen={onOpenProjectWatch} /> : null}
       {isPrivate ? <TaxProjectSection projectId={project.id} onConversationSelected={onConversationSelected} /> : null}
 
       {filesOpen ? (
@@ -618,51 +618,43 @@ export function ProjectHome({
   );
 }
 
-function ProjectAgents({ project, visible, onNew, onOpen }: {
-  project: AudreyProject;
-  visible: boolean;
-  onNew?: (project: AudreyProject, signal?: AbortSignal) => void | Promise<void>;
-  onOpen?: (task: AgentTask, signal?: AbortSignal) => void | Promise<void>;
+type ProjectActivityTab = "chats" | "agents" | "watches";
+
+function ProjectActivity({ chats, agents, watches }: {
+  chats: ReactNode;
+  agents?: (active: boolean) => ReactNode;
+  watches?: (active: boolean) => ReactNode;
 }) {
-  const [items, setItems] = useState<AgentTask[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [opening, setOpening] = useState(false);
-  const [error, setError] = useState("");
-  const [refresh, setRefresh] = useState(0);
-  const link = useRef<AbortController | null>(null);
-  useEffect(() => {
-    if (!visible) return;
-    const controller = new AbortController();
-    queueMicrotask(() => { if (!controller.signal.aborted) { setLoading(true); setOpening(false); setError(""); } });
-    void listAgentTasks(controller.signal, project.id).then(({ items }) => {
-      if (!controller.signal.aborted) setItems(items.filter((task) => task.project_context?.project_id === project.id));
-    }).catch((reason: unknown) => { if (!controller.signal.aborted) setError(messageOf(reason)); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => { controller.abort(); link.current?.abort(); };
-  }, [visible, project.id, refresh]);
+  const [selected, setSelected] = useState<ProjectActivityTab>("chats");
+  const id = useId();
+  const buttons = useRef<Partial<Record<ProjectActivityTab, HTMLButtonElement | null>>>({});
+  const tabs: { id: ProjectActivityTab; label: string }[] = [{ id: "chats", label: "Chats" }];
+  if (agents) tabs.push({ id: "agents", label: "Agents" });
+  if (watches) tabs.push({ id: "watches", label: "Watches" });
+  const active = tabs.some((tab) => tab.id === selected) ? selected : "chats";
 
-  async function follow(task?: AgentTask) {
-    if (!visible) return;
-    if (task && (task.project_context?.project_id !== project.id || !task.project_context.available)) {
-      setError("This saved agent is unavailable in this Project. Refresh before trying again."); return;
-    }
-    link.current?.abort();
-    const controller = new AbortController(); link.current = controller;
-    setOpening(true); setError("");
-    try { if (task) await onOpen?.(task, controller.signal); else await onNew?.(project, controller.signal); }
-    catch (reason) { if (!controller.signal.aborted) setError(messageOf(reason)); }
-    finally { if (link.current === controller) { link.current = null; if (!controller.signal.aborted) setOpening(false); } }
-  }
-
-  return <section className="project-panel project-agents" aria-labelledby="project-agents-title">
-    <header><div><span>Background tasks</span><h2 id="project-agents-title">Project agents</h2></div>
-      {onNew ? <button className="project-primary-button" type="button" disabled={opening} onClick={() => void follow()}>New agent in Project</button> : null}
-    </header>
-    {error ? <p className="project-error" role="alert">{error}</p> : null}
-    {loading ? <p role="status">Loading Project agents…</p> : items.length ? <ul className="project-home-conversations">{items.map((task) => <li key={task.id} className="conversation-row">
-      <button className="conversation project-home-conversation" type="button" disabled={opening || !onOpen} onClick={() => void follow(task)}><span>{task.title || task.objective}</span><small>{task.status.replaceAll("_", " ")}</small></button>
-    </li>)}</ul> : <p className="project-empty">No agents in this Project yet. Start one with its instructions and knowledge.</p>}
-    <button type="button" disabled={loading} onClick={() => setRefresh((value) => value + 1)}>Refresh Project agents</button>
+  return <section className="project-panel project-activity" aria-label="Project activity">
+    <div className="project-activity-tabs" role="tablist" aria-label="Project activity">
+      {tabs.map((tab, index) => <button key={tab.id} type="button" role="tab"
+        id={`${id}-${tab.id}-tab`} aria-controls={`${id}-${tab.id}-panel`}
+        aria-selected={active === tab.id} tabIndex={active === tab.id ? 0 : -1}
+        ref={(node) => { buttons.current[tab.id] = node; }}
+        onClick={() => setSelected(tab.id)}
+        onKeyDown={(event) => {
+          const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+            : event.key === "ArrowRight" ? (index + 1) % tabs.length
+            : event.key === "ArrowLeft" ? (index - 1 + tabs.length) % tabs.length : null;
+          if (next === null) return;
+          event.preventDefault();
+          setSelected(tabs[next].id);
+          buttons.current[tabs[next].id]?.focus();
+        }}>{tab.label}</button>)}
+    </div>
+    {tabs.map((tab) => <div className="project-activity-panel" key={tab.id} role="tabpanel"
+      id={`${id}-${tab.id}-panel`} aria-labelledby={`${id}-${tab.id}-tab`}
+      hidden={active !== tab.id} tabIndex={0}>
+      {tab.id === "chats" ? chats : tab.id === "agents" ? agents?.(active === "agents") : watches?.(active === "watches")}
+    </div>)}
   </section>;
 }
 

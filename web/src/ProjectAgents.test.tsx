@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ProjectHome } from "./ProjectWorkspace";
 import * as api from "./api";
@@ -14,6 +14,8 @@ it("lists only this Project's saved agents and offers explicit prefill without c
   const listing = vi.spyOn(api, "listAgentTasks").mockResolvedValue({ items: [task, { ...task, id: "other", title: "Other Project", project_context: { ...task.project_context!, project_id: "other-project" } }] });
   const create = vi.spyOn(api, "createAgentTask"), onNew = vi.fn(), onOpen = vi.fn();
   render(<ProjectHome {...props()} onNewProjectAgent={onNew} onOpenProjectAgent={onOpen} />);
+  expect(listing).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("tab", { name: "Agents" }));
   fireEvent.click(await screen.findByRole("button", { name: /Release comparison/ }));
   expect(onOpen).toHaveBeenCalledWith(task, expect.any(AbortSignal));
   expect(screen.queryByText("Other Project")).not.toBeInTheDocument();
@@ -26,6 +28,7 @@ it("lists only this Project's saved agents and offers explicit prefill without c
 it("never exposes public agent creation or list reads inside Private Projects", () => {
   const listing = vi.spyOn(api, "listAgentTasks");
   render(<ProjectHome {...props()} project={{ ...project, private_required: true }} onNewProjectAgent={vi.fn()} onOpenProjectAgent={vi.fn()} />);
+  expect(screen.queryByRole("tab", { name: "Agents" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "New agent in Project" })).not.toBeInTheDocument(); expect(listing).not.toHaveBeenCalled();
 });
 
@@ -34,10 +37,36 @@ it("aborts hidden navigation and refreshes without leaving controls disabled", a
   let signal: AbortSignal | undefined;
   const onOpen = vi.fn((_task: api.AgentTask, request?: AbortSignal) => { signal = request; return new Promise<void>(() => {}); });
   const base = props(); const { rerender } = render(<ProjectHome {...base} onOpenProjectAgent={onOpen} onNewProjectAgent={vi.fn()} />);
+  fireEvent.click(screen.getByRole("tab", { name: "Agents" }));
   fireEvent.click(await screen.findByRole("button", { name: /Release comparison/ }));
   expect(signal?.aborted).toBe(false);
   rerender(<ProjectHome {...base} visible={false} onOpenProjectAgent={onOpen} onNewProjectAgent={vi.fn()} />);
   expect(signal?.aborted).toBe(true);
   rerender(<ProjectHome {...base} visible onOpenProjectAgent={onOpen} onNewProjectAgent={vi.fn()} />);
   await waitFor(() => expect(screen.getByRole("button", { name: "New agent in Project" })).toBeEnabled());
+});
+
+it("aborts a pending open when changing tabs and ignores a late list response", async () => {
+  let resolve!: (value: { items: api.AgentTask[] }) => void;
+  const listing = vi.spyOn(api, "listAgentTasks").mockResolvedValueOnce({ items: [task] })
+    .mockImplementationOnce(() => new Promise((done) => { resolve = done; })).mockResolvedValue({ items: [task] });
+  let navigationSignal: AbortSignal | undefined;
+  const onOpen = vi.fn((_task: api.AgentTask, signal?: AbortSignal) => { navigationSignal = signal; return new Promise<void>(() => {}); });
+  render(<ProjectHome {...props()} onOpenProjectAgent={onOpen} onNewProjectAgent={vi.fn()} />);
+  fireEvent.click(screen.getByRole("tab", { name: "Agents" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Release comparison/ }));
+  expect(navigationSignal?.aborted).toBe(false);
+  fireEvent.click(screen.getByRole("tab", { name: "Chats" }));
+  expect(navigationSignal?.aborted).toBe(true);
+  fireEvent.click(screen.getByRole("tab", { name: "Agents" }));
+  await waitFor(() => expect(listing).toHaveBeenCalledTimes(2));
+  const listSignal = listing.mock.calls[1][0];
+  fireEvent.click(screen.getByRole("tab", { name: "Chats" }));
+  expect(listSignal?.aborted).toBe(true);
+  await act(async () => resolve({ items: [{ ...task, title: "Late stale agent" }] }));
+  expect(screen.queryByText("Late stale agent")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: "Agents" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "New agent in Project" })).toBeEnabled());
+  expect(listing).toHaveBeenCalledTimes(3);
+  expect(screen.queryByText("Late stale agent")).not.toBeInTheDocument();
 });
