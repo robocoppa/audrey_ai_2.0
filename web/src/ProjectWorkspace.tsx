@@ -250,21 +250,41 @@ export function ProjectHome({
   const [uploadNotice, setUploadNotice] = useState("");
   const [error, setError] = useState("");
   const projectUploadRef = useRef<HTMLInputElement>(null);
+  // Keep the canonical save response available until the parent supplies new saved fields.
+  const savedProjectFields = useRef({ id: project.id, name: project.name, instructions: project.instructions });
+  const draftProjectId = useRef(project.id);
+  const editDirty = useRef(false);
   const isPrivate = project.private_required === true;
 
   useEffect(() => {
+    savedProjectFields.current = { id: project.id, name: project.name, instructions: project.instructions };
     let current = true;
     queueMicrotask(() => {
       if (!current) return;
-      setName(project.name);
-      setInstructions(project.instructions);
-      setEditing(false);
-      setConfirmingDelete(false);
-      setUploadNotice("");
-      setError("");
+      if (draftProjectId.current !== project.id) {
+        draftProjectId.current = project.id;
+        editDirty.current = false;
+        setEditing(false);
+        setConfirmingDelete(false);
+        setUploadNotice("");
+        setError("");
+      }
+      // Late initial details can fill the form; background refreshes must keep user edits.
+      if (!editDirty.current) {
+        setName(project.name);
+        setInstructions(project.instructions);
+      }
     });
     return () => { current = false; };
   }, [project.id, project.instructions, project.name]);
+
+  function resetProjectDraft() {
+    const saved = savedProjectFields.current.id === project.id ? savedProjectFields.current : project;
+    draftProjectId.current = project.id;
+    editDirty.current = false;
+    setName(saved.name);
+    setInstructions(saved.instructions);
+  }
 
   const hasProcessingFiles = files.some(({ status }) =>
     status === "pending" || status === "processing",
@@ -306,6 +326,11 @@ export function ProjectHome({
         name: nextName,
         instructions: instructions.trim(),
       });
+      if (savedProjectFields.current.id !== project.id) return;
+      savedProjectFields.current = { id: updated.id, name: updated.name, instructions: updated.instructions };
+      editDirty.current = false;
+      setName(updated.name);
+      setInstructions(updated.instructions);
       onProjectChange(updated);
       setEditing(false);
     } catch (reason) {
@@ -415,7 +440,10 @@ export function ProjectHome({
         </div>
         <div className="project-home-actions">
           <div className="project-management-actions">
-            <button type="button" aria-label={editing ? "Close edit" : "Edit project"} onClick={() => setEditing((current) => !current)} disabled={deleting}>
+            <button type="button" aria-label={editing ? "Close edit" : "Edit project"} onClick={() => {
+              resetProjectDraft();
+              setEditing((current) => !current);
+            }} disabled={deleting}>
               {editing ? "Close edit" : <><span className="project-action-label-full">Edit project</span><span className="project-action-label-compact" aria-hidden="true">Edit</span></>}
             </button>
             <button
@@ -455,7 +483,7 @@ export function ProjectHome({
             <span>Project name</span>
             <input
               value={name}
-              onChange={(event) => setName(event.target.value)}
+              onChange={(event) => { editDirty.current = true; setName(event.target.value); }}
               maxLength={limits.max_name_chars}
               required
             />
@@ -464,15 +492,14 @@ export function ProjectHome({
             <span>Project instructions</span>
             <textarea
               value={instructions}
-              onChange={(event) => setInstructions(event.target.value)}
+              onChange={(event) => { editDirty.current = true; setInstructions(event.target.value); }}
               maxLength={limits.max_instructions_chars}
               rows={5}
             />
           </label>
           <div className="project-dialog-actions">
             <button type="button" onClick={() => {
-              setName(project.name);
-              setInstructions(project.instructions);
+              resetProjectDraft();
               setEditing(false);
             }}>Cancel</button>
             <button className="project-primary-button" type="submit" disabled={!name.trim() || saving}>

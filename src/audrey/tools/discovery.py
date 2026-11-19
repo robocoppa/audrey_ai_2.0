@@ -104,6 +104,7 @@ TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
         _declare("calculate", dependencies=()),
         _declare("create_file", dependencies=("application_state",), in_process_only=True),
         _declare("read_selected_file", dependencies=("application_state",), in_process_only=True),
+        _declare("search_selected_file", dependencies=("application_state",), in_process_only=True),
         _declare("save_progress", dependencies=("application_state",), in_process_only=True),
         _declare("tax_review", dependencies=("application_state",), in_process_only=True),
         _declare("reference_lookup", dependencies=("audrey_references",)),

@@ -31,6 +31,64 @@ function homeProps() {
     onOpenProjectAgent: vi.fn(), onNewProjectWatch: vi.fn(), onOpenProjectWatch: vi.fn() };
 }
 
+it("prefills saved instructions, saves modifications and reopens the canonical saved response", async () => {
+  vi.spyOn(api, "getProjectKnowledgeText").mockResolvedValue({ text: "Separate saved knowledge", revision: "v1", max_text_chars: 8000 });
+  const saved = { ...project, name: "Fern Circle revised", instructions: "Use the revised garden context." };
+  const update = vi.spyOn(api, "updateProject").mockResolvedValue(saved);
+  const onProjectChange = vi.fn();
+  render(<ProjectHome {...homeProps()} onProjectChange={onProjectChange} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit project" }));
+  expect(screen.getByRole("textbox", { name: "Project name" })).toHaveValue(project.name);
+  const instructions = screen.getByRole("textbox", { name: "Project instructions" });
+  expect(instructions).toHaveValue(project.instructions);
+  fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), { target: { value: " Fern Circle revised " } });
+  fireEvent.change(instructions, { target: { value: " Use the revised garden context. " } });
+  fireEvent.click(screen.getByRole("button", { name: "Save project" }));
+  await waitFor(() => expect(update).toHaveBeenCalledExactlyOnceWith(project.id, { name: saved.name, instructions: saved.instructions }));
+  await waitFor(() => expect(onProjectChange).toHaveBeenCalledExactlyOnceWith(saved));
+  expect(screen.queryByRole("textbox", { name: "Project instructions" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Edit project" }));
+  expect(screen.getByRole("textbox", { name: "Project name" })).toHaveValue(saved.name);
+  expect(screen.getByRole("textbox", { name: "Project instructions" })).toHaveValue(saved.instructions);
+  expect(await screen.findByDisplayValue("Separate saved knowledge")).toBeVisible();
+});
+
+it.each(["Cancel", "Close edit"])("discards cleared unsaved instructions with %s and restores saved fields on reopening", async (close) => {
+  vi.spyOn(api, "getProjectKnowledgeText").mockResolvedValue({ text: "", revision: "empty", max_text_chars: 8000 });
+  const update = vi.spyOn(api, "updateProject");
+  render(<ProjectHome {...homeProps()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit project" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), { target: { value: "Unsaved name" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Project instructions" }), { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: close }));
+  expect(screen.queryByRole("textbox", { name: "Project instructions" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Edit project" }));
+  expect(screen.getByRole("textbox", { name: "Project name" })).toHaveValue(project.name);
+  expect(screen.getByRole("textbox", { name: "Project instructions" })).toHaveValue(project.instructions);
+  expect(update).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Project knowledge" })).toBeEnabled());
+});
+
+it("hydrates late saved instructions without closing the editor or overwriting modified fields", async () => {
+  vi.spyOn(api, "getProjectKnowledgeText").mockResolvedValue({ text: "", revision: "empty", max_text_chars: 8000 });
+  const props = homeProps();
+  const view = render(<ProjectHome {...props} project={{ ...project, instructions: "" }} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit project" }));
+  expect(screen.getByRole("textbox", { name: "Project instructions" })).toHaveValue("");
+  view.rerender(<ProjectHome {...props} />);
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Project instructions" })).toHaveValue(project.instructions));
+  fireEvent.change(screen.getByRole("textbox", { name: "Project instructions" }), { target: { value: "My unsaved modification" } });
+  const refreshed = { ...project, name: "Updated saved name", instructions: "Newer saved instructions" };
+  view.rerender(<ProjectHome {...props} project={refreshed} />);
+  await act(async () => {});
+  expect(screen.getByRole("textbox", { name: "Project name" })).toHaveValue(project.name);
+  expect(screen.getByRole("textbox", { name: "Project instructions" })).toHaveValue("My unsaved modification");
+  fireEvent.click(screen.getByRole("button", { name: "Close edit" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit project" }));
+  expect(screen.getByRole("textbox", { name: "Project name" })).toHaveValue(refreshed.name);
+  expect(screen.getByRole("textbox", { name: "Project instructions" })).toHaveValue(refreshed.instructions);
+});
+
 it("shows one activity tab at a time while keeping knowledge edits and files available", async () => {
   vi.spyOn(api, "getProjectKnowledgeText").mockResolvedValue({ text: "Saved garden notes", revision: "v1", max_text_chars: 8000 });
   const save = vi.spyOn(api, "saveProjectKnowledgeText");

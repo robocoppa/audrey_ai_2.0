@@ -81,21 +81,22 @@ async def test_selected_file_read_event_is_exposed_without_read_arguments_or_con
 
 
 @pytest.mark.parametrize("stage", ["research", "review"])
-async def test_calculate_event_api_keeps_only_owned_metadata(state, stage):
+@pytest.mark.parametrize("tool", ["calculate", "search_selected_file"])
+async def test_native_tool_event_api_keeps_only_owned_metadata(state, stage, tool):
     lease, _seq = await started(state)
     for previous in ("plan", "research"):
         if previous == stage:
             break
         await state.store.agents.checkpoint(**lease, step_id=previous, result="Check the arithmetic.")
         await state.store.agents.reserve_operation(**lease, step_id="research" if previous == "plan" else "review")
-    seq = await state.store.agents.start_event(**lease, stage=stage, kind="tool", tool="calculate")
+    seq = await state.store.agents.start_event(**lease, stage=stage, kind="tool", tool=tool)
     await state.store.agents.finish_event(**lease, seq=seq, duration_ms=2)
     url = f"/api/agents/{state.task['id']}/events"
     response = await state.client.get(url)
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "private, no-store"
     event = response.json()["items"][0]
-    assert event["tool"] == "calculate" and event["stage"] == stage and event["state"] == "completed"
+    assert event["tool"] == tool and event["stage"] == stage and event["state"] == "completed"
     assert set(event) == {"seq", "attempt", "stage", "kind", "state", "tool", "created_at", "finished_at",
                           "duration_ms", "input_tokens", "output_tokens"}
     state.current[0] = state.owners[1]

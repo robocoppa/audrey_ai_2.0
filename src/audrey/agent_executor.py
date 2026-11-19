@@ -259,6 +259,10 @@ def _file_input_message(files: list[dict]) -> dict:
             "A truncated excerpt does not represent the whole file. State relevant coverage gaps. "
             "If read_selected_file is available, use it only when the task needs further parts "
             "of these explicitly selected file versions. Continue from its actual next_offset. "
+            "If search_selected_file is available, find literal phrases in these same versions "
+            "and use its Unicode match offsets to read surrounding ranges when needed. "
+            "Search snippets cover only the returned ranges; a zero-match result does not "
+            "prove that a fact is absent or that the whole file was inspected. "
             "Generated files are working outputs, not independent evidence."
         ),
     }
@@ -540,7 +544,11 @@ class ResearchAgentExecutor:
         lease = {"task_id": task["id"], "lease_token": task["lease_token"], "fence": task["fence"]}
         from audrey.agent_file_inputs import get_agent_file_inputs
         from audrey.tools.agent_calculator import agent_calculator_scope, with_agent_calculator
-        from audrey.tools.agent_file_reads import agent_file_read_scope, with_selected_file_read
+        from audrey.tools.agent_file_reads import (
+            agent_file_read_scope,
+            with_selected_file_read,
+            with_selected_file_search,
+        )
         from audrey.tools.agent_progress import agent_progress_scope, with_agent_progress
 
         file_inputs = get_agent_file_inputs(self.app)
@@ -575,7 +583,7 @@ class ResearchAgentExecutor:
             spec = tools.by_name["create_file"]
             spec.description = spec.description.replace("in this reply", "for this task")
         if native_reads:
-            tools = with_selected_file_read(tools)
+            tools = with_selected_file_search(with_selected_file_read(tools))
         if native_calculator:
             tools = with_agent_calculator(tools)
         if native_progress:
@@ -668,7 +676,7 @@ class ResearchAgentExecutor:
             async def check_tool(name):
                 await authorize()
                 if ((name == "create_file" and native_files)
-                        or (name == "read_selected_file" and native_reads)
+                        or (name in {"read_selected_file", "search_selected_file"} and native_reads)
                         or (name == "calculate" and native_calculator)
                         or (name == "save_progress" and native_progress)):
                     # Native capabilities have task-bound handlers, never HTTP

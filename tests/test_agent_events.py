@@ -314,12 +314,13 @@ async def test_tool_metadata_follows_live_stages_and_non_models_cannot_claim_tok
 
 
 @pytest.mark.parametrize("stage", ["research", "review"])
-async def test_calculate_events_are_metadata_only_and_keep_stage_and_lease_fences(state, stage):
+@pytest.mark.parametrize("tool", ["calculate", "search_selected_file"])
+async def test_native_tool_events_are_metadata_only_and_keep_stage_and_lease_fences(state, stage, tool):
     task = await _claim(state)
     lease = _lease(task)
     for forbidden in ("plan", "title"):
         with pytest.raises(AgentTaskError):
-            await state.store.agents.start_event(**lease, stage=forbidden, kind="tool", tool="calculate")
+            await state.store.agents.start_event(**lease, stage=forbidden, kind="tool", tool=tool)
     for previous in ("plan", "research"):
         if previous == stage:
             break
@@ -327,19 +328,19 @@ async def test_calculate_events_are_metadata_only_and_keep_stage_and_lease_fence
         await state.store.agents.checkpoint(**lease, step_id=previous, result="Saved work.")
     other_stage = "review" if stage == "research" else "research"
     with pytest.raises(AgentTaskConflictError):
-        await state.store.agents.start_event(**lease, stage=other_stage, kind="tool", tool="calculate")
+        await state.store.agents.start_event(**lease, stage=other_stage, kind="tool", tool=tool)
     before = dict(state.store._conn.execute("SELECT * FROM app_agent_tasks").fetchone())
-    seq = await state.store.agents.start_event(**lease, stage=stage, kind="tool", tool="calculate")
+    seq = await state.store.agents.start_event(**lease, stage=stage, kind="tool", tool=tool)
     with pytest.raises(AgentTaskError):
         await state.store.agents.finish_event(**lease, seq=seq, input_tokens=7)
     await state.store.agents.finish_event(**lease, seq=seq, duration_ms=2)
     event = (await _events(state, task))["items"][0]
-    assert event["tool"] == "calculate" and event["stage"] == stage and event["state"] == "completed"
+    assert event["tool"] == tool and event["stage"] == stage and event["state"] == "completed"
     assert set(event) == {"seq", "attempt", "stage", "kind", "state", "tool", "created_at", "finished_at",
                           "duration_ms", "input_tokens", "output_tokens"}
-    assert not {"expression", "result", "arguments", "precision", "text", "user_id"} & event.keys()
+    assert not {"expression", "query", "snippet", "matches", "result", "arguments", "precision", "text", "user_id"} & event.keys()
     assert dict(state.store._conn.execute("SELECT * FROM app_agent_tasks").fetchone()) == before
-    pending = await state.store.agents.start_event(**lease, stage=stage, kind="tool", tool="calculate")
+    pending = await state.store.agents.start_event(**lease, stage=stage, kind="tool", tool=tool)
     await _control(state, task, "cancel")
     with pytest.raises(AgentTaskConflictError):
         await state.store.agents.finish_event(**lease, seq=pending)
@@ -417,7 +418,7 @@ async def test_schema_upgrade_keeps_saved_tasks_and_enforces_owner_foreign_key(s
     upgraded = ApplicationStore(state.store.path)
     upgraded.agents._clock = state.clock
     try:
-        assert upgraded.schema_version == 43
+        assert upgraded.schema_version == 44
         assert (await upgraded.agents.get(user_id=state.owner.user_id, task_id=task["id"]))["objective"] == task["objective"]
         assert upgraded._conn.execute("PRAGMA foreign_key_check").fetchall() == []
         with upgraded._conn, pytest.raises(sqlite3.IntegrityError):

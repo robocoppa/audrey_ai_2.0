@@ -24,6 +24,22 @@ describe("AgentRecentActivity", () => {
   it.each([
     ["research", "Work", "completed", "Completed"], ["research", "Work", "failed", "Failed"],
     ["review", "Review", "completed", "Completed"], ["review", "Review", "failed", "Failed"],
+  ] as const)("labels %s Search selected file %s without displaying the query or source matches", async (stage, label, state, stateLabel) => {
+    const search = { ...event({ kind: "tool", tool: "search_selected_file", stage, state, finished_at: "2026-11-03T14:00:01Z", duration_ms: 9 }),
+      query: "Saved approval marker", matches: [{ text: "Protected source snippet", start: 12200 }] };
+    vi.spyOn(api, "listAgentEvents").mockResolvedValue(page([search]));
+    render(<AgentRecentActivity task={{ ...task, status: "completed" }} visible timezone="UTC" />);
+    const operations = await screen.findByRole("list", { name: "Agent operations" });
+    expect(within(operations).getByText("Search selected file")).toBeVisible();
+    expect(within(operations).getByText(stateLabel)).toBeVisible();
+    expect(within(operations).getByText(new RegExp(`${label} · Attempt 1`))).toBeVisible();
+    expect(within(operations).getByText("9 ms")).toBeVisible();
+    expect(screen.queryByText(search.query)).not.toBeInTheDocument();
+    expect(screen.queryByText(search.matches[0].text)).not.toBeInTheDocument();
+  });
+  it.each([
+    ["research", "Work", "completed", "Completed"], ["research", "Work", "failed", "Failed"],
+    ["review", "Review", "completed", "Completed"], ["review", "Review", "failed", "Failed"],
   ] as const)("labels %s Calculate %s without displaying calculator content", async (stage, label, state, stateLabel) => {
     const calculation = { ...event({ kind: "tool", tool: "calculate", stage, state, finished_at: "2026-11-03T14:00:01Z", duration_ms: 7 }),
       expression: "472.35 - 260.30", result: "212.05", arguments: { expression: "472.35 - 260.30" }, output: { result: "212.05" } };

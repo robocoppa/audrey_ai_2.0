@@ -1875,6 +1875,99 @@ def _read_call(file_id="chosen-input", **arguments):
     }}]})
 
 
+
+def _selected_search_call(file_id="chosen-input", **arguments):
+    return _answer("", message={"tool_calls": [{"function": {
+        "name": "search_selected_file", "arguments": {"file_id": file_id, **arguments},
+    }}]})
+
+
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_selected_search_locates_late_text_then_reads_and_saves_a_real_download(file_state, stage):
+    s = file_state
+    s.app.state.cfg.raw["agent_tasks"] = {}
+    marker = "FINAL APPROVAL SECTION"
+    late_text = marker + "\nDelivery quantity: 17 boxes.\nApproval: GARDEN-73.\n"
+    text = "General preparation notes.\n" * 1400 + late_text
+    project, _path, pins = await _selected_file_context(s, selected_text=text)
+    task = await _step(s, stage, project_id=project.project_id, file_inputs=pins,
+                       objective="Find the final approval, inspect the decisions and save decisions.md. Do not browse.")
+    observed = []
+
+    async def reply():
+        payload = json.loads(s.provider_requests[-1].content)
+        offered = {item["function"]["name"] for item in payload["tools"]}
+        assert {"search_selected_file", "read_selected_file", "create_file"} <= offered
+        assert "memory_recall" not in offered and "get_file_text" not in offered
+        if stage == "review":
+            assert "web_search" not in offered and "web_fetch" not in offered
+        excerpt = next(message for message in payload["messages"]
+                       if message["content"].startswith("User-selected file excerpts"))
+        assert marker not in excerpt["content"] and "GARDEN-73" not in excerpt["content"]
+        tool_results = [message for message in payload["messages"] if message["role"] == "tool"]
+        if not tool_results:
+            s.responses.append(_selected_search_call(query=marker.lower()))
+            return
+        outcome = json.loads(tool_results[-1]["content"])
+        observed.append(outcome)
+        if "matches" in outcome:
+            match = outcome["matches"][0]
+            assert text[match["match_start"]:match["match_end"]] == marker
+            assert match["match_start"] > task["file_inputs"]["files"][0]["chars"]
+            assert match["text"] == text[match["start"]:match["end"]]
+            assert len(tool_results[-1]["content"]) <= 5000
+            s.responses.append(_read_call(offset=match["match_start"], limit=1000))
+        elif "text" in outcome:
+            assert outcome["text"] == late_text
+            s.responses.append(_file_call(filename="decisions.md", content=outcome["text"]))
+        else:
+            assert outcome["filename"] == "decisions.md" and not outcome.get("error")
+            s.responses.append(_answer(f"[Download decisions.md]({outcome['download_url']})"))
+
+    s.on_chat = reply
+    result = await s.executor(task, stage)
+    assert len(observed) == 3 and observed[-1]["download_url"] in result
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=s.app), base_url="http://test") as client:
+        response = await client.get(observed[-1]["download_url"])
+    assert response.status_code == 200 and response.text == late_text
+    events = [event for event in await _activity(s, task) if event["kind"] == "tool"]
+    assert [(event["tool"], event["state"]) for event in events] == [
+        ("search_selected_file", "completed"), ("read_selected_file", "completed"), ("create_file", "completed"),
+    ]
+    assert marker not in json.dumps(events) and "GARDEN-73" not in json.dumps(events)
+    assert all(event["stage"] == stage for event in events)
+    assert not s.tool_requests and not s.responses
+
+
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_selected_search_does_not_grant_implicit_project_file_access(file_state, stage):
+    s = file_state
+    project, _path, _pins = await _selected_file_context(s)
+    task = await _step(s, stage, project_id=project.project_id)
+    s.responses.append(_selected_search_call(query="private business detail"))
+    with pytest.raises(AgentDispatchStoppedError, match="tool is unavailable"):
+        await s.executor(task, stage)
+    assert "search_selected_file" not in {item["function"]["name"]
+                                          for item in _content_requests(s)[0]["tools"]}
+    assert not s.tool_requests and not [row for row in await _activity(s, task) if row["kind"] == "tool"]
+
+
+@pytest.mark.parametrize("stage", ["research", "review"])
+async def test_selected_search_unselected_file_error_is_truthful_and_records_failure(file_state, stage):
+    s = file_state
+    project, _path, pins = await _selected_file_context(s)
+    task = await _step(s, stage, project_id=project.project_id, file_inputs=pins)
+    s.responses.extend([_selected_search_call(file_id="unselected-input", query="business"),
+                        _answer("The file was not selected, so I could not search it.")])
+    assert "not selected" in await s.executor(task, stage)
+    result = json.loads(_content_requests(s)[1]["messages"][-1]["content"])
+    assert result["error"] == "file_not_selected"
+    assert "Unselected private business detail" not in json.dumps(result)
+    events = [event for event in await _activity(s, task) if event["kind"] == "tool"]
+    assert [(event["tool"], event["state"]) for event in events] == [("search_selected_file", "failed")]
+    assert not s.tool_requests
+
+
 async def test_work_reads_then_waits_and_resumes_after_restart_to_save_owned_download(file_state):
     s = file_state
     s.app.state.cfg.raw["agent_tasks"] = {}
@@ -1998,7 +2091,7 @@ async def test_review_rereads_selected_appendix_and_publishes_corrected_immutabl
     async def review_reply():
         payload = json.loads(s.provider_requests[-1].content)
         assert payload["messages"][0]["content"].startswith(AGENT_REVIEW_SYSTEM)
-        assert {tool["function"]["name"] for tool in payload["tools"]} == {"create_file", "read_selected_file", "calculate"}
+        assert {tool["function"]["name"] for tool in payload["tools"]} == {"create_file", "read_selected_file", "search_selected_file", "calculate"}
         quoted = next(message for message in payload["messages"] if message["content"].startswith("User-selected file excerpts"))
         assert "MOSS-7Q4-RIVER" not in quoted["content"] and "270.95" in json.dumps(payload)
         task_context = json.loads(next(message["content"] for message in payload["messages"]
@@ -2137,7 +2230,7 @@ async def test_existing_excerpt_question_can_recover_same_agent_and_read_real_ap
                 s.responses.append(_answer("Saved the inspected appendix checklist: " + result["download_url"]))
         else:
             assert system.startswith(AGENT_REVIEW_SYSTEM) and capabilities == []
-            assert {item["function"]["name"] for item in payload["tools"]} == {"create_file", "read_selected_file", "calculate"}
+            assert {item["function"]["name"] for item in payload["tools"]} == {"create_file", "read_selected_file", "search_selected_file", "calculate"}
             objective = json.loads(next(message["content"] for message in reversed(payload["messages"])
                                         if message["role"] == "user"))
             s.responses.append(_answer(objective["saved_work"]["research"]))

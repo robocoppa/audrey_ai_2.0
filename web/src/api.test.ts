@@ -67,6 +67,20 @@ describe("Agent activity metadata", () => {
   });
   it.each([
     ["research", "completed"], ["research", "failed"], ["review", "completed"], ["review", "failed"],
+  ])("reads %s Search selected file %s activity without retaining queries or matches", async (stage, state) => {
+    const search = { ...event, stage, state, kind: "tool", tool: "search_selected_file", input_tokens: null, output_tokens: null };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ items: [{ ...search,
+      query: "Saved approval marker", file_id: "selected-file", offset: 12000,
+      matches: [{ text: "Protected source snippet", start: 12200 }], arguments: { query: "Saved approval marker" } }], has_more: false, truncated: false })));
+    expect(await listAgentEvents("owned")).toEqual({ items: [search], has_more: false, truncated: false });
+  });
+  it.each(["plan", "title"])("rejects Search selected file activity in %s", async (stage) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ items: [{ ...event,
+      stage, kind: "tool", tool: "search_selected_file", input_tokens: null, output_tokens: null }], has_more: false, truncated: false })));
+    await expect(listAgentEvents("owned")).rejects.toThrow("This agent’s activity could not be read.");
+  });
+  it.each([
+    ["research", "completed"], ["research", "failed"], ["review", "completed"], ["review", "failed"],
   ])("accepts %s Calculate %s metadata without retaining expressions or results", async (stage, state) => {
     const calculation = { ...event, stage, state, kind: "tool", tool: "calculate", duration_ms: 7, input_tokens: null, output_tokens: null };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({

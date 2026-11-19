@@ -1,6 +1,6 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, November 17, 2026. Saved task Agents, unified lexical
+**Status:** In progress, November 19, 2026. Saved task Agents, unified lexical
 Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner closed the recent
 interactive acceptance work on November 13. Campaigns 1–4 remain closed.
 
@@ -17,8 +17,8 @@ answers and input-change blocks, public-page baseline creation and an unchanged
 manual check that stayed paused. Earlier per-slice verification limits below
 remain historical evidence; unrecorded scenarios are not newly asserted passes.
 Work questions and the local calculator now pass the owner's live checks. The
-current slice adds a saved Work draft, so an Agent can retain useful intermediate
-work when it pauses or asks a question.
+saved Work draft retains useful intermediate work when an Agent pauses or asks a
+question. The latest slice adds literal search within explicitly selected files.
 
 ## Current implementation slice
 
@@ -106,10 +106,15 @@ Knowledge, Agent and Watch/check updates. One owner-scoped batch supplies each
 page. Narrow layouts retain a summary for the selected Project below the picker.
 Switching preserves mounted Chat/Agent drafts; Project conversations open canonically
 in Chat. Agent Project links, Project breadcrumbs and Knowledge Search links open
-Projects. Knowledge sits top right beside Conversations; Files and Agents follow
-below. Project headers put instructions/the empty hint beside the title, with Edit
+Projects. One larger left panel switches between Chats, Agents and Watches; only
+the selected tab is visible and reads. Separate Knowledge and Files cards sit on
+the right, with independently scrolling lists and responsive stacking. Agent and
+Watch rows use the shared card styling. Project headers put instructions/the empty hint beside the title, with Edit
 and Delete together. New conversation belongs inside its conversations box; Upload
-file stays on one line.
+file stays on one line. Edit opens with the current saved name and instructions;
+Close/Cancel discard unsaved form changes. Late initial details fill untouched
+fields, background updates preserve active edits, and reopening after Save uses
+the canonical response. The Knowledge textbox remains a separate draft.
 
 Project knowledge is now one plain editable textbox with explicit Save. The entry
 types, pin/approval/source controls, assignment buttons and Agent report proposal
@@ -583,6 +588,41 @@ label and timestamp, use a casual tone and belong to the same Agent with the sam
 completed Plan. A question asked by Plan does not exercise this Work path. Live
 local-model and actual service-restart acceptance remain pending until the owner
 performs this check; storage-reopen regressions are separate evidence.
+
+### Searching selected-file text
+
+Work and Review can call native `search_selected_file` to locate literal text in
+the same frozen file versions available to `read_selected_file`. Plan remains
+tool-free and is told about the later capability. Selecting a Project alone does
+not grant file access; only explicitly selected ordinary files qualify.
+
+Arguments are a selected `file_id`, a nonblank literal query up to 160 Unicode
+characters/640 UTF-8 bytes, an optional zero-based character offset, a match limit
+from one to five (default three), and a boolean `case_sensitive` (default false).
+Queries are escaped as literals, with original-string offsets preserved during
+case-insensitive matching. No paths, URLs, regex syntax or alternative owners are
+accepted. Each result includes bounded source excerpts with exact match/excerpt
+ranges and a truthful continuation cursor. The complete JSON fits the existing
+5,000-character page budget, including escaped content.
+
+Search can locate later passages without sequentially reading every page. It does
+not establish whole-file inspection, and no literal match does not prove that a
+fact is absent under other wording. The Agent can inspect more context through
+the existing reader, then save the assigned deliverable normally.
+
+The same live owner/model/task/source checks run before and after local work;
+changed, removed or detached inputs and expired bindings stop access. Execution
+uses existing operation/time limits and verified local Qwen only, with no HTTP,
+Private or ordinary-chat fallback. No durable query/snippet cache is added.
+Schema 44 preserves prior activity and permits metadata-only Search selected file
+events during Work/Review. The client accepts those labels without retaining
+injected query or snippet fields. Source manifests, rerun and restart behavior
+remain the existing frozen-input contract.
+
+Local service, dispatcher, executor, migration, route and UI checks supplement the
+owner-operated check in the [manual input guide](../../tests/manual/agent-workspace/README.md#selected-file-search).
+Rebuild `audrey` and `audrey-ui`; schema 44 applies automatically. Real local-model
+and deployed browser acceptance remain pending until that check is performed.
 
 ### Project-linked Agents
 

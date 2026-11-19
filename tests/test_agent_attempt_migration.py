@@ -40,7 +40,7 @@ async def test_schema40_preserves_exhausted_legacy_attempts_until_explicit_same_
         connection.execute("DROP TRIGGER reject_schema40")
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 43
+        assert upgraded.schema_version == 44
         assert await upgraded.agents.get(user_id=owner.user_id, task_id=task["id"]) == before
         assert await upgraded.agents.events(user_id=owner.user_id, task_id=task["id"]) == events
         assert upgraded._conn.execute("SELECT attempt_base FROM app_agent_tasks").fetchone()[0] == 0
@@ -77,7 +77,7 @@ async def test_schema40_partial_column_replay_keeps_base_and_validates_integer_b
     store.close()
     replayed = ApplicationStore(path)
     try:
-        assert replayed.schema_version == 43
+        assert replayed.schema_version == 44
         claimed = await replayed.agents.claim(max_attempts=2)
         assert claimed["attempts"] == 9 and claimed["attempt_base"] == 7
         column = next(row for row in replayed._conn.execute("PRAGMA table_info(app_agent_tasks)") if row["name"] == "attempt_base")

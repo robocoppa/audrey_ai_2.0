@@ -226,17 +226,18 @@ async def dispatch_one(
                     "error": "native_tool_unavailable",
                     "detail": "Calculations require an active agent Work or Review step.",
                 }), elapsed_s=0.0, is_error=True)
-    if name == "read_selected_file":
+    if name in {"read_selected_file", "search_selected_file"}:
         # This capability has no chat, Private or HTTP fallback. Resolve its
         # server-owned task binding before parsing or logging source arguments.
-        from audrey.tools.agent_file_reads import agent_file_read_handler
+        from audrey.tools.agent_file_reads import agent_file_read_handler, agent_file_search_handler
 
-        native_handler = agent_file_read_handler(user_id=user_id)
+        handler = agent_file_search_handler if name == "search_selected_file" else agent_file_read_handler
+        native_handler = handler(user_id=user_id)
         if native_handler is None or policy is not None:
             tool_calls_total.labels(tool=name, outcome="error").inc()
             return ToolResult(name=name, call_id=call_id, content=json.dumps({
                 "error": "native_tool_unavailable",
-                "detail": "Selected file reads require an active agent Work step.",
+                "detail": "Selected file access requires an active agent Work or Review step.",
             }), elapsed_s=0.0, is_error=True)
     if policy is None and name == "create_file":
         # Resolve the owner/run binding before parsing or logging model content.

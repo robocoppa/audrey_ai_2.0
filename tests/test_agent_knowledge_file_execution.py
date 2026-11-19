@@ -102,8 +102,11 @@ async def test_file_backed_approved_note_reaches_actual_local_step_without_linke
     assert SOURCE_BODY not in json.dumps(payload) and "knowledge-source" not in json.dumps(payload)
     offered = {item["function"]["name"] for item in payload.get("tools", [])}
     assert "read_selected_file" not in offered
-    if stage != "research":
+    assert "search_selected_file" not in offered
+    if stage == "plan":
         assert not offered
+    elif stage == "review":
+        assert offered == {"calculate", "create_file"}
     assert not s.tool_requests
     manifest = s.store._conn.execute("SELECT knowledge_json FROM app_agent_project_contexts").fetchone()[0]
     assert SOURCE_BODY not in manifest and NOTE_TEXT not in manifest

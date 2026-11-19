@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
 
 from audrey.agent_dispatch import AgentDispatchStoppedError
@@ -25,6 +27,7 @@ from audrey.user_data_visibility import remote_personal_reads_blocked
 FILES_CHANGED = "Selected files changed or are unavailable. Create a new agent to use their current text."
 _PUBLIC = ("file_id", "filename", "artifact", "chars", "total_chars", "truncated", "origin")
 _PAGE_RESULT_CHARS = 5000
+_SEARCH_EXCERPT_CHARS = 400
 
 
 def _digest(value) -> str:
@@ -76,6 +79,68 @@ def _page_result(pin: dict, text: str, offset: int, limit: int) -> dict:
         else:
             high = count - 1
     return candidate(low)
+
+
+def _search_arguments(arguments) -> tuple[str, str, int, int, bool] | None:
+    if (not isinstance(arguments, dict)
+            or set(arguments) - {"file_id", "query", "offset", "limit", "case_sensitive"}
+            or not _identifier(arguments.get("file_id"))):
+        return None
+    query = arguments.get("query")
+    offset, limit, case_sensitive = arguments.get("offset", 0), arguments.get("limit", 3), arguments.get("case_sensitive", False)
+    if (not isinstance(query, str) or not 1 <= len(query) <= 160 or not query.strip()
+            or type(offset) is not int or not 0 <= offset <= 500000
+            or type(limit) is not int or not 1 <= limit <= 5 or type(case_sensitive) is not bool):
+        return None
+    try:
+        if len(query.encode("utf-8")) > 640:
+            return None
+    except UnicodeEncodeError:
+        return None
+    return arguments["file_id"], query, offset, limit, case_sensitive
+
+
+def _search_result(pin: dict, text: str, query: str, offset: int, limit: int, case_sensitive: bool) -> dict:
+    """Locate literal spans without treating generated query text as regex code.
+
+    Unicode matching uses indices into the original string. Case-folding a copy
+    could change its length and would make offsets unsafe for subsequent reads.
+    Only the requested page plus one lookahead match is materialized.
+    """
+    pattern = re.compile(re.escape(query), 0 if case_sensitive else re.IGNORECASE)
+    found = list(islice(pattern.finditer(text, offset), limit + 1))
+    base = {key: pin[key] for key in ("file_id", "filename", "artifact", "origin")}
+    base["filename"] = base["filename"][:240]
+    base.update(total_chars=len(text), searched_start=offset)
+
+    def candidate(count, radius):
+        matches = []
+        for match in found[:count]:
+            before = min(radius, (_SEARCH_EXCERPT_CHARS - (match.end() - match.start())) // 2)
+            start = max(0, match.start() - before)
+            end = min(len(text), match.end() + before)
+            matches.append({"match_start": match.start(), "match_end": match.end(),
+                            "start": start, "end": end, "text": text[start:end]})
+        more = len(found) > count
+        cursor = found[count - 1].end() if more else None
+        return {**base, "matches": matches, "has_more": more, "next_offset": cursor,
+                "searched_end": cursor if more else len(text)}
+
+    # Rare escape-heavy replies can fit fewer hits. They keep a real cursor to
+    # the first unreported part, rather than losing matches or truncating JSON.
+    count = min(limit, len(found))
+    while count and len(json.dumps(candidate(count, 0), ensure_ascii=False)) > _PAGE_RESULT_CHARS:
+        count -= 1
+    if found and not count:
+        return {"error": "result_too_large", "detail": "This file's search result cannot fit the reply budget."}
+    low, high = 0, _SEARCH_EXCERPT_CHARS // 2
+    while low < high:
+        radius = (low + high + 1) // 2
+        if len(json.dumps(candidate(count, radius), ensure_ascii=False)) <= _PAGE_RESULT_CHARS:
+            low = radius
+        else:
+            high = radius - 1
+    return candidate(count, low)
 
 
 class AgentFileInputs:
@@ -276,6 +341,31 @@ class AgentFileInputs:
             if offset > len(text):
                 return {"error": "offset_out_of_range", "detail": "The offset exceeds this file's character count."}
             return _page_result(pin, text, offset, limit)
+
+    async def search_selected(self, principal, task: dict, arguments: dict, *, scope_guard=None) -> dict:
+        """Search one frozen selected file; no global index or saved snippets."""
+        with self.store._lock:
+            self._read_authority(principal, task, scope_guard)
+            request = _search_arguments(arguments)
+            if request is None:
+                return {"error": "invalid_arguments", "detail": "Supply a selected file ID, a nonblank literal query of 1 to 160 characters, an offset from 0 to 500000, a match limit from 1 to 5 and an optional boolean case_sensitive."}
+            file_id, query, offset, limit, case_sensitive = request
+            selected = next(((project, pin) for project, pin in self.store.agents._file_input_pins(task["id"], task["user_id"])
+                             if pin["file_id"] == file_id), None)
+            if selected is None:
+                return {"error": "file_not_selected", "detail": "Search only a file explicitly selected for this agent."}
+        project_id, pin = selected
+        try:
+            text = await self._read_pin(task, project_id, pin, scope_guard=scope_guard)
+        except AgentTaskError:
+            raise AgentDispatchStoppedError(FILES_CHANGED) from None
+        if offset > len(text):
+            result = {"error": "offset_out_of_range", "detail": "The offset exceeds this file's character count."}
+        else:
+            result = await self.reader._disk(_search_result, pin, text, query, offset, limit, case_sensitive)
+        with self.store._lock:
+            self._read_authority(principal, task, scope_guard)
+            return result
 
 
 def get_agent_file_inputs(app) -> AgentFileInputs | None:
