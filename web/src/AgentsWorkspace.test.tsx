@@ -507,8 +507,8 @@ describe("AgentsWorkspace", () => {
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
     const open = vi.fn(); render(<AgentsWorkspace onOpenProject={open} />);
     const badge = await screen.findByRole("button", { name: `Open Project: ${project.name}` });
-    const toolbar = badge.closest(".agents-detail-toolbar")!;
-    expect(within(toolbar as HTMLElement).getByText("Running")).toBeVisible();
+    const metadata = badge.closest(".agents-detail-meta")!;
+    expect(within(metadata as HTMLElement).getByText("Running")).toBeVisible();
     expect(badge).toHaveAccessibleDescription(expect.stringContaining("1 saved knowledge revision pinned for this agent."));
     const detail = screen.getByRole("region", { name: "Selected agent" });
     expect(within(detail).queryByRole("combobox", { name: "Project" })).not.toBeInTheDocument();

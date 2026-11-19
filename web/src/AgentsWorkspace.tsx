@@ -31,7 +31,8 @@ import { ActivityWorkspace } from "./ActivityWorkspace";
 import { canAssignKnowledge, knowledgeTaskObjective, type KnowledgeAgentRequest } from "./knowledgeAgents";
 import { NewProjectDialog } from "./ProjectWorkspace";
 import { SidebarCreateButton } from "./SidebarCreateButton";
-import { SidebarHeader, SidebarSectionTabs } from "./SidebarHeader";
+import { SidebarHeader, SidebarHeading, SidebarSectionTabs } from "./SidebarHeader";
+import { SidebarItemButton } from "./SidebarItemButton";
 
 const STATUS_LABELS: Record<AgentTaskStatus, string> = {
   queued: "Queued", running: "Running", paused: "Paused", completed: "Completed",
@@ -780,12 +781,9 @@ function AgentTasksWorkspace({
             setError(""); setNotice(null);
             window.requestAnimationFrame(() => objectiveRef.current?.focus({ preventScroll: true }));
           }}>New agent</SidebarCreateButton>}>{sidebarTabs}</SidebarHeader>
-          {!compactNavigation ? <header className="agents-header">
-            <div>
-              <h1 id="agents-title">{sidebarMode === "new" ? "New agent" : "Agents"}</h1>
-              <p className="agents-sidebar-caption">{sidebarMode === "new" ? "Describe what you want done." : "Running and past work."}</p>
-            </div>
-          </header> : null}
+          {!compactNavigation ? <SidebarHeading id="agents-title" level={1} action={sidebarMode === "agents" ? <button type="button" className="agents-refresh" onClick={() => { setError(""); setRefreshToken((value) => value + 1); }} disabled={refreshing} aria-label="Refresh agents">{refreshing ? "Refreshing…" : "Refresh"}</button> : undefined}>
+            {sidebarMode === "new" ? "New agent" : "Agents"}
+          </SidebarHeading> : null}
           <div className="agents-sidebar-scroll">
             {sidebarOpen && error ? <p className="agents-error" role="alert">{error}</p> : null}
             {sidebarOpen && notice && !notice.taskId ? <p className="agents-notice" role="status">{notice.text}</p> : null}
@@ -861,14 +859,13 @@ function AgentTasksWorkspace({
               </section>
             ) : null}
 
-            <div className="agents-task-list-header">
-              <h2>History</h2>
-              <button type="button" className="agents-refresh" onClick={() => { setError(""); setRefreshToken((value) => value + 1); }} disabled={refreshing} aria-label="Refresh agents">{refreshing ? "Refreshing…" : "Refresh"}</button>
-            </div>
+            <div className="agents-history-toolbar">
             <div className="agents-filters" role="group" aria-label="Filter agents">
               {([['all', 'All'], ['active', 'Active'], ['finished', 'Finished']] as const).map(([value, label]) => (
                 <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
               ))}
+            </div>
+            {compactNavigation ? <button type="button" className="agents-refresh" onClick={() => { setError(""); setRefreshToken((value) => value + 1); }} disabled={refreshing} aria-label="Refresh agents">{refreshing ? "Refreshing…" : "Refresh"}</button> : null}
             </div>
             {loading ? <p className="agents-empty" role="status">Loading your agents…</p> : !shownTasks.length ? (
               <p className="agents-empty">{tasks.length ? "No agents in this view." : "No agents yet. Choose New agent to start."}</p>
@@ -876,13 +873,13 @@ function AgentTasksWorkspace({
               <ul className="agents-task-list">
                 {shownTasks.map((task) => (
                   <li key={task.id}>
-                    <button type="button" className="agents-task-card" aria-pressed={selectedId === task.id} aria-label={`Open agent: ${agentTitle(task)}`} onClick={() => selectTask(task.id)}>
+                    <SidebarItemButton className="agents-task-card" aria-pressed={selectedId === task.id} aria-label={`Open agent: ${agentTitle(task)}`} onClick={() => selectTask(task.id)}>
                       <span className={`agents-status agents-status-${task.status}`}>{STATUS_LABELS[task.status]}</span>
-                      <strong>{agentTitle(task)}</strong>
-                      {task.project_context ? <span className="agents-project-badge">Project: {task.project_context.project_name ?? "Unavailable"}</span> : null}
-                      <span className="agents-task-stage">{task.status === "waiting_for_input" ? "Your answer is needed to continue" : stepLabel(task.steps.find((step) => step.status === "running")) ?? (task.status === "paused" ? "Completed steps saved" : task.status === "queued" ? "Waiting to start" : "Saved progress")}</span>
-                      <time dateTime={task.updated_at}>Last activity {timestamp(task.updated_at)}</time>
-                    </button>
+                      <strong className="sidebar-item-title">{agentTitle(task)}</strong>
+                      {task.project_context ? <span className="agents-project-badge sidebar-item-meta">Project: {task.project_context.project_name ?? "Unavailable"}</span> : null}
+                      <span className="agents-task-stage sidebar-item-meta">{task.status === "waiting_for_input" ? "Your answer is needed to continue" : stepLabel(task.steps.find((step) => step.status === "running")) ?? (task.status === "paused" ? "Completed steps saved" : task.status === "queued" ? "Waiting to start" : "Saved progress")}</span>
+                      <time className="sidebar-item-meta" dateTime={task.updated_at}>Last activity {timestamp(task.updated_at)}</time>
+                    </SidebarItemButton>
                   </li>
                 ))}
               </ul>
@@ -900,11 +897,7 @@ function AgentTasksWorkspace({
               <>
                 <header className="agents-detail-header">
                   <div className="agents-detail-toolbar">
-                    <div className="agents-detail-meta">
-                      <span className={`agents-status agents-status-${selected.status}`}>{STATUS_LABELS[selected.status]}</span>
-                      {selected.project_context ? <AgentProjectContextBadge task={selected} onOpenProject={onOpenProject} /> : null}
-                      {notice?.taskId === selected.id ? <span className="agents-task-notice" role="status">{notice.text}</span> : null}
-                    </div>
+                    <h2 className="workspace-page-title">{agentTitle(selected)}</h2>
                     {isFinished(selected) ? <AgentTaskControls
                       key={`${selected.id}:${isFinished(selected) ? selected.revision : "active"}:${visible}`}
                       task={selected}
@@ -913,7 +906,11 @@ function AgentTasksWorkspace({
                       onDelete={() => void removeTask(selected)}
                     /> : null}
                   </div>
-                  <h2>{agentTitle(selected)}</h2>
+                  <div className="agents-detail-meta">
+                    <span className={`agents-status agents-status-${selected.status}`}>{STATUS_LABELS[selected.status]}</span>
+                    {selected.project_context ? <AgentProjectContextBadge task={selected} onOpenProject={onOpenProject} /> : null}
+                    {notice?.taskId === selected.id ? <span className="agents-task-notice" role="status">{notice.text}</span> : null}
+                  </div>
                   <div className="agents-detail-disclosures">
                     <details className="agents-original-prompt"><summary>Original prompt</summary><p>{selected.objective}</p></details>
                     {selected.input_requests?.some((request) => request.answer !== null) ? <details className="agents-input-history"><summary aria-label="Questions and answers">Questions / answers</summary><ol>{selected.input_requests.filter((request) => request.answer !== null).map((request) => <li key={request.id}><h3>{request.step_id === "research" ? "Work question" : "Planning question"}</h3><p>{request.question}</p><h4>Your answer</h4><p>{request.answer}</p></li>)}</ol></details> : null}

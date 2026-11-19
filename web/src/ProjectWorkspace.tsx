@@ -409,7 +409,7 @@ export function ProjectHome({
     <div className="project-home" data-private={isPrivate ? "true" : undefined}>
       <header className="project-home-header">
         <div className="project-home-title-line">
-          <h1>{project.name}</h1>
+          <h1 className="workspace-page-title">{project.name}</h1>
           {isPrivate ? <span className="project-private-label">Private</span> : null}
           <p title={project.instructions || undefined}>{project.instructions || "No project instructions yet."}</p>
         </div>

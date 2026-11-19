@@ -15,3 +15,14 @@ export function SidebarSectionTabs({ label, className, children }: {
 }) {
   return <nav className={`sidebar-section-tabs${className ? ` ${className}` : ""}`} aria-label={label}>{children}</nav>;
 }
+
+/** A single compact label, optionally with an existing refresh action. */
+export function SidebarHeading({ id, level = 2, children, action }: {
+  id?: string;
+  level?: 1 | 2;
+  children: ReactNode;
+  action?: ReactNode;
+}) {
+  const Heading = level === 1 ? "h1" : "h2";
+  return <header className="workspace-sidebar-heading"><Heading id={id}>{children}</Heading>{action}</header>;
+}

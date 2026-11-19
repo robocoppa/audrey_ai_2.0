@@ -3,11 +3,11 @@
 }
 
 .project-home.project-home {
-  padding: var(--space-4) 1.2rem;
+  padding: var(--workspace-content-inset);
 }
 
 .project-home .project-home-header {
-  align-items: center;
+  align-items: flex-start;
   gap: 0.6rem;
   padding-bottom: 0.55rem;
 }
@@ -27,7 +27,9 @@
 }
 
 .project-home .project-home-header h1 {
-  font-size: clamp(1.15rem, 1.8vw, 1.45rem);
+  margin: 0;
+  font-size: var(--workspace-title-size);
+  line-height: var(--workspace-title-line-height);
   overflow-wrap: anywhere;
 }
 
@@ -276,10 +278,6 @@
 }
 
 @media (max-width: 560px) {
-  .project-home.project-home {
-    padding: 0.8rem;
-  }
-
   .project-home .project-file-actions {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -87,6 +87,25 @@
   --sidebar-section-control-height: 2.15rem;
   --sidebar-section-gap: 0.2rem;
   --sidebar-section-padding: 0.2rem;
+  --sidebar-heading-size: 1rem;
+  --sidebar-heading-row-height: 2rem;
+  --sidebar-item-title-size: 0.82rem;
+  --sidebar-item-meta-size: 0.72rem;
+  --sidebar-item-radius: 0.6rem;
+  --sidebar-item-padding: 0.72rem 0.75rem;
+  --sidebar-item-list-gap: 0.2rem;
+  --sidebar-item-content-gap: 0.3rem;
+  --sidebar-item-surface: color-mix(in srgb, var(--surface-panel) 45%, transparent);
+  --sidebar-item-border: var(--border);
+  --sidebar-item-hover-surface: color-mix(in srgb, var(--accent-soft) 8%, transparent);
+  --sidebar-item-selected-surface: color-mix(in srgb, var(--accent-soft) 10%, transparent);
+  --sidebar-item-selected-hover-surface: color-mix(in srgb, var(--accent-soft) 14%, transparent);
+  --sidebar-item-selected-border: color-mix(in srgb, var(--accent) 55%, transparent);
+  --sidebar-item-selected-shadow: inset 0.18rem 0 0 var(--accent), var(--shadow-sm);
+  --workspace-content-inset: clamp(1rem, 2.5vw, 2rem);
+  --workspace-frame-inset: clamp(0.5rem, 1.25vw, 1rem);
+  --workspace-title-size: 1.3rem;
+  --workspace-title-line-height: 1.4;
 
   /* Interaction and elevation. Hover is a quiet fill/glow; focus stays distinct. */
   --duration-fast: 120ms;

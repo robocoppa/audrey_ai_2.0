@@ -98,7 +98,8 @@ import { latestActionFetch } from "./agentTransport";
 import { upsertConversation } from "./conversationHistory";
 import { NewProjectDialog, ProjectHome } from "./ProjectWorkspace";
 import { SidebarCreateButton } from "./SidebarCreateButton";
-import { SidebarHeader, SidebarSectionTabs } from "./SidebarHeader";
+import { SidebarHeader, SidebarHeading, SidebarSectionTabs } from "./SidebarHeader";
+import { SidebarItemButton } from "./SidebarItemButton";
 import "./SearchConversation.css";
 
 const PRIVATE_MODEL: AudreyModel = {
@@ -1006,7 +1007,7 @@ export function ChatWorkspace({
                           onArchive={() => void archiveFromSidebar(conversation)}
                           onDelete={() => void deleteFromSidebar(conversation.id)}
                         >
-                          <button
+                          <SidebarItemButton
                             className={conversation.id === selectedId ? "project-conversation active" : "project-conversation"}
                             data-private={conversation.private_required ? "true" : undefined}
                             type="button"
@@ -1014,9 +1015,9 @@ export function ChatWorkspace({
                             aria-current={conversation.id === selectedId ? "page" : undefined}
                             title={conversation.title || "New conversation"}
                           >
-                            <span>{conversation.title || "New conversation"}</span>
-                            <small>{modelLabel(models, conversation)}</small>
-                          </button>
+                            <span className="sidebar-item-title">{conversation.title || "New conversation"}</span>
+                            <small className="sidebar-item-meta">{modelLabel(models, conversation)}</small>
+                          </SidebarItemButton>
                         </SwipeConversationRow>
                       ))}
                       {projectConversationsNextCursor ? (
@@ -1138,6 +1139,7 @@ export function ChatWorkspace({
             </button>
           </SidebarSectionTabs>
         </SidebarHeader>
+        <SidebarHeading>Chats</SidebarHeading>
         <div className="sidebar-content">
           {compactNavigation ? menuActions : null}
 
@@ -1148,7 +1150,7 @@ export function ChatWorkspace({
               <h2>Draft conversations</h2>
               <div className="conversation-list">
                 {retainedDraftConversations.map((conversation) => (
-                  <button
+                  <SidebarItemButton
                     className="conversation"
                     key={conversation.id}
                     aria-label={`Open draft conversation ${conversation.title || "New conversation"}`}
@@ -1156,9 +1158,9 @@ export function ChatWorkspace({
                     type="button"
                     onClick={() => openConversation(conversation)}
                   >
-                    <span>{conversation.title || "New conversation"}</span>
-                    <small>{modelLabel(models, conversation)}</small>
-                  </button>
+                    <span className="sidebar-item-title">{conversation.title || "New conversation"}</span>
+                    <small className="sidebar-item-meta">{modelLabel(models, conversation)}</small>
+                  </SidebarItemButton>
                 ))}
               </div>
             </nav>
@@ -1201,16 +1203,16 @@ export function ChatWorkspace({
                 onDelete={() => void deleteFromSidebar(conversation.id)}
               >
                 <div className="conversation-row">
-                  <button
+                  <SidebarItemButton
                     className={conversation.id === selectedId ? "conversation active" : "conversation"}
                     data-private={conversation.private_required === true || conversation.default_model_id === "private" ? "true" : undefined}
                     type="button"
                     onClick={() => openConversation(conversation)}
                     aria-current={conversation.id === selectedId ? "page" : undefined}
                   >
-                    <span>{conversation.title || "New conversation"}</span>
-                    <small>{modelLabel(models, conversation)}</small>
-                  </button>
+                    <span className="sidebar-item-title">{conversation.title || "New conversation"}</span>
+                    <small className="sidebar-item-meta">{modelLabel(models, conversation)}</small>
+                  </SidebarItemButton>
                   {!compactNavigation ? <button
                     className={confirmDeleteId === conversation.id
                       ? "conversation-delete confirming-delete"
@@ -1676,15 +1678,6 @@ function ConversationThread({
   const conversationHeader = (
     <header className="thread-header">
       <div className="thread-title">
-        {conversationProject ? (
-          <nav className="project-breadcrumb" aria-label="Project breadcrumb">
-            <button type="button" onClick={() => onOpenProject(conversationProject.id)}>{conversationProject.name}</button>
-            <span aria-hidden="true">›</span>
-            <span>Conversation</span>
-          </nav>
-        ) : (
-          <span>Conversation</span>
-        )}
         {editingTitle ? (
           <form className="rename-conversation" onSubmit={(event) => void renameConversation(event)}>
             <input
@@ -1707,7 +1700,7 @@ function ConversationThread({
           </form>
         ) : (
           <div className="conversation-title-display">
-            <h1>{conversation.title || "New conversation"}</h1>
+            <h1 className="workspace-page-title">{conversation.title || "New conversation"}</h1>
             <button
               className="conversation-title-button"
               type="button"
@@ -1717,6 +1710,15 @@ function ConversationThread({
               Edit
             </button>
           </div>
+        )}
+        {conversationProject ? (
+          <nav className="project-breadcrumb" aria-label="Project breadcrumb">
+            <button type="button" onClick={() => onOpenProject(conversationProject.id)}>{conversationProject.name}</button>
+            <span aria-hidden="true">›</span>
+            <span>Conversation</span>
+          </nav>
+        ) : (
+          <span>Conversation</span>
         )}
       </div>
       <div className="thread-controls">

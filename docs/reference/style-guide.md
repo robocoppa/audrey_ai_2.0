@@ -12,7 +12,8 @@ Use the shared system when adding or changing a screen.
 | [theme.css](../../web/src/theme.css) | Shared colors, typography, spacing, radii, control sizes, shadows, motion and layers |
 | [styles.css](../../web/src/styles.css) | Global defaults, app shell and established Chat/account/file layouts |
 | [SidebarCreateButton.tsx](../../web/src/SidebarCreateButton.tsx) | Shared sidebar creation action for conversations, Agents, Watches and Projects |
-| [SidebarHeader.tsx](../../web/src/SidebarHeader.tsx) | Fixed creation row and shared segmented navigation below it |
+| [SidebarHeader.tsx](../../web/src/SidebarHeader.tsx) | Fixed creation row, segmented navigation and compact sidebar heading |
+| [SidebarItemButton.tsx](../../web/src/SidebarItemButton.tsx) | Shared selectable history/directory card and text roles |
 | Feature CSS beside each component | Component arrangement, responsive layout and role-specific token usage |
 
 Theme tokens are CSS custom properties on `:root`. Components reference those
@@ -128,6 +129,9 @@ new shadow recipes to make an ordinary panel look more prominent.
 | Navigation width | `--workspace-sidebar-width` 17rem |
 | Sidebar controls | `--workspace-sidebar-top` / `--workspace-sidebar-inset` 0.9rem; `--workspace-sidebar-row-gap` 0.75rem |
 | Drawer heading | `--workspace-sidebar-mobile-heading-height` 3.25rem; shared `--workspace-sidebar-drawer-width` |
+| Sidebar text | `--sidebar-heading-size` 1rem; `--sidebar-item-title-size` 0.82rem; `--sidebar-item-meta-size` 0.72rem |
+| Sidebar cards | `--sidebar-item-radius` 0.6rem; `--sidebar-item-padding` 0.72rem 0.75rem; `--sidebar-item-list-gap` 0.2rem |
+| Main title | `--workspace-title-size` 1.3rem; `--workspace-title-line-height` 1.4; `--workspace-content-inset` sets the common content inset |
 | Elevation | `--shadow-sm`, `--shadow-md`, `--shadow-create-hover` |
 
 ## Buttons and controls
@@ -172,9 +176,32 @@ navigation semantics. Keep headings, Project lists, drafts and search below thos
 fixed rows so content cannot move the controls. Projects has no invented second
 navigation row. Shared tokens set the header inset, top spacing and row gap.
 
+Place `SidebarHeading` below the fixed controls and before the scrolling body.
+Chats, Agents and Projects share its font, row height and inset. Agents needs no
+additional History heading; its existing Refresh action fits in the heading row
+on desktop and beside its filters in a compact drawer.
+
+Use `SidebarItemButton` for selectable conversations (including drafts and nested
+Project conversations), Agents, Watches and Projects. Mark the title with
+`sidebar-item-title` and supporting text with `sidebar-item-meta`. The shared
+`--sidebar-item-*` tokens combine Chat's compact rounded shape with Agents'
+quiet panel shading, selected accent and hover fill. Keep native selection
+attributes, readable status labels and keyboard focus. Card heights follow their
+content; Agent status and Project activity can require extra rows. Chat's desktop
+delete target retains its reserved right-hand space. Private conversations retain
+their labelled tint through local state-token overrides.
+
+Selected workspace titles use `workspace-page-title` at the common content
+inset, with optional breadcrumbs/status below and actions alongside. Project
+instructions remain inline beside its title. Framed Agent/Watch panels split
+`--workspace-content-inset` between outer `--workspace-frame-inset`, their border
+and inner padding so a second full inset does not push the title down. Preserve
+the Agent panel's reading-width cap, aligned to the start of its content area,
+and the compact Chat header behavior where that main title is hidden.
+
 Open Chat/Agent/Watch drawers use the same width and 3.25rem close-heading row above
 the creation/navigation rows. The compact Projects view retains its picker beneath
-the creation action. At widths where workspaces use different responsive modes,
+the creation action and heading. At widths where workspaces use different responsive modes,
 compare controls within their respective navigation containers.
 
 Search also uses the shared sidebar-width token. Keep headings fixed when a panel owns a scrolling body.

@@ -50,10 +50,12 @@ it("keeps creation and view controls before Projects and search while switching 
   const create = sidebar.getByRole("button", { name: "New conversation" });
   const active = sidebar.getByRole("button", { name: "Active" });
   const archived = sidebar.getByRole("button", { name: "Archived" });
+  const heading = sidebar.getByRole("heading", { name: "Chats", level: 2 });
   const projects = sidebar.getByRole("region", { name: "Projects" });
   const search = sidebar.getByRole("searchbox", { name: "Search titles" });
   expect(create.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(archived.compareDocumentPosition(projects) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(archived.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(heading.compareDocumentPosition(projects) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(archived.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   fireEvent.click(archived);
   expect(archived).toHaveAttribute("aria-pressed", "true");
@@ -61,6 +63,32 @@ it("keeps creation and view controls before Projects and search while switching 
   fireEvent.click(active);
   expect(active).toHaveAttribute("aria-pressed", "true");
   await waitFor(() => expect(requests.mock.calls.filter(([url]) => url.startsWith("/api/conversations?archived=false")).length).toBeGreaterThan(1));
+  expect(requests.mock.calls.some(([, init]) => init?.method && init.method !== "GET")).toBe(false);
+});
+
+it("keeps history selection, title editing and delete confirmation separate", async () => {
+  const { requests } = mockApi({ history: [{ ...saved, id: "other", title: "Another saved conversation" }, saved] });
+  render(<ChatWorkspace {...props()} />);
+  await screen.findByRole("textbox", { name: "Ask Audrey" });
+  const history = within(screen.getByRole("navigation", { name: "Conversation history" }));
+  const open = history.getByRole("button", { name: /^Saved conversation/ });
+  fireEvent.click(open);
+  expect(await screen.findByText(answerMessage.content)).toBeVisible();
+  expect(open).toHaveAttribute("aria-current", "page");
+  const title = screen.getByRole("heading", { name: saved.title, level: 1 });
+  const header = within(title.closest("header")!);
+  expect(title.compareDocumentPosition(header.getByText("Conversation")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(header.getByRole("button", { name: "Archive" })).toBeEnabled();
+  expect(header.getByRole("button", { name: "Delete conversation" })).toBeEnabled();
+  fireEvent.click(header.getByRole("button", { name: "Rename conversation" }));
+  const input = header.getByRole("textbox", { name: "Conversation title" });
+  expect(input).toHaveFocus();
+  fireEvent.change(input, { target: { value: "Unsaved rename" } });
+  fireEvent.click(header.getByRole("button", { name: "Cancel" }));
+  expect(screen.getByRole("heading", { name: saved.title, level: 1 })).toBeVisible();
+  fireEvent.click(history.getByRole("button", { name: `Delete conversation ${saved.title}` }));
+  expect(history.getByRole("button", { name: `Confirm delete conversation ${saved.title}` })).toHaveAttribute("aria-pressed", "true");
+  expect(open).toHaveAttribute("aria-current", "page");
   expect(requests.mock.calls.some(([, init]) => init?.method && init.method !== "GET")).toBe(false);
 });
 
@@ -111,6 +139,7 @@ it("makes a retained Private draft reachable from the mobile Menu after Search n
   fireEvent.click(screen.getByRole("button", { name: "Menu" }));
   const drawer = screen.getByRole("dialog", { name: "Conversations" });
   expect(within(drawer).getByRole("button", { name: "New conversation" })).toBeVisible();
+  expect(within(drawer).getByRole("heading", { name: "Chats", level: 2 })).toBeVisible();
   const drafts = within(drawer).getByRole("navigation", { name: "Draft conversations" });
   const resume = within(drafts).getByRole("button", { name: "Open draft conversation Draft conversation" });
   expect(resume).toHaveAttribute("data-private", "true");

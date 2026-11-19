@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { NewProjectDialog, ProjectHome } from "./ProjectWorkspace";
 import { SidebarCreateButton } from "./SidebarCreateButton";
-import { SidebarHeader } from "./SidebarHeader";
+import { SidebarHeader, SidebarHeading } from "./SidebarHeader";
+import { SidebarItemButton } from "./SidebarItemButton";
 import {
   getProject, listProjects, listProjectConversations, listProjectFiles,
   type AudreyModel, type AudreyProject, type AudreyProjectFile, type Conversation,
@@ -154,20 +155,20 @@ export function ProjectsWorkspace({ visible, models, openRequest, onOpenConversa
   return <div className="projects-workspace">
     <aside className="projects-directory" aria-label="Projects" inert={creating ? true : undefined}>
       <SidebarHeader action={<SidebarCreateButton onClick={() => setCreating(true)}>New project</SidebarCreateButton>} />
+      <SidebarHeading>Projects</SidebarHeading>
       <div className="projects-directory-scroll">
-      <header><h2>Projects</h2></header>
       <select className="projects-compact-picker" aria-label="Choose project" value={selectedId ?? ""} onChange={(event) => select(event.target.value)}>
         <option value="">Choose a project</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select>
       {loading ? <p className="project-empty" role="status">Loading projects…</p> : null}
       <nav className="projects-directory-list" aria-label="Project list">
-        {projects.map((item) => <button key={item.id} type="button" aria-current={selectedId === item.id ? "page" : undefined}
+        {projects.map((item) => <SidebarItemButton key={item.id} className="projects-directory-item" aria-current={selectedId === item.id ? "page" : undefined}
           aria-labelledby={`project-directory-name-${item.id}`} aria-describedby={`project-directory-summary-${item.id}`}
           onClick={() => select(item.id)}>
-          <span className="projects-directory-title"><span id={`project-directory-name-${item.id}`} title={item.name}>{item.name}</span>
+          <span className="projects-directory-title sidebar-item-title"><span id={`project-directory-name-${item.id}`} title={item.name}>{item.name}</span>
             {item.private_required ? <small className="projects-directory-private">Private</small> : null}</span>
           <ProjectDirectorySummary project={item} id={`project-directory-summary-${item.id}`} />
-        </button>)}
+        </SidebarItemButton>)}
       </nav>
       {selectedSummary ? <div className="projects-compact-summary">
         <ProjectDirectorySummary project={selectedSummary} />
@@ -201,7 +202,7 @@ export function ProjectsWorkspace({ visible, models, openRequest, onOpenConversa
         onFilesChange={(updated) => { if (selection.current === project.id) setFiles(updated); }}
         onNewProjectAgent={onNewProjectAgent} onOpenProjectAgent={onOpenProjectAgent}
         onNewProjectWatch={onNewProjectWatch} onOpenProjectWatch={onOpenProjectWatch} />
-        : <div className="projects-workspace-empty"><h1>{detailLoading ? "Opening project…" : "Your projects"}</h1><p>{detailLoading ? "Loading saved conversations and files." : "Choose a project or create one to keep related work together."}</p></div>}
+        : <div className="projects-workspace-empty"><h1 className="workspace-page-title">{detailLoading ? "Opening project…" : "Your projects"}</h1><p>{detailLoading ? "Loading saved conversations and files." : "Choose a project or create one to keep related work together."}</p></div>}
       {conversationCursor ? <button className="projects-more-conversations" type="button" disabled={detailLoading} onClick={() => void loadMoreConversations()}>More conversations</button> : null}
     </section>
     {creating ? <NewProjectDialog limits={limits} privateAvailable={models.some(({ id }) => id === "private")}
@@ -222,7 +223,7 @@ function ProjectDirectorySummary({ project, id }: { project: AudreyProject; id?:
   const validActivity = activity && !Number.isNaN(activity.valueOf());
   const countLabel = validChatCount(count) ? `${count} ${count === 1 ? "chat" : "chats"}` : "Chat count unavailable";
   const fullActivity = validActivity ? new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "long" }).format(activity) : null;
-  return <span className="projects-directory-summary" id={id}>
+  return <span className="projects-directory-summary sidebar-item-meta" id={id}>
     <span className="projects-directory-accessible">{`${project.private_required ? "Private project. " : ""}${countLabel}. ${fullActivity ? `Last activity ${fullActivity}` : "Activity unavailable"}.`}</span>
     <span className="projects-directory-chat-count" aria-hidden="true">{countLabel}</span>
     <span className="projects-directory-activity" aria-hidden="true">{validActivity ? <>
