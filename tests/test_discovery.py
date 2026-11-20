@@ -159,7 +159,7 @@ async def test_discover_one_finds_tools_tag():
 
 
 async def test_agent_file_read_and_progress_are_native_only_and_not_discovered_over_http():
-    for name, field in (("read_selected_file", "file_id"), ("save_progress", "note")):
+    for name, field in (("read_selected_file", "file_id"), ("read_output_file", "file_id"), ("save_progress", "note")):
         declaration = TOOL_DECLARATIONS[name]
         assert declaration.in_process_only and declaration.dependencies == frozenset({"application_state"})
         doc = _openapi({f"/{name}": _post(

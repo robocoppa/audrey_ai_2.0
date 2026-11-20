@@ -81,6 +81,20 @@ describe("Agent activity metadata", () => {
   });
   it.each([
     ["research", "completed"], ["research", "failed"], ["review", "completed"], ["review", "failed"],
+  ])("reads %s Read output file %s activity without retaining content or file identity", async (stage, state) => {
+    const read = { ...event, stage, state, kind: "tool", tool: "read_output_file", input_tokens: null, output_tokens: null };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ items: [{ ...read,
+      text: "Saved deliverable body", file_id: "agent-output", revision: "d".repeat(64), offset: 12000,
+      arguments: { file_id: "agent-output" }, result: { text: "Saved deliverable body" } }], has_more: false, truncated: false })));
+    expect(await listAgentEvents("owned")).toEqual({ items: [read], has_more: false, truncated: false });
+  });
+  it.each(["plan", "title"])("rejects Read output file activity in %s", async (stage) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ items: [{ ...event,
+      stage, kind: "tool", tool: "read_output_file", input_tokens: null, output_tokens: null }], has_more: false, truncated: false })));
+    await expect(listAgentEvents("owned")).rejects.toThrow("This agent’s activity could not be read.");
+  });
+  it.each([
+    ["research", "completed"], ["research", "failed"], ["review", "completed"], ["review", "failed"],
   ])("accepts %s Calculate %s metadata without retaining expressions or results", async (stage, state) => {
     const calculation = { ...event, stage, state, kind: "tool", tool: "calculate", duration_ms: 7, input_tokens: null, output_tokens: null };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({

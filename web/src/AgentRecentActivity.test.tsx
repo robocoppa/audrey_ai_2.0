@@ -24,6 +24,23 @@ describe("AgentRecentActivity", () => {
   it.each([
     ["research", "Work", "completed", "Completed"], ["research", "Work", "failed", "Failed"],
     ["review", "Review", "completed", "Completed"], ["review", "Review", "failed", "Failed"],
+  ] as const)("labels %s Read output file %s without displaying saved content or identity", async (stage, label, state, stateLabel) => {
+    const read = { ...event({ kind: "tool", tool: "read_output_file", stage, state, finished_at: "2026-11-03T14:00:01Z", duration_ms: 4 }),
+      text: "Saved deliverable body", file_id: "agent-output", revision: "d".repeat(64), arguments: { file_id: "agent-output" } };
+    vi.spyOn(api, "listAgentEvents").mockResolvedValue(page([read]));
+    render(<AgentRecentActivity task={{ ...task, status: "completed" }} visible timezone="UTC" />);
+    const operations = await screen.findByRole("list", { name: "Agent operations" });
+    expect(within(operations).getByText("Read output file")).toBeVisible();
+    expect(within(operations).getByText(stateLabel)).toBeVisible();
+    expect(within(operations).getByText(new RegExp(`${label} · Attempt 1`))).toBeVisible();
+    expect(within(operations).getByText("4 ms")).toBeVisible();
+    expect(screen.queryByText(read.text)).not.toBeInTheDocument();
+    expect(screen.queryByText(read.file_id)).not.toBeInTheDocument();
+    expect(screen.queryByText(read.revision)).not.toBeInTheDocument();
+  });
+  it.each([
+    ["research", "Work", "completed", "Completed"], ["research", "Work", "failed", "Failed"],
+    ["review", "Review", "completed", "Completed"], ["review", "Review", "failed", "Failed"],
   ] as const)("labels %s Search selected file %s without displaying the query or source matches", async (stage, label, state, stateLabel) => {
     const search = { ...event({ kind: "tool", tool: "search_selected_file", stage, state, finished_at: "2026-11-03T14:00:01Z", duration_ms: 9 }),
       query: "Saved approval marker", matches: [{ text: "Protected source snippet", start: 12200 }] };

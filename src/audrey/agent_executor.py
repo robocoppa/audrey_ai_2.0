@@ -549,6 +549,7 @@ class ResearchAgentExecutor:
             with_selected_file_read,
             with_selected_file_search,
         )
+        from audrey.tools.agent_output_reads import with_output_file_read
         from audrey.tools.agent_progress import agent_progress_scope, with_agent_progress
 
         file_inputs = get_agent_file_inputs(self.app)
@@ -577,7 +578,7 @@ class ResearchAgentExecutor:
         selected_file_reads = bool(selected_files) and file_inputs is not None
         native_reads = native_step and selected_file_reads
         if native_files:
-            tools = with_create_file(tools)
+            tools = with_output_file_read(with_create_file(tools))
             # with_create_file constructs a fresh native spec. Shared discovery
             # remains untouched; task retries have a longer identity than a chat reply.
             spec = tools.by_name["create_file"]
@@ -606,11 +607,17 @@ class ResearchAgentExecutor:
                 progress = next(step for step in current["steps"] if step["id"] == "research").get("progress")
                 if progress is not None:
                     task_context["saved_progress"] = {key: progress[key] for key in ("note", "saved_at")}
-        if step_id == "review":
-            task_context["current_output_files"] = [
-                {key: output[key] for key in ("file_id", "filename", "download_url", "created_at")}
-                for output in task.get("outputs", []) if output.get("current") is True
-            ]
+        if native_step:
+            # Work can restart after a question/pause with files already saved.
+            # Take canonical metadata under the live lease rather than trusting
+            # an incoming task snapshot or a model's claimed file identifiers.
+            with self.app.state.application_store._lock:
+                repository.fence_execution(**lease)
+                current = repository._lease(**lease)
+                task_context["current_output_files"] = [
+                    {key: output[key] for key in ("file_id", "filename", "download_url", "created_at")}
+                    for output in current["outputs"] if output.get("current") is True
+                ]
         messages = [
             {"role": "system", "content": prompts[step_id]},
             {
@@ -675,7 +682,7 @@ class ResearchAgentExecutor:
 
             async def check_tool(name):
                 await authorize()
-                if ((name == "create_file" and native_files)
+                if ((name in {"create_file", "read_output_file"} and native_files)
                         or (name in {"read_selected_file", "search_selected_file"} and native_reads)
                         or (name == "calculate" and native_calculator)
                         or (name == "save_progress" and native_progress)):

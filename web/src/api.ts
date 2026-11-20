@@ -604,7 +604,7 @@ export interface AgentEvent {
   stage: "plan" | "research" | "review" | "title";
   kind: "stage" | "model" | "tool";
   state: "started" | "completed" | "failed" | "interrupted";
-  tool: "web_search" | "web_fetch" | "create_file" | "read_selected_file" | "search_selected_file" | "calculate" | "save_progress" | null;
+  tool: "web_search" | "web_fetch" | "create_file" | "read_selected_file" | "search_selected_file" | "read_output_file" | "calculate" | "save_progress" | null;
   created_at: string;
   finished_at: string | null;
   duration_ms: number | null;
@@ -632,8 +632,8 @@ export async function listAgentEvents(taskId: string, signal?: AbortSignal, befo
       || !["plan", "research", "review", "title"].includes(event.stage)
       || !["stage", "model", "tool"].includes(event.kind)
       || !["started", "completed", "failed", "interrupted"].includes(event.state)
-      || (event.kind === "tool" ? !["web_search", "web_fetch", "create_file", "read_selected_file", "search_selected_file", "calculate", "save_progress"].includes(event.tool ?? "") : event.tool !== null)
-      || (["calculate", "search_selected_file"].includes(event.tool ?? "") && !["research", "review"].includes(event.stage))
+      || (event.kind === "tool" ? !["web_search", "web_fetch", "create_file", "read_selected_file", "search_selected_file", "read_output_file", "calculate", "save_progress"].includes(event.tool ?? "") : event.tool !== null)
+      || (["calculate", "search_selected_file", "read_output_file"].includes(event.tool ?? "") && !["research", "review"].includes(event.stage))
       || (event.tool === "save_progress" && event.stage !== "research")
       || !date(event.created_at) || (event.finished_at !== null && !date(event.finished_at))
       || (event.state === "started" ? event.finished_at !== null : event.finished_at === null)

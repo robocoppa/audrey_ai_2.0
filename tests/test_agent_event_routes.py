@@ -81,7 +81,7 @@ async def test_selected_file_read_event_is_exposed_without_read_arguments_or_con
 
 
 @pytest.mark.parametrize("stage", ["research", "review"])
-@pytest.mark.parametrize("tool", ["calculate", "search_selected_file"])
+@pytest.mark.parametrize("tool", ["calculate", "search_selected_file", "read_output_file"])
 async def test_native_tool_event_api_keeps_only_owned_metadata(state, stage, tool):
     lease, _seq = await started(state)
     for previous in ("plan", "research"):

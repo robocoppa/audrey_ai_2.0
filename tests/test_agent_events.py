@@ -314,7 +314,7 @@ async def test_tool_metadata_follows_live_stages_and_non_models_cannot_claim_tok
 
 
 @pytest.mark.parametrize("stage", ["research", "review"])
-@pytest.mark.parametrize("tool", ["calculate", "search_selected_file"])
+@pytest.mark.parametrize("tool", ["calculate", "search_selected_file", "read_output_file"])
 async def test_native_tool_events_are_metadata_only_and_keep_stage_and_lease_fences(state, stage, tool):
     task = await _claim(state)
     lease = _lease(task)
@@ -418,7 +418,7 @@ async def test_schema_upgrade_keeps_saved_tasks_and_enforces_owner_foreign_key(s
     upgraded = ApplicationStore(state.store.path)
     upgraded.agents._clock = state.clock
     try:
-        assert upgraded.schema_version == 44
+        assert upgraded.schema_version == 45
         assert (await upgraded.agents.get(user_id=state.owner.user_id, task_id=task["id"]))["objective"] == task["objective"]
         assert upgraded._conn.execute("PRAGMA foreign_key_check").fetchall() == []
         with upgraded._conn, pytest.raises(sqlite3.IntegrityError):

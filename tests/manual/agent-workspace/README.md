@@ -49,3 +49,44 @@ actual search/read events and the real downloaded contents does not pass.
 The selected-file tool must not appear in Plan. Other Project files remain outside
 the Agent's selected scope. Fast isolated regressions exercise those access and
 restart boundaries separately; they do not replace this real local-model check.
+
+## Saved-output inspection
+
+After syncing this slice, rebuild `audrey` and `audrey-ui` on **Tower** from
+`/mnt/user/appdata/audrey_ai_2.0`:
+
+```bash
+docker compose up -d --build audrey audrey-ui
+```
+
+Schema 45 applies automatically. No configuration change or upload is needed.
+In the real Audrey browser, start a new Agent without selected files using:
+
+> This is a test of checking an actual saved deliverable. During Plan, outline
+> the steps without questions. During Work, create budget-check.md with these
+> six purchases: 8 at 12.50, 6 at 3.25, 4 at 7.75, 2 at 18.40, 5 at 9.60 and
+> 4 at 6.25, and a spending ceiling of 472.35. Intentionally put the incorrect
+> total 270.95 and remainder 201.40 in that first draft. Reopen the saved draft
+> with read_output_file and confirm what it actually contains. During Review,
+> reopen that saved file with read_output_file, use calculate to recompute both
+> figures, then use create_file to save the complete corrected budget-check.md.
+> Reopen the corrected file with read_output_file before returning its download.
+> Keep this deliberate draft error out of the final deliverable. Do not browse.
+
+Pass only when all of these are visible:
+
+1. Recent activity shows successful **Read output file** operations in both Work
+   and Review, successful Review **Calculate** entries and a Review **Create file**.
+   Use **Show more activity** if needed. Plan has no tool operations.
+2. Open the actual current `budget-check.md` download from the Agent's Files area.
+   Its total is **260.30** and remaining budget is **212.05**, with the six purchase
+   quantities and prices intact. The final Result links that corrected file.
+3. Expand **Previous files** and open the earlier draft. It still contains
+   **270.95 / 201.40**, with a different file identity. The correction preserves
+   the old bytes rather than silently modifying a previous download.
+
+The model's claim that it read or corrected a file is insufficient: inspect the
+events and both actual downloads. This checks real local-model tool choice,
+the running worker and browser/proxy wiring. Scripted local regressions separately
+check owner/task isolation, changed/deleted files, paging and revoked attempts;
+they do not close this interactive acceptance check.

@@ -120,7 +120,7 @@ async def test_dispatch_one_happy_path():
 
 @pytest.mark.parametrize("registered", [False, True])
 @pytest.mark.parametrize("private", [False, True])
-@pytest.mark.parametrize("name", ["read_selected_file", "save_progress"])
+@pytest.mark.parametrize("name", ["read_selected_file", "search_selected_file", "read_output_file", "save_progress"])
 async def test_agent_native_source_and_progress_cannot_fallback_to_chat_private_or_http(registered, private, caplog, name):
     registry = _registry([_spec(name)]) if registered else ToolRegistry()
     requests = []

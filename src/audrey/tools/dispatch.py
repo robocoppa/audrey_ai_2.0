@@ -226,6 +226,18 @@ async def dispatch_one(
                     "error": "native_tool_unavailable",
                     "detail": "Calculations require an active agent Work or Review step.",
                 }), elapsed_s=0.0, is_error=True)
+    if name == "read_output_file":
+        # Same-task output receipts are the authority, never a download URL or
+        # a shared registry entry. Resolve before parsing or logging content.
+        from audrey.tools.agent_output_reads import agent_output_read_handler
+
+        native_handler = agent_output_read_handler(user_id=user_id)
+        if native_handler is None or policy is not None:
+            tool_calls_total.labels(tool=name, outcome="error").inc()
+            return ToolResult(name=name, call_id=call_id, content=json.dumps({
+                "error": "native_tool_unavailable",
+                "detail": "Output file access requires an active agent Work or Review step.",
+            }), elapsed_s=0.0, is_error=True)
     if name in {"read_selected_file", "search_selected_file"}:
         # This capability has no chat, Private or HTTP fallback. Resolve its
         # server-owned task binding before parsing or logging source arguments.

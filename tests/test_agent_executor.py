@@ -448,7 +448,7 @@ async def test_every_step_uses_only_local_qwen_and_only_research_has_public_tool
     supplied = json.loads(
         next(row["content"] for row in requests[0]["messages"] if row["role"] == "user")
     )
-    if step_id == "review":
+    if step_id in {"research", "review"}:
         assert supplied.pop("current_output_files") == []
     assert supplied == {
         "objective": task["objective"],
@@ -699,7 +699,7 @@ async def test_work_creates_owned_download_without_http_and_review_keeps_canonic
     await s.store.agents.checkpoint(**lease, step_id="review", result=reviewed)
     completed = await s.store.agents.complete(**lease, result=reviewed)
     assert outputs[0]["download_url"] in completed["result"]
-    assert {tool["function"]["name"] for tool in _content_requests(s)[-1]["tools"]} == {"create_file", "calculate"}
+    assert {tool["function"]["name"] for tool in _content_requests(s)[-1]["tools"]} == {"create_file", "read_output_file", "calculate"}
     # Use the ASGI transport rather than the fixture's tool transport.
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=s.app), base_url="http://test") as client:
         downloaded = await client.get(outputs[0]["download_url"])
@@ -2091,7 +2091,7 @@ async def test_review_rereads_selected_appendix_and_publishes_corrected_immutabl
     async def review_reply():
         payload = json.loads(s.provider_requests[-1].content)
         assert payload["messages"][0]["content"].startswith(AGENT_REVIEW_SYSTEM)
-        assert {tool["function"]["name"] for tool in payload["tools"]} == {"create_file", "read_selected_file", "search_selected_file", "calculate"}
+        assert {tool["function"]["name"] for tool in payload["tools"]} == {"create_file", "read_output_file", "read_selected_file", "search_selected_file", "calculate"}
         quoted = next(message for message in payload["messages"] if message["content"].startswith("User-selected file excerpts"))
         assert "MOSS-7Q4-RIVER" not in quoted["content"] and "270.95" in json.dumps(payload)
         task_context = json.loads(next(message["content"] for message in payload["messages"]
@@ -2230,7 +2230,7 @@ async def test_existing_excerpt_question_can_recover_same_agent_and_read_real_ap
                 s.responses.append(_answer("Saved the inspected appendix checklist: " + result["download_url"]))
         else:
             assert system.startswith(AGENT_REVIEW_SYSTEM) and capabilities == []
-            assert {item["function"]["name"] for item in payload["tools"]} == {"create_file", "read_selected_file", "search_selected_file", "calculate"}
+            assert {item["function"]["name"] for item in payload["tools"]} == {"create_file", "read_output_file", "read_selected_file", "search_selected_file", "calculate"}
             objective = json.loads(next(message["content"] for message in reversed(payload["messages"])
                                         if message["role"] == "user"))
             s.responses.append(_answer(objective["saved_work"]["research"]))
