@@ -21,6 +21,7 @@ from audrey.background_admission import BackgroundGenerationGate
 from audrey.model_catalog import resolve_model
 from audrey.models.ollama import OllamaClient, OllamaError, generation_budget
 from audrey.pipeline.prompts import (
+    AGENT_PLAN_CAPABILITIES_SYSTEM,
     AGENT_PLAN_FILE_READS_SYSTEM,
     AGENT_PLAN_SYSTEM,
     AGENT_RESEARCH_SYSTEM,
@@ -266,6 +267,32 @@ def _file_input_message(files: list[dict]) -> dict:
             "Generated files are working outputs, not independent evidence."
         ),
     }
+
+
+def _stage_tools(app: Any, step_id: str, *, selected_file_reads: bool) -> ToolRegistry:
+    """One selection for execution and the planner's description of later stages."""
+    from audrey.agent_files import agent_files_available
+    from audrey.tools.agent_calculator import with_agent_calculator
+    from audrey.tools.agent_file_reads import with_selected_file_read, with_selected_file_search
+    from audrey.tools.agent_output_reads import with_output_file_read
+    from audrey.tools.agent_progress import with_agent_progress
+
+    tools = getattr(app.state, "tools", ToolRegistry()).restrict(
+        PUBLIC_RESEARCH_TOOLS if step_id == "research" else frozenset()
+    )
+    if step_id not in {"research", "review"}:
+        return tools
+    if agent_files_available(app):
+        tools = with_output_file_read(with_create_file(tools))
+        # Fresh task-native specs leave shared discovery and chat identities intact.
+        spec = tools.by_name["create_file"]
+        spec.description = spec.description.replace("in this reply", "for this task")
+    if selected_file_reads:
+        tools = with_selected_file_search(with_selected_file_read(tools))
+    tools = with_agent_calculator(tools)
+    if step_id == "research":
+        tools = with_agent_progress(tools)
+    return tools
 
 
 class AgentSettings(BaseModel):
@@ -543,14 +570,9 @@ class ResearchAgentExecutor:
         repository = self.app.state.application_store.agents
         lease = {"task_id": task["id"], "lease_token": task["lease_token"], "fence": task["fence"]}
         from audrey.agent_file_inputs import get_agent_file_inputs
-        from audrey.tools.agent_calculator import agent_calculator_scope, with_agent_calculator
-        from audrey.tools.agent_file_reads import (
-            agent_file_read_scope,
-            with_selected_file_read,
-            with_selected_file_search,
-        )
-        from audrey.tools.agent_output_reads import with_output_file_read
-        from audrey.tools.agent_progress import agent_progress_scope, with_agent_progress
+        from audrey.tools.agent_calculator import agent_calculator_scope
+        from audrey.tools.agent_file_reads import agent_file_read_scope
+        from audrey.tools.agent_progress import agent_progress_scope
 
         file_inputs = get_agent_file_inputs(self.app)
         principal = await research_authority(self.app, task["user_id"])
@@ -565,9 +587,6 @@ class ResearchAgentExecutor:
         if step_id not in prompts:
             raise AgentDispatchStoppedError("Unsupported agent step.")
         max_tokens = settings.tokens_for_step(step_id)
-        tools = getattr(self.app.state, "tools", ToolRegistry()).restrict(
-            PUBLIC_RESEARCH_TOOLS if step_id == "research" else frozenset()
-        )
         from audrey.agent_files import agent_file_scope, agent_files_available
 
         file_outputs = []
@@ -577,18 +596,7 @@ class ResearchAgentExecutor:
         native_files = native_step and agent_files_available(self.app)
         selected_file_reads = bool(selected_files) and file_inputs is not None
         native_reads = native_step and selected_file_reads
-        if native_files:
-            tools = with_output_file_read(with_create_file(tools))
-            # with_create_file constructs a fresh native spec. Shared discovery
-            # remains untouched; task retries have a longer identity than a chat reply.
-            spec = tools.by_name["create_file"]
-            spec.description = spec.description.replace("in this reply", "for this task")
-        if native_reads:
-            tools = with_selected_file_search(with_selected_file_read(tools))
-        if native_calculator:
-            tools = with_agent_calculator(tools)
-        if native_progress:
-            tools = with_agent_progress(tools)
+        tools = _stage_tools(self.app, step_id, selected_file_reads=selected_file_reads)
         endpoints = {spec.name: (spec.server_url, spec.path) for spec in tools.specs()}
         previous = {
             step["id"]: step["result"] for step in task["steps"] if step["status"] == "completed"
@@ -639,6 +647,16 @@ class ResearchAgentExecutor:
             messages.insert(1, _project_message(project_context))
         if selected_files:
             messages.insert(-1, _file_input_message(selected_files))
+        if step_id == "plan":
+            messages.insert(1, {
+                "role": "system",
+                "content": AGENT_PLAN_CAPABILITIES_SYSTEM + json.dumps([
+                    {"stage": label, "tools": _stage_tools(
+                        self.app, stage, selected_file_reads=selected_file_reads,
+                    ).names()}
+                    for stage, label in (("research", "Work"), ("review", "Review"))
+                ], separators=(",", ":")),
+            })
         if step_id == "plan" and selected_file_reads:
             # Plan cannot invoke Work's tools. Describe the real later-stage
             # capability explicitly so an excerpt boundary is not mistaken for

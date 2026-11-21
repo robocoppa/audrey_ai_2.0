@@ -198,6 +198,20 @@ read the selected appendix, or Cancel/Run again on that same Agent; neither path
 replaces the selected versions. Local fixture recovery passes; real Qwen behavior
 still needs the owner-operated file case.
 
+Plan also receives a compact, server-derived list of Work and Review tools from
+the same selection function used to execute those stages. It distinguishes
+planning from later execution and tells the model that Audrey supplies argument
+schemas during execution. It must not ask the user to confirm application tool
+names, availability or syntax merely because Plan has no callable tools. Missing
+storage, unavailable public tools and absent explicit file selections remain
+absent from the corresponding stage list; the list grants no new authority.
+This corrects the owner's saved-output test in which Plan asked whether
+`read_output_file`, `calculate` and `create_file` would exist later. Genuine missing
+user decisions can still ask questions. Local request/dispatch regressions use
+scripted replies; a fresh real-model Plan without that question remains pending.
+Only `audrey` needs rebuilding for this guidance change; no UI, schema or budget
+change is required.
+
 Agent response snapshots refresh ordinary progress committed by the worker between
 an awaited route operation and its HTTP reply. They serialize final owner/body
 checks and preserve compact summary responses. Successful writes are not replayed;

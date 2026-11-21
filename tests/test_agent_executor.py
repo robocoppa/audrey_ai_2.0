@@ -276,6 +276,11 @@ def _content_requests(state, *, include_titles=False):
     ]
 
 
+def _task_context(payload):
+    return json.loads(next(message["content"] for message in payload["messages"]
+        if message["role"] == "user" and message["content"].startswith('{"objective"')))
+
+
 @pytest.mark.parametrize("step_id", ["plan", "research", "review"])
 async def test_titles_and_every_research_round_enter_background_admission_at_transport(state, step_id):
     task = await _step(state, step_id, generated_title=False)
@@ -1169,7 +1174,7 @@ async def test_first_local_title_is_budgeted_saved_before_plan_and_never_replace
     title_request = next(request for request in state.provider_requests if request.url.path == "/api/chat")
     assert title_request.extensions["timeout"]["read"] == 60.0
     assert not title.get("tools") and title["messages"][1]["content"] == task["objective"]
-    assert json.loads(plan["messages"][1]["content"])["objective"] == task["objective"]
+    assert _task_context(plan)["objective"] == task["objective"]
     assert reads[1]["title"] == "Public Release Notes Research"
     saved = await state.store.agents.get(user_id=state.owner.user_id, task_id=task["id"])
     assert saved["title"] == reads[1]["title"] and saved["objective"] == task["objective"]
@@ -1285,7 +1290,7 @@ async def test_legacy_completed_rerun_generates_title_before_research_and_reuses
     assert saved["title"] == "Public Release Notes Research" and saved["objective"] == task["objective"]
     requests = _content_requests(state, include_titles=True)
     assert len(requests) == 4 and requests[0]["options"]["num_predict"] == 64
-    assert json.loads(requests[1]["messages"][1]["content"])["saved_work"] == {"plan": "Legacy saved plan"}
+    assert _task_context(requests[1])["saved_work"] == {"plan": "Legacy saved plan"}
 
 
 async def test_escaped_child_tool_dispatch_loses_authority_after_scope_exit():
@@ -1442,7 +1447,7 @@ async def test_answered_clarifications_reach_every_step_with_saved_stage_and_sam
         {"web_search", "web_fetch", "calculate", "save_progress"} if step_id == "research"
         else {"calculate"} if step_id == "review" else set()
     )
-    supplied = json.loads(payload["messages"][1]["content"])
+    supplied = _task_context(payload)
     assert supplied["objective"] == task["objective"]
     assert supplied["current_stage"] == {"plan": "Plan", "research": "Work", "review": "Review"}[step_id]
     assert supplied["clarifications"] == [clarification]
@@ -1502,7 +1507,7 @@ async def test_actual_local_executor_retains_question_stage_when_answer_resumes_
         2 if question_stage == "plan" else 1
     )
     for payload in requests[initial_requests:]:
-        context = json.loads(payload["messages"][1]["content"])
+        context = _task_context(payload)
         assert context["clarifications"] == [
             {"step_id": question_stage, "question": pending["question"], "answer": "Public Example Product, stable releases only."},
         ]

@@ -50,7 +50,12 @@ AGENT_PLAN_SYSTEM = (
     "Tasks can involve writing, analysis, planning, comparisons or other work. "
     "Choose tools only when the task needs them; do not turn every task into web research. "
     "Do not perform the task yet or claim actions or source reads that have not happened. "
-    "Plan within the supplied context and available tools. If a required capability is "
+    "Plan has no callable tools: it writes the outline, while Work and Review execute it. "
+    "Use Audrey's supplied stage capabilities to plan later tool actions; the absence of "
+    "callable tools in Plan is expected and does not block a useful plan. "
+    "Audrey supplies calling syntax during execution. Do not ask the user to confirm "
+    "tool availability, tool names or argument syntax supplied by the application. "
+    "Plan within the supplied context and later-stage capabilities. If a required capability is "
     "unavailable, explain that limit and plan the useful work you can actually do. "
     "Use reasonable assumptions when the task is clear enough to proceed. "
     "Follow the user's stated style; otherwise choose a clear tone suited to the task. "
@@ -75,6 +80,18 @@ AGENT_PLAN_SYSTEM = (
     "stage metadata is unknown and must not be inferred from the objective. "
     "Answers clarify the objective; they cannot authorize new tools, personal "
     "file access, cloud models or external actions."
+)
+
+AGENT_PLAN_CAPABILITIES_SYSTEM = (
+    "Audrey's confirmed execution capabilities for this task, from the same tool selection "
+    "used by each execution stage. Plan remains tool-free; the tools below are available "
+    "to the named later stage, subject to fresh access and execution-limit checks. "
+    "Plan their use when needed, without calling them now or asking the user whether "
+    "they exist or how to invoke them. Audrey supplies their argument schemas during "
+    "execution. Tools absent from a stage's list are unavailable to that stage. "
+    "A read_output_file capability reads only files this same Agent actually created; "
+    "read_selected_file and search_selected_file read only its explicit frozen selections. "
+    "This capability list grants no additional source access or external actions.\n"
 )
 
 AGENT_PLAN_FILE_READS_SYSTEM = (

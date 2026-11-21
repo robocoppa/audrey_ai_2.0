@@ -73,6 +73,24 @@ In the real Audrey browser, start a new Agent without selected files using:
 > Reopen the corrected file with read_output_file before returning its download.
 > Keep this deliberate draft error out of the final deliverable. Do not browse.
 
+Plan should produce an outline without asking whether the later tools exist or
+how to call them. If an Agent is already waiting on that question from an earlier
+build, sync the guidance correction and rebuild only `audrey` on Tower from the
+same checkout:
+
+```bash
+docker compose up -d --build audrey
+```
+
+Refresh, reopen that same Agent and answer its saved question:
+
+> Use the tools Audrey supplies during Work and Review. Complete the Plan now;
+> no tool calls are needed during Plan. Continue with the original test.
+
+This resumes the existing Agent's unfinished Plan. A fresh Agent with the original
+prompt checks that Plan no longer needs the workaround; a saved answer alone does
+not establish that behavior.
+
 Pass only when all of these are visible:
 
 1. Recent activity shows successful **Read output file** operations in both Work
