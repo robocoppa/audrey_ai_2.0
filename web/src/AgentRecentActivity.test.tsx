@@ -207,21 +207,34 @@ describe("AgentRecentActivity", () => {
     expect(screen.queryByText("Create file")).not.toBeInTheDocument();
   });
 
-  it("shows only six rows until expanded and loads bounded older pages with the oldest sequence", async () => {
+  it("expands and contracts from the header and loads bounded older pages with the oldest sequence", async () => {
     const first = Array.from({ length: 50 }, (_, index) => event({ seq: 100 - index }));
     const read = vi.spyOn(api, "listAgentEvents").mockResolvedValueOnce(page(first, true))
       .mockResolvedValueOnce(page(Array.from({ length: 50 }, (_, index) => event({ seq: 50 - index })), false, true));
     render(<AgentRecentActivity task={{ ...task, status: "completed" }} visible />);
     const operations = await screen.findByRole("list", { name: "Agent operations" });
+    const header = screen.getByRole("region", { name: "Recent activity" }).querySelector("header")!;
+    const expand = within(header).getByRole("button", { name: "Show more activity" });
+    expect(expand).toHaveAttribute("aria-expanded", "false");
+    expect(expand).toHaveAttribute("aria-controls", operations.id);
+    expect(within(header).getByRole("heading", { name: "Recent activity" })).not.toContainElement(expand);
     expect(within(operations).getAllByRole("listitem")).toHaveLength(6);
-    fireEvent.click(screen.getByRole("button", { name: "Show more activity" }));
+    fireEvent.click(expand);
+    expect(within(header).getByRole("button", { name: "Show recent only" })).toHaveAttribute("aria-expanded", "true");
     expect(within(operations).getAllByRole("listitem")).toHaveLength(50);
+    fireEvent.click(within(header).getByRole("button", { name: "Show recent only" }));
+    expect(within(operations).getAllByRole("listitem")).toHaveLength(6);
+    fireEvent.click(within(header).getByRole("button", { name: "Show more activity" }));
+    expect(read).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Load older activity" }));
     await waitFor(() => expect(within(operations).getAllByRole("listitem")).toHaveLength(100));
     expect(read).toHaveBeenLastCalledWith(task.id, expect.any(AbortSignal), 51);
     expect(screen.queryByRole("button", { name: "Load older activity" })).not.toBeInTheDocument();
     expect(screen.getByText(/Older activity has been removed/)).toBeVisible();
     expect(document.activeElement).not.toBe(operations);
+    fireEvent.click(within(header).getByRole("button", { name: "Recent activity" }));
+    expect(screen.queryByRole("list", { name: "Agent operations" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show recent only" })).not.toBeInTheDocument();
   });
 
   it("clears unavailable rows, hides raw server details and permits a safe explicit retry", async () => {

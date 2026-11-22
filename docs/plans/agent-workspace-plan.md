@@ -91,7 +91,11 @@ Agent's header, without a banner pushing the card down. Delayed responses cannot
 show their confirmation on another task; Project creation feedback stays separate.
 Plan and progress and Recent activity share equal-width, equal-height cards when
 the workflow has enough width. Step names, status and saved-result controls share compact rows; both panels
-have fixed headings and independent scrolling;
+have fixed headings and independent scrolling. Their height is now
+`clamp(14rem, 32dvh, 18rem)`, with aligned header dividers. Show more activity /
+Show recent only sits beside the Recent activity title, leaving the list more
+room; Load older activity remains below the list only when needed. Controls wrap
+within narrow panels and preserve keyboard focus and expansion state;
 narrow workspaces, including Search-open views, stack them. Result uses a compact
 header, restrained report headings and bounded, labeled code blocks. Saved report
 text is preserved. The saved Agent's Project is a compact badge beside its status,
@@ -1023,6 +1027,17 @@ automatically with no configuration change. The [interactive output check](../..
 uses a deliberately incorrect draft followed by a verified correction. Local
 regressions use scripted provider replies; live local-model/browser acceptance
 remains pending until the owner performs the check and opens the real download.
+
+The November 21 owner download was inspected directly: all six purchases and
+line totals, total 260.30, ceiling 472.35 and remainder 212.05 are correct; neither
+deliberate draft error appears. Supplied attempt 3 activity confirms successful
+output reads in Work and Review, calculations in both stages and two Work file
+publications. The current file's 09:55:42 timestamp matches the second Work
+publication; Review then read an output and calculated without publishing another
+file. One earlier failed Work read was followed by a successful read. This passes
+current-download content and actual Work/Review read/calculator execution checks.
+The prescribed Review correction/publication path, earlier draft's contents and
+fresh-Plan behavior without the saved answer were not established by that receipt.
 
 ### Explicit Project file inputs for Agents
 

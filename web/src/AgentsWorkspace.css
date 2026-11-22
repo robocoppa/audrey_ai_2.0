@@ -184,8 +184,8 @@ button.agents-context-project:focus-visible { outline: var(--focus-ring); outlin
 .agents-task-actions .danger-button { min-width: 6.2rem; border-color: color-mix(in srgb, var(--danger) 30%, transparent); background: color-mix(in srgb, var(--danger) 6%, transparent); }
 .agents-task-actions .danger-button:hover:not(:disabled), .agents-task-actions .confirming-delete { border-color: color-mix(in srgb, var(--danger) 56%, transparent); background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .agents-progress-panels { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); min-width: 0; }
-.agents-progress-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: clamp(11rem, 25dvh, 14rem); padding: var(--space-3); overflow: hidden; border: 1px solid var(--border); border-radius: 0.85rem; background: color-mix(in srgb, var(--surface-overlay) 38%, transparent); }
-.agents-panel-header { display: flex; align-items: center; flex: none; min-height: 1.9rem; padding-bottom: var(--space-2); margin-bottom: var(--space-2); border-bottom: 1px solid var(--border); }
+.agents-progress-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: clamp(14rem, 32dvh, 18rem); padding: var(--space-3); overflow: hidden; border: 1px solid var(--border); border-radius: 0.85rem; background: color-mix(in srgb, var(--surface-overlay) 38%, transparent); }
+.agents-panel-header { display: flex; align-items: center; flex: none; min-height: var(--control-height-md); padding-bottom: var(--space-2); margin-bottom: var(--space-2); border-bottom: 1px solid var(--border); }
 .agents-panel-header > h3, .agents-result-header > h3, .agents-outputs > h3 { margin: 0; color: var(--text-soft); font-size: 0.9rem; font-weight: 650; line-height: 1.5; }
 .agents-plan-scroll { flex: 1; min-width: 0; min-height: 0; padding-right: 0.4rem; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-gutter: stable; }
 .agents-plan-scroll:focus-visible, .agents-event-list:focus-visible { outline: var(--focus-ring); outline-offset: -2px; border-radius: 0.3rem; }
@@ -217,6 +217,9 @@ button.agents-context-project:focus-visible { outline: var(--focus-ring); outlin
 .agents-result-body { min-width: 0; padding: 1.2rem; }
 .agents-result-body > .agents-markdown { max-width: 78ch; }
 .agents-activity-content { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
+.agents-activity-header { flex-wrap: wrap; justify-content: space-between; gap: var(--space-2); }
+.agents-activity-header > h3 { min-width: 0; }
+.agents-activity-expand { flex: none; min-height: 1.9rem; padding: var(--space-1) var(--space-2); font-size: var(--font-size-xs); }
 .agents-activity-toggle { display: flex; align-items: center; gap: var(--space-2); padding: 0; border: 0; color: inherit; background: transparent; font: inherit; cursor: pointer; }
 .agents-activity-toggle > span { width: 0.8rem; color: var(--muted); }
 .agents-activity-toggle:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset-wide); border-radius: 0.2rem; }
