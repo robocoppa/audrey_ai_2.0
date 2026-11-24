@@ -26,8 +26,16 @@ function mergeWatch(current: PublicWatch[], watch: PublicWatch) {
   return [watch, ...current.filter((item) => item.id !== watch.id)].sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 function scheduleLabel(watch: Pick<PublicWatch, "schedule">) {
-  const schedule = watch.schedule;
-  const cadence = schedule.kind === "interval" ? `Every ${schedule.interval_minutes} minutes` : schedule.kind === "daily" ? `Daily at ${schedule.time}` : `${["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][schedule.weekday ?? 0]} at ${schedule.time}`;
+  const { schedule } = watch;
+  let cadence: string;
+  if (schedule.kind === "interval") {
+    cadence = schedule.interval_minutes === 60 ? "Hourly" : `Every ${schedule.interval_minutes} minutes`;
+  } else if (schedule.kind === "daily") {
+    cadence = `Daily at ${schedule.time}`;
+  } else {
+    const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    cadence = `${days[schedule.weekday ?? 0]} at ${schedule.time}`;
+  }
   return `${cadence} · ${schedule.timezone}`;
 }
 

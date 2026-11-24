@@ -19,9 +19,9 @@ function project(patch: Partial<AudreyProject> = {}): AudreyProject {
 function workspace(props: Partial<Parameters<typeof WatchesWorkspace>[0]> = {}) {
   return render(<WatchesWorkspace visible timezone="America/Denver" {...props} />);
 }
-function fillNewWatch() {
+function fillNewWatch(url = "https://example.com/releases") {
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Release announcements" } });
-  fireEvent.change(screen.getByRole("textbox", { name: "Public page URL" }), { target: { value: "https://example.com/releases" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Public page URL" }), { target: { value: url } });
   fireEvent.change(screen.getByRole("textbox", { name: "What changes matter?" }), { target: { value: "New stable releases" } });
 }
 beforeEach(() => {
@@ -118,12 +118,15 @@ describe("watch history navigation", () => {
 });
 
 describe("watch creation and schedules", () => {
-  it("requires a current UTC preview, saves explicitly and never runs at creation", async () => {
+  it.each([
+    ["www.example.com/releases", "https://www.example.com/releases"],
+    ["http://example.com/releases", "http://example.com/releases"],
+  ])("saves %s with a current UTC preview and never runs at creation", async (input, expectedUrl) => {
     const create = vi.spyOn(api, "createWatch").mockResolvedValue(watch({ latest_run: null }));
     const run = vi.spyOn(api, "actOnWatch");
     workspace();
     fireEvent.click(await screen.findByRole("button", { name: "New watch" }));
-    fillNewWatch();
+    fillNewWatch(input);
     expect(screen.getByRole("button", { name: "Create watch" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Preview next checks" }));
     expect(await screen.findByText("Next three checks (UTC)")).toBeVisible();
@@ -133,7 +136,11 @@ describe("watch creation and schedules", () => {
     fireEvent.click(screen.getByRole("button", { name: "Preview next checks" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Create watch" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Create watch" }));
-    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, schedule: { kind: "daily", time: "09:00", timezone: "UTC" } }), expect.any(String)));
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      url: expectedUrl,
+      enabled: true,
+      schedule: { kind: "daily", time: "09:00", timezone: "UTC" },
+    }), expect.any(String)));
     expect(run).not.toHaveBeenCalled();
     expect(await screen.findByText(/Watch created\. Its first scheduled check/)).toBeVisible();
   });
@@ -152,13 +159,39 @@ describe("watch creation and schedules", () => {
     expect(create.mock.calls[0][1]).toBe(create.mock.calls[1][1]);
   });
 
+  it("previews and saves Hourly as a 60-minute interval and restores it when editing", async () => {
+    const schedule = { kind: "interval", timezone: "America/Denver", interval_minutes: 60 } as const;
+    const create = vi.spyOn(api, "createWatch").mockImplementation(async (definition) => {
+      const saved = watch({ schedule: definition.schedule, latest_run: null });
+      vi.mocked(api.listWatches).mockResolvedValue({ items: [saved] });
+      return saved;
+    });
+    workspace();
+    fireEvent.click(await screen.findByRole("button", { name: "New watch" }));
+    fillNewWatch();
+    const cadence = screen.getByRole("combobox", { name: "Cadence" });
+    expect(within(cadence).getByRole("option", { name: "Hourly" })).toBeVisible();
+    fireEvent.change(cadence, { target: { value: "hourly" } });
+    expect(screen.queryByRole("spinbutton", { name: "Interval in minutes" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Preview next checks" }));
+    await screen.findByText("Next three checks (UTC)");
+    expect(api.previewWatchSchedule).toHaveBeenCalledWith(schedule, expect.any(AbortSignal));
+    fireEvent.click(screen.getByRole("button", { name: "Create watch" }));
+    expect(await screen.findByText("Hourly · America/Denver")).toBeVisible();
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ schedule }), expect.any(String));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("combobox", { name: "Cadence" })).toHaveValue("hourly");
+  });
+
   it("sends interval and weekly schedules with bounded values and Monday-based days", async () => {
     render(<WatchForm busy={false} timezone="UTC" onSave={vi.fn()} onCancel={vi.fn()} />);
     fireEvent.change(screen.getByRole("combobox", { name: "Cadence" }), { target: { value: "interval" } });
-    expect(screen.getByRole("spinbutton", { name: "Interval in minutes" })).toHaveAttribute("min", "60");
-    expect(screen.getByRole("spinbutton", { name: "Interval in minutes" })).toHaveAttribute("max", "10080");
+    const minutes = screen.getByRole("spinbutton", { name: "Interval in minutes" });
+    expect(minutes).toHaveAttribute("min", "60");
+    expect(minutes).toHaveAttribute("max", "10080");
+    fireEvent.change(minutes, { target: { value: "90" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview next checks" }));
-    await waitFor(() => expect(api.previewWatchSchedule).toHaveBeenCalledWith({ kind: "interval", timezone: "UTC", interval_minutes: 1440 }, expect.any(AbortSignal)));
+    await waitFor(() => expect(api.previewWatchSchedule).toHaveBeenCalledWith({ kind: "interval", timezone: "UTC", interval_minutes: 90 }, expect.any(AbortSignal)));
     fireEvent.change(screen.getByRole("combobox", { name: "Cadence" }), { target: { value: "weekly" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Day" }), { target: { value: "6" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview next checks" }));
