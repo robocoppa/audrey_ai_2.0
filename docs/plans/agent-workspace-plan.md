@@ -330,6 +330,14 @@ multiple-source definitions remain later work.
 Affected hermetic checks and mocked desktop/phone browser flows pass; real public
 page changes, scheduled runtime and model-judgment acceptance remain manual.
 
+Check history offers **Reset baseline**. Confirming queues one manual fetch of
+the saved page. A successful run replaces the comparison baseline without a diff,
+local model call or change notice. A failed or cancelled reset keeps the previous
+baseline. The Watch retains its schedule and check history, and a paused Watch
+stays paused. A queued or running check must finish before a reset can be queued.
+Each reset is recorded in the run's existing saved definition, with no schema
+migration. See the [interactive baseline check](../../tests/manual/agent-workspace/README.md#resetting-a-watch-baseline).
+
 Schema 30 unifies agent completion/failure notices and existing watch alerts in
 Agents' Activity inbox. Terminal agent state and its deduplicated notice commit
 together; retries, pauses and cancellations remain silent. Notices contain a

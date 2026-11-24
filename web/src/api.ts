@@ -819,6 +819,7 @@ export interface WatchRunSummary {
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   outcome: "baseline" | "unchanged" | "changed" | null;
   kind: "scheduled" | "catchup" | "manual";
+  rebaseline?: boolean;
   created_at: string;
   scheduled_at: string;
   completed_at: string | null;
@@ -912,7 +913,7 @@ export function updateWatch(id: string, definition: WatchDefinition, expectedRev
   return apiJson(`/api/watches/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...definition, expected_revision: expectedRevision }) });
 }
 
-export function actOnWatch(id: string, action: "pause" | "resume" | "run", expectedRevision: number): Promise<PublicWatch> {
+export function actOnWatch(id: string, action: "pause" | "resume" | "run" | "rebaseline", expectedRevision: number): Promise<PublicWatch> {
   return apiJson(`/api/watches/${encodeURIComponent(id)}/actions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, expected_revision: expectedRevision }) });
 }
 

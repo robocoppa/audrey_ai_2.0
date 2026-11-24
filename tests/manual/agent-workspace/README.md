@@ -108,3 +108,25 @@ events and both actual downloads. This checks real local-model tool choice,
 the running worker and browser/proxy wiring. Scripted local regressions separately
 check owner/task isolation, changed/deleted files, paging and revoked attempts;
 they do not close this interactive acceptance check.
+
+## Resetting a Watch baseline
+
+After syncing, rebuild the backend and UI on **Tower**.
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+```
+
+1. Open **Agents → Watches** and select a public-page Watch that has already
+   saved a baseline. Use a paused Watch or pause it first. No file upload is needed.
+2. Click **Reset baseline** beside **Check history**, then **Confirm baseline
+   reset**. Wait for the new check to finish.
+3. Verify history shows **Baseline saved** and **Baseline reset** on the new
+   check. Its detail should say the check saved a new baseline. Open
+   the prior check from history and verify its result remains available. The
+   Watch should still say **Paused**, with the next check **Not scheduled**, and
+   there should be no change notification for the reset.
+4. Click **Run now**. If the page text has stayed the same, the check should say
+   **Unchanged**, and the schedule should still be paused. A page that changed
+   between checks is a separate comparison against the new baseline.

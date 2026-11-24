@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import hashlib
 import json
 import socket
@@ -514,6 +515,71 @@ async def test_real_repository_runtime_snapshots_and_notices_preserve_prior_base
     # The failed occurrence is in durable backoff; repeated wakes cannot retry
     # immediately or manufacture another notice.
     assert not await runtime.run_once()
+
+
+async def test_reset_check_survives_restart_and_replaces_baseline_only_after_success(state):
+    from audrey.app_state.watches import WatchesRepository
+
+    repository = WatchesRepository(state.store._conn, state.store._lock)
+    state.store.watches = repository
+    owner = {"user_id": state.owner.user_id}
+    watch = await repository.create(
+        **owner, title="Release updates", url=_URL, criterion="New releases",
+        request_id="reset-baseline", enabled=False,
+        schedule={"kind": "interval", "timezone": "UTC", "interval_minutes": 60},
+    )
+    scope = {**owner, "watch_id": watch["id"]}
+    await repository.run_now(**scope, expected_revision=watch["revision"])
+    assert await WatchRuntime(repository, state.executor).run_once()
+    initial = repository._baseline(watch["id"])
+    assert initial["text"] == "Release 2 is available."
+
+    state.asset = PublicAsset(b"Release 3 is available.", "text/plain", _URL)
+    queued = await repository.run_now(**scope, expected_revision=watch["revision"], rebaseline=True)
+    assert queued["latest_run"]["rebaseline"] is True
+    assert repository._baseline(watch["id"]) == initial
+    assert queued["enabled"] is False and queued["next_run_at"] is None
+
+    reopened = ApplicationStore(state.store.path)
+    state.app.state.application_store = reopened
+    repository = reopened.watches
+    now = dt.datetime.now(dt.UTC)
+    repository._clock = lambda: now
+    runtime = WatchRuntime(repository, state.executor)
+    try:
+        assert await runtime.run_once()
+        runs = await repository.list_runs(**scope)
+        reset = runs[0]
+        assert reset["id"] == queued["active_run_id"]
+        assert (reset["outcome"], reset["significant"], reset["diff"]) == ("baseline", None, "")
+        assert reset["rebaseline"] is True and runs[1]["id"] == initial["run_id"]
+        current = repository._baseline(watch["id"])
+        assert current["run_id"] == reset["id"] and current["text"] == "Release 3 is available."
+        assert await repository.unread_count(**owner) == 0
+
+        state.asset = PublicAsset(b"", "text/plain", _URL)
+        failed_attempt = await repository.run_now(**scope, expected_revision=queued["revision"], rebaseline=True)
+        assert await runtime.run_once()
+        assert (await repository.list_runs(**scope))[0]["status"] == "queued"
+        for delay in (61, 121):
+            assert repository._baseline(watch["id"]) == current
+            now += dt.timedelta(seconds=delay)
+            assert await runtime.run_once()
+        failed = (await repository.list_runs(**scope))[0]
+        assert failed["status"] == "failed" and failed["outcome"] is None and failed["rebaseline"] is True
+        assert repository._baseline(watch["id"]) == current
+
+        state.asset = PublicAsset(b"Release 3 is available.", "text/plain", _URL)
+        await repository.run_now(**scope, expected_revision=failed_attempt["revision"])
+        assert await runtime.run_once()
+        latest = await repository.get(**scope)
+        assert latest["latest_run"]["outcome"] == "unchanged"
+        assert not latest["latest_run"].get("rebaseline")
+        assert latest["enabled"] is False and latest["next_run_at"] is None
+        assert not state.calls and not state.clients
+    finally:
+        state.app.state.application_store = state.store
+        reopened.close()
 
 
 async def _project_watch(state):

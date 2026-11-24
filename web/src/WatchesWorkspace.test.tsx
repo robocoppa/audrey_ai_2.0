@@ -222,6 +222,47 @@ describe("saved watch controls and history", () => {
     expect(await screen.findByText("Check queued. The saved schedule is unchanged.")).toBeVisible();
   });
 
+  it("requires confirmation for a paused baseline reset and opens the reset check beside earlier checks", async () => {
+    const paused = watch({ enabled: false, next_run_at: null });
+    const reset = savedRun({ id: "reset-1", rebaseline: true, watch_revision: 2 });
+    const updated = { ...paused, revision: 2, latest_run: reset };
+    vi.mocked(api.listWatches).mockResolvedValue({ items: [paused] });
+    vi.mocked(api.getWatchRun).mockImplementation(async (_, runId) => runId === reset.id ? reset : savedRun());
+    const action = vi.spyOn(api, "actOnWatch").mockImplementation(async () => {
+      vi.mocked(api.listWatches).mockResolvedValue({ items: [updated] });
+      vi.mocked(api.listWatchRuns).mockResolvedValue({ items: [reset, savedRun()] });
+      return updated;
+    });
+    workspace();
+    const history = await screen.findByRole("region", { name: "Check history" });
+    const resetButton = within(history).getByRole("button", { name: "Reset baseline" });
+    resetButton.focus();
+    fireEvent.click(resetButton);
+    expect(action).not.toHaveBeenCalled();
+    const confirm = within(history).getByRole("button", { name: "Confirm baseline reset" });
+    expect(confirm).toHaveAccessibleDescription(/comparison point once the check succeeds/);
+    fireEvent.keyDown(confirm, { key: "Escape" });
+    expect(resetButton).toHaveFocus();
+    expect(resetButton).toHaveTextContent("Reset baseline");
+    fireEvent.click(resetButton);
+    fireEvent.click(within(history).getByRole("button", { name: "Confirm baseline reset" }));
+    expect(action).toHaveBeenCalledExactlyOnceWith("watch-1", "rebaseline", 1);
+    expect(await screen.findByText("This successful check saved a new baseline for future comparisons.")).toBeVisible();
+    expect(within(history).getByRole("button", { name: /Baseline saved\s*Baseline reset/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(history).getByRole("button", { name: /Baseline saved\s*Run now/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeVisible();
+    expect(screen.getByText("Next scheduled check:")).toHaveTextContent("Not scheduled");
+  });
+
+  it.each([
+    { active_run_id: "running-check" },
+    { project: { id: "project-1", name: null, available: false } },
+  ])("disables reset while a check is active or the Project is unavailable (%j)", async (patch) => {
+    vi.mocked(api.listWatches).mockResolvedValue({ items: [watch(patch)] });
+    workspace();
+    expect(await screen.findByRole("button", { name: "Reset baseline" })).toBeDisabled();
+  });
+
   it("requires the red delete check twice and resets confirmation on blur and revision conflicts", async () => {
     const remove = vi.spyOn(api, "deleteWatch").mockRejectedValue(new api.ApiError(409, "Changed"));
     vi.mocked(api.getWatch).mockResolvedValue(watch({ revision: 2 })); workspace();

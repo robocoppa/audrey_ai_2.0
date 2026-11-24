@@ -89,6 +89,56 @@ async def test_run_now_is_explicit_deduplicated_and_does_not_enable_paused_sched
     assert not {"snapshot", "text", "baseline", "lease_token", "fence", "operations"} & detail.json().keys()
 
 
+async def test_reset_exposes_check_intent_and_rejects_duplicate_or_active_actions(watches):
+    watch = (await _create(watches, enabled=False)).json()
+    response = await _action(watches, watch, "rebaseline")
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    assert saved["enabled"] is False and saved["next_run_at"] is None
+    assert saved["revision"] == watch["revision"] + 1
+    assert saved["latest_run"]["status"] == "queued"
+    assert saved["latest_run"]["kind"] == "manual"
+    assert saved["latest_run"]["rebaseline"] is True
+    assert "rebaseline" not in saved["latest_run"]["definition"]
+    wakes = len(watches.wakes)
+    assert (await _action(watches, watch, "rebaseline")).status_code == 409
+    assert (await _action(watches, saved, "rebaseline")).status_code == 409
+    assert len(watches.wakes) == wakes
+    path = f"/api/watches/{watch['id']}/runs"
+    runs = (await watches.client.get(path)).json()["items"]
+    assert len(runs) == 1 and runs[0]["id"] == saved["active_run_id"]
+    assert runs[0]["rebaseline"] is True
+    assert (await watches.client.get(f"{path}/{runs[0]['id']}")).json() == runs[0]
+
+
+@pytest.mark.parametrize("then", ["claim", "delete", "edit"])
+async def test_reset_response_refreshes_worker_progress_but_fences_owner_definition(watches, monkeypatch, then):
+    watch = (await _create(watches, enabled=False)).json()
+    repository = watches.store.watches
+    original = repository.run_now
+
+    async def interleave(**kwargs):
+        saved = await original(**kwargs)
+        key = {"user_id": kwargs["user_id"], "watch_id": saved["id"], "expected_revision": saved["revision"]}
+        if then == "claim":
+            assert (await repository.claim())["id"] == saved["active_run_id"]
+        elif then == "delete":
+            await repository.delete(**key)
+        else:
+            await repository.update(**key, title="Changed one more time")
+        return saved
+
+    monkeypatch.setattr(repository, "run_now", interleave)
+    response = await _action(watches, watch, "rebaseline")
+    if then == "claim":
+        assert response.status_code == 200, response.text
+        assert response.json()["latest_run"]["status"] == "running"
+        assert response.json()["latest_run"]["rebaseline"] is True
+    else:
+        assert response.status_code == (404 if then == "delete" else 409)
+        assert "Release notes" not in response.text
+
+
 async def test_pause_edit_conflict_and_delete_fence_queued_work(watches):
     watch = (await _create(watches)).json()
     await _action(watches, watch, "run")
@@ -118,7 +168,8 @@ async def test_foreign_and_missing_watch_run_and_notice_are_indistinguishable(wa
         assert (await watches.client.get(f"{path}/runs")).status_code == 404
         assert (await watches.client.get(f"{path}/runs/{queued['active_run_id']}")).status_code == 404
         assert (await watches.client.patch(path, json={"expected_revision": watch["revision"], "title": "Foreign"})).status_code == 404
-        assert (await watches.client.post(f"{path}/actions", json={"expected_revision": watch["revision"], "action": "run"})).status_code == 404
+        for action in ("run", "rebaseline"):
+            assert (await watches.client.post(f"{path}/actions", json={"expected_revision": watch["revision"], "action": action})).status_code == 404
         assert (await watches.client.delete(path, params={"expected_revision": watch["revision"]})).status_code == 404
     assert (await watches.client.post("/api/notifications/missing/read")).status_code == 404
 
@@ -128,6 +179,7 @@ async def test_disabled_execution_preserves_saved_reads_pause_and_delete(watches
     watches.app.state.cfg.raw["watches"] = {"enabled": False}
     assert (await _create(watches, request_id="disabled")).status_code == 503
     assert (await _action(watches, watch, "run")).status_code == 503
+    assert (await _action(watches, watch, "rebaseline")).status_code == 503
     assert (await watches.client.get(f"/api/watches/{watch['id']}")).status_code == 200
     paused = await _action(watches, watch, "pause")
     assert paused.status_code == 200

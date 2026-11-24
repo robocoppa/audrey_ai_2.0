@@ -45,6 +45,7 @@ class WatchRunSummary(BaseModel):
     id: str
     status: Literal["queued", "running", "completed", "failed", "cancelled"]
     kind: Literal["scheduled", "catchup", "manual"]
+    rebaseline: bool = False
     scheduled_at: str
     created_at: str
     completed_at: str | None
@@ -114,7 +115,7 @@ class WatchUpdate(BaseModel):
 
 class WatchAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    action: Literal["pause", "resume", "run"]
+    action: Literal["pause", "resume", "run", "rebaseline"]
     expected_revision: int = Field(ge=1, strict=True)
 
 
@@ -250,14 +251,18 @@ async def watch_action(watch_id: str, body: WatchAction, request: Request, respo
         await repository.get(user_id=principal.user_id, watch_id=watch_id)
         if body.action != "pause":
             await watch_authority(request.app, principal.user_id)
-        if body.action == "run":
+        if body.action in {"run", "rebaseline"}:
             watch = await repository.run_now(user_id=principal.user_id, watch_id=watch_id,
-                                             expected_revision=body.expected_revision)
+                                             expected_revision=body.expected_revision,
+                                             rebaseline=body.action == "rebaseline")
         else:
             watch = await repository.update(user_id=principal.user_id, watch_id=watch_id,
                                             expected_revision=body.expected_revision,
                                             enabled=body.action == "resume")
-        _fence(request, principal, watches=[watch])
+        if body.action == "rebaseline":
+            watch = repository.rebaseline_response(user_id=principal.user_id, watch=watch)
+        else:
+            _fence(request, principal, watches=[watch])
     except AgentDispatchStoppedError as error:
         raise HTTPException(503, str(error)) from None
     except WatchError as error:

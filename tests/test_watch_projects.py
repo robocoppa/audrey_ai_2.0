@@ -153,6 +153,7 @@ async def test_claim_sweep_pauses_missing_project_and_cancels_queued_or_running_
             await state.store.watches.validate_lease(**lease(run))
     for call in (
         state.store.watches.run_now(**key(state, saved)),
+        state.store.watches.run_now(**key(state, saved), rebaseline=True),
         state.store.watches.update(**key(state, saved), enabled=True),
     ):
         with pytest.raises(WatchAccessError):
@@ -279,12 +280,12 @@ async def test_schema33_upgrade_preserves_legacy_unscoped_request_digest_and_run
         state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=33")
     upgraded = ApplicationStore(state.store.path)
     try:
-        assert upgraded.schema_version == 43
+        assert upgraded.schema_version == 45
         saved = await upgraded.watches.create(**inputs(state, project_id=None))
         assert saved["id"] == watch["id"] and saved["project"] is None
         assert saved["active_run_id"] == queued["active_run_id"] and saved["latest_run"]["definition"]["project"] is None
         run = await upgraded.watches.claim()
-        assert run["definition"]["project"] is None
+        assert run["definition"]["project"] is None and run["rebaseline"] is False
     finally:
         upgraded.close()
 

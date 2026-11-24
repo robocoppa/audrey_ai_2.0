@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ApiError, actOnWatch, createWatch, deleteWatch, getWatch, getWatchRun,
   listWatchRuns, listWatches, updateWatch,
@@ -14,6 +14,11 @@ function messageOf(reason: unknown) { return reason instanceof Error ? reason.me
 function runLabel(run: WatchRunSummary) {
   if (run.status === "completed") return run.outcome === "baseline" ? "Baseline saved" : run.outcome === "unchanged" ? "Unchanged" : run.outcome === "changed" ? "Changed" : "Completed";
   return { queued: "Queued", running: "Checking", failed: "Failed", cancelled: "Cancelled" }[run.status];
+}
+function runTriggerLabel(run: WatchRunSummary, scheduledLabel = "Scheduled") {
+  if (run.rebaseline) return "Baseline reset";
+  if (run.kind === "catchup") return "Catch-up after downtime";
+  return run.kind === "manual" ? "Run now" : scheduledLabel;
 }
 function mergeWatch(current: PublicWatch[], watch: PublicWatch) {
   const saved = current.find((item) => item.id === watch.id);
@@ -286,6 +291,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
 
   function selectWatch(id: string) {
     externalRead.current?.abort();
+    generation.current += 1;
     setSelectedId(id); setRunId(null); setRun(null); setRuns([]); setFormVisible(false); setError(""); setNotice(""); showDetail();
   }
   function newWatch() {
@@ -294,14 +300,17 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
     setEditing("new"); setFormVisible(true); setConflict(undefined); setError(""); setNotice(""); showDetail();
   }
 
-  async function reloadConflict(id: string) {
+  async function reloadConflict(id: string, expectedGeneration?: number) {
     try {
       const latest = await getWatch(id);
       if (!mounted.current) return;
       setWatches((current) => mergeWatch(current, latest));
+      if (expectedGeneration !== undefined && expectedGeneration !== generation.current) return;
       setConflict(latest);
       setNotice("This watch changed. Review its latest saved state before trying again. Any edit draft is preserved.");
-    } catch (reason) { if (mounted.current) setError(messageOf(reason)); }
+    } catch (reason) {
+      if (mounted.current && (expectedGeneration === undefined || expectedGeneration === generation.current)) setError(messageOf(reason));
+    }
   }
 
   async function save(definition: WatchDefinition, expectedRevision?: number) {
@@ -327,9 +336,12 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
     } finally { busyRef.current = false; if (mounted.current) { setBusy(false); setToken((value) => value + 1); } }
   }
 
-  async function act(watch: PublicWatch, action: "pause" | "resume" | "run" | "delete") {
-    if (busyRef.current || (watch.project && !watch.project.available && (action === "run" || action === "resume"))) return;
-    busyRef.current = true; generation.current += 1; setBusy(true); setError(""); setNotice("");
+  async function act(watch: PublicWatch, action: "pause" | "resume" | "run" | "rebaseline" | "delete") {
+    const startsCheck = action === "run" || action === "rebaseline";
+    if (busyRef.current || (startsCheck && watch.active_run_id) || (watch.project && !watch.project.available && (startsCheck || action === "resume"))) return;
+    if (action === "rebaseline") externalRead.current?.abort();
+    const started = ++generation.current;
+    busyRef.current = true; setBusy(true); setError(""); setNotice("");
     try {
       if (action === "delete") {
         await deleteWatch(watch.id, watch.revision);
@@ -340,12 +352,18 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
         const updated = await actOnWatch(watch.id, action, watch.revision);
         if (!mounted.current) return;
         setWatches((current) => mergeWatch(current, updated));
-        if (action === "run") { setRunId(updated.active_run_id); setRun(null); setNotice("Check queued. The saved schedule is unchanged."); }
+        if (action === "rebaseline") {
+          if (started === generation.current) {
+            setRunId(updated.active_run_id ?? updated.latest_run?.id ?? null);
+            setRun(null);
+            setNotice("Baseline reset check requested.");
+          }
+        } else if (action === "run") { setRunId(updated.active_run_id); setRun(null); setNotice("Check queued. The saved schedule is unchanged."); }
         else setNotice(action === "pause" ? "Watch paused. Queued or running checks cannot publish a result after this change." : "Watch resumed. Its next scheduled check is shown below.");
       }
     } catch (reason) {
-      if (!mounted.current) return;
-      if (reason instanceof ApiError && reason.status === 409) await reloadConflict(watch.id);
+      if (!mounted.current || (action === "rebaseline" && started !== generation.current)) return;
+      if (reason instanceof ApiError && reason.status === 409) await reloadConflict(watch.id, action === "rebaseline" ? started : undefined);
       else setError(messageOf(reason));
     } finally { busyRef.current = false; if (mounted.current) { setBusy(false); setToken((value) => value + 1); } }
   }
@@ -389,9 +407,22 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
               <WatchControls key={`${selected.id}:${selected.revision}:${visible}`} watch={selected} busy={busy} onAction={(action) => void act(selected, action)} onEdit={() => { externalRead.current?.abort(); setFormKey((value) => value + 1); setEditing(selected); setFormVisible(true); setFormProjectRequest(undefined); setConflict(undefined); }} />
             </div>
             <div className="agents-detail-meta"><span className={`agents-status agents-status-${selected.enabled ? "running" : "paused"}`}>{selected.enabled ? "Scheduled" : "Paused"}</span></div>
-            <a href={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a><p>{selected.criterion}</p><WatchProjectView project={selected.project} onOpenProject={onOpenProject} /><p>{scheduleLabel(selected)}</p><p>Next scheduled check: <strong>{timestamp(selected.next_run_at)}</strong></p>{!selected.enabled ? <p>Run now checks this page once and leaves the schedule paused.</p> : null}
+            <a href={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a><p>{selected.criterion}</p><WatchProjectView project={selected.project} onOpenProject={onOpenProject} /><p>{scheduleLabel(selected)}</p><p>Next scheduled check: <strong>{timestamp(selected.next_run_at)}</strong></p>{!selected.enabled ? <p>Run now and Reset baseline each check this page once while the schedule is paused.</p> : null}
           </header>
-          <section className="watch-history" aria-labelledby="watch-history-title"><h3 id="watch-history-title">Check history</h3><p className="watch-help">The first successful check saves a baseline. Later successful checks compare normalized page text; failed checks leave the baseline unchanged. Showing up to 50 recent checks.</p>{runs.length ? <ul>{runs.map((item) => <li key={item.id}><button type="button" aria-pressed={runId === item.id} onClick={() => { setRunId(item.id); setRun(null); }}><strong>{runLabel(item)}</strong><span>{item.kind === "catchup" ? "Catch-up after downtime" : item.kind === "manual" ? "Run now" : "Scheduled"}</span><time dateTime={item.scheduled_at}>{timestamp(item.scheduled_at)}</time></button></li>)}</ul> : <p className="agents-empty">No saved checks yet. Run now to establish a baseline, or wait for the first scheduled check.</p>}</section>
+          <section className="watch-history" aria-labelledby="watch-history-title">
+            <WatchHistoryHeader
+              key={`${selected.id}:${selected.revision}:${visible}:${selected.active_run_id ?? ""}:${selected.project?.available ?? true}`}
+              disabled={busy || Boolean(selected.active_run_id) || selected.project?.available === false}
+              onReset={() => void act(selected, "rebaseline")}
+            />
+            <p className="watch-help">The first successful check saves a baseline. Later successful checks compare normalized page text. Failed checks keep the last valid baseline. Showing up to 50 recent checks.</p>
+            {runs.length ? <ul>{runs.map((item) => <li key={item.id}>
+              <button type="button" aria-pressed={runId === item.id} onClick={() => { setRunId(item.id); setRun(null); }}>
+                <strong>{runLabel(item)}</strong><span>{runTriggerLabel(item)}</span>
+                <time dateTime={item.scheduled_at}>{timestamp(item.scheduled_at)}</time>
+              </button>
+            </li>)}</ul> : <p className="agents-empty">No saved checks yet. Run now to establish a baseline, or wait for the first scheduled check.</p>}
+          </section>
           {run && run.id === runId && run.watch_id === selected.id ? <WatchRunDetail run={run} timestamp={timestamp} onOpenProject={onOpenProject} /> : loadingRun ? <p role="status">Loading saved check…</p> : null}
         </> : <div className="agents-welcome"><span className="agents-welcome-mark" aria-hidden="true">◉</span><h2>Watch history</h2><p>Your saved watches and checks appear here. Create a watch to follow a public page and receive relevant changes in Updates.</p><button className="agents-primary" type="button" onClick={newWatch}>Create a watch</button></div>}
       </div></section>
@@ -410,8 +441,63 @@ function WatchControls({ watch, busy, onAction, onEdit }: { watch: PublicWatch; 
   return <div className="agents-task-actions watch-controls" role="group" aria-label="Watch controls"><button type="button" className="agents-primary" disabled={busy || Boolean(watch.active_run_id) || Boolean(watch.project && !watch.project.available)} onClick={() => onAction("run")}>Run now</button><button type="button" className="agents-secondary" disabled={busy || Boolean(!watch.enabled && watch.project && !watch.project.available)} onClick={() => onAction(watch.enabled ? "pause" : "resume")}>{watch.enabled ? "Pause" : "Resume"}</button><button type="button" className="agents-secondary" disabled={busy} onClick={onEdit}>Edit</button><button type="button" className={`agents-secondary danger-button${confirming ? " confirming-delete" : ""}`} disabled={busy} aria-label={confirming ? "Confirm delete watch" : "Delete watch"} aria-pressed={confirming} title={confirming ? "Click again to delete this watch, snapshots and history." : "Delete watch and history"} onBlur={() => setConfirming(false)} onKeyDown={(event) => { if (event.key === "Escape") setConfirming(false); }} onClick={() => { if (confirming) { setConfirming(false); onAction("delete"); } else setConfirming(true); }}>{confirming ? "✓" : "Delete watch"}</button></div>;
 }
 
+function WatchHistoryHeader({ disabled, onReset }: { disabled: boolean; onReset: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const helpId = useId();
+  useEffect(() => {
+    if (!confirming) return;
+    const reset = () => setConfirming(false);
+    const onVisibilityChange = () => { if (document.visibilityState === "hidden") reset(); };
+    window.addEventListener("blur", reset);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("blur", reset);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [confirming]);
+  return <>
+    <header className="watch-history-header">
+      <h3 id="watch-history-title">Check history</h3>
+      <button
+        type="button"
+        className="agents-secondary"
+        disabled={disabled}
+        aria-describedby={confirming ? helpId : undefined}
+        onBlur={() => setConfirming(false)}
+        onKeyDown={(event) => { if (event.key === "Escape") setConfirming(false); }}
+        onClick={() => {
+          setConfirming(!confirming);
+          if (confirming) onReset();
+        }}
+      >{confirming ? "Confirm baseline reset" : "Reset baseline"}</button>
+    </header>
+    {confirming ? <p id={helpId} className="watch-help">Run a check now and use the page as the new comparison point once the check succeeds.</p> : null}
+  </>;
+}
+
 function WatchRunDetail({ run, timestamp, onOpenProject }: { run: WatchRun; timestamp: (value: string | null) => string; onOpenProject?: (id: string) => void }) {
-  return <section className="watch-run" aria-labelledby="watch-run-title"><h3 id="watch-run-title">{runLabel(run)}</h3><p>{run.kind === "catchup" ? "Catch-up after downtime" : run.kind === "manual" ? "Run now" : "Scheduled check"} · {timestamp(run.scheduled_at)}</p><p>Watch revision {run.watch_revision}{run.completed_at ? ` · Finished ${timestamp(run.completed_at)}` : ""}</p>{run.definition ? <details className="watch-saved-inputs"><summary>Saved check inputs</summary><dl><dt>Title</dt><dd>{run.definition.title}</dd><dt>Public page URL</dt><dd>{run.definition.url}</dd><dt>Change criterion</dt><dd>{run.definition.criterion}</dd><dt>Schedule</dt><dd>{scheduleLabel(run.definition)}</dd><dt>Project at this check</dt><dd><WatchProjectView project={run.definition.project} onOpenProject={onOpenProject} historical /></dd></dl></details> : null}{run.error ? <p className="agents-error" role="alert">{run.error}</p> : null}{run.status === "queued" || run.status === "running" ? <p role="status">This check is {run.status === "queued" ? "queued" : "in progress"}. Saved results will appear here.</p> : null}{run.outcome === "baseline" ? <p>This successful check established the saved baseline for future comparisons.</p> : null}{run.outcome === "unchanged" ? <p>The normalized page text is unchanged. No repeated notification was created.</p> : null}{run.outcome === "changed" ? <p>{run.significant === true ? "The local model found a change relevant to your criterion." : run.significant === false ? "The page changed; the local model did not find a change relevant to your criterion." : "The page changed."}</p> : null}{run.report ? <section><h4>{run.outcome === "changed" ? "Local model assessment" : "Check result"}</h4><p className="watch-plain-text">{run.report}</p></section> : null}{run.diff ? <details className="watch-diff"><summary>Exact normalized text diff</summary><pre>{run.diff}</pre></details> : null}</section>;
+  return <section className="watch-run" aria-labelledby="watch-run-title">
+    <h3 id="watch-run-title">{runLabel(run)}</h3>
+    <p>{runTriggerLabel(run, "Scheduled check")} · {timestamp(run.scheduled_at)}</p>
+    <p>Watch revision {run.watch_revision}{run.completed_at ? ` · Finished ${timestamp(run.completed_at)}` : ""}</p>
+    {run.definition ? <details className="watch-saved-inputs">
+      <summary>Saved check inputs</summary>
+      <dl>
+        <dt>Title</dt><dd>{run.definition.title}</dd>
+        <dt>Public page URL</dt><dd>{run.definition.url}</dd>
+        <dt>Change criterion</dt><dd>{run.definition.criterion}</dd>
+        <dt>Schedule</dt><dd>{scheduleLabel(run.definition)}</dd>
+        <dt>Project at this check</dt><dd><WatchProjectView project={run.definition.project} onOpenProject={onOpenProject} historical /></dd>
+      </dl>
+    </details> : null}
+    {run.error ? <p className="agents-error" role="alert">{run.error}</p> : null}
+    {run.status === "queued" || run.status === "running" ? <p role="status">This check is {run.status === "queued" ? "queued" : "in progress"}. Saved results will appear here.</p> : null}
+    {run.outcome === "baseline" ? <p>This successful check saved {run.rebaseline ? "a new baseline" : "the baseline"} for future comparisons.</p> : null}
+    {run.outcome === "unchanged" ? <p>The normalized page text is unchanged. No repeated notification was created.</p> : null}
+    {run.outcome === "changed" ? <p>{run.significant === true ? "The local model found a change relevant to your criterion." : run.significant === false ? "The page changed; the local model did not find a change relevant to your criterion." : "The page changed."}</p> : null}
+    {run.report ? <section><h4>{run.outcome === "changed" ? "Local model assessment" : "Check result"}</h4><p className="watch-plain-text">{run.report}</p></section> : null}
+    {run.diff ? <details className="watch-diff"><summary>Exact normalized text diff</summary><pre>{run.diff}</pre></details> : null}
+  </section>;
 }
 
 function WatchProjectView({ project, onOpenProject, historical = false }: { project?: WatchProject | null; onOpenProject?: (id: string) => void; historical?: boolean }) {

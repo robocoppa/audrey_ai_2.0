@@ -175,6 +175,35 @@ async def test_manual_paused_run_does_not_resume_schedule_and_concurrent_edit_co
     second.close()
 
 
+async def test_reset_conflicts_with_active_check_and_cancel_keeps_the_prior_baseline(state):
+    repository = state.store.watches
+    watch = await _create(state)
+    first = await _claim(state, watch)
+    await _complete(state, first)
+    ordinary = await _claim(state, watch)
+    with pytest.raises(WatchConflictError, match="current watch check"):
+        await repository.run_now(**_key(state, watch), rebaseline=True)
+    await _complete(state, ordinary, outcome="unchanged")
+
+    queued = await repository.run_now(**_key(state, watch), rebaseline=True)
+    assert queued["enabled"] and queued["next_run_at"] == watch["next_run_at"]
+    assert queued["revision"] == watch["revision"] + 1
+    reset = await repository.claim()
+    assert reset["id"] == queued["active_run_id"] and reset["baseline"] is None
+    assert reset["rebaseline"] is True
+    with pytest.raises(WatchConflictError, match="Watch changed"):
+        await repository.run_now(**_key(state, watch), rebaseline=True)
+
+    edited = await repository.update(**_key(state, queued), enabled=False)
+    with pytest.raises(WatchConflictError):
+        await _complete(state, reset, text="This text must never replace the baseline.")
+    saved = await repository.get_run(user_id=state.owner.user_id, watch_id=watch["id"], run_id=reset["id"])
+    assert saved["status"] == "cancelled" and saved["rebaseline"] is True
+    following = await _claim(state, edited)
+    assert following["baseline"]["run_id"] == ordinary["id"]
+    assert following["rebaseline"] is False
+
+
 async def test_research_and_watch_claims_serialize_per_owner_but_allow_other_owner(state):
     watch = await _create(state)
     run = await _claim(state, watch)

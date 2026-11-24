@@ -155,10 +155,12 @@ class WatchesRepository:
     def _public_run(self, record: dict, *, summary: bool = False) -> dict:
         definition = json.loads(record["definition_json"])
         project_id = definition.pop("project_id", None)
+        rebaseline = definition.pop("rebaseline", False)
         definition["project"] = self._project(record["user_id"], project_id)
         return {
             "id": record["run_id"],
             "definition": definition,
+            "rebaseline": rebaseline is True,
             **{key: record[key] for key in (
                 "watch_id", "watch_revision", "status", "kind", "scheduled_at", "created_at",
                 "updated_at", "completed_at", "attempts", "outcome", "error",
@@ -289,11 +291,15 @@ class WatchesRepository:
             (watch_id,),
         )
 
-    def _enqueue(self, watch: dict, *, kind: str, scheduled_at: str) -> str:
+    def _enqueue(self, watch: dict, *, kind: str, scheduled_at: str, rebaseline: bool = False) -> str:
         run_id, now = str(uuid.uuid4()), _stamp(self._clock())
         definition = {key: watch[key] for key in ("title", "url", "criterion", "schedule")}
         definition["project_id"] = watch["project_id"]
-        baseline = self._baseline(watch["watch_id"])
+        if rebaseline:
+            definition["rebaseline"] = True
+        # A reset skips comparison for this check. Completion replaces the
+        # baseline atomically with the new snapshot, so failure keeps the old one.
+        baseline = None if rebaseline else self._baseline(watch["watch_id"])
         self._conn.execute(
             "INSERT INTO app_watch_runs (run_id,watch_id,user_id,watch_revision,definition_json,"
             "limits_json,baseline_json,kind,scheduled_at,status,available_at,created_at,updated_at) "
@@ -375,6 +381,14 @@ class WatchesRepository:
                 return self._public(self._load(watch_id, user_id))
         return await asyncio.to_thread(work)
 
+    def rebaseline_response(self, *, user_id: str, watch: dict) -> dict:
+        """Return the committed reset and current check state under the same fence."""
+        with self._lock:
+            # A worker can claim or finish the check between enqueue and the
+            # route resuming. Refresh its state, but fence changes to the watch.
+            self.fence_response(user_id=user_id, watches=[{**watch, "latest_run": None}])
+            return self._public(self._load(watch["id"], user_id))
+
     async def update(
         self, *, user_id: str, watch_id: str, expected_revision: int,
         title: Any = _UNSET, url: Any = _UNSET, criterion: Any = _UNSET,
@@ -441,25 +455,42 @@ class WatchesRepository:
             return True
         return await asyncio.to_thread(self._transaction, work)
 
-    async def run_now(self, *, user_id: str, watch_id: str, expected_revision: int) -> dict:
+    async def run_now(
+        self, *, user_id: str, watch_id: str, expected_revision: int, rebaseline: bool = False,
+    ) -> dict:
         _integer(expected_revision, 1, 2**63 - 1)
+        if type(rebaseline) is not bool:
+            raise WatchError("Invalid watch baseline action.")
 
         def work() -> dict:
             watch = self._load(watch_id, user_id)
             if watch["revision"] != expected_revision:
                 raise WatchConflictError("Watch changed. Refresh before trying again.")
             self._require_project(user_id, watch["project_id"])
-            if not self._conn.execute(
+            active = self._conn.execute(
                 "SELECT 1 FROM app_watch_runs WHERE watch_id=? AND status IN ('queued','running')", (watch_id,),
+            ).fetchone()
+            if active:
+                if rebaseline:
+                    raise WatchConflictError("Wait for the current watch check to finish before resetting its baseline.")
+                return self._public(watch)
+
+            stamp = _stamp(self._clock())
+            if rebaseline:
+                # A retry with the same expected revision cannot queue a second
+                # reset, even after the first check has finished.
+                watch.update(revision=watch["revision"] + 1, updated_at=stamp)
+                self._conn.execute(
+                    "UPDATE app_watches SET revision=?,updated_at=? WHERE watch_id=?",
+                    (watch["revision"], stamp, watch_id),
+                )
+            # Microsecond identity also permits deliberate repeated runs with a frozen clock.
+            while self._conn.execute(
+                "SELECT 1 FROM app_watch_runs WHERE watch_id=? AND watch_revision=? "
+                "AND scheduled_at=? AND kind='manual'", (watch_id, watch["revision"], stamp),
             ).fetchone():
-                # Microsecond identity also permits deliberate repeated runs with a frozen clock.
-                stamp = _stamp(self._clock())
-                while self._conn.execute(
-                    "SELECT 1 FROM app_watch_runs WHERE watch_id=? AND watch_revision=? "
-                    "AND scheduled_at=? AND kind='manual'", (watch_id, watch["revision"], stamp),
-                ).fetchone():
-                    stamp = _stamp(dt.datetime.fromisoformat(stamp) + dt.timedelta(microseconds=1))
-                self._enqueue(watch, kind="manual", scheduled_at=stamp)
+                stamp = _stamp(dt.datetime.fromisoformat(stamp) + dt.timedelta(microseconds=1))
+            self._enqueue(watch, kind="manual", scheduled_at=stamp, rebaseline=rebaseline)
             return self._public(watch)
         return await asyncio.to_thread(self._transaction, work)
 
