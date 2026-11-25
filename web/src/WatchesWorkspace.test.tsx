@@ -233,6 +233,39 @@ describe("saved watch controls and history", () => {
     workspace();
     expect(await screen.findByRole("heading", { name: "Check result" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Local model assessment" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Page changes" })).toBeVisible();
+    expect(screen.queryByText("Page changes", { selector: "summary" })).not.toBeInTheDocument();
+    expect(screen.getByText(outcome === "baseline" ? /saved the baseline for future comparisons/ : /page text is unchanged/)).toBeVisible();
+  });
+
+  it("switches saved checks immediately and ignores a late detail response for the previous card", async () => {
+    const first = savedRun({ outcome: "unchanged", report: "First saved check result." });
+    const second = savedRun({ id: "run-2", outcome: "unchanged", report: "Second saved check result." });
+    let finishFirst!: (result: WatchRun) => void;
+    let finishSecond!: (result: WatchRun) => void;
+    vi.mocked(api.listWatchRuns).mockResolvedValue({ items: [first, second] });
+    const getRun = vi.mocked(api.getWatchRun).mockImplementation((_watchId, id) => new Promise((resolve) => {
+      if (id === first.id) finishFirst = resolve;
+      else finishSecond = resolve;
+    }));
+    workspace();
+    expect(await screen.findByText(first.report)).toBeVisible();
+    const firstSignal = getRun.mock.calls[0][2];
+    const history = screen.getByRole("region", { name: "Check history" });
+    const secondCard = within(history).getAllByRole("button", { name: /^Unchanged/ })[1];
+
+    fireEvent.click(secondCard);
+    expect(screen.getByText(second.report)).toBeVisible();
+    expect(screen.queryByText(first.report)).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading saved check…")).not.toBeInTheDocument();
+    expect(firstSignal?.aborted).toBe(true);
+    fireEvent.click(secondCard);
+    expect(screen.getByText(second.report)).toBeVisible();
+
+    await act(async () => finishFirst({ ...first, report: "Late first check response." }));
+    expect(screen.queryByText("Late first check response.")).not.toBeInTheDocument();
+    await act(async () => finishSecond({ ...second, report: "Revalidated second check." }));
+    expect(screen.getByText("Revalidated second check.")).toBeVisible();
   });
 
   it("shows a relevant change using the exact saved before and after excerpts", async () => {

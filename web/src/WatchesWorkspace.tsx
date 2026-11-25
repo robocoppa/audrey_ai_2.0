@@ -64,13 +64,13 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
   const [runs, setRuns] = useState<WatchRun[]>([]);
   const [run, setRun] = useState<WatchRun | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
+  const [runError, setRunError] = useState<{ watchId: string; runId: string; message: string } | null>(null);
   const [editing, setEditing] = useState<PublicWatch | "new" | null>(null);
   const [formVisible, setFormVisible] = useState(false);
   const [formKey, setFormKey] = useState(0);
   const [formProjectRequest, setFormProjectRequest] = useState<typeof composerProjectRequest>();
   const [conflict, setConflict] = useState<PublicWatch>();
   const [loading, setLoading] = useState(true);
-  const [loadingRun, setLoadingRun] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -152,6 +152,13 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
   const activeRunId = selected?.active_run_id;
   const latestRunId = selected?.latest_run?.id;
   const selectedRevision = selected?.revision;
+  const history = runs.filter((item) => item.watch_id === selectedId);
+  // History includes saved check details, so selection can render immediately.
+  // Polling either endpoint may provide a newer version of a running check.
+  const listedRun = history.find((item) => item.id === runId);
+  const fetchedRun = run?.id === runId && run.watch_id === selectedId ? run : null;
+  const selectedRun = fetchedRun && (!listedRun || fetchedRun.updated_at >= listedRun.updated_at) ? fetchedRun : listedRun;
+  const selectedRunError = runError?.watchId === selectedId && runError.runId === runId ? runError.message : null;
   useEffect(() => {
     if (!visible || !selectedId || formActive) return;
     const controller = new AbortController();
@@ -175,17 +182,22 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
 
   useEffect(() => {
     if (!visible || !selectedId || !runId || formActive) return;
+    const watchId = selectedId;
+    const checkId = runId;
     const controller = new AbortController();
     let inFlight = false;
     async function refreshRun() {
       if (inFlight || controller.signal.aborted || document.visibilityState === "hidden") return;
       inFlight = true;
-      setLoadingRun(true);
       try {
-        const saved = await getWatchRun(selectedId!, runId!, controller.signal);
-        if (!controller.signal.aborted) setRun(saved);
-      } catch (reason) { if (!controller.signal.aborted) setError(messageOf(reason)); }
-      finally { inFlight = false; if (!controller.signal.aborted) setLoadingRun(false); }
+        const saved = await getWatchRun(watchId, checkId, controller.signal);
+        if (!controller.signal.aborted) {
+          setRun(saved);
+          setRunError(null);
+        }
+      } catch (reason) {
+        if (!controller.signal.aborted) setRunError({ watchId, runId: checkId, message: messageOf(reason) });
+      } finally { inFlight = false; }
     }
     void refreshRun();
     const timer = activeRunId === runId ? window.setInterval(() => void refreshRun(), 3000) : undefined;
@@ -432,14 +444,18 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
               onReset={() => void act(selected, "rebaseline")}
             />
             <p className="watch-help">The first successful check saves a baseline. Later successful checks compare normalized page text. Failed checks keep the last valid baseline. Showing up to 50 recent checks.</p>
-            {runs.length ? <ul>{runs.map((item) => <li key={item.id}>
-              <button type="button" aria-pressed={runId === item.id} onClick={() => { setRunId(item.id); setRun(null); }}>
+            {history.length ? <ul>{history.map((item) => <li key={item.id}>
+              <button type="button" aria-pressed={runId === item.id} onClick={() => {
+                if (runId === item.id) return;
+                setRunId(item.id);
+                setRunError(null);
+              }}>
                 <strong>{runLabel(item)}</strong><span>{runTriggerLabel(item)}</span>
                 <time dateTime={item.scheduled_at}>{timestamp(item.scheduled_at)}</time>
               </button>
             </li>)}</ul> : <p className="agents-empty">No saved checks yet. Run now to establish a baseline, or wait for the first scheduled check.</p>}
           </section>
-          {run && run.id === runId && run.watch_id === selected.id ? <WatchRunDetail run={run} timestamp={timestamp} onOpenProject={onOpenProject} /> : loadingRun ? <p role="status">Loading saved check…</p> : null}
+          {selectedRunError ? <p className="agents-error" role="alert">{selectedRunError}</p> : selectedRun ? <WatchRunDetail run={selectedRun} timestamp={timestamp} onOpenProject={onOpenProject} /> : null}
         </> : <div className="agents-welcome"><span className="agents-welcome-mark" aria-hidden="true">◉</span><h2>Watch history</h2><p>Your saved watches and checks appear here. Create a watch to follow a public page and receive relevant changes in Updates.</p><button className="agents-primary" type="button" onClick={newWatch}>Create a watch</button></div>}
       </div></section>
     </div>
@@ -508,11 +524,14 @@ function WatchRunDetail({ run, timestamp, onOpenProject }: { run: WatchRun; time
     </details> : null}
     {run.error ? <p className="agents-error" role="alert">{run.error}</p> : null}
     {run.status === "queued" || run.status === "running" ? <p role="status">This check is {run.status === "queued" ? "queued" : "in progress"}. Saved results will appear here.</p> : null}
-    {run.outcome === "baseline" ? <p>This successful check saved {run.rebaseline ? "a new baseline" : "the baseline"} for future comparisons.</p> : null}
-    {run.outcome === "unchanged" ? <p>The normalized page text is unchanged. No repeated notification was created.</p> : null}
     {run.outcome === "changed" ? <p>{run.significant === true ? "The local model found a change relevant to your criterion." : run.significant === false ? "The page changed; the local model did not find a change relevant to your criterion." : "The page changed."}</p> : null}
     {run.report ? <section><h4>{run.outcome === "changed" ? "Local model assessment" : "Check result"}</h4><p className="watch-plain-text">{run.report}</p></section> : null}
-    {run.diff ? <WatchChangeEvidence key={run.id} diff={run.diff} /> : null}
+    {run.diff ? <WatchChangeEvidence key={run.id} diff={run.diff} /> : run.status === "completed" ? <section>
+      <h4>Page changes</h4>
+      {run.outcome === "baseline" ? <p>This successful check saved {run.rebaseline ? "a new baseline" : "the baseline"} for future comparisons.</p>
+        : run.outcome === "unchanged" ? <p>The normalized page text is unchanged. No repeated notification was created.</p>
+        : <p>Comparison excerpts are unavailable for this saved check.</p>}
+    </section> : null}
   </section>;
 }
 

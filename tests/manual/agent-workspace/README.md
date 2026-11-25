@@ -155,5 +155,7 @@ same text, wait briefly and run another manual check.
 Open the changed check and expand **Page changes**. The **Before** and **After**
 excerpts should show the two clock values with the changed passage highlighted.
 The model assessment belongs above the excerpts. A clock change that matches the
-criterion should appear as **Relevant change**. Select the baseline check and
-verify the comparison panel closes. No upload is needed.
+criterion should appear as **Relevant change**. For a **Baseline saved** or
+**Unchanged** check, the **Page changes** heading explains the outcome in place.
+Select a different saved check and verify its details appear without a loading
+message flashing between them. No upload is needed.
