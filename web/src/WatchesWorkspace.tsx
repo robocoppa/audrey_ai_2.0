@@ -397,7 +397,10 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
   }
 
   const refreshWatches = <button className="agents-refresh" type="button" aria-label="Refresh watches" onClick={() => setToken((value) => value + 1)}>Refresh</button>;
-  const errors = <>{error ? <p className="agents-error" role="alert">{error}</p> : null}{notice ? <p className="agents-notice" role="status">{notice}</p> : null}</>;
+  const messages = error || notice ? <div className="watch-detail-messages">
+    {error ? <p className="agents-error" role="alert">{error}</p> : null}
+    {notice ? <p className="agents-notice" role="status">{notice}</p> : null}
+  </div> : null;
   return <section className={`watches-workspace${sidebarTabs ? " watches-workspace-integrated" : ""}`} data-sidebar-open={sidebarOpen} aria-labelledby="watches-title">
     {compact ? <div className="agents-mobile-toolbar" inert={sidebarOpen ? true : undefined}><button className="agents-secondary" type="button" ref={sidebarButton} aria-controls="watches-navigation" aria-expanded={sidebarOpen} onClick={() => setDrawerOpen(true)}>Watch controls</button><span>Page monitoring</span></div> : null}
     {sidebarOpen ? <button className="agents-sidebar-backdrop" type="button" tabIndex={-1} aria-label="Dismiss watch controls" onClick={closeSidebar} /> : null}
@@ -421,7 +424,8 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
           </ul>}
         </div>
       </aside>
-      <section className="watch-detail-scroll" aria-label="Selected watch" tabIndex={0} ref={detail} inert={sidebarOpen ? true : undefined}>{errors}<div className="watch-detail">
+      <section className="watch-detail-scroll" aria-label="Selected watch" tabIndex={0} ref={detail} inert={sidebarOpen ? true : undefined}><div className="watch-detail" data-view={!formActive && selected ? "watch" : undefined}>
+        {messages}
         {formActive ? <button className="agents-secondary watch-back-history" type="button" disabled={busy} onClick={() => {
           setFormVisible(false); setError(""); setNotice(""); showDetail();
           window.requestAnimationFrame(() => detail.current?.focus({ preventScroll: true }));
@@ -434,28 +438,43 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
               <h2 className="workspace-page-title">{selected.title}</h2>
               <WatchControls key={`${selected.id}:${selected.revision}:${visible}`} watch={selected} busy={busy} onAction={(action) => void act(selected, action)} onEdit={() => { externalRead.current?.abort(); setFormKey((value) => value + 1); setEditing(selected); setFormVisible(true); setFormProjectRequest(undefined); setConflict(undefined); }} />
             </div>
-            <div className="agents-detail-meta"><span className={`agents-status agents-status-${selected.enabled ? "running" : "paused"}`}>{selected.enabled ? "Scheduled" : "Paused"}</span></div>
-            <a href={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a><p>{selected.criterion}</p><WatchProjectView project={selected.project} onOpenProject={onOpenProject} /><p>{scheduleLabel(selected)}</p><p>Next scheduled check: <strong>{timestamp(selected.next_run_at)}</strong></p>{!selected.enabled ? <p>Run now and Reset baseline each check this page once while the schedule is paused.</p> : null}
+            <div className="watch-overview">
+              <div className="watch-source">
+                <a href={selected.url} title={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a>
+                <WatchProjectView project={selected.project} onOpenProject={onOpenProject} />
+              </div>
+              <div className="watch-schedule">
+                <span className={`agents-status agents-status-${selected.enabled ? "running" : "paused"}`}>{selected.enabled ? "Scheduled" : "Paused"}</span>
+                <p>{scheduleLabel(selected)}</p>
+                <p>Next scheduled check: <strong>{timestamp(selected.next_run_at)}</strong></p>
+              </div>
+            </div>
+            <p className="watch-criterion" tabIndex={0}>{selected.criterion}</p>
           </header>
-          <section className="watch-history" aria-labelledby="watch-history-title">
-            <WatchHistoryHeader
-              key={`${selected.id}:${selected.revision}:${visible}:${selected.active_run_id ?? ""}:${selected.project?.available ?? true}`}
-              disabled={busy || Boolean(selected.active_run_id) || selected.project?.available === false}
-              onReset={() => void act(selected, "rebaseline")}
-            />
-            <p className="watch-help">The first successful check saves a baseline. Later successful checks compare normalized page text. Failed checks keep the last valid baseline. Showing up to 50 recent checks.</p>
-            {history.length ? <ul>{history.map((item) => <li key={item.id}>
-              <button type="button" aria-pressed={runId === item.id} onClick={() => {
-                if (runId === item.id) return;
-                setRunId(item.id);
-                setRunError(null);
-              }}>
-                <strong>{runLabel(item)}</strong><span>{runTriggerLabel(item)}</span>
-                <time dateTime={item.scheduled_at}>{timestamp(item.scheduled_at)}</time>
-              </button>
-            </li>)}</ul> : <p className="agents-empty">No saved checks yet. Run now to establish a baseline, or wait for the first scheduled check.</p>}
-          </section>
-          {selectedRunError ? <p className="agents-error" role="alert">{selectedRunError}</p> : selectedRun ? <WatchRunDetail run={selectedRun} timestamp={timestamp} onOpenProject={onOpenProject} /> : null}
+          <div className="watch-checks">
+            <section className="watch-history" aria-labelledby="watch-history-title">
+              <WatchHistoryHeader
+                key={`${selected.id}:${selected.revision}:${visible}:${selected.active_run_id ?? ""}:${selected.project?.available ?? true}`}
+                disabled={busy || Boolean(selected.active_run_id) || selected.project?.available === false}
+                onReset={() => void act(selected, "rebaseline")}
+              />
+              {history.length ? <ul aria-label="Saved checks" tabIndex={0}>{history.map((item) => <li key={item.id}>
+                <button type="button" aria-pressed={runId === item.id} onClick={() => {
+                  if (runId === item.id) return;
+                  setRunId(item.id);
+                  setRunError(null);
+                }}>
+                  <strong>{runLabel(item)}</strong><span>{runTriggerLabel(item)}</span>
+                  <time dateTime={item.scheduled_at}>{timestamp(item.scheduled_at)}</time>
+                </button>
+              </li>)}</ul> : <p className="agents-empty">No saved checks yet. Run now to establish a baseline, or wait for the first scheduled check.</p>}
+            </section>
+            <section className="watch-check-panel" aria-label="Selected check" tabIndex={0}>
+              {selectedRunError ? <p className="agents-error" role="alert">{selectedRunError}</p>
+                : selectedRun ? <WatchRunDetail run={selectedRun} timestamp={timestamp} onOpenProject={onOpenProject} />
+                : !history.length ? <p className="agents-empty">Check details appear here after the first check.</p> : null}
+            </section>
+          </div>
         </> : <div className="agents-welcome"><span className="agents-welcome-mark" aria-hidden="true">◉</span><h2>Watch history</h2><p>Your saved watches and checks appear here. Create a watch to follow a public page and receive relevant changes in Updates.</p><button className="agents-primary" type="button" onClick={newWatch}>Create a watch</button></div>}
       </div></section>
     </div>
@@ -510,28 +529,32 @@ function WatchHistoryHeader({ disabled, onReset }: { disabled: boolean; onReset:
 function WatchRunDetail({ run, timestamp, onOpenProject }: { run: WatchRun; timestamp: (value: string | null) => string; onOpenProject?: (id: string) => void }) {
   return <section className="watch-run" aria-labelledby="watch-run-title">
     <h3 id="watch-run-title">{runLabel(run)}</h3>
-    <p>{runTriggerLabel(run, "Scheduled check")} · {timestamp(run.scheduled_at)}</p>
-    <p>Watch revision {run.watch_revision}{run.completed_at ? ` · Finished ${timestamp(run.completed_at)}` : ""}</p>
-    {run.definition ? <details className="watch-saved-inputs">
-      <summary>Saved check inputs</summary>
-      <dl>
-        <dt>Title</dt><dd>{run.definition.title}</dd>
-        <dt>Public page URL</dt><dd>{run.definition.url}</dd>
-        <dt>Change criterion</dt><dd>{run.definition.criterion}</dd>
-        <dt>Schedule</dt><dd>{scheduleLabel(run.definition)}</dd>
-        <dt>Project at this check</dt><dd><WatchProjectView project={run.definition.project} onOpenProject={onOpenProject} historical /></dd>
-      </dl>
-    </details> : null}
-    {run.error ? <p className="agents-error" role="alert">{run.error}</p> : null}
-    {run.status === "queued" || run.status === "running" ? <p role="status">This check is {run.status === "queued" ? "queued" : "in progress"}. Saved results will appear here.</p> : null}
-    {run.outcome === "changed" ? <p>{run.significant === true ? "The local model found a change relevant to your criterion." : run.significant === false ? "The page changed; the local model did not find a change relevant to your criterion." : "The page changed."}</p> : null}
-    {run.report ? <section><h4>{run.outcome === "changed" ? "Local model assessment" : "Check result"}</h4><p className="watch-plain-text">{run.report}</p></section> : null}
-    {run.diff ? <WatchChangeEvidence key={run.id} diff={run.diff} /> : run.status === "completed" ? <section>
-      <h4>Page changes</h4>
-      {run.outcome === "baseline" ? <p>This successful check saved {run.rebaseline ? "a new baseline" : "the baseline"} for future comparisons.</p>
-        : run.outcome === "unchanged" ? <p>The normalized page text is unchanged. No repeated notification was created.</p>
-        : <p>Comparison excerpts are unavailable for this saved check.</p>}
-    </section> : null}
+    <div className="watch-run-meta">
+      <p>{runTriggerLabel(run, "Scheduled check")} · {timestamp(run.scheduled_at)}</p>
+      <p>Watch revision {run.watch_revision}{run.completed_at ? ` · Finished ${timestamp(run.completed_at)}` : ""}</p>
+    </div>
+    <div className="watch-run-body">
+      {run.definition ? <details className="watch-saved-inputs">
+        <summary>Saved check inputs</summary>
+        <dl>
+          <dt>Title</dt><dd>{run.definition.title}</dd>
+          <dt>Public page URL</dt><dd>{run.definition.url}</dd>
+          <dt>Change criterion</dt><dd>{run.definition.criterion}</dd>
+          <dt>Schedule</dt><dd>{scheduleLabel(run.definition)}</dd>
+          <dt>Project at this check</dt><dd><WatchProjectView project={run.definition.project} onOpenProject={onOpenProject} historical /></dd>
+        </dl>
+      </details> : null}
+      {run.error ? <p className="agents-error" role="alert">{run.error}</p> : null}
+      {run.status === "queued" || run.status === "running" ? <p role="status">This check is {run.status === "queued" ? "queued" : "in progress"}. Saved results will appear here.</p> : null}
+      {run.outcome === "changed" ? <p>{run.significant === true ? "The local model found a change relevant to your criterion." : run.significant === false ? "The page changed; the local model did not find a change relevant to your criterion." : "The page changed."}</p> : null}
+      {run.report ? <section><h4>{run.outcome === "changed" ? "Local model assessment" : "Check result"}</h4><p className="watch-plain-text">{run.report}</p></section> : null}
+      {run.diff ? <WatchChangeEvidence key={run.id} diff={run.diff} /> : run.status === "completed" ? <section>
+        <h4>Page changes</h4>
+        {run.outcome === "baseline" ? <p>This successful check saved {run.rebaseline ? "a new baseline" : "the baseline"} for future comparisons.</p>
+          : run.outcome === "unchanged" ? <p>The normalized page text is unchanged. No repeated notification was created.</p>
+          : <p>Comparison excerpts are unavailable for this saved check.</p>}
+      </section> : null}
+    </div>
   </section>;
 }
 
