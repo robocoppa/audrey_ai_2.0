@@ -338,6 +338,12 @@ stays paused. A queued or running check must finish before a reset can be queued
 Each reset is recorded in the run's existing saved definition, with no schema
 migration. See the [interactive baseline check](../../tests/manual/agent-workspace/README.md#resetting-a-watch-baseline).
 
+Changed checks expose **Page changes** with the saved **Before** and **After**
+excerpts. Highlights enclose the changed passage, with surrounding text available
+for context. The history distinguishes **Relevant change** from **Other page
+change** using the saved model judgment. Older saved comparisons remain readable
+as plain text. See the [interactive comparison check](../../tests/manual/agent-workspace/README.md#viewing-watch-page-changes).
+
 Schema 30 unifies agent completion/failure notices and existing watch alerts in
 Agents' Activity inbox. Terminal agent state and its deduplicated notice commit
 together; retries, pauses and cancellations remain silent. Notices contain a

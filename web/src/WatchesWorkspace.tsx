@@ -5,6 +5,7 @@ import {
   type AudreyProject, type PublicWatch, type WatchDefinition, type WatchProject, type WatchRun, type WatchRunSummary,
 } from "./api";
 import { WatchForm } from "./WatchForm";
+import { WatchChangeEvidence } from "./WatchChangeEvidence";
 import { SidebarCreateButton } from "./SidebarCreateButton";
 import { SidebarHeader, SidebarHeading } from "./SidebarHeader";
 import { SidebarItemButton } from "./SidebarItemButton";
@@ -12,8 +13,15 @@ import "./WatchesWorkspace.css";
 
 function messageOf(reason: unknown) { return reason instanceof Error ? reason.message : "The request could not be completed."; }
 function runLabel(run: WatchRunSummary) {
-  if (run.status === "completed") return run.outcome === "baseline" ? "Baseline saved" : run.outcome === "unchanged" ? "Unchanged" : run.outcome === "changed" ? "Changed" : "Completed";
-  return { queued: "Queued", running: "Checking", failed: "Failed", cancelled: "Cancelled" }[run.status];
+  if (run.status !== "completed") {
+    return { queued: "Queued", running: "Checking", failed: "Failed", cancelled: "Cancelled" }[run.status];
+  }
+  if (run.outcome === "changed") {
+    if (run.significant === true) return "Relevant change";
+    if (run.significant === false) return "Other page change";
+    return "Changed";
+  }
+  return run.outcome === "baseline" ? "Baseline saved" : run.outcome === "unchanged" ? "Unchanged" : "Completed";
 }
 function runTriggerLabel(run: WatchRunSummary, scheduledLabel = "Scheduled") {
   if (run.rebaseline) return "Baseline reset";
@@ -504,7 +512,7 @@ function WatchRunDetail({ run, timestamp, onOpenProject }: { run: WatchRun; time
     {run.outcome === "unchanged" ? <p>The normalized page text is unchanged. No repeated notification was created.</p> : null}
     {run.outcome === "changed" ? <p>{run.significant === true ? "The local model found a change relevant to your criterion." : run.significant === false ? "The page changed; the local model did not find a change relevant to your criterion." : "The page changed."}</p> : null}
     {run.report ? <section><h4>{run.outcome === "changed" ? "Local model assessment" : "Check result"}</h4><p className="watch-plain-text">{run.report}</p></section> : null}
-    {run.diff ? <details className="watch-diff"><summary>Exact normalized text diff</summary><pre>{run.diff}</pre></details> : null}
+    {run.diff ? <WatchChangeEvidence key={run.id} diff={run.diff} /> : null}
   </section>;
 }
 

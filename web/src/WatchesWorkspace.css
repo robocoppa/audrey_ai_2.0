@@ -37,6 +37,16 @@
 .watch-saved-inputs dt { color: var(--muted); font-size: 0.72rem; }
 .watch-saved-inputs dd { margin: 0 0 0.45rem; color: var(--text-soft); white-space: pre-wrap; overflow-wrap: anywhere; }
 .watch-diff pre, .watch-conflict pre { max-width: 100%; max-height: 28rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 0.8rem; border: 1px solid var(--border); border-radius: 0.6rem; background: color-mix(in srgb, var(--surface-overlay) 75%, transparent); color: var(--text-soft); font-size: 0.77rem; line-height: 1.6; }
+.watch-diff-excerpts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: var(--space-3); }
+.watch-diff-excerpt { display: flex; flex-direction: column; min-width: 0; margin: 0; gap: var(--space-2); }
+.watch-diff-excerpt figcaption { color: var(--text-soft); font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); }
+.watch-diff-excerpt > pre { flex: 1; max-height: 17rem; margin: 0; padding: var(--space-3); font-family: inherit; }
+.watch-diff pre:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+.watch-diff-excerpt mark { color: var(--text); background: color-mix(in srgb, var(--accent) 24%, transparent); }
+.watch-diff-excerpt[data-side="before"] mark { background: color-mix(in srgb, var(--warning) 22%, transparent); }
+@media (forced-colors: active) {
+  .watch-diff-excerpt mark { text-decoration: underline; }
+}
 .watch-form { display: grid; gap: 0.85rem; max-width: 46rem; }
 .watch-form h2 { margin: 0; font-size: var(--font-size-title); }
 .watch-form > p { margin: 0; color: var(--muted); font-size: 0.82rem; line-height: 1.7; }

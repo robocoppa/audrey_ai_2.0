@@ -235,15 +235,67 @@ describe("saved watch controls and history", () => {
     expect(screen.queryByRole("heading", { name: "Local model assessment" })).not.toBeInTheDocument();
   });
 
-  it("shows exact diff and local assessment as plain text with distinct change outcomes", async () => {
-    const changed = savedRun({ outcome: "changed", significant: false, kind: "catchup", report: "<img src=x onerror=alert(1)> **Not relevant**", diff: "- old text\n+ new text" });
-    vi.mocked(api.listWatchRuns).mockResolvedValue({ items: [changed] }); vi.mocked(api.getWatchRun).mockResolvedValue(changed);
+  it("shows a relevant change using the exact saved before and after excerpts", async () => {
+    const before = "Café 🧪\nSpring plan\nDetails";
+    const after = "Café 🧪\nWinter plan\nDetails";
+    const excerpt = (text: string) => ({ start: 31, end: 31 + Array.from(text).length, text });
+    const evidenceJson = (oldText: string, newText: string) => JSON.stringify({
+      offset_unit: "Unicode characters, zero-based, end-exclusive",
+      coverage: "All changed text is included; surrounding text is context.",
+      old: excerpt(oldText),
+      new: excerpt(newText),
+    });
+    const changed = savedRun({
+      outcome: "changed",
+      significant: true,
+      report: "The seasonal plan changed.",
+      diff: evidenceJson(before, after),
+    });
+    const historic = savedRun({ id: "older-change", outcome: "changed", diff: evidenceJson("Details", "Details\nNew section") });
+    vi.mocked(api.listWatches).mockResolvedValue({ items: [watch({ latest_run: changed })] });
+    vi.mocked(api.listWatchRuns).mockResolvedValue({ items: [changed, historic] });
+    vi.mocked(api.getWatchRun).mockImplementation(async (_, id) => id === historic.id ? historic : changed);
     workspace();
+    expect(await screen.findByRole("heading", { name: "Relevant change" })).toBeVisible();
+    const sidebar = screen.getByRole("button", { name: "Open watch: Release announcements" });
+    expect(within(sidebar).getByText("Relevant change")).toBeVisible();
+    const history = screen.getByRole("region", { name: "Check history" });
+    expect(within(history).getByRole("button", { name: /^Relevant change/ })).toHaveAttribute("aria-pressed", "true");
+    const evidence = screen.getByText("Page changes", { selector: "summary" });
+    expect(evidence.parentElement).not.toHaveAttribute("open");
+    fireEvent.click(evidence);
+    expect(screen.getByText("Before", { exact: true })).toBeVisible();
+    expect(screen.getByText("After", { exact: true })).toBeVisible();
+    expect(screen.getByText("Spring", { selector: "mark" }).closest("pre")?.textContent).toBe(before);
+    expect(screen.getByText("Winter", { selector: "mark" }).closest("pre")?.textContent).toBe(after);
+    fireEvent.click(within(history).getByRole("button", { name: /^Changed/ }));
     expect(await screen.findByRole("heading", { name: "Changed" })).toBeVisible();
+    const olderEvidence = screen.getByText("Page changes", { selector: "summary" });
+    expect(olderEvidence.parentElement).not.toHaveAttribute("open");
+    expect(screen.queryByText("Spring", { selector: "mark" })).not.toBeInTheDocument();
+    fireEvent.click(olderEvidence);
+    const oldExcerpt = screen.getByLabelText("Before excerpt");
+    expect(oldExcerpt).toHaveTextContent("Details");
+    expect(oldExcerpt.querySelector("mark")).toBeNull();
+    expect(screen.getByText("New section", { selector: "mark" })).toBeVisible();
+  });
+
+  it("shows an older diff and local assessment as plain text for other page changes", async () => {
+    const diff = "- old text\n+ <img src=old-diff onerror=alert(1)>";
+    const changed = savedRun({ outcome: "changed", significant: false, kind: "catchup", report: "<img src=x onerror=alert(1)> **Not relevant**", diff });
+    vi.mocked(api.listWatchRuns).mockResolvedValue({ items: [changed] });
+    vi.mocked(api.getWatchRun).mockResolvedValue(changed);
+    workspace();
+    expect(await screen.findByRole("heading", { name: "Other page change" })).toBeVisible();
     expect(screen.getByText(/did not find a change relevant/)).toBeVisible();
-    expect(screen.getByText(changed.report)).toBeVisible(); expect(document.querySelector('img[src="x"]')).toBeNull();
-    expect(screen.getByText(/- old text/, { selector: "pre" })).not.toBeVisible(); fireEvent.click(screen.getByText("Exact normalized text diff", { selector: "summary" }));
-    expect(screen.getByText(/- old text/, { selector: "pre" })).toBeVisible(); expect(screen.getAllByText("Catch-up after downtime").length).toBeGreaterThan(0);
+    expect(screen.getByText(changed.report)).toBeVisible();
+    const savedDiff = screen.getByText(/- old text/, { selector: "pre" });
+    expect(savedDiff).not.toBeVisible();
+    fireEvent.click(screen.getByText("Page changes", { selector: "summary" }));
+    expect(savedDiff).toBeVisible();
+    expect(savedDiff.textContent).toBe(diff);
+    expect(document.querySelector('img[src="x"], img[src="old-diff"]')).toBeNull();
+    expect(screen.getAllByText("Catch-up after downtime").length).toBeGreaterThan(0);
   });
 
   it("runs a paused watch once without changing its saved schedule", async () => {

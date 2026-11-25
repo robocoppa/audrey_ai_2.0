@@ -130,3 +130,30 @@ docker compose up -d --build audrey audrey-ui
 4. Click **Run now**. If the page text has stayed the same, the check should say
    **Unchanged**, and the schedule should still be paused. A page that changed
    between checks is a separate comparison against the new baseline.
+
+## Viewing Watch page changes
+
+After syncing, rebuild the UI on **Tower**.
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey-ui
+```
+
+Open a changed check in **Agents → Watches → Check history**, or create a
+temporary Watch named `UTC clock check` using the
+[public UTC clock](https://www.timeanddate.com/worldclock/timezone/utc).
+Use **Hourly** and the following criterion.
+
+> Notify me whenever the displayed UTC clock time changes. Treat any change to
+> the displayed clock value as relevant.
+
+Pause the Watch and click **Run now** to save a baseline. Wait about ten seconds,
+then click **Run now** again. Wait for the check to finish. If the page returned the
+same text, wait briefly and run another manual check.
+
+Open the changed check and expand **Page changes**. The **Before** and **After**
+excerpts should show the two clock values with the changed passage highlighted.
+The model assessment belongs above the excerpts. A clock change that matches the
+criterion should appear as **Relevant change**. Select the baseline check and
+verify the comparison panel closes. No upload is needed.
