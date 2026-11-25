@@ -1,0 +1,64 @@
+.watch-page-snapshot > summary {
+  padding: var(--space-2) 0;
+  cursor: pointer;
+  color: var(--accent);
+  font-size: var(--font-size-body-sm);
+}
+
+.watch-snapshot-reader {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-2);
+}
+
+.watch-snapshot-toolbar, .watch-snapshot-pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.watch-snapshot-toolbar { justify-content: space-between; }
+
+.watch-snapshot-pagination > button {
+  min-height: var(--control-height-sm);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.watches-workspace .watch-snapshot-pagination > button[aria-disabled="true"] {
+  cursor: default;
+  opacity: var(--opacity-disabled);
+}
+
+.watch-run-body .watch-snapshot-reader .watch-snapshot-source {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+
+.watch-snapshot-reader > pre {
+  min-width: 0;
+  max-height: min(12rem, 30dvh);
+  overflow: auto;
+  scrollbar-width: thin;
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-overlay) 75%, transparent);
+  color: var(--text-soft);
+  font: inherit;
+  font-size: var(--font-size-body-sm);
+  line-height: var(--line-height-reading);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.watch-snapshot-reader > pre:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}

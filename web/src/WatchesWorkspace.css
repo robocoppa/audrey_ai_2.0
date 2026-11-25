@@ -12,16 +12,19 @@
 .watch-detail[data-view="watch"] { display: flex; flex-direction: column; gap: var(--space-3); }
 .watch-detail-messages { display: grid; gap: var(--space-2); }
 .watch-detail-messages > p, .watch-detail[data-view="watch"] > .watch-resume-draft { margin: 0; align-self: flex-start; }
-.watch-detail-header { display: grid; flex: none; min-width: 0; gap: var(--space-2); }
-.watch-overview, .watch-source, .watch-schedule { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); min-width: 0; }
-.watch-overview { justify-content: space-between; }
-.watch-source { flex: 1 1 14rem; }
-.watch-source > a { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-body-sm); color: var(--accent); }
-.watch-source > .watch-project { margin: 0; }
-.watch-schedule { color: var(--muted); font-size: var(--font-size-sm); }
+.agents-detail-toolbar.watch-detail-header { flex: none; align-items: center; gap: var(--space-2) var(--space-3); }
+.watch-heading { display: flex; flex: 1 1 17rem; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); min-width: 0; }
+.watch-heading > h2 { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.watch-schedule { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-width: 0; color: var(--muted); font-size: var(--font-size-sm); }
 .watch-schedule > p { margin: 0; }
 .watch-schedule strong { color: var(--text-soft); }
-.watch-criterion { min-width: 0; max-height: 3rem; overflow-y: auto; margin: 0; color: var(--text-soft); white-space: pre-wrap; font-size: var(--font-size-body); line-height: var(--line-height-ui); }
+.watch-settings { display: grid; flex: none; min-width: 0; padding: var(--space-2) var(--space-3); gap: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); background: color-mix(in srgb, var(--surface-overlay) 38%, transparent); }
+.watch-source, .watch-prompt { min-width: 0; }
+.watch-settings h3 { margin: 0 0 var(--space-1); color: var(--muted); font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); line-height: var(--line-height-ui); }
+.watch-source > a { display: block; width: fit-content; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-body-sm); line-height: var(--line-height-ui); color: var(--accent); }
+.watch-source > .watch-project { margin: var(--space-1) 0 0; }
+.watch-prompt { padding-block-start: var(--space-2); border-block-start: 1px solid var(--border); }
+.watch-criterion { max-height: 3lh; overflow-y: auto; margin: 0; color: var(--text-soft); white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--font-size-body); line-height: var(--line-height-ui); }
 .watch-controls { gap: 0.4rem; }
 .watch-controls button { font-size: 0.76rem; min-height: 2.35rem; padding: var(--space-2) 0.7rem; }
 .watch-project { display: flex; align-items: center; flex-wrap: wrap; gap: 0.55rem; margin: 0.65rem 0; color: var(--text-soft); font-size: var(--font-size-body-sm); }
@@ -82,10 +85,17 @@
 .watch-schedule-preview { color: var(--text-soft); font-size: 0.77rem; line-height: 1.7; }
 .watch-schedule-preview ol { padding-left: 1.3rem; margin-bottom: 0; }
 .watch-conflict { padding: var(--space-4); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); border-radius: var(--radius-button); color: var(--text-soft); font-size: 0.82rem; line-height: 1.7; }
-.watches-workspace button:hover:not(:disabled):not(:where(.sidebar-create-button, .sidebar-section-tabs button, .sidebar-item)) { box-shadow: 0 0 1rem color-mix(in srgb, var(--accent-soft) 10%, transparent); background-color: color-mix(in srgb, var(--accent-soft) 18%, transparent); }
+.watches-workspace button:hover:not(:disabled):not(:where([aria-disabled="true"], .sidebar-create-button, .sidebar-section-tabs button, .sidebar-item)) { box-shadow: 0 0 1rem color-mix(in srgb, var(--accent-soft) 10%, transparent); background-color: color-mix(in srgb, var(--accent-soft) 18%, transparent); }
 .watches-workspace .danger-button:hover:not(:disabled) { background-color: color-mix(in srgb, var(--danger) 12%, transparent); box-shadow: 0 0 1rem color-mix(in srgb, var(--danger) 9%, transparent); }
 .watches-workspace :is(button, input, textarea, select, summary):focus-visible:not(:where(.sidebar-create-button, .sidebar-section-tabs button, .sidebar-item)) { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 .watches-workspace button:disabled:not(:where(.sidebar-create-button, .sidebar-section-tabs button, .sidebar-item)) { cursor: default; opacity: var(--opacity-disabled); }
+@container watch-pane (min-width: 38rem) {
+  .watch-settings { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+  .watch-prompt { padding-block-start: 0; padding-inline-start: var(--space-3); border-block-start: 0; border-inline-start: 1px solid var(--border); }
+}
+@container watch-pane (width < 38rem) {
+  .watch-detail-header .watch-controls { justify-content: flex-start; margin-left: 0; }
+}
 @media (min-height: 36rem) {
   @container watch-pane (min-width: 38rem) {
     .watch-detail[data-view="watch"] { height: 100%; }

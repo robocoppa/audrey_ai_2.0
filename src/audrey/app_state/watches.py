@@ -19,7 +19,10 @@ from audrey.net.public_fetch import _public_ip, parse_public_url
 from audrey.watch_schedule import next_occurrence, normalize_schedule
 
 DEFAULT_LIMITS = {"max_operations": 8, "max_active_seconds": 300}
+WATCH_SOURCE_MAX_BYTES = 64_000
+WATCH_SNAPSHOT_PAGE_LIMIT = 8_000
 _UNSET = object()
+_SNAPSHOT_UNAVAILABLE = "Saved Watch snapshot is unavailable."
 
 
 class WatchError(ValueError):
@@ -649,7 +652,7 @@ class WatchesRepository:
         self, *, run_id: str, lease_token: str, fence: int, outcome: str, significant: bool | None,
         report: str, diff: str, text: str, sha256: str, extraction_version: str, final_url: str,
     ) -> dict:
-        text = _bytes_text(text, 64000, "source text")
+        text = _bytes_text(text, WATCH_SOURCE_MAX_BYTES, "source text")
         report, diff = _bytes_text(report, 16000, "report", empty=True), _bytes_text(diff, 16000, "diff", empty=True)
         extraction_version = _text(extraction_version, 100, "extraction version")
         final_url = normalize_watch_url(final_url)
@@ -755,6 +758,62 @@ class WatchesRepository:
                 return self._public_run(record)
         return await asyncio.to_thread(work)
 
+    def _snapshot_row(
+        self, user_id: str, watch_id: str, run_id: str, *, include_body: bool = False,
+    ) -> sqlite3.Row:
+        # The same query guards the asynchronous read and its final response fence.
+        row = self._conn.execute(
+            "SELECT r.updated_at,CASE WHEN ? THEN s.record_json END AS record_json "
+            "FROM app_watch_runs r JOIN app_watches w ON w.watch_id=r.watch_id "
+            "JOIN app_users u ON u.user_id=w.user_id AND u.user_id=r.user_id "
+            "JOIN app_watch_snapshots s ON s.watch_id=r.watch_id AND s.snapshot_id=r.source_snapshot_id "
+            "AND s.snapshot_id=r.run_id "
+            "WHERE u.user_id=? AND u.status='active' AND r.watch_id=? AND r.run_id=? "
+            "AND r.status='completed' AND r.completed_at IS NOT NULL AND r.outcome IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM account_deletion_requests d WHERE d.user_id=u.user_id)",
+            (include_body, user_id, watch_id, run_id),
+        ).fetchone()
+        if row is None:
+            raise WatchAccessError(_SNAPSHOT_UNAVAILABLE)
+        return row
+
+    async def get_snapshot_page(
+        self, *, user_id: str, watch_id: str, run_id: str, offset: int, limit: int,
+    ) -> tuple[dict, str]:
+        # The UTF-8 storage limit also bounds the maximum Unicode character offset.
+        _integer(offset, 0, WATCH_SOURCE_MAX_BYTES)
+        _integer(limit, 1, WATCH_SNAPSHOT_PAGE_LIMIT)
+
+        def work() -> tuple[dict, str]:
+            with self._lock:
+                row = self._snapshot_row(user_id, watch_id, run_id, include_body=True)
+            try:
+                snapshot = json.loads(row["record_json"])
+                if not isinstance(snapshot, dict) or snapshot.get("run_id") != run_id:
+                    raise ValueError
+                text = _bytes_text(snapshot.get("text"), WATCH_SOURCE_MAX_BYTES, "source text")
+                source_url = snapshot.get("final_url")
+                if (
+                    normalize_watch_url(source_url) != source_url
+                    or _text(snapshot.get("extraction_version"), 100, "extraction version")
+                    != snapshot.get("extraction_version")
+                    or hashlib.sha256(text.encode("utf-8")).hexdigest() != snapshot.get("sha256")
+                ):
+                    raise ValueError
+            except (TypeError, ValueError, RecursionError):
+                raise WatchAccessError(_SNAPSHOT_UNAVAILABLE) from None
+            total_chars = len(text)
+            if offset > total_chars:
+                raise WatchError("Watch snapshot offset is past the end.")
+            end = min(offset + limit, total_chars)
+            return {
+                "watch_id": watch_id, "run_id": run_id, "source_url": source_url, "start": offset,
+                "end": end, "total_chars": total_chars, "next_offset": end if end < total_chars else None,
+                "text": text[offset:end],
+            }, row["updated_at"]
+
+        return await asyncio.to_thread(work)
+
     async def list_notices(self, *, user_id: str, limit: int = 50) -> list[dict]:
         _integer(limit, 1, 50)
 
@@ -796,6 +855,7 @@ class WatchesRepository:
     def fence_response(
         self, *, user_id: str, watches: list[dict] | tuple = (), runs: list[dict] | tuple = (),
         notices: list[dict] | tuple = (), project_id: str | None = None,
+        snapshot: tuple[str, str, str] | None = None,
     ) -> None:
         """Recheck canonical response proofs synchronously after the last await.
 
@@ -825,7 +885,12 @@ class WatchesRepository:
                 raise WatchConflictError("Watch check Project changed. Refresh before trying again.")
 
         with self._lock:
-            self._owner(user_id)
+            if snapshot is None:
+                self._owner(user_id)
+            else:
+                watch_id, run_id, updated_at = snapshot
+                if self._snapshot_row(user_id, watch_id, run_id)["updated_at"] != updated_at:
+                    raise WatchAccessError(_SNAPSHOT_UNAVAILABLE)
             self._require_project(user_id, project_id)
             for payload in watches:
                 row = self._conn.execute(

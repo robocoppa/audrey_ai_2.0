@@ -6,6 +6,7 @@ import {
 } from "./api";
 import { WatchForm } from "./WatchForm";
 import { WatchChangeEvidence } from "./WatchChangeEvidence";
+import { WatchPageSnapshot } from "./WatchPageSnapshot";
 import { SidebarCreateButton } from "./SidebarCreateButton";
 import { SidebarHeader, SidebarHeading } from "./SidebarHeader";
 import { SidebarItemButton } from "./SidebarItemButton";
@@ -433,24 +434,28 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
         {editing ? <div hidden={!formActive}><WatchForm key={formKey} watch={editing === "new" ? undefined : editing} timezone={timezone} busy={busy} conflict={conflict} visible={visible && formActive} projectRequest={formProjectRequest} onSave={save} onCancel={() => { setEditing(null); setFormVisible(false); setFormProjectRequest(undefined); setConflict(undefined); }} /></div> : null}
         {!formActive && editing ? <button className="agents-secondary watch-resume-draft" type="button" disabled={busy} onClick={() => { externalRead.current?.abort(); setFormVisible(true); showDetail(); }}>Resume draft</button> : null}
         {formActive ? null : selected ? <>
-          <header className="watch-detail-header">
-            <div className="agents-detail-toolbar">
+          <header className="agents-detail-toolbar watch-detail-header">
+            <div className="watch-heading">
               <h2 className="workspace-page-title">{selected.title}</h2>
-              <WatchControls key={`${selected.id}:${selected.revision}:${visible}`} watch={selected} busy={busy} onAction={(action) => void act(selected, action)} onEdit={() => { externalRead.current?.abort(); setFormKey((value) => value + 1); setEditing(selected); setFormVisible(true); setFormProjectRequest(undefined); setConflict(undefined); }} />
-            </div>
-            <div className="watch-overview">
-              <div className="watch-source">
-                <a href={selected.url} title={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a>
-                <WatchProjectView project={selected.project} onOpenProject={onOpenProject} />
-              </div>
               <div className="watch-schedule">
                 <span className={`agents-status agents-status-${selected.enabled ? "running" : "paused"}`}>{selected.enabled ? "Scheduled" : "Paused"}</span>
                 <p>{scheduleLabel(selected)}</p>
-                <p>Next scheduled check: <strong>{timestamp(selected.next_run_at)}</strong></p>
+                {selected.enabled ? <p>Next scheduled check: <strong>{timestamp(selected.next_run_at)}</strong></p> : null}
               </div>
             </div>
-            <p className="watch-criterion" tabIndex={0}>{selected.criterion}</p>
+            <WatchControls key={`${selected.id}:${selected.revision}:${visible}`} watch={selected} busy={busy} onAction={(action) => void act(selected, action)} onEdit={() => { externalRead.current?.abort(); setFormKey((value) => value + 1); setEditing(selected); setFormVisible(true); setFormProjectRequest(undefined); setConflict(undefined); }} />
           </header>
+          <section className="watch-settings" aria-label="Watch settings">
+            <div className="watch-source">
+              <h3>Watched site</h3>
+              <a href={selected.url} title={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a>
+              {selected.project ? <WatchProjectView project={selected.project} onOpenProject={onOpenProject} /> : null}
+            </div>
+            <div className="watch-prompt">
+              <h3>Watch prompt</h3>
+              <p className="watch-criterion" tabIndex={0}>{selected.criterion}</p>
+            </div>
+          </section>
           <div className="watch-checks">
             <section className="watch-history" aria-labelledby="watch-history-title">
               <WatchHistoryHeader
@@ -471,7 +476,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
             </section>
             <section className="watch-check-panel" aria-label="Selected check" tabIndex={0}>
               {selectedRunError ? <p className="agents-error" role="alert">{selectedRunError}</p>
-                : selectedRun ? <WatchRunDetail run={selectedRun} timestamp={timestamp} onOpenProject={onOpenProject} />
+                : selectedRun ? <WatchRunDetail run={selectedRun} timestamp={timestamp} onOpenProject={onOpenProject} snapshotVisible={visible && !sidebarOpen} />
                 : !history.length ? <p className="agents-empty">Check details appear here after the first check.</p> : null}
             </section>
           </div>
@@ -526,7 +531,7 @@ function WatchHistoryHeader({ disabled, onReset }: { disabled: boolean; onReset:
   </>;
 }
 
-function WatchRunDetail({ run, timestamp, onOpenProject }: { run: WatchRun; timestamp: (value: string | null) => string; onOpenProject?: (id: string) => void }) {
+function WatchRunDetail({ run, timestamp, onOpenProject, snapshotVisible }: { run: WatchRun; timestamp: (value: string | null) => string; onOpenProject?: (id: string) => void; snapshotVisible: boolean }) {
   return <section className="watch-run" aria-labelledby="watch-run-title">
     <h3 id="watch-run-title">{runLabel(run)}</h3>
     <div className="watch-run-meta">
@@ -554,6 +559,7 @@ function WatchRunDetail({ run, timestamp, onOpenProject }: { run: WatchRun; time
           : run.outcome === "unchanged" ? <p>The normalized page text is unchanged. No repeated notification was created.</p>
           : <p>Comparison excerpts are unavailable for this saved check.</p>}
       </section> : null}
+      {run.status === "completed" && snapshotVisible ? <WatchPageSnapshot key={`${run.watch_id}:${run.id}:${run.updated_at}`} watchId={run.watch_id} runId={run.id} /> : null}
     </div>
   </section>;
 }

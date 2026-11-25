@@ -317,6 +317,9 @@ async def test_snapshots_are_immutable_and_history_retention_preserves_current_b
     watch = await _create(state)
     initial = await _claim(state, watch)
     await _complete(state, initial)
+    snapshot_args = dict(user_id=state.owner.user_id, watch_id=watch["id"], run_id=initial["id"])
+    page, saved_at = await state.store.watches.get_snapshot_page(**snapshot_args, offset=0, limit=7)
+    assert page["text"] == "Version" and page["next_offset"] == 7
     with state.store._lock:
         with pytest.raises(sqlite3.IntegrityError, match="immutable"):
             state.store._conn.execute("UPDATE app_watch_snapshots SET record_json='{}'")
@@ -328,6 +331,12 @@ async def test_snapshots_are_immutable_and_history_retention_preserves_current_b
         await state.store.watches.fail(**_lease(run), error="Unavailable")
     assert len(await state.store.watches.list_runs(user_id=state.owner.user_id, watch_id=watch["id"])) == 50
     assert state.store.watches._baseline(watch["id"])["run_id"] == initial["id"]
+    with pytest.raises(WatchAccessError):
+        await state.store.watches.get_snapshot_page(**snapshot_args, offset=7, limit=7)
+    with pytest.raises(WatchAccessError):
+        state.store.watches.fence_response(
+            user_id=state.owner.user_id, snapshot=(watch["id"], initial["id"], saved_at),
+        )
     notices = await state.store.watches.list_notices(user_id=state.owner.user_id)
     assert len(notices) == 1
     assert (await state.store.watches.get_run(user_id=state.owner.user_id, watch_id=watch["id"],

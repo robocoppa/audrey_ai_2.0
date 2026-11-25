@@ -344,6 +344,13 @@ for context. The history distinguishes **Relevant change** from **Other page
 change** using the saved model judgment. Older saved comparisons remain readable
 as plain text. See the [interactive comparison check](../../tests/manual/agent-workspace/README.md#viewing-watch-page-changes).
 
+**Saved page text** opens the normalized text retained for the selected
+completed check, including baseline and unchanged checks. Audrey reads it in
+pages from that check's immutable snapshot and verifies the owner, check and
+snapshot against current retention before returning it. Opening the viewer
+uses the saved text without checking the live page or calling a model. See the
+[interactive snapshot check](../../tests/manual/agent-workspace/README.md#viewing-saved-watch-page-text).
+
 Schema 30 unifies agent completion/failure notices and existing watch alerts in
 Agents' Activity inbox. Terminal agent state and its deduplicated notice commit
 together; retries, pauses and cancellations remain silent. Notices contain a

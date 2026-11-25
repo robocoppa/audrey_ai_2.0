@@ -12,6 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from audrey.agent_dispatch import AgentDispatchStoppedError
 from audrey.app_state.watches import (
+    WATCH_SNAPSHOT_PAGE_LIMIT,
+    WATCH_SOURCE_MAX_BYTES,
     WatchAccessError,
     WatchConflictError,
     WatchError,
@@ -62,6 +64,17 @@ class WatchRunResponse(WatchRunSummary):
     watch_revision: int
     updated_at: str
     attempts: int
+
+
+class WatchSnapshotPage(BaseModel):
+    watch_id: str
+    run_id: str
+    source_url: str
+    start: int
+    end: int
+    total_chars: int
+    next_offset: int | None
+    text: str
 
 
 class WatchResponse(BaseModel):
@@ -310,6 +323,26 @@ async def get_watch_run(watch_id: str, run_id: str, request: Request, response: 
         run = await _repository(request).get_run(user_id=principal.user_id, watch_id=watch_id, run_id=run_id)
         _fence(request, principal, runs=[run])
         return run
+    except WatchError as error:
+        raise _error(error) from None
+    except (sqlite3.Error, OSError) as error:
+        raise _unavailable(error) from None
+
+
+@router.get("/watches/{watch_id}/runs/{run_id}/snapshot", response_model=WatchSnapshotPage)
+async def get_watch_snapshot(
+    watch_id: str, run_id: str, request: Request, response: Response,
+    offset: int = Query(default=0, ge=0, le=WATCH_SOURCE_MAX_BYTES),
+    limit: int = Query(default=4000, ge=1, le=WATCH_SNAPSHOT_PAGE_LIMIT),
+    principal: Principal = Depends(_access),
+):
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        page, updated_at = await _repository(request).get_snapshot_page(
+            user_id=principal.user_id, watch_id=watch_id, run_id=run_id, offset=offset, limit=limit,
+        )
+        _fence(request, principal, snapshot=(watch_id, run_id, updated_at))
+        return page
     except WatchError as error:
         raise _error(error) from None
     except (sqlite3.Error, OSError) as error:

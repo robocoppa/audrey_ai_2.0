@@ -125,8 +125,8 @@ docker compose up -d --build audrey audrey-ui
 3. Verify history shows **Baseline saved** and **Baseline reset** on the new
    check. Its detail should say the check saved a new baseline. Open
    the prior check from history and verify its result remains available. The
-   Watch should still say **Paused**, with the next check **Not scheduled**, and
-   there should be no change notification for the reset.
+   Watch header should still say **Paused** and the sidebar should show
+   **Next: Not scheduled**. The reset produces no change notification.
 4. Click **Run now**. If the page text has stayed the same, the check should say
    **Unchanged**, and the schedule should still be paused. A page that changed
    between checks is a separate comparison against the new baseline.
@@ -159,3 +159,28 @@ criterion should appear as **Relevant change**. For a **Baseline saved** or
 **Unchanged** check, the **Page changes** heading explains the outcome in place.
 Select a different saved check and verify its details appear without a loading
 message flashing between them. No upload is needed.
+
+## Viewing saved Watch page text
+
+After syncing, rebuild the backend and UI on **Tower**.
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+```
+
+1. Refresh Audrey and open **Agents → Watches**. Select a Watch with a
+   completed **Baseline saved** or **Unchanged** entry in **Check history**.
+2. Select that entry and expand **Saved page text**. Verify that recognizable
+   text from the Watch's page appears below the disclosure. A long page should
+   scroll within the check detail at laptop widths.
+3. If the text spans several pages, use **Next page** and **Previous page**.
+   Verify that the character range advances and then returns with the original
+   text.
+4. Select a different completed check. Open its **Saved page text** and verify
+   that the viewer starts on the first page for that check. The history and
+   next scheduled check should stay the same throughout the test.
+
+Use existing entries for this check. No live fetch, model call, or upload is
+needed. If there is no completed check with retained text, choose **Run now**
+once and wait for a successful result before opening the viewer.

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { actOnWatch, createWatch, deleteWatch, getWatch, getWatchRun, getWatchUnreadCount, listWatchNotifications, listWatchRuns, listWatches, previewWatchSchedule, readWatchNotification, updateWatch, type WatchDefinition } from "./api";
+import { actOnWatch, createWatch, deleteWatch, getWatch, getWatchRun, getWatchRunSnapshot, getWatchUnreadCount, listWatchNotifications, listWatchRuns, listWatches, previewWatchSchedule, readWatchNotification, updateWatch, type WatchDefinition } from "./api";
 afterEach(() => vi.unstubAllGlobals());
 it("keeps watch reads cancellable and mutations revisioned with owner authentication", async () => {
   const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ items: [], occurrences: [] }), { status: 200, headers: { "Content-Type": "application/json" } })); vi.stubGlobal("fetch", fetchMock);
@@ -16,6 +16,15 @@ it("keeps watch reads cancellable and mutations revisioned with owner authentica
   expect(fetchMock).toHaveBeenCalledWith("/api/notifications/unread", expect.objectContaining({ signal, cache: "no-store" }));
   expect(fetchMock).toHaveBeenCalledWith("/api/notifications/notice%20%2F%20one/read", expect.objectContaining({ method: "POST" }));
   for (const [, init] of fetchMock.mock.calls as [string, RequestInit][]) { expect(init.credentials).toBe("same-origin"); expect(init.headers).not.toHaveProperty("Authorization"); }
+});
+
+it("requests one owned snapshot page with the encoded target, offset and cancellation signal", async () => {
+  const page = { watch_id: "watch / one", run_id: "run / one", source_url: "https://example.com/releases", start: 4000, end: 4002, total_chars: 4002, next_offset: null, text: "a🧪" };
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(page), { headers: { "Content-Type": "application/json" } }));
+  vi.stubGlobal("fetch", fetchMock);
+  const signal = new AbortController().signal;
+  expect(await getWatchRunSnapshot(page.watch_id, page.run_id, 4000, signal)).toEqual(page);
+  expect(fetchMock).toHaveBeenCalledExactlyOnceWith("/api/watches/watch%20%2F%20one/runs/run%20%2F%20one/snapshot?offset=4000&limit=4000", expect.objectContaining({ signal, credentials: "same-origin", cache: "no-store" }));
 });
 
 it("filters Project watches without changing legacy list URLs or explicit detach bodies", async () => {

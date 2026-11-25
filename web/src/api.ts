@@ -836,6 +836,19 @@ export interface WatchRun extends WatchRunSummary {
   attempts: number;
 }
 
+export interface WatchRunSnapshotPage {
+  watch_id: string;
+  run_id: string;
+  source_url: string;
+  start: number;
+  end: number;
+  total_chars: number;
+  next_offset: number | null;
+  text: string;
+}
+
+export const WATCH_SNAPSHOT_PAGE_SIZE = 4000;
+
 export interface PublicWatch {
   id: string;
   title: string;
@@ -927,6 +940,11 @@ export function listWatchRuns(id: string, signal?: AbortSignal): Promise<{ items
 
 export function getWatchRun(watchId: string, runId: string, signal?: AbortSignal): Promise<WatchRun> {
   return apiJson(`/api/watches/${encodeURIComponent(watchId)}/runs/${encodeURIComponent(runId)}`, { signal, cache: "no-store" });
+}
+
+export function getWatchRunSnapshot(watchId: string, runId: string, offset: number, signal?: AbortSignal): Promise<WatchRunSnapshotPage> {
+  const query = new URLSearchParams({ offset: String(offset), limit: String(WATCH_SNAPSHOT_PAGE_SIZE) });
+  return apiJson(`/api/watches/${encodeURIComponent(watchId)}/runs/${encodeURIComponent(runId)}/snapshot?${query}`, { signal, cache: "no-store" });
 }
 
 export function listWatchNotifications(signal?: AbortSignal): Promise<{ items: WatchNotification[]; unread_count: number }> {

@@ -8,6 +8,11 @@ import type { AudreyProject, PublicWatch, WatchRun } from "./api";
 function savedRun(patch: Partial<WatchRun> = {}): WatchRun {
   return { id: "run-1", watch_id: "watch-1", watch_revision: 1, status: "completed", outcome: "baseline", kind: "manual", scheduled_at: "2026-10-30T15:00:00Z", created_at: "2026-10-30T15:00:00Z", updated_at: "2026-10-30T15:01:00Z", completed_at: "2026-10-30T15:01:00Z", attempts: 1, report: "", diff: "", significant: null, error: "", ...patch };
 }
+function savedPage(run: WatchRun, text: string, start = 0, totalChars?: number): api.WatchRunSnapshotPage {
+  const end = start + Array.from(text).length;
+  const total = totalChars ?? end;
+  return { watch_id: run.watch_id, run_id: run.id, source_url: "https://example.com/captured", start, end, total_chars: total, next_offset: end === total ? null : end, text };
+}
 function watch(patch: Partial<PublicWatch> = {}): PublicWatch {
   return { id: "watch-1", title: "Release announcements", url: "https://example.com/releases", criterion: "New stable releases", schedule: { kind: "daily", time: "09:00", timezone: "America/Denver" }, enabled: true, revision: 1, next_run_at: "2026-10-31T15:00:00Z", active_run_id: null, latest_run: savedRun(), created_at: "2026-10-30T14:00:00Z", updated_at: "2026-10-30T15:01:00Z", ...patch };
 }
@@ -42,6 +47,12 @@ describe("watch history navigation", () => {
     workspace({ historyRequest: 0 });
     expect(await screen.findByRole("heading", { name: "Release announcements" })).toBeVisible();
     expect(await screen.findByRole("heading", { name: "Check history" })).toBeVisible();
+    const settings = within(screen.getByRole("region", { name: "Watch settings" }));
+    expect(settings.getByRole("heading", { name: "Watched site" })).toBeVisible();
+    expect(settings.getByRole("link", { name: watch().url })).toHaveAttribute("href", watch().url);
+    expect(settings.getByRole("heading", { name: "Watch prompt" })).toBeVisible();
+    expect(settings.getByText(watch().criterion)).toBeVisible();
+    expect(screen.getByText("Next scheduled check:")).toBeVisible();
     expect(screen.getByRole("button", { name: "Open watch: Release announcements" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "New watch" })).toBeVisible();
     expect(screen.queryByRole("form", { name: "Create watch" })).not.toBeInTheDocument();
@@ -369,7 +380,9 @@ describe("saved watch controls and history", () => {
     expect(within(history).getByRole("button", { name: /Baseline saved\s*Baseline reset/ })).toHaveAttribute("aria-pressed", "true");
     expect(within(history).getByRole("button", { name: /Baseline saved\s*Run now/ })).toBeVisible();
     expect(screen.getByRole("button", { name: "Resume" })).toBeVisible();
-    expect(screen.getByText("Next scheduled check:")).toHaveTextContent("Not scheduled");
+    const detail = within(screen.getByRole("region", { name: "Selected watch" }));
+    expect(detail.getByText("Paused", { exact: true })).toBeVisible();
+    expect(detail.queryByText("Next scheduled check:")).not.toBeInTheDocument();
   });
 
   it.each([
@@ -451,6 +464,138 @@ describe("watch activity and visibility", () => {
     workspace({ visible: false, navigationOpen: true, onNavigationOpenChange: change });
     await act(async () => resize({ matches: true } as MediaQueryListEvent));
     expect(change).not.toHaveBeenCalled();
+  });
+});
+
+describe("saved watch page text", () => {
+  it("fetches only when opened and pages through exact Unicode text without rendering markup", async () => {
+    const run = savedRun({ outcome: "unchanged" });
+    vi.mocked(api.listWatchRuns).mockResolvedValue({ items: [run] });
+    vi.mocked(api.getWatchRun).mockResolvedValue(run);
+    const firstText = "a".repeat(3999) + "🧪";
+    const secondText = "<img src=snapshot.invalid />\nCafé 🐢";
+    const total = 4000 + Array.from(secondText).length;
+    const read = vi.spyOn(api, "getWatchRunSnapshot").mockImplementation(async (_, __, offset) => (
+      offset === 0 ? savedPage(run, firstText, 0, total) : savedPage(run, secondText, 4000)
+    ));
+    const action = vi.spyOn(api, "actOnWatch");
+    workspace();
+    const summary = await screen.findByText("Saved page text", { selector: "summary" });
+    expect(summary.parentElement).not.toHaveAttribute("open");
+    expect(read).not.toHaveBeenCalled();
+    fireEvent.click(summary);
+    const first = await screen.findByLabelText("Saved page text");
+    expect(first.textContent).toBe(firstText);
+    expect(screen.getByRole("status")).toHaveTextContent(`Characters 1–4,000 of ${total.toLocaleString()}`);
+    expect(screen.getByText("https://example.com/captured")).toBeVisible();
+    expect(read).toHaveBeenCalledExactlyOnceWith(run.watch_id, run.id, 0, expect.any(AbortSignal));
+
+    const previous = screen.getByRole("button", { name: "Previous page" });
+    const next = screen.getByRole("button", { name: "Next page" });
+    expect(previous).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(next);
+    expect(screen.queryByLabelText("Saved page text")).not.toBeInTheDocument();
+    const second = await screen.findByLabelText("Saved page text");
+    expect(second.textContent).toBe(secondText);
+    expect(second.querySelector("img")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(`Characters 4,001–${total.toLocaleString()} of ${total.toLocaleString()}`);
+    expect(next).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(next);
+    expect(read).toHaveBeenCalledTimes(2);
+    fireEvent.click(previous);
+    expect((await screen.findByLabelText("Saved page text")).textContent).toBe(firstText);
+    expect(read.mock.calls.map(([, , offset]) => offset)).toEqual([0, 4000, 0]);
+    expect(action).not.toHaveBeenCalled();
+  });
+
+  it("aborts a pending page and closes the disclosure when another check is selected", async () => {
+    const firstRun = savedRun();
+    const secondRun = savedRun({ id: "run-2", outcome: "changed" });
+    vi.mocked(api.listWatchRuns).mockResolvedValue({ items: [firstRun, secondRun] });
+    vi.mocked(api.getWatchRun).mockImplementation(async (_, id) => id === firstRun.id ? firstRun : secondRun);
+    let finish!: (page: api.WatchRunSnapshotPage) => void;
+    const read = vi.spyOn(api, "getWatchRunSnapshot").mockImplementation((_watchId, id) => id === firstRun.id
+      ? new Promise((resolve) => { finish = resolve; })
+      : Promise.resolve(savedPage(secondRun, "Second check page.")));
+    workspace();
+    const summary = await screen.findByText("Saved page text", { selector: "summary" });
+    fireEvent.click(summary);
+    expect(await screen.findByText("Loading saved page text…")).toBeVisible();
+    const signal = read.mock.calls[0][3];
+    fireEvent.click(within(screen.getByRole("region", { name: "Check history" })).getByRole("button", { name: /^Changed/ }));
+    expect(signal?.aborted).toBe(true);
+    const nextSummary = screen.getByText("Saved page text", { selector: "summary" });
+    expect(nextSummary.parentElement).not.toHaveAttribute("open");
+    await act(async () => finish(savedPage(firstRun, "Outdated first check page.")));
+    expect(screen.queryByText("Outdated first check page.")).not.toBeInTheDocument();
+    expect(read).toHaveBeenCalledTimes(1);
+    fireEvent.click(nextSummary);
+    expect(await screen.findByText("Second check page.")).toBeVisible();
+  });
+
+  it.each(["close", "hide", "drawer"] as const)("discards the pending page on %s", async (dismiss) => {
+    if (dismiss === "drawer") {
+      vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    }
+    let finish!: (page: api.WatchRunSnapshotPage) => void;
+    const read = vi.spyOn(api, "getWatchRunSnapshot").mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const view = workspace();
+    const summary = await screen.findByText("Saved page text", { selector: "summary" });
+    fireEvent.click(summary);
+    expect(await screen.findByText("Loading saved page text…")).toBeVisible();
+    const signal = read.mock.calls[0][3];
+    if (dismiss === "close") fireEvent.click(summary);
+    if (dismiss === "hide") view.rerender(<WatchesWorkspace visible={false} />);
+    if (dismiss === "drawer") fireEvent.click(screen.getByRole("button", { name: "Watch controls" }));
+    await waitFor(() => expect(signal?.aborted).toBe(true));
+    await act(async () => finish(savedPage(savedRun(), "Discarded page.")));
+    expect(screen.queryByText("Discarded page.")).not.toBeInTheDocument();
+    if (dismiss === "hide") view.rerender(<WatchesWorkspace visible />);
+    if (dismiss === "drawer") fireEvent.click(screen.getByRole("button", { name: "Close watch controls" }));
+    expect(screen.getByText("Saved page text", { selector: "summary" }).parentElement).not.toHaveAttribute("open");
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows unavailable and recoverable errors without showing a body or offering text for a failed check", async () => {
+    const failed = savedRun({ id: "failed", status: "failed", outcome: null });
+    vi.mocked(api.listWatchRuns).mockResolvedValue({ items: [savedRun(), failed] });
+    vi.mocked(api.getWatchRun).mockImplementation(async (_, id) => id === failed.id ? failed : savedRun());
+    const read = vi.spyOn(api, "getWatchRunSnapshot")
+      .mockRejectedValueOnce(new api.ApiError(404, "Internal storage error detail"))
+      .mockRejectedValueOnce(new api.ApiError(503, "Internal storage error detail"))
+      .mockResolvedValueOnce(savedPage(savedRun(), "Recovered page."));
+    workspace();
+    const summary = await screen.findByText("Saved page text", { selector: "summary" });
+    fireEvent.click(summary);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Saved page text is unavailable for this check.");
+    expect(screen.queryByText("Internal storage error detail")).not.toBeInTheDocument();
+    fireEvent.click(summary);
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    fireEvent.click(summary);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load saved page text. Close and reopen to try again.");
+    fireEvent.click(summary);
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    fireEvent.click(summary);
+    expect(await screen.findByText("Recovered page.")).toBeVisible();
+    fireEvent.click(within(screen.getByRole("region", { name: "Check history" })).getByRole("button", { name: /^Failed/ }));
+    expect(screen.queryByText("Saved page text", { selector: "summary" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Saved page text")).not.toBeInTheDocument();
+    expect(read).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    { run_id: "other-run" },
+    { next_offset: 0, total_chars: 6000 },
+    { end: 4000, total_chars: 4000 },
+    { total_chars: null },
+  ])("rejects an inconsistent response without rendering its text", async (override) => {
+    const page = { ...savedPage(savedRun(), "Unverified text."), ...override } as api.WatchRunSnapshotPage;
+    vi.spyOn(api, "getWatchRunSnapshot").mockResolvedValue(page);
+    workspace();
+    fireEvent.click(await screen.findByText("Saved page text", { selector: "summary" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load saved page text.");
+    expect(screen.queryByText("Unverified text.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Next page" })).not.toBeInTheDocument();
   });
 });
 

@@ -59,6 +59,17 @@ async def _action(state, watch, action, **changes):
     })
 
 
+async def _complete_snapshot(state, claimed, *, text, final_url):
+    repository = state.store.watches
+    lease = {key: claimed[key] for key in ("run_id", "lease_token", "fence")}
+    await repository.reserve_operation(**lease, kind="fetch")
+    return await repository.complete(
+        **lease, text=text, sha256=hashlib.sha256(text.encode()).hexdigest(),
+        final_url=final_url, extraction_version="test-v1", outcome="baseline",
+        significant=None, report="Source check complete.", diff="",
+    )
+
+
 async def test_create_schedules_future_without_running_and_retries_idempotently(watches):
     created = await _create(watches)
     assert created.status_code == 201, created.text
@@ -290,6 +301,7 @@ async def test_all_watch_routes_require_sign_in(watches):
         ("GET", "/api/notifications/unread", None),
         ("POST", "/api/watches/preview", {"schedule": {"kind": "interval", "interval_minutes": 60, "timezone": "UTC"}}),
         ("GET", "/api/watches/missing/runs", None), ("POST", "/api/notifications/missing/read", None),
+        ("GET", "/api/watches/missing/runs/missing/snapshot", None),
     ):
         assert (await watches.client.request(method, path, json=body)).status_code == 401
 
@@ -317,17 +329,24 @@ async def test_saved_watch_results_and_notices_link_to_exact_owned_run(watches):
     runtime = WatchRuntime(watches.store.watches, execute)
     expected = ("baseline", "unchanged", "changed")
     run_ids = []
+    run_texts = []
     for outcome in expected:
         if outcome == "changed":
             source[0] = "Local model support: expanded."
         queued = (await _action(watches, watch, "run")).json()
         run_ids.append(queued["active_run_id"])
+        run_texts.append(source[0])
         assert await runtime.run_once()
         detail = (await watches.client.get(f"/api/watches/{watch['id']}/runs/{run_ids[-1]}")).json()
         assert detail["status"] == "completed" and detail["outcome"] == outcome
         assert detail["significant"] is (True if outcome == "changed" else None)
     history = (await watches.client.get(f"/api/watches/{watch['id']}/runs")).json()["items"]
     assert [run["outcome"] for run in history] == list(reversed(expected))
+    for run_id, saved_text in zip(run_ids, run_texts, strict=True):
+        response = await watches.client.get(f"/api/watches/{watch['id']}/runs/{run_id}/snapshot")
+        assert response.status_code == 200
+        assert response.json()["text"] == saved_text
+        assert response.json()["next_offset"] is None
     notices = (await watches.client.get("/api/notifications")).json()
     assert notices["unread_count"] == 1 and len(notices["items"]) == 1
     assert (await watches.client.get("/api/notifications/unread")).json() == {"unread_count": 1}
@@ -356,6 +375,104 @@ async def test_activity_uses_one_canonical_feed_without_awaiting_a_later_count(w
     assert response.status_code == 200 and response.json() == {"items": [], "unread_count": 0}
 
 
+async def test_snapshot_paginates_saved_unicode_and_keeps_its_final_url(watches):
+    watch = (await _create(watches, enabled=False)).json()
+    queued = (await _action(watches, watch, "run")).json()
+    run_id = queued["active_run_id"]
+    saved_text = "a" * 3999 + "🌲" + "cafe\u0301" * 900 + "\nFinal text."
+    final_url = "https://example.com/canonical-release-notes"
+    claimed = await watches.store.watches.claim()
+    await _complete_snapshot(watches, claimed, text=saved_text, final_url=final_url)
+    edited = await watches.client.patch(f"/api/watches/{watch['id']}", json={
+        "expected_revision": watch["revision"], "url": "https://example.com/new-source",
+    })
+    assert edited.status_code == 200, edited.text
+
+    path = f"/api/watches/{watch['id']}/runs/{run_id}/snapshot"
+    first = await watches.client.get(path)
+    assert first.status_code == 200
+    assert first.headers["cache-control"] == "private, no-store"
+    assert first.json() == {
+        "watch_id": watch["id"], "run_id": run_id, "source_url": final_url,
+        "start": 0, "end": 4000, "total_chars": len(saved_text), "next_offset": 4000,
+        "text": saved_text[:4000],
+    }
+    second = await watches.client.get(path, params={"offset": 4000})
+    assert second.status_code == 200
+    assert second.json()["text"] == saved_text[4000:8000] and second.json()["next_offset"] == 8000
+    last = await watches.client.get(path, params={"offset": 8000})
+    assert last.status_code == 200
+    assert last.json()["text"] == saved_text[8000:] and last.json()["next_offset"] is None
+    assert last.json()["end"] == len(saved_text)
+    eof = await watches.client.get(path, params={"offset": len(saved_text)})
+    assert eof.status_code == 200 and eof.json()["text"] == ""
+    assert eof.json()["start"] == eof.json()["end"] == len(saved_text)
+    for params in ({"offset": len(saved_text) + 1}, {"offset": -1}, {"offset": 64001}, {"limit": 8001}, {"limit": 0}):
+        error = await watches.client.get(path, params=params)
+        assert error.status_code == 422 and "Final text" not in error.text
+
+
+async def test_snapshot_fences_wrong_run_owner_and_unavailable_checks(watches):
+    watch = (await _create(watches, enabled=False)).json()
+    other_watch = (await _create(watches, enabled=False, request_id="other")).json()
+    queued = (await _action(watches, watch, "run")).json()
+    path = f"/api/watches/{watch['id']}/runs/{queued['active_run_id']}/snapshot"
+    missing = await watches.client.get(path)
+    assert missing.status_code == 404
+    claimed = await watches.store.watches.claim()
+    assert (await watches.client.get(path)).json() == missing.json()
+    await _complete_snapshot(watches, claimed, text="Old owned page.", final_url=watch["url"])
+    assert (await watches.client.get(path)).status_code == 200
+    assert (await watches.client.get(path.replace(watch["id"], other_watch["id"]))).json() == missing.json()
+    watches.current[0] = watches.owners[1]
+    assert (await watches.client.get(path)).json() == missing.json()
+    watches.current[0] = watches.owners[0]
+
+    failed_watch = (await _action(watches, watch, "run")).json()
+    failed_path = f"/api/watches/{watch['id']}/runs/{failed_watch['active_run_id']}/snapshot"
+    claimed = await watches.store.watches.claim()
+    await watches.store.watches.fail(
+        **{key: claimed[key] for key in ("run_id", "lease_token", "fence")}, error="Page unavailable.",
+    )
+    # Failed runs still have a captured baseline, which the snapshot route must never serve.
+    assert (await watches.client.get(failed_path)).json() == missing.json()
+    with watches.store._lock, watches.store._conn:
+        watches.store._conn.execute(
+            "UPDATE app_watch_runs SET source_snapshot_id=NULL WHERE run_id=?", (queued["active_run_id"],),
+        )
+    assert (await watches.client.get(path)).json() == missing.json()
+
+
+@pytest.mark.parametrize("remove", ["watch", "user_data", "owner_disabled"])
+async def test_snapshot_revocation_between_read_and_response_hides_saved_text(watches, monkeypatch, remove):
+    watch = (await _create(watches, enabled=False)).json()
+    queued = (await _action(watches, watch, "run")).json()
+    repository = watches.store.watches
+    await _complete_snapshot(
+        watches, await repository.claim(), text="Saved page text must disappear.", final_url=watch["url"],
+    )
+    original = repository.get_snapshot_page
+
+    async def revoke_after_read(**kwargs):
+        page = await original(**kwargs)
+        if remove == "watch":
+            await repository.delete(
+                user_id=watches.owners[0].user_id, watch_id=watch["id"], expected_revision=watch["revision"],
+            )
+        elif remove == "user_data":
+            await watches.store.purge_local_user_data(user_id=watches.owners[0].user_id)
+        else:
+            with watches.store._lock, watches.store._conn:
+                watches.store._conn.execute(
+                    "UPDATE app_users SET status='disabled' WHERE user_id=?", (watches.owners[0].user_id,),
+                )
+        return page
+
+    monkeypatch.setattr(repository, "get_snapshot_page", revoke_after_read)
+    response = await watches.client.get(f"/api/watches/{watch['id']}/runs/{queued['active_run_id']}/snapshot")
+    assert response.status_code == 404 and "Saved page text" not in response.text
+
+
 async def test_historical_check_keeps_its_saved_url_and_criterion_after_watch_edit(watches):
     watch = (await _create(watches, enabled=False)).json()
     queued = (await _action(watches, watch, "run")).json()
@@ -368,6 +485,8 @@ async def test_historical_check_keeps_its_saved_url_and_criterion_after_watch_ed
     assert historical.status_code == 200
     assert historical.json()["definition"] == {key: watch[key] for key in ("title", "url", "criterion", "schedule", "project")}
     assert historical.json()["status"] == "cancelled"
+    snapshot = await watches.client.get(f"/api/watches/{watch['id']}/runs/{queued['active_run_id']}/snapshot")
+    assert snapshot.status_code == 404
 
 
 @pytest.mark.parametrize("method_name,path_template,http_method", [
