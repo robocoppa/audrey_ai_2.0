@@ -1,4 +1,4 @@
-"""Lifecycle-owned, leased checks of explicit saved public-page watches."""
+"""Lifecycle-owned, leased checks of saved watches."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from audrey.watch_executor import WatchCheckError
 
 logger = logging.getLogger(__name__)
 WatchCheckExecutor = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+WatchProjectFilesExecutor = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class WatchRuntime:
@@ -22,6 +23,7 @@ class WatchRuntime:
 
     def __init__(
         self, repository: Any, executor: WatchCheckExecutor, *,
+        project_files_executor: WatchProjectFilesExecutor | None = None,
         poll_seconds: float = 10.0, lease_seconds: int = 60, max_attempts: int = 3,
         check_timeout_seconds: float = 100.0, run_limits: dict[str, int] | None = None,
     ) -> None:
@@ -43,6 +45,7 @@ class WatchRuntime:
         ):
             raise ValueError("Invalid watch run limits.")
         self.repository, self.executor = repository, executor
+        self.project_files_executor = project_files_executor
         self.poll_seconds, self.lease_seconds = poll_seconds, lease_seconds
         self.max_attempts, self.check_timeout_seconds = max_attempts, check_timeout_seconds
         self.run_limits = dict(run_limits) if run_limits is not None else None
@@ -131,6 +134,11 @@ class WatchRuntime:
     async def _execute(self, run: dict[str, Any]) -> None:
         lease = self._lease(run)
         await self.repository.validate_lease(**lease)
+        if run.get("source_kind") == "project_files":
+            if self.project_files_executor is None:
+                raise AgentDispatchStoppedError("Project file watches are unavailable.")
+            await self.project_files_executor(run)
+            return
         result = await self.executor(run)
         if not isinstance(result, dict) or result.keys() != {
             "outcome", "significant", "report", "diff", "text", "sha256",

@@ -92,7 +92,7 @@ def validate_watch_url(value: str) -> str:
     return str(url)
 
 
-async def watch_authority(app: Any, user_id: str) -> Any:
+async def watch_authority(app: Any, user_id: str, *, require_model: bool = True) -> Any:
     store = app.state.application_store
     principal = await store.get_principal(user_id=user_id)
     if (
@@ -106,8 +106,9 @@ async def watch_authority(app: Any, user_id: str) -> Any:
         or not agent_settings(app).enabled
         or current_processing_policy() is not None
     ):
-        raise AgentDispatchStoppedError("Public page watches are unavailable.")
-    if await resolve_model(app.state.cfg, store, principal, "local") is None:
+        source = "Public page" if require_model else "Project file"
+        raise AgentDispatchStoppedError(f"{source} watches are unavailable.")
+    if require_model and await resolve_model(app.state.cfg, store, principal, "local") is None:
         raise AgentDispatchStoppedError("Local model access is unavailable.")
     return principal
 
@@ -177,13 +178,20 @@ def evidence_diff(old: str, new: str) -> str:
 
 
 class WatchExecutor:
-    """Fetch one explicit URL; call verified local Qwen only for changed text."""
+    """Check Project file membership locally or assess a saved public page."""
 
     def __init__(self, app: Any, *, client_factory=None, resolver=None, fetcher=None) -> None:
         self.app = app
         self.client_factory = client_factory or OllamaClient
         self.resolver = resolver or resolve_public_url
         self.fetcher = fetcher or fetch_public_asset
+
+    async def complete_project_files(self, run: dict[str, Any]) -> None:
+        await watch_authority(self.app, run["user_id"], require_model=False)
+        # The repository reads membership and rechecks the lease and Project in
+        # the same transaction that publishes the check.
+        lease = {key: run[key] for key in ("run_id", "lease_token", "fence")}
+        await self.app.state.application_store.watches.complete_project_files(**lease)
 
     async def __call__(self, run: dict[str, Any]) -> dict[str, Any]:
         repository = self.app.state.application_store.watches

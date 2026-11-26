@@ -11,7 +11,7 @@
   gap: var(--space-2);
 }
 
-.watch-snapshot-toolbar, .watch-snapshot-pagination {
+.watch-snapshot-find, .watch-snapshot-toolbar, .watch-snapshot-pagination {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -20,13 +20,26 @@
 
 .watch-snapshot-toolbar { justify-content: space-between; }
 
-.watch-snapshot-pagination > button {
+.watch-snapshot-find > input {
+  flex: 1 1 9rem;
+  min-width: 0;
+  min-height: var(--control-height-sm);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--input-surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-size-body-sm);
+}
+
+.watch-snapshot-find > button, .watch-snapshot-pagination > button {
   min-height: var(--control-height-sm);
   padding: var(--space-1) var(--space-2);
   font-size: var(--font-size-sm);
 }
 
-.watches-workspace .watch-snapshot-pagination > button[aria-disabled="true"] {
+.watch-snapshot-reader button[aria-disabled="true"] {
   cursor: default;
   opacity: var(--opacity-disabled);
 }
@@ -61,4 +74,14 @@
 .watch-snapshot-reader > pre:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
+}
+
+.watch-snapshot-reader mark {
+  color: var(--text);
+  background: color-mix(in srgb, var(--warning) 32%, var(--surface-overlay));
+  font-weight: var(--font-weight-semibold);
+}
+
+@media (forced-colors: active) {
+  .watch-snapshot-reader mark { text-decoration: underline; }
 }

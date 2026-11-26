@@ -407,9 +407,11 @@ async def lifespan(app: FastAPI):
     app.state.agent_runtime = agent_runtime
 
     saved_watch_settings = watch_settings(app)
+    watch_executor = WatchExecutor(app)
     watch_runtime = WatchRuntime(
         application_store.watches,
-        WatchExecutor(app),
+        watch_executor,
+        project_files_executor=watch_executor.complete_project_files,
         poll_seconds=saved_watch_settings.poll_seconds,
         lease_seconds=saved_watch_settings.lease_seconds,
         max_attempts=saved_watch_settings.max_attempts,

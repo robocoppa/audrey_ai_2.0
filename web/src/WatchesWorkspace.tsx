@@ -18,6 +18,7 @@ function runLabel(run: WatchRunSummary) {
     return { queued: "Queued", running: "Checking", failed: "Failed", cancelled: "Cancelled" }[run.status];
   }
   if (run.outcome === "changed") {
+    if (run.definition?.source_kind === "project_files") return "Files changed";
     if (run.significant === true) return "Relevant change";
     if (run.significant === false) return "Other page change";
     return "Changed";
@@ -95,6 +96,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
   const formActive = Boolean(editing && formVisible);
   const hasScheduled = watches.some((watch) => watch.enabled || watch.active_run_id);
   const selected = watches.find((watch) => watch.id === selectedId);
+  const projectFiles = selected?.source_kind === "project_files";
   const sidebarOpen = visible && compact && (navigationOpen ?? drawerOpen);
   const setDrawerOpen = useCallback((open: boolean) => {
     setInternalDrawerOpen(open);
@@ -403,7 +405,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
     {notice ? <p className="agents-notice" role="status">{notice}</p> : null}
   </div> : null;
   return <section className={`watches-workspace${sidebarTabs ? " watches-workspace-integrated" : ""}`} data-sidebar-open={sidebarOpen} aria-labelledby="watches-title">
-    {compact ? <div className="agents-mobile-toolbar" inert={sidebarOpen ? true : undefined}><button className="agents-secondary" type="button" ref={sidebarButton} aria-controls="watches-navigation" aria-expanded={sidebarOpen} onClick={() => setDrawerOpen(true)}>Watch controls</button><span>Page monitoring</span></div> : null}
+    {compact ? <div className="agents-mobile-toolbar" inert={sidebarOpen ? true : undefined}><button className="agents-secondary" type="button" ref={sidebarButton} aria-controls="watches-navigation" aria-expanded={sidebarOpen} onClick={() => setDrawerOpen(true)}>Watch controls</button><span>Monitoring</span></div> : null}
     {sidebarOpen ? <button className="agents-sidebar-backdrop" type="button" tabIndex={-1} aria-label="Dismiss watch controls" onClick={closeSidebar} /> : null}
     <div className="watch-columns">
       <aside className="watch-sidebar" id="watches-navigation" ref={sidebar} aria-label="Saved watches" role={compact ? "dialog" : undefined} aria-modal={sidebarOpen ? true : undefined} aria-hidden={compact && !sidebarOpen ? true : undefined} inert={compact && !sidebarOpen ? true : undefined}>
@@ -411,9 +413,9 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
         <SidebarHeader action={<SidebarCreateButton disabled={busy} onClick={newWatch}>New watch</SidebarCreateButton>}>{sidebarTabs}</SidebarHeader>
         {!compact ? <SidebarHeading id="watches-title" level={1} action={refreshWatches}>Watches</SidebarHeading> : null}
         <div className="watch-sidebar-scroll">
-          <p className="watch-help">Scheduled checks continue while you’re away. Only public pages are supported.</p>
+          <p className="watch-help">Scheduled checks continue while you’re away.</p>
           {compact ? refreshWatches : null}
-          {loading ? <p role="status">Loading watches…</p> : !watches.length ? <p className="agents-empty">No watches yet. Create one to follow a public page.</p> : <ul className="agents-task-list">
+          {loading ? <p role="status">Loading watches…</p> : !watches.length ? <p className="agents-empty">No watches yet. Create one to follow a public page or Project files.</p> : <ul className="agents-task-list">
             {watches.map((watch) => <li key={watch.id}>
               <SidebarItemButton className="agents-task-card" aria-pressed={!formActive && selectedId === watch.id} onClick={() => selectWatch(watch.id)} aria-label={`Open watch: ${watch.title}`}>
                 <span className={`agents-status agents-status-${watch.enabled ? "running" : "paused"}`}>{watch.enabled ? "Scheduled" : "Paused"}</span>
@@ -435,7 +437,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
         {!formActive && editing ? <button className="agents-secondary watch-resume-draft" type="button" disabled={busy} onClick={() => { externalRead.current?.abort(); setFormVisible(true); showDetail(); }}>Resume draft</button> : null}
         {formActive ? null : selected ? <>
           <header className="agents-detail-toolbar watch-detail-header">
-            <div className="watch-heading">
+            <div className="agents-detail-heading">
               <h2 className="workspace-page-title">{selected.title}</h2>
               <div className="watch-schedule">
                 <span className={`agents-status agents-status-${selected.enabled ? "running" : "paused"}`}>{selected.enabled ? "Scheduled" : "Paused"}</span>
@@ -445,14 +447,14 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
             </div>
             <WatchControls key={`${selected.id}:${selected.revision}:${visible}`} watch={selected} busy={busy} onAction={(action) => void act(selected, action)} onEdit={() => { externalRead.current?.abort(); setFormKey((value) => value + 1); setEditing(selected); setFormVisible(true); setFormProjectRequest(undefined); setConflict(undefined); }} />
           </header>
-          <section className="watch-settings" aria-label="Watch settings">
+          <section className="agents-detail-summary watch-settings" aria-label="Watch settings">
             <div className="watch-source">
-              <h3>Watched site</h3>
-              <a href={selected.url} title={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a>
-              {selected.project ? <WatchProjectView project={selected.project} onOpenProject={onOpenProject} /> : null}
+              <h3>{projectFiles ? "Watched Project files" : "Watched site"}</h3>
+              {!projectFiles && selected.url ? <a href={selected.url} title={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a> : null}
+              {selected.project ? <WatchProjectView project={selected.project} onOpenProject={onOpenProject} fixedProject={projectFiles} /> : null}
             </div>
             <div className="watch-prompt">
-              <h3>Watch prompt</h3>
+              <h3>{projectFiles ? "Changes tracked" : "Watch prompt"}</h3>
               <p className="watch-criterion" tabIndex={0}>{selected.criterion}</p>
             </div>
           </section>
@@ -480,7 +482,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
                 : !history.length ? <p className="agents-empty">Check details appear here after the first check.</p> : null}
             </section>
           </div>
-        </> : <div className="agents-welcome"><span className="agents-welcome-mark" aria-hidden="true">◉</span><h2>Watch history</h2><p>Your saved watches and checks appear here. Create a watch to follow a public page and receive relevant changes in Updates.</p><button className="agents-primary" type="button" onClick={newWatch}>Create a watch</button></div>}
+        </> : <div className="agents-welcome"><span className="agents-welcome-mark" aria-hidden="true">◉</span><h2>Watch history</h2><p>Create a watch to follow a public page or Project files. Changes appear in Updates.</p><button className="agents-primary" type="button" onClick={newWatch}>Create a watch</button></div>}
       </div></section>
     </div>
   </section>;
@@ -527,11 +529,13 @@ function WatchHistoryHeader({ disabled, onReset }: { disabled: boolean; onReset:
         }}
       >{confirming ? "Confirm baseline reset" : "Reset baseline"}</button>
     </header>
-    {confirming ? <p id={helpId} className="watch-help">Run a check now and use the page as the new comparison point once the check succeeds.</p> : null}
+    {confirming ? <p id={helpId} className="watch-help">Run a check now. Its result becomes the new comparison point once the check succeeds.</p> : null}
   </>;
 }
 
 function WatchRunDetail({ run, timestamp, onOpenProject, snapshotVisible }: { run: WatchRun; timestamp: (value: string | null) => string; onOpenProject?: (id: string) => void; snapshotVisible: boolean }) {
+  const projectFiles = run.definition?.source_kind === "project_files";
+  const reportTitle = run.outcome === "changed" ? (projectFiles ? "File changes" : "Local model assessment") : "Check result";
   return <section className="watch-run" aria-labelledby="watch-run-title">
     <h3 id="watch-run-title">{runLabel(run)}</h3>
     <div className="watch-run-meta">
@@ -543,7 +547,7 @@ function WatchRunDetail({ run, timestamp, onOpenProject, snapshotVisible }: { ru
         <summary>Saved check inputs</summary>
         <dl>
           <dt>Title</dt><dd>{run.definition.title}</dd>
-          <dt>Public page URL</dt><dd>{run.definition.url}</dd>
+          {projectFiles ? <><dt>Source</dt><dd>Project files</dd></> : <><dt>Public page URL</dt><dd>{run.definition.url}</dd></>}
           <dt>Change criterion</dt><dd>{run.definition.criterion}</dd>
           <dt>Schedule</dt><dd>{scheduleLabel(run.definition)}</dd>
           <dt>Project at this check</dt><dd><WatchProjectView project={run.definition.project} onOpenProject={onOpenProject} historical /></dd>
@@ -551,19 +555,22 @@ function WatchRunDetail({ run, timestamp, onOpenProject, snapshotVisible }: { ru
       </details> : null}
       {run.error ? <p className="agents-error" role="alert">{run.error}</p> : null}
       {run.status === "queued" || run.status === "running" ? <p role="status">This check is {run.status === "queued" ? "queued" : "in progress"}. Saved results will appear here.</p> : null}
-      {run.outcome === "changed" ? <p>{run.significant === true ? "The local model found a change relevant to your criterion." : run.significant === false ? "The page changed; the local model did not find a change relevant to your criterion." : "The page changed."}</p> : null}
-      {run.report ? <section><h4>{run.outcome === "changed" ? "Local model assessment" : "Check result"}</h4><p className="watch-plain-text">{run.report}</p></section> : null}
-      {run.diff ? <WatchChangeEvidence key={run.id} diff={run.diff} /> : run.status === "completed" ? <section>
+      {!projectFiles && run.outcome === "changed" ? <p>{run.significant === true ? "The local model found a change relevant to your criterion." : run.significant === false ? "The page changed; the local model did not find a change relevant to your criterion." : "The page changed."}</p> : null}
+      {run.report ? <section><h4>{reportTitle}</h4><p className="watch-plain-text">{run.report}</p></section> : null}
+      {!projectFiles && run.diff ? <WatchChangeEvidence key={run.id} diff={run.diff} /> : !projectFiles && run.status === "completed" ? <section>
         <h4>Page changes</h4>
         {run.outcome === "baseline" ? <p>This successful check saved {run.rebaseline ? "a new baseline" : "the baseline"} for future comparisons.</p>
           : run.outcome === "unchanged" ? <p>The normalized page text is unchanged. No repeated notification was created.</p>
           : <p>Comparison excerpts are unavailable for this saved check.</p>}
       </section> : null}
-      {run.status === "completed" && snapshotVisible ? <WatchPageSnapshot key={`${run.watch_id}:${run.id}:${run.updated_at}`} watchId={run.watch_id} runId={run.id} /> : null}
+      {!projectFiles && run.status === "completed" && snapshotVisible ? <WatchPageSnapshot key={`${run.watch_id}:${run.id}:${run.updated_at}`} watchId={run.watch_id} runId={run.id} /> : null}
     </div>
   </section>;
 }
 
-function WatchProjectView({ project, onOpenProject, historical = false }: { project?: WatchProject | null; onOpenProject?: (id: string) => void; historical?: boolean }) {
-  return <div className="watch-project"><span>Project: <strong>{project?.name ?? (project ? "Unavailable Project" : "None")}</strong></span>{project?.available && onOpenProject ? <button className="agents-secondary" type="button" onClick={() => onOpenProject(project.id)}>Open Project</button> : null}{project && !project.available ? <p className="watch-help">{historical ? "The Project linked to this saved check is unavailable." : "This Project is unavailable. Edit the watch to choose another Project or None before running or resuming it."}</p> : null}</div>;
+function WatchProjectView({ project, onOpenProject, historical = false, fixedProject = false }: { project?: WatchProject | null; onOpenProject?: (id: string) => void; historical?: boolean; fixedProject?: boolean }) {
+  const unavailable = historical ? "The Project linked to this saved check is unavailable."
+    : fixedProject ? "This Project is unavailable."
+      : "This Project is unavailable. Edit the watch to choose another Project or None before running or resuming it.";
+  return <div className="watch-project"><span>Project: <strong>{project?.name ?? (project ? "Unavailable Project" : "None")}</strong></span>{project?.available && onOpenProject ? <button className="agents-secondary" type="button" onClick={() => onOpenProject(project.id)}>Open Project</button> : null}{project && !project.available ? <p className="watch-help">{unavailable}</p> : null}</div>;
 }

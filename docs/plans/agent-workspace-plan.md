@@ -1,7 +1,7 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, November 20, 2026. Saved task Agents, unified lexical
-Search, Project Knowledge and public-page Watches with Project links are implemented locally. The owner closed the recent
+**Status:** In progress, November 25, 2026. Saved task Agents, unified lexical
+Search, Project Knowledge, public-page Watches and Project attachment Watches are implemented locally. The owner closed the recent
 interactive acceptance work on November 13. Campaigns 1–4 remain closed.
 
 The owner selected unified search, saved background tasks, project working
@@ -18,8 +18,37 @@ manual check that stayed paused. Earlier per-slice verification limits below
 remain historical evidence; unrecorded scenarios are not newly asserted passes.
 Work questions and the local calculator now pass the owner's live checks. The
 saved Work draft retains useful intermediate work when an Agent pauses or asks a
-question. Literal search locates passages in explicitly selected files, and the
-latest slice lets Work and Review reopen this Agent's saved deliverables.
+question. Literal search locates passages in explicitly selected files, and Work
+and Review can reopen an Agent's saved deliverables.
+
+## Build checklist
+
+- [x] **Saved Agents.** Save Plan, Work, Review, questions, results, files and
+  activity. Use local Qwen for Agent model calls.
+- [x] **Unified text search.** Search saved messages, file text, Agent results and
+  Project Knowledge. Open the matching source.
+- [x] **Project Knowledge.** Save a plain-text knowledge field and reuse it in
+  Project conversations and new Agents.
+- [x] **Public-page Watches.** Schedule checks, reset baselines, inspect before
+  and after evidence, and find text in a saved capture. The owner verified a
+  scheduled check, an unchanged check and saved-text display.
+- [x] **Project file Watches.** Monitor additions and removals of attachments
+  in one ordinary Project. Report counts through Watch history and Updates.
+  Local API, runtime, migration, UI and browser checks passed.
+- [ ] **File content and Private Watches.** Compare permitted saved file
+  revisions with deletion and detachment handling for retained evidence.
+- [ ] **Multiple-source Watches.** Give each selected source its own coverage
+  and baseline while retaining one schedule and check history.
+- [ ] **Adaptive Agents.** Add bounded replanning and finer checkpoints inside
+  Work so a restart can pick up from a committed step.
+- [ ] **Private Agents.** Run general tasks against explicitly selected Private
+  Project files with verified local processing.
+- [ ] **Semantic search.** Add owner-scoped concept matching and support deeper
+  document or media navigation where stored source locations are available.
+- [ ] **Tower acceptance.** Verify Project file addition and removal checks,
+  Find text, the Agent/Watch header refresh, a controlled public-page change
+  and alert, restart without duplicate Agent outputs, and Chat responsiveness
+  during concurrent Agent work.
 
 ## Current implementation slice
 
@@ -350,6 +379,22 @@ pages from that check's immutable snapshot and verifies the owner, check and
 snapshot against current retention before returning it. Opening the viewer
 uses the saved text without checking the live page or calling a model. See the
 [interactive snapshot check](../../tests/manual/agent-workspace/README.md#viewing-saved-watch-page-text).
+
+**Find text** searches the selected check's full saved capture for a literal
+phrase, ignoring case. It returns bounded character ranges from the same
+retained snapshot. The viewer jumps to the page containing the selected match
+and highlights it, with controls to move between matches. This read uses the
+same owner and retention checks as snapshot paging. See the
+[interactive find check](../../tests/manual/agent-workspace/README.md#finding-text-in-a-saved-watch-check).
+
+**Project files** is a Watch source for one ordinary Project. Each check reads
+its attachment membership and saves the comparison in one transaction. History
+reports the attachment count and any additions or removals. A changed inventory
+creates one Update linked to that check. The schedule, Pause, Run now and Reset
+baseline use the existing Watch workflow. Snapshots contain hashes of attachment
+identities. The check uses application records without opening files or calling a
+model. Schema 46 adds the source type and preserves existing public-page Watches.
+See the [interactive Project file check](../../tests/manual/agent-workspace/README.md#watching-project-file-attachments).
 
 Schema 30 unifies agent completion/failure notices and existing watch alerts in
 Agents' Activity inbox. Terminal agent state and its deduplicated notice commit

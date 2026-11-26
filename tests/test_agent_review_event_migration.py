@@ -67,7 +67,7 @@ async def test_schema39_preserves_schema38_history_and_allows_only_native_review
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 45
+        assert upgraded.schema_version == 46
         assert await upgraded.agents.events(user_id=owner.user_id, task_id=task["id"]) == before
         assert await upgraded.agents.get(user_id=owner.user_id, task_id=task["id"]) == before_task
         await upgraded.agents.finish_event(**lease, seq=seq, input_tokens=49, output_tokens=20, duration_ms=11)

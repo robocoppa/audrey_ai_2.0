@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import hashlib
+import json
 import sqlite3
 from types import SimpleNamespace
 
 import pytest
 
 from audrey.app_state import ApplicationStore
+from audrey.app_state import store as store_module
+from audrey.app_state.migrations import MIGRATIONS
 from audrey.app_state.watches import (
     WatchAccessError,
     WatchConflictError,
@@ -91,6 +94,90 @@ async def test_create_does_not_dispatch_idempotency_survives_edit_and_reopen(sta
     second = ApplicationStore(state.store.path)
     assert (await second.watches.get(user_id=state.owner.user_id, watch_id=watch["id"]))["title"] == "Stable releases"
     second.close()
+
+
+async def test_schema46_preserves_public_watch_history_baseline_and_queued_check(tmp_path, monkeypatch):
+    path = tmp_path / "legacy.sqlite"
+    clock = Clock()
+    stamp = clock().isoformat()
+    earlier = (clock() - dt.timedelta(seconds=1)).isoformat()
+    definition = {
+        "title": "Release notes", "url": "https://example.com/releases", "criterion": "New stable releases",
+        "schedule": {"kind": "interval", "timezone": "UTC", "interval_minutes": 60}, "project_id": None,
+    }
+    limits = json.dumps({"max_operations": 8, "max_active_seconds": 300})
+    digest = hashlib.sha256(json.dumps(
+        [definition[key] for key in ("title", "url", "criterion", "schedule")] + [False],
+        separators=(",", ":"), sort_keys=True,
+    ).encode()).hexdigest()
+    text = "Version one."
+    snapshot = json.dumps({
+        "text": text, "sha256": hashlib.sha256(text.encode()).hexdigest(), "final_url": definition["url"],
+        "extraction_version": "public-text-v1", "run_id": "completed-run",
+    })
+    with monkeypatch.context() as patch:
+        patch.setattr(store_module, "MIGRATIONS", tuple(item for item in MIGRATIONS if item[0] <= 45))
+        legacy = ApplicationStore(path)
+        try:
+            assert legacy.schema_version == 45
+            owner = await legacy.resolve_external_identity(
+                provider="test", subject="alice", email="alice@example.com",
+                display_name="Alice", role="user", auth_method="test",
+            )
+            with legacy._lock, legacy._conn:
+                legacy._conn.execute(
+                    "INSERT INTO app_watches (watch_id,user_id,request_id,request_digest,title,url,criterion,"
+                    "schedule_json,limits_json,enabled,created_at,updated_at) VALUES "
+                    "('public-watch',?,'legacy',?,?,?,?,?,?,0,?,?)",
+                    (owner.user_id, digest, definition["title"], definition["url"], definition["criterion"],
+                     json.dumps(definition["schedule"]), limits, stamp, stamp),
+                )
+                legacy._conn.execute(
+                    "INSERT INTO app_watch_snapshots VALUES ('completed-run','public-watch',?,?)", (snapshot, stamp),
+                )
+                legacy._conn.execute("INSERT INTO app_watch_baselines VALUES ('public-watch','completed-run')")
+                legacy._conn.execute(
+                    "INSERT INTO app_watch_runs (run_id,watch_id,user_id,watch_revision,definition_json,limits_json,"
+                    "kind,scheduled_at,status,attempts,fence,operations,available_at,source_snapshot_id,"
+                    "outcome,report,created_at,updated_at,completed_at) "
+                    "VALUES ('completed-run','public-watch',?,1,?,?,'manual',?,'completed',1,1,1,?,"
+                    "'completed-run','baseline','Saved baseline.',?,?,?)",
+                    (owner.user_id, json.dumps(definition), limits, earlier, earlier, earlier, stamp, stamp),
+                )
+                legacy._conn.execute(
+                    "INSERT INTO app_watch_operations VALUES ('completed-op','completed-run',1,'fetch','committed',?,?)",
+                    (earlier, stamp),
+                )
+                legacy._conn.execute(
+                    "INSERT INTO app_watch_runs (run_id,watch_id,user_id,watch_revision,definition_json,limits_json,"
+                    "baseline_json,kind,scheduled_at,status,available_at,created_at,updated_at) VALUES "
+                    "('queued-run','public-watch',?,1,?,?,?,'manual',?,'queued',?,?,?)",
+                    (owner.user_id, json.dumps(definition), limits, snapshot, stamp, stamp, stamp, stamp),
+                )
+        finally:
+            legacy.close()
+
+    upgraded = ApplicationStore(path)
+    try:
+        assert upgraded.schema_version == 46
+        assert upgraded._conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert upgraded._conn.execute(
+            "SELECT status FROM app_watch_operations WHERE operation_id='completed-op'",
+        ).fetchone()[0] == "committed"
+        upgraded.watches._clock = clock
+        replayed = await upgraded.watches.create(user_id=owner.user_id, request_id="legacy", enabled=False, **definition)
+        assert replayed["id"] == "public-watch" and replayed["active_run_id"] == "queued-run"
+        assert replayed["url"] == definition["url"]
+        page, _ = await upgraded.watches.get_snapshot_page(
+            user_id=owner.user_id, watch_id=replayed["id"], run_id="completed-run", offset=0, limit=100,
+        )
+        assert page["text"] == text
+        run = await upgraded.watches.claim()
+        assert run["id"] == "queued-run" and run["baseline"] == json.loads(snapshot)
+        finished = await _complete(SimpleNamespace(store=upgraded), run, text=text, outcome="unchanged")
+        assert finished["outcome"] == "unchanged"
+    finally:
+        upgraded.close()
 
 
 @pytest.mark.parametrize("url", [

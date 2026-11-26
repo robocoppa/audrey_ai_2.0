@@ -12,21 +12,17 @@
 .watch-detail[data-view="watch"] { display: flex; flex-direction: column; gap: var(--space-3); }
 .watch-detail-messages { display: grid; gap: var(--space-2); }
 .watch-detail-messages > p, .watch-detail[data-view="watch"] > .watch-resume-draft { margin: 0; align-self: flex-start; }
-.agents-detail-toolbar.watch-detail-header { flex: none; align-items: center; gap: var(--space-2) var(--space-3); }
-.watch-heading { display: flex; flex: 1 1 17rem; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); min-width: 0; }
-.watch-heading > h2 { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.watch-detail-header { flex: none; }
 .watch-schedule { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-width: 0; color: var(--muted); font-size: var(--font-size-sm); }
 .watch-schedule > p { margin: 0; }
 .watch-schedule strong { color: var(--text-soft); }
-.watch-settings { display: grid; flex: none; min-width: 0; padding: var(--space-2) var(--space-3); gap: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-control); background: color-mix(in srgb, var(--surface-overlay) 38%, transparent); }
+.watch-settings { display: grid; flex: none; gap: var(--space-2) var(--space-3); }
 .watch-source, .watch-prompt { min-width: 0; }
 .watch-settings h3 { margin: 0 0 var(--space-1); color: var(--muted); font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); line-height: var(--line-height-ui); }
 .watch-source > a { display: block; width: fit-content; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-body-sm); line-height: var(--line-height-ui); color: var(--accent); }
 .watch-source > .watch-project { margin: var(--space-1) 0 0; }
 .watch-prompt { padding-block-start: var(--space-2); border-block-start: 1px solid var(--border); }
 .watch-criterion { max-height: 3lh; overflow-y: auto; margin: 0; color: var(--text-soft); white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--font-size-body); line-height: var(--line-height-ui); }
-.watch-controls { gap: 0.4rem; }
-.watch-controls button { font-size: 0.76rem; min-height: 2.35rem; padding: var(--space-2) 0.7rem; }
 .watch-project { display: flex; align-items: center; flex-wrap: wrap; gap: 0.55rem; margin: 0.65rem 0; color: var(--text-soft); font-size: var(--font-size-body-sm); }
 .watch-project > button { min-height: 2rem; padding: 0.35rem 0.65rem; font-size: var(--font-size-sm); }
 .watch-project > p { flex-basis: 100%; margin: 0; }
@@ -92,9 +88,6 @@
 @container watch-pane (min-width: 38rem) {
   .watch-settings { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
   .watch-prompt { padding-block-start: 0; padding-inline-start: var(--space-3); border-block-start: 0; border-inline-start: 1px solid var(--border); }
-}
-@container watch-pane (width < 38rem) {
-  .watch-detail-header .watch-controls { justify-content: flex-start; margin-left: 0; }
 }
 @media (min-height: 36rem) {
   @container watch-pane (min-width: 38rem) {

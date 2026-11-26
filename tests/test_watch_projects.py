@@ -15,6 +15,8 @@ from audrey.app_state import ApplicationStore
 from audrey.app_state.watches import WatchAccessError, WatchConflictError
 from audrey.auth import require_principal
 from audrey.routes.app import router
+from audrey.watch_executor import WatchExecutor
+from audrey.watch_runtime import WatchRuntime
 
 
 @pytest.fixture
@@ -36,7 +38,7 @@ async def state(tmp_path):
     app.dependency_overrides[require_principal] = lambda: current[0]
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         yield SimpleNamespace(store=store, owner=owners[0], other=owners[1], project=project,
-                              foreign=other, private=private, current=current, client=client)
+                              foreign=other, private=private, current=current, client=client, app=app)
     store.close()
 
 
@@ -68,6 +70,95 @@ def result(run):
 
 async def delete_project(state):
     await state.store.projects.delete(user_id=state.owner.user_id, project_id=state.project.project_id)
+
+
+def attachment_watch_body(state, **changes):
+    return {
+        "title": "Project file changes", "source_kind": "project_files", "enabled": False,
+        "project_id": state.project.project_id, "request_id": "attachments",
+        "schedule": {"kind": "interval", "timezone": "UTC", "interval_minutes": 60}, **changes,
+    }
+
+
+async def test_project_attachment_watch_reports_additions_and_removals_via_saved_checks(state, monkeypatch):
+    async def unexpected_model(*_args, **_kwargs):
+        pytest.fail("Project attachment Watch must run independently of model selection.")
+
+    monkeypatch.setattr("audrey.watch_executor.resolve_model", unexpected_model)
+    created = await state.client.post("/api/watches", json=attachment_watch_body(state))
+    assert created.status_code == 201, created.text
+    watch = created.json()
+    assert watch["source_kind"] == "project_files" and watch["url"] is None and watch["active_run_id"] is None
+    replayed = await state.client.post("/api/watches", json=attachment_watch_body(state))
+    assert replayed.json()["id"] == watch["id"]
+
+    executor = WatchExecutor(state.app, resolver=unexpected_model, fetcher=unexpected_model)
+    runtime = WatchRuntime(state.store.watches, executor, project_files_executor=executor.complete_project_files)
+
+    async def run_check(action="run"):
+        queued = await state.client.post(f"/api/watches/{watch['id']}/actions", json={
+            "action": action, "expected_revision": watch["revision"],
+        })
+        assert queued.status_code == 200, queued.text
+        assert not queued.json()["enabled"] and queued.json()["next_run_at"] is None
+        assert await runtime.run_once()
+        path = f"/api/watches/{watch['id']}/runs/{queued.json()['active_run_id']}"
+        response = await state.client.get(path)
+        assert response.status_code == 200 and response.json()["status"] == "completed", response.text
+        assert (await state.client.get(f"{path}/snapshot")).status_code == 404
+        return response.json()
+
+    baseline = await run_check()
+    assert baseline["outcome"] == "baseline" and baseline["definition"]["source_kind"] == "project_files"
+    assert (await run_check())["outcome"] == "unchanged"
+
+    attachment = {"user_id": state.owner.user_id, "project_id": state.project.project_id, "file_id": "attachment-test-id"}
+    await state.store.projects.add_file(**attachment)
+    added = await run_check()
+    assert added["outcome"] == "changed" and added["significant"] is True and "Added: 1. Removed: 0." in added["report"]
+    notices = (await state.client.get("/api/notifications")).json()["items"]
+    assert len(notices) == 1 and notices[0]["run_id"] == added["id"]
+    assert (await run_check())["outcome"] == "unchanged"
+    assert len((await state.client.get("/api/notifications")).json()["items"]) == 1
+
+    assert await state.store.projects.remove_file(**attachment)
+    removed = await run_check()
+    assert removed["outcome"] == "changed" and removed["significant"] is True and "Added: 0. Removed: 1." in removed["report"]
+    reset = await run_check("rebaseline")
+    assert reset["outcome"] == "baseline" and reset["rebaseline"]
+    assert len((await state.client.get("/api/notifications")).json()["items"]) == 2
+    history = await state.client.get(f"/api/watches/{watch['id']}/runs")
+    assert attachment["file_id"] not in history.text
+
+
+async def test_project_attachment_watch_rejects_foreign_private_and_changed_sources(state):
+    for project_id in (state.foreign.project_id, state.private.project_id):
+        response = await state.client.post("/api/watches", json=attachment_watch_body(state, project_id=project_id))
+        assert response.status_code == 404
+    for changes in ({"project_id": None}, {"url": "https://example.com"}, {"criterion": "unrelated scope"}):
+        response = await state.client.post("/api/watches", json=attachment_watch_body(state, **changes))
+        assert response.status_code == 422
+
+    created = await state.client.post("/api/watches", json=attachment_watch_body(state))
+    assert created.status_code == 201
+    watch = created.json()
+    path = f"/api/watches/{watch['id']}"
+    for changes in ({"project_id": None}, {"url": "https://example.com"}, {"criterion": "unrelated scope"}):
+        response = await state.client.patch(path, json={"expected_revision": watch["revision"], **changes})
+        assert response.status_code == 422
+    state.current[0] = state.other
+    assert (await state.client.get(path)).status_code == 404
+    state.current[0] = state.owner
+
+    queued = await state.client.post(f"{path}/actions", json={"action": "run", "expected_revision": watch["revision"]})
+    assert queued.status_code == 200
+    run = await state.store.watches.claim()
+    await delete_project(state)
+    with pytest.raises((WatchAccessError, WatchConflictError)):
+        await state.store.watches.complete_project_files(**lease(run))
+    assert (await state.client.get(path)).json()["project"]["available"] is False
+    blocked = await state.client.post(f"{path}/actions", json={"action": "run", "expected_revision": watch["revision"]})
+    assert blocked.status_code in {404, 409}
 
 
 async def test_owned_project_create_filter_and_idempotency_do_not_dispatch_or_copy_context(state):
@@ -280,7 +371,7 @@ async def test_schema33_upgrade_preserves_legacy_unscoped_request_digest_and_run
         state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=33")
     upgraded = ApplicationStore(state.store.path)
     try:
-        assert upgraded.schema_version == 45
+        assert upgraded.schema_version == 46
         saved = await upgraded.watches.create(**inputs(state, project_id=None))
         assert saved["id"] == watch["id"] and saved["project"] is None
         assert saved["active_run_id"] == queued["active_run_id"] and saved["latest_run"]["definition"]["project"] is None

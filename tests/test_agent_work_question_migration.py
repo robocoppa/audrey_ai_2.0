@@ -63,7 +63,7 @@ async def test_schema41_preserves_pending_answered_and_dismissed_plan_questions(
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 45
+        assert upgraded.schema_version == 46
         assert [dict(row) for row in upgraded._conn.execute("SELECT * FROM app_agent_input_requests ORDER BY request_id")] == before_rows
         assert await upgraded.agents.list(user_id=owner.user_id) == before_tasks
         assert await upgraded.notifications.feed(user_id=owner.user_id) == before_feed

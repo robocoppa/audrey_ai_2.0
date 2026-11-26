@@ -507,8 +507,9 @@ describe("AgentsWorkspace", () => {
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
     const open = vi.fn(); render(<AgentsWorkspace onOpenProject={open} />);
     const badge = await screen.findByRole("button", { name: `Open Project: ${project.name}` });
-    const metadata = badge.closest(".agents-detail-meta")!;
-    expect(within(metadata as HTMLElement).getByText("Running")).toBeVisible();
+    const heading = badge.closest<HTMLElement>(".agents-detail-heading")!;
+    expect(within(heading).getByRole("heading", { name: saved.objective })).toBeVisible();
+    expect(within(heading).getByText("Running")).toBeVisible();
     expect(badge).toHaveAccessibleDescription(expect.stringContaining("1 saved knowledge revision pinned for this agent."));
     const detail = screen.getByRole("region", { name: "Selected agent" });
     expect(within(detail).queryByRole("combobox", { name: "Project" })).not.toBeInTheDocument();
@@ -838,7 +839,7 @@ describe("AgentsWorkspace", () => {
     expect(create.mock.calls[0][1]).toBe(create.mock.calls[1][1]);
   });
 
-  it("uses saved revisions for pause, resume, and cancellation", async () => {
+  it("shows status and actions in the title bar and uses saved revisions to control the agent", async () => {
     let current = task();
     vi.mocked(api.listAgentTasks).mockImplementation(async () => ({ items: [current] }));
     vi.mocked(api.getAgentTask).mockImplementation(async () => current);
@@ -851,12 +852,16 @@ describe("AgentsWorkspace", () => {
     const sidebar = within(screen.getByRole("complementary", { name: "Agents" }));
     const detail = within(screen.getByRole("region", { name: "Selected agent" }));
     expect(sidebar.queryByRole("textbox", { name: "Task objective" })).not.toBeInTheDocument();
-    fireEvent.click(await sidebar.findByRole("button", { name: "Pause" }));
-    fireEvent.click(await sidebar.findByRole("button", { name: "Resume" }));
-    fireEvent.click(await sidebar.findByRole("button", { name: "Cancel" }));
-    expect(await detail.findByRole("button", { name: "Run again" })).toBeEnabled();
-    expect(detail.getByRole("button", { name: "Delete task" })).toBeVisible();
-    expect(sidebar.queryByRole("button", { name: "Run again" })).not.toBeInTheDocument();
+    const toolbar = within((await detail.findByRole("group", { name: "Agent controls" })).parentElement!);
+    expect(toolbar.getByRole("heading", { name: current.objective })).toBeVisible();
+    expect(sidebar.queryByRole("group", { name: "Agent controls" })).not.toBeInTheDocument();
+    fireEvent.click(toolbar.getByRole("button", { name: "Pause" }));
+    expect(await toolbar.findByText("Paused", { exact: true })).toBeVisible();
+    fireEvent.click(toolbar.getByRole("button", { name: "Resume" }));
+    expect(await toolbar.findByText("Queued", { exact: true })).toBeVisible();
+    fireEvent.click(toolbar.getByRole("button", { name: "Cancel" }));
+    expect(await toolbar.findByRole("button", { name: "Run again" })).toBeEnabled();
+    expect(toolbar.getByRole("button", { name: "Delete task" })).toBeVisible();
     expect(action.mock.calls).toEqual([
       ["agt_first", "pause", 2], ["agt_first", "resume", 3], ["agt_first", "cancel", 4],
     ]);
@@ -881,7 +886,7 @@ describe("AgentsWorkspace", () => {
     expect(workflow).not.toContainElement(screen.getByLabelText("Task objective"));
   });
 
-  it("keeps mobile controls in a dismissible focus-trapped drawer and opens the workflow on selection", async () => {
+  it("keeps mobile navigation in a focus-trapped drawer and shows actions in the selected workflow", async () => {
     vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
     const saved = task();
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] });
@@ -914,6 +919,7 @@ describe("AgentsWorkspace", () => {
     const workflow = screen.getByRole("region", { name: "Selected agent" });
     await waitFor(() => expect(workflow).toHaveFocus());
     expect(workflow).not.toHaveAttribute("inert");
+    expect(within(workflow).getByRole("button", { name: "Pause" })).toBeVisible();
   });
 
   it("keeps a failed mobile creation visible inside the controls drawer", async () => {

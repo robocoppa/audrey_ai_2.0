@@ -845,20 +845,6 @@ function AgentTasksWorkspace({
             </form>
             </div>
             <div hidden={sidebarMode !== "agents"}>
-            {selected && !isFinished(selected) ? (
-              <section className="agents-current-controls" aria-labelledby="agent-current-controls-title">
-                <h2 id="agent-current-controls-title">Current agent</h2>
-                <p>{agentTitle(selected)}</p>
-                <AgentTaskControls
-                  key={`${selected.id}:active:${visible}:${sidebarOpen}`}
-                  task={selected}
-                  busy={busy}
-                  onAction={(action) => void act(selected, action)}
-                  onDelete={() => void removeTask(selected)}
-                />
-              </section>
-            ) : null}
-
             <div className="agents-history-toolbar">
             <div className="agents-filters" role="group" aria-label="Filter agents">
               {([['all', 'All'], ['active', 'Active'], ['finished', 'Finished']] as const).map(([value, label]) => (
@@ -897,30 +883,38 @@ function AgentTasksWorkspace({
               <>
                 <header className="agents-detail-header">
                   <div className="agents-detail-toolbar">
-                    <h2 className="workspace-page-title">{agentTitle(selected)}</h2>
-                    {isFinished(selected) ? <AgentTaskControls
-                      key={`${selected.id}:${isFinished(selected) ? selected.revision : "active"}:${visible}`}
+                    <div className="agents-detail-heading">
+                      <h2 className="workspace-page-title" data-prompt-title={!selected.title?.trim() || undefined}>{agentTitle(selected)}</h2>
+                      <div className="agents-detail-meta">
+                        <span className={`agents-status agents-status-${selected.status}`}>{STATUS_LABELS[selected.status]}</span>
+                        {selected.project_context ? <AgentProjectContextBadge task={selected} onOpenProject={onOpenProject} /> : null}
+                      </div>
+                    </div>
+                    <AgentTaskControls
+                      key={`${selected.id}:${isFinished(selected) ? selected.revision : "active"}:${visible}:${sidebarOpen}`}
                       task={selected}
                       busy={busy}
                       onAction={(action) => void act(selected, action)}
                       onDelete={() => void removeTask(selected)}
-                    /> : null}
+                    />
                   </div>
-                  <div className="agents-detail-meta">
-                    <span className={`agents-status agents-status-${selected.status}`}>{STATUS_LABELS[selected.status]}</span>
-                    {selected.project_context ? <AgentProjectContextBadge task={selected} onOpenProject={onOpenProject} /> : null}
+                  <div className="agents-detail-summary agents-detail-disclosures">
+                    <details className="agents-original-prompt">
+                      <summary>Original prompt</summary>
+                      <p tabIndex={0}>{selected.objective}</p>
+                    </details>
+                    {selected.input_requests?.some((request) => request.answer !== null) ? <details className="agents-input-history">
+                      <summary aria-label="Questions and answers">Questions / answers</summary>
+                      <ol tabIndex={0}>{selected.input_requests.filter((request) => request.answer !== null).map((request) => <li key={request.id}><h3>{request.step_id === "research" ? "Work question" : "Planning question"}</h3><p>{request.question}</p><h4>Your answer</h4><p>{request.answer}</p></li>)}</ol>
+                    </details> : null}
                     {notice?.taskId === selected.id ? <span className="agents-task-notice" role="status">{notice.text}</span> : null}
-                  </div>
-                  <div className="agents-detail-disclosures">
-                    <details className="agents-original-prompt"><summary>Original prompt</summary><p>{selected.objective}</p></details>
-                    {selected.input_requests?.some((request) => request.answer !== null) ? <details className="agents-input-history"><summary aria-label="Questions and answers">Questions / answers</summary><ol>{selected.input_requests.filter((request) => request.answer !== null).map((request) => <li key={request.id}><h3>{request.step_id === "research" ? "Work question" : "Planning question"}</h3><p>{request.question}</p><h4>Your answer</h4><p>{request.answer}</p></li>)}</ol></details> : null}
+                    {selected.status === "paused" && notice?.taskId !== selected.id ? <span className="agents-task-notice">Completed steps are saved.</span> : null}
                   </div>
                 </header>
                 {selected.project_context && (!selected.project_context.available || !selected.project_context.current) ? <p className="agents-project-context-notice">
                   {!selected.project_context.available ? "This Project is no longer available. Continuing or running this agent again is unavailable." : "The Project context has changed. Start a new agent to use its current instructions and knowledge."}
                 </p> : null}
                 <AgentFileInputsView inputs={selected.file_inputs} />
-                {selected.status === "paused" ? <p className="agents-notice">Completed steps are saved. Resume to continue from the next unfinished step.</p> : null}
                 {selected.error ? <p className="agents-error" role="alert">{selected.error}</p> : null}
                 {selected.status === "waiting_for_input" ? selectedInput && selectedInputDraft ? <AgentInputPanel request={selectedInput} revision={selected.revision} draft={selectedInputDraft} busy={busy} contextBlocked={agentContextBlocked(selected)}
                   onChange={(text) => setAnswerDrafts((current) => ({ ...current, [selectedInputKey]: { text, revision: current[selectedInputKey]?.revision ?? selected.revision } }))}

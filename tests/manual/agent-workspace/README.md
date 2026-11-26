@@ -184,3 +184,52 @@ docker compose up -d --build audrey audrey-ui
 Use existing entries for this check. No live fetch, model call, or upload is
 needed. If there is no completed check with retained text, choose **Run now**
 once and wait for a successful result before opening the viewer.
+
+## Finding text in a saved Watch check
+
+After syncing, rebuild the backend and UI on **Tower**.
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+```
+
+1. Refresh Audrey and open **Agents → Watches → Check history**. Select an
+   existing successful check for the Python downloads Watch and expand
+   **Saved page text**. No upload is needed.
+2. Click **Next page** and copy a release name or distinctive phrase from that
+   page. Click **Previous page** to return to the beginning.
+3. Enter the phrase in **Find text** and press Enter. Audrey should jump to the
+   matching page, highlight the phrase, and display the match count. If the
+   first match is earlier in the capture, use **Next match** to reach the later
+   occurrence.
+4. Search for `release notes` to check case-insensitive matching and use
+   **Next match** and **Previous match** to move through the highlights. Search
+   for `audrey-no-such-release-731` to check the empty result.
+
+## Watching Project file attachments
+
+After syncing, rebuild the backend and UI on **Tower**. Schema 46 applies at
+backend startup.
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+```
+
+1. Create an ordinary Project named `Attachment Watch Test` and leave it empty.
+   In **Agents → Watches → New watch**, set **Watch source** to **Project files**,
+   choose the Project, and enter `Attachment changes` as the title. Select
+   **Hourly**, click **Preview next checks**, then **Create watch**.
+2. Open the new Watch and click **Pause**, then **Run now**. The check should
+   finish with **Baseline saved** and **Attached files: 0**.
+3. In the Project's **Files** box, use **Choose from My Files** to attach one
+   existing ordinary file. If needed, use **Upload file** with
+   [supply-list.csv](supply-list.csv). Wait for the file to appear in the box.
+4. Return to the Watch and click **Run now**. Expect **Files changed** with
+   **Added: 1**, **Removed: 0**, and **Attached files: 1**. Open its change in
+   **Agents → Updates** and verify it opens that exact check.
+5. Run another check with the attachment still in place. Expect **Unchanged**
+   and a single addition Update. Remove the file from the Project and run the
+   Watch again. Expect **Files changed**, **Added: 0**, **Removed: 1**, and
+   **Attached files: 0**. The Watch should stay **Paused** throughout.

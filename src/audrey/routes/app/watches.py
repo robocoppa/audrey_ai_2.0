@@ -27,6 +27,7 @@ from audrey.watch_schedule import preview_schedule
 router = APIRouter(tags=["application-watches"])
 _access = require_scope("compat:full")
 logger = logging.getLogger(__name__)
+WatchSourceKind = Literal["public_page", "project_files"]
 
 
 class WatchProject(BaseModel):
@@ -37,7 +38,8 @@ class WatchProject(BaseModel):
 
 class WatchRunInputs(BaseModel):
     title: str
-    url: str
+    source_kind: WatchSourceKind = "public_page"
+    url: str | None
     criterion: str
     schedule: dict[str, Any]
     project: WatchProject | None = None
@@ -77,10 +79,24 @@ class WatchSnapshotPage(BaseModel):
     text: str
 
 
+class WatchSnapshotMatch(BaseModel):
+    start: int
+    end: int
+
+
+class WatchSnapshotSearch(BaseModel):
+    watch_id: str
+    run_id: str
+    total_chars: int
+    matches: list[WatchSnapshotMatch]
+    truncated: bool
+
+
 class WatchResponse(BaseModel):
     id: str
     title: str
-    url: str
+    source_kind: WatchSourceKind = "public_page"
+    url: str | None
     criterion: str
     schedule: dict[str, Any]
     enabled: bool
@@ -107,8 +123,9 @@ class NoticeResponse(BaseModel):
 class WatchCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     title: str = Field(min_length=1, max_length=100)
-    url: str = Field(min_length=1, max_length=4096)
-    criterion: str = Field(min_length=1, max_length=2000)
+    source_kind: WatchSourceKind = "public_page"
+    url: str | None = Field(default=None, min_length=1, max_length=4096)
+    criterion: str | None = Field(default=None, min_length=1, max_length=2000)
     schedule: dict[str, Any]
     enabled: bool = Field(default=True, strict=True)
     request_id: str = Field(min_length=1, max_length=200)
@@ -170,6 +187,10 @@ def _fence(request: Request, principal: Principal, **payloads) -> None:
     _repository(request).fence_response(user_id=principal.user_id, **payloads)
 
 
+async def _authorize_watch(request: Request, principal: Principal, source_kind: str | None) -> None:
+    await watch_authority(request.app, principal.user_id, require_model=source_kind != "project_files")
+
+
 @router.post("/watches/preview")
 async def preview_watch(body: SchedulePreview, response: Response, principal: Principal = Depends(_access)):
     response.headers["Cache-Control"] = "private, no-store"
@@ -199,7 +220,7 @@ async def create_watch(body: WatchCreate, request: Request, response: Response,
                        principal: Principal = Depends(_access)):
     response.headers["Cache-Control"] = "private, no-store"
     try:
-        await watch_authority(request.app, principal.user_id)
+        await _authorize_watch(request, principal, body.source_kind)
         settings = watch_settings(request.app)
         watch = await _repository(request).create(
             user_id=principal.user_id, **body.model_dump(), limits=settings.run_limits(),
@@ -239,10 +260,10 @@ async def update_watch(watch_id: str, body: WatchUpdate, request: Request, respo
     if any(value is None for key, value in values.items() if key != "project_id") or len(values) <= 1:
         raise HTTPException(422, "Choose at least one watch field to change; only Project may be null.")
     try:
-        await repository.get(user_id=principal.user_id, watch_id=watch_id)
+        existing = await repository.get(user_id=principal.user_id, watch_id=watch_id)
         # Pausing and deletion remain available after grants/configuration change.
         if values.keys() - {"expected_revision", "enabled"} or values.get("enabled") is True:
-            await watch_authority(request.app, principal.user_id)
+            await _authorize_watch(request, principal, existing.get("source_kind"))
         watch = await repository.update(user_id=principal.user_id, watch_id=watch_id, **values)
         _fence(request, principal, watches=[watch])
     except AgentDispatchStoppedError as error:
@@ -261,9 +282,9 @@ async def watch_action(watch_id: str, body: WatchAction, request: Request, respo
     response.headers["Cache-Control"] = "private, no-store"
     repository = _repository(request)
     try:
-        await repository.get(user_id=principal.user_id, watch_id=watch_id)
+        existing = await repository.get(user_id=principal.user_id, watch_id=watch_id)
         if body.action != "pause":
-            await watch_authority(request.app, principal.user_id)
+            await _authorize_watch(request, principal, existing.get("source_kind"))
         if body.action in {"run", "rebaseline"}:
             watch = await repository.run_now(user_id=principal.user_id, watch_id=watch_id,
                                              expected_revision=body.expected_revision,
@@ -343,6 +364,24 @@ async def get_watch_snapshot(
         )
         _fence(request, principal, snapshot=(watch_id, run_id, updated_at))
         return page
+    except WatchError as error:
+        raise _error(error) from None
+    except (sqlite3.Error, OSError) as error:
+        raise _unavailable(error) from None
+
+
+@router.get("/watches/{watch_id}/runs/{run_id}/snapshot/search", response_model=WatchSnapshotSearch)
+async def search_watch_snapshot(
+    watch_id: str, run_id: str, request: Request, response: Response,
+    q: str = Query(default=""), principal: Principal = Depends(_access),
+):
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        results, updated_at = await _repository(request).search_snapshot(
+            user_id=principal.user_id, watch_id=watch_id, run_id=run_id, query=q,
+        )
+        _fence(request, principal, snapshot=(watch_id, run_id, updated_at))
+        return results
     except WatchError as error:
         raise _error(error) from None
     except (sqlite3.Error, OSError) as error:

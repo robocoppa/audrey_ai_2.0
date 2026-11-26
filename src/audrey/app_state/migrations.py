@@ -1828,6 +1828,49 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX idx_app_agent_events_owner ON app_agent_events(user_id,task_id,seq);
         """,
     ),
+    (
+        46,
+        """
+        CREATE TABLE app_watches_v46 (
+          watch_id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+          request_id TEXT NOT NULL CHECK (length(request_id) BETWEEN 1 AND 200),
+          request_digest TEXT NOT NULL CHECK (length(request_digest)=64),
+          title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 100),
+          url TEXT,
+          criterion TEXT NOT NULL CHECK (length(criterion) BETWEEN 1 AND 2000),
+          schedule_json TEXT NOT NULL CHECK (length(schedule_json)<=1000),
+          limits_json TEXT NOT NULL CHECK (length(limits_json)<=1000),
+          enabled INTEGER NOT NULL CHECK (typeof(enabled)='integer' AND enabled IN (0,1)),
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (revision>=1),
+          next_run_at TEXT,
+          failure_key TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          project_id TEXT CHECK (project_id IS NULL OR length(project_id) BETWEEN 1 AND 300),
+          source_kind TEXT NOT NULL DEFAULT 'public_page',
+          CHECK ((source_kind='public_page' AND url IS NOT NULL AND length(url) BETWEEN 1 AND 4096)
+              OR (source_kind='project_files' AND url IS NULL)),
+          UNIQUE (user_id,request_id)
+        );
+        INSERT INTO app_watches_v46
+          (watch_id,user_id,request_id,request_digest,title,url,criterion,schedule_json,limits_json,
+           enabled,revision,next_run_at,failure_key,created_at,updated_at,project_id)
+        SELECT watch_id,user_id,request_id,request_digest,title,url,criterion,schedule_json,limits_json,
+               enabled,revision,next_run_at,failure_key,created_at,updated_at,project_id
+        FROM app_watches;
+        DROP TABLE app_watches;
+        ALTER TABLE app_watches_v46 RENAME TO app_watches;
+        CREATE INDEX idx_app_watches_due ON app_watches(enabled,next_run_at);
+        CREATE INDEX idx_app_watches_owner ON app_watches(user_id,created_at DESC,watch_id);
+        CREATE INDEX idx_app_watches_project ON app_watches(user_id,project_id,created_at DESC,watch_id);
+        CREATE TRIGGER trg_app_watch_source_immutable BEFORE UPDATE OF source_kind ON app_watches
+        WHEN NEW.source_kind != OLD.source_kind
+        BEGIN
+          SELECT RAISE(ABORT,'Watch source scope is immutable');
+        END;
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

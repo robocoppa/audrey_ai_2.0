@@ -13,8 +13,9 @@ function savedPage(run: WatchRun, text: string, start = 0, totalChars?: number):
   const total = totalChars ?? end;
   return { watch_id: run.watch_id, run_id: run.id, source_url: "https://example.com/captured", start, end, total_chars: total, next_offset: end === total ? null : end, text };
 }
+const publicPageUrl = "https://example.com/releases";
 function watch(patch: Partial<PublicWatch> = {}): PublicWatch {
-  return { id: "watch-1", title: "Release announcements", url: "https://example.com/releases", criterion: "New stable releases", schedule: { kind: "daily", time: "09:00", timezone: "America/Denver" }, enabled: true, revision: 1, next_run_at: "2026-10-31T15:00:00Z", active_run_id: null, latest_run: savedRun(), created_at: "2026-10-30T14:00:00Z", updated_at: "2026-10-30T15:01:00Z", ...patch };
+  return { id: "watch-1", title: "Release announcements", url: publicPageUrl, criterion: "New stable releases", schedule: { kind: "daily", time: "09:00", timezone: "America/Denver" }, enabled: true, revision: 1, next_run_at: "2026-10-31T15:00:00Z", active_run_id: null, latest_run: savedRun(), created_at: "2026-10-30T14:00:00Z", updated_at: "2026-10-30T15:01:00Z", ...patch };
 }
 const occurrences = ["2026-10-31T15:00:00Z", "2026-11-01T16:00:00Z", "2026-11-02T16:00:00Z"];
 const projectLimits = { max_name_chars: 100, max_instructions_chars: 10000, max_files: 100 };
@@ -49,7 +50,7 @@ describe("watch history navigation", () => {
     expect(await screen.findByRole("heading", { name: "Check history" })).toBeVisible();
     const settings = within(screen.getByRole("region", { name: "Watch settings" }));
     expect(settings.getByRole("heading", { name: "Watched site" })).toBeVisible();
-    expect(settings.getByRole("link", { name: watch().url })).toHaveAttribute("href", watch().url);
+    expect(settings.getByRole("link", { name: publicPageUrl })).toHaveAttribute("href", publicPageUrl);
     expect(settings.getByRole("heading", { name: "Watch prompt" })).toBeVisible();
     expect(settings.getByText(watch().criterion)).toBeVisible();
     expect(screen.getByText("Next scheduled check:")).toBeVisible();
@@ -65,7 +66,7 @@ describe("watch history navigation", () => {
     vi.mocked(api.listWatches).mockResolvedValue({ items: [] });
     const create = vi.spyOn(api, "createWatch");
     workspace({ historyRequest: 0 });
-    expect(await screen.findByText("No watches yet. Create one to follow a public page.")).toBeVisible();
+    expect(await screen.findByText("No watches yet. Create one to follow a public page or Project files.")).toBeVisible();
     expect(screen.getByRole("heading", { name: "Watch history" })).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "New watch" }));
@@ -468,6 +469,65 @@ describe("watch activity and visibility", () => {
 });
 
 describe("saved watch page text", () => {
+  it("finds text in the full capture and follows exact Unicode matches across pages", async () => {
+    const run = savedRun();
+    const first = "🌲" + "a".repeat(3997) + "Py";
+    const second = "thon 3.15\n🐢 Python 3.14";
+    const total = 4000 + Array.from(second).length;
+    const later = 4000 + Array.from(second.split("Python")[0]).length;
+    const read = vi.spyOn(api, "getWatchRunSnapshot").mockImplementation(async (_, __, offset) => offset
+      ? savedPage(run, second, 4000)
+      : savedPage(run, first, 0, total));
+    const search = vi.spyOn(api, "searchWatchRunSnapshot").mockResolvedValue({
+      watch_id: run.watch_id, run_id: run.id, total_chars: total, truncated: false,
+      matches: [{ start: 3998, end: 4004 }, { start: later, end: later + 6 }],
+    });
+    workspace();
+    fireEvent.click(await screen.findByText("Saved page text", { selector: "summary" }));
+    const input = await screen.findByRole("searchbox", { name: "Find text" });
+    fireEvent.change(input, { target: { value: "  pYtHoN  " } });
+    expect(search).not.toHaveBeenCalled();
+    fireEvent.submit(screen.getByRole("search", { name: "Find in saved page text" }));
+    expect(await screen.findByText("Match 1 of 2")).toBeVisible();
+    expect(search).toHaveBeenCalledExactlyOnceWith(run.watch_id, run.id, "pYtHoN", expect.any(AbortSignal));
+    expect(screen.getByLabelText("Saved page text").querySelector("mark")).toHaveTextContent("Py");
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    const secondPage = await screen.findByLabelText("Saved page text");
+    expect(secondPage.querySelector("mark")).toHaveTextContent("thon");
+    fireEvent.click(screen.getByRole("button", { name: "Next match" }));
+    expect(screen.getByText("Match 2 of 2")).toBeVisible();
+    expect(secondPage.querySelector("mark")).toHaveTextContent("Python");
+    fireEvent.click(screen.getByRole("button", { name: "Previous match" }));
+    expect((await screen.findByLabelText("Saved page text")).textContent).toBe(first);
+    expect(read.mock.calls.map(([, , offset]) => offset)).toEqual([0, 4000, 0]);
+  });
+
+  it("cancels stale find results and shows a genuine empty result for the new query", async () => {
+    const run = savedRun();
+    const page = savedPage(run, "Python release notes");
+    const empty = { watch_id: run.watch_id, run_id: run.id, total_chars: page.total_chars, matches: [], truncated: false };
+    vi.spyOn(api, "getWatchRunSnapshot").mockResolvedValue(page);
+    let finish!: (result: api.WatchSnapshotSearchResult) => void;
+    const search = vi.spyOn(api, "searchWatchRunSnapshot")
+      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }))
+      .mockResolvedValueOnce(empty);
+    workspace();
+    fireEvent.click(await screen.findByText("Saved page text", { selector: "summary" }));
+    const input = await screen.findByRole("searchbox", { name: "Find text" });
+    const form = screen.getByRole("search", { name: "Find in saved page text" });
+    fireEvent.change(input, { target: { value: "Python" } });
+    fireEvent.submit(form);
+    expect(screen.getByText("Finding text…")).toBeVisible();
+    const signal = search.mock.calls[0][3];
+    fireEvent.change(input, { target: { value: "No such version" } });
+    expect(signal?.aborted).toBe(true);
+    fireEvent.submit(form);
+    expect(await screen.findByText("No matches in this saved check.")).toBeVisible();
+    await act(async () => finish({ ...empty, matches: [{ start: 0, end: 6 }] }));
+    expect(screen.queryByText("Match 1 of 1")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Saved page text").querySelector("mark")).toBeNull();
+  });
+
   it("fetches only when opened and pages through exact Unicode text without rendering markup", async () => {
     const run = savedRun({ outcome: "unchanged" });
     vi.mocked(api.listWatchRuns).mockResolvedValue({ items: [run] });
@@ -600,6 +660,68 @@ describe("saved watch page text", () => {
 });
 
 describe("Project watch navigation and drafts", () => {
+  it("creates a Project file watch from an explicit ordinary Project selection", async () => {
+    const selected = project();
+    vi.mocked(api.listProjects).mockResolvedValue({
+      items: [selected, project({ id: "private", name: "Private files", private_required: true })],
+      next_cursor: null,
+      limits: projectLimits,
+    });
+    const saved = watch({ title: "Daily attachments", source_kind: "project_files", url: null,
+      project: { id: selected.id, name: selected.name, available: true }, latest_run: null });
+    const create = vi.spyOn(api, "createWatch").mockImplementation(async () => {
+      vi.mocked(api.listWatches).mockResolvedValue({ items: [saved] });
+      return saved;
+    });
+    workspace();
+    fireEvent.click(await screen.findByRole("button", { name: "New watch" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Watch source" }), { target: { value: "project_files" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: saved.title } });
+    expect(screen.queryByRole("textbox", { name: "Public page URL" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "What changes matter?" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Preview next checks" }));
+    await screen.findByText("Next three checks (UTC)");
+    const save = screen.getByRole("button", { name: "Create watch" });
+    expect(save).toBeDisabled();
+    expect(screen.queryByRole("option", { name: "Private files" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Project" }), { target: { value: selected.id } });
+    fireEvent.click(save);
+    expect(await screen.findByRole("heading", { name: "Watched Project files" })).toBeVisible();
+    expect(create).toHaveBeenCalledExactlyOnceWith({
+      title: saved.title, schedule: saved.schedule, enabled: true, source_kind: "project_files", project_id: selected.id,
+    }, expect.any(String));
+  });
+
+  it("shows attachment changes and keeps a saved file watch bound to its Project", async () => {
+    const selected = { id: "project-1", name: "Release research", available: true };
+    const saved = watch({ source_kind: "project_files", url: null, project: selected });
+    const report = "1 attachment added, 1 removed.";
+    const changed = savedRun({ outcome: "changed", significant: true, report, definition: {
+      title: saved.title, source_kind: "project_files", url: null, criterion: saved.criterion,
+      schedule: saved.schedule, project: selected,
+    } });
+    vi.mocked(api.listWatches).mockResolvedValue({ items: [{ ...saved, latest_run: changed }] });
+    vi.mocked(api.listWatchRuns).mockResolvedValue({ items: [changed] });
+    vi.mocked(api.getWatchRun).mockResolvedValue(changed);
+    const openProject = vi.fn();
+    workspace({ onOpenProject: openProject });
+    expect(await screen.findByRole("heading", { name: "Files changed" })).toBeVisible();
+    expect(screen.getByText(report)).toBeVisible();
+    expect(screen.queryByText("Saved page text")).not.toBeInTheDocument();
+    expect(screen.queryByText("Local model assessment")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    const settings = within(screen.getByRole("region", { name: "Watch settings" }));
+    fireEvent.click(settings.getByRole("button", { name: "Open Project" }));
+    expect(openProject).toHaveBeenCalledWith(selected.id);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const source = screen.getByRole("combobox", { name: "Watch source" });
+    expect(source).toHaveValue("project_files");
+    expect(source).toBeDisabled();
+    const projectChoice = screen.getByRole("combobox", { name: "Project" });
+    expect(projectChoice).toHaveValue(selected.id);
+    expect(projectChoice).toBeDisabled();
+  });
+
   it("prefills a Project without creating or running, keeps the draft on another prefill and saves explicitly", async () => {
     const create = vi.spyOn(api, "createWatch").mockResolvedValue(watch({ project: { id: "project-2", name: "Another Project", available: true } }));
     const action = vi.spyOn(api, "actOnWatch");

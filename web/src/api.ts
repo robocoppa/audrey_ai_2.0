@@ -807,11 +807,14 @@ export interface WatchProject {
   available: boolean;
 }
 
+export type WatchSourceKind = "public_page" | "project_files";
+
 export interface WatchRunSummary {
   id: string;
   definition?: {
     title: string;
-    url: string;
+    source_kind?: WatchSourceKind;
+    url: string | null;
     criterion: string;
     schedule: WatchSchedule;
     project?: WatchProject | null;
@@ -848,11 +851,27 @@ export interface WatchRunSnapshotPage {
 }
 
 export const WATCH_SNAPSHOT_PAGE_SIZE = 4000;
+export const WATCH_SNAPSHOT_QUERY_LIMIT = 160;
+export const WATCH_SNAPSHOT_MATCH_LIMIT = 200;
+
+export interface WatchSnapshotMatch {
+  start: number;
+  end: number;
+}
+
+export interface WatchSnapshotSearchResult {
+  watch_id: string;
+  run_id: string;
+  total_chars: number;
+  matches: WatchSnapshotMatch[];
+  truncated: boolean;
+}
 
 export interface PublicWatch {
   id: string;
   title: string;
-  url: string;
+  source_kind?: WatchSourceKind;
+  url: string | null;
   criterion: string;
   project?: WatchProject | null;
   schedule: WatchSchedule;
@@ -865,7 +884,10 @@ export interface PublicWatch {
   updated_at: string;
 }
 
-export type WatchDefinition = Pick<PublicWatch, "title" | "url" | "criterion" | "schedule" | "enabled"> & { project_id?: string | null };
+export type WatchDefinition = Pick<PublicWatch, "title" | "schedule" | "enabled"> & (
+  { source_kind?: "public_page"; url: string; criterion: string; project_id?: string | null }
+  | { source_kind: "project_files"; project_id: string }
+);
 
 export interface WatchNotification {
   id: string;
@@ -923,7 +945,10 @@ export function createWatch(definition: WatchDefinition, requestId: string): Pro
 }
 
 export function updateWatch(id: string, definition: WatchDefinition, expectedRevision: number): Promise<PublicWatch> {
-  return apiJson(`/api/watches/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...definition, expected_revision: expectedRevision }) });
+  const { source_kind, ...settings } = definition;
+  const { title, schedule, enabled } = settings;
+  const editable = source_kind === "project_files" ? { title, schedule, enabled } : settings;
+  return apiJson(`/api/watches/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...editable, expected_revision: expectedRevision }) });
 }
 
 export function actOnWatch(id: string, action: "pause" | "resume" | "run" | "rebaseline", expectedRevision: number): Promise<PublicWatch> {
@@ -945,6 +970,11 @@ export function getWatchRun(watchId: string, runId: string, signal?: AbortSignal
 export function getWatchRunSnapshot(watchId: string, runId: string, offset: number, signal?: AbortSignal): Promise<WatchRunSnapshotPage> {
   const query = new URLSearchParams({ offset: String(offset), limit: String(WATCH_SNAPSHOT_PAGE_SIZE) });
   return apiJson(`/api/watches/${encodeURIComponent(watchId)}/runs/${encodeURIComponent(runId)}/snapshot?${query}`, { signal, cache: "no-store" });
+}
+
+export function searchWatchRunSnapshot(watchId: string, runId: string, text: string, signal?: AbortSignal): Promise<WatchSnapshotSearchResult> {
+  const query = new URLSearchParams({ q: text });
+  return apiJson(`/api/watches/${encodeURIComponent(watchId)}/runs/${encodeURIComponent(runId)}/snapshot/search?${query}`, { signal, cache: "no-store" });
 }
 
 export function listWatchNotifications(signal?: AbortSignal): Promise<{ items: WatchNotification[]; unread_count: number }> {
