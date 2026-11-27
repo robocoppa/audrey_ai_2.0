@@ -452,12 +452,8 @@ export function ProjectHome({
               aria-label={confirmingDelete ? "Confirm delete project" : "Delete project"}
               aria-pressed={confirmingDelete}
               title={confirmingDelete
-                ? isPrivate
-                  ? "Click again to delete project. Conversations and files will be kept."
-                  : "Click again to delete project. Linked watches stop; saved checks, conversations and files will be kept."
-                : isPrivate
-                  ? "Conversations and files will be kept. Conversations return to your chat history with their processing setting unchanged."
-                  : "Linked watches stop; saved checks, conversations and files will be kept. Conversations return to your chat history with their processing setting unchanged."}
+                ? "Click again to delete project. Linked watches stop; saved checks, conversations and files will be kept."
+                : "Linked watches stop; saved checks, conversations and files will be kept. Conversations return to your chat history with their processing setting unchanged."}
               onClick={() => {
                 if (confirmingDelete) {
                   void removeProject();
@@ -516,7 +512,7 @@ export function ProjectHome({
           agents={!isPrivate && (onNewProjectAgent || onOpenProjectAgent) ? (active) => <ProjectAgents
             project={project} visible={visible && active}
             onNew={onNewProjectAgent} onOpen={onOpenProjectAgent} /> : undefined}
-          watches={!isPrivate && (onNewProjectWatch || onOpenProjectWatch) ? (active) => <ProjectWatches
+          watches={onNewProjectWatch || onOpenProjectWatch ? (active) => <ProjectWatches
             project={project} visible={visible && active}
             onNew={onNewProjectWatch} onOpen={onOpenProjectWatch} /> : undefined}
           chats={

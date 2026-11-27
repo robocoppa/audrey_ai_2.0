@@ -196,7 +196,7 @@ Watches as accessible tabs. Show one activity panel at a time; keep its creation
 and refresh controls above the scrolling list. Agent/Watch cards use the same
 shared item styling as conversations. Inactive tabs pause their reads and pending
 navigation; switching tabs must preserve the Knowledge draft. Private Projects
-retain Chats and their existing local tools, with no Agent/Watch tabs.
+offer Chats and Private file Watches alongside their local tools.
 
 The right column contains separate Knowledge and Files panels. Start with a
 60/40 activity/context split, give long lists their own scrolling area, and grow

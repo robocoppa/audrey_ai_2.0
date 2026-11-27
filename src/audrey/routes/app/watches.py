@@ -1,4 +1,4 @@
-"""Explicit, owner-bound public-page watches and their in-app activity."""
+"""Explicit, owner-bound watches and their in-app activity."""
 
 from __future__ import annotations
 
@@ -35,12 +35,14 @@ class WatchProject(BaseModel):
     id: str
     name: str | None
     available: bool
+    private_required: Literal[True] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class WatchRunInputs(BaseModel):
     title: str
     source_kind: WatchSourceKind = "public_page"
     source_filename: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    private_required: Literal[True] | None = Field(default=None, exclude_if=lambda value: value is None)
     url: str | None
     criterion: str
     schedule: dict[str, Any]
@@ -99,6 +101,7 @@ class WatchResponse(BaseModel):
     title: str
     source_kind: WatchSourceKind = "public_page"
     source_filename: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    private_required: Literal[True] | None = Field(default=None, exclude_if=lambda value: value is None)
     url: str | None
     criterion: str
     schedule: dict[str, Any]
@@ -128,6 +131,7 @@ class WatchCreate(BaseModel):
     title: str = Field(min_length=1, max_length=100)
     source_kind: WatchSourceKind = "public_page"
     source_filename: Annotated[str, StringConstraints(min_length=1, max_length=255, strip_whitespace=False)] | None = None
+    private_required: bool = Field(default=False, strict=True)
     url: str | None = Field(default=None, min_length=1, max_length=4096)
     criterion: str | None = Field(default=None, min_length=1, max_length=2000)
     schedule: dict[str, Any]
@@ -191,8 +195,13 @@ def _fence(request: Request, principal: Principal, **payloads) -> None:
     _repository(request).fence_response(user_id=principal.user_id, **payloads)
 
 
-async def _authorize_watch(request: Request, principal: Principal, source_kind: str | None) -> None:
-    await watch_authority(request.app, principal.user_id, require_model=source_kind != "project_files")
+async def _authorize_watch(
+    request: Request, principal: Principal, source_kind: str | None, *, private_required: bool = False,
+) -> None:
+    await watch_authority(
+        request.app, principal.user_id, require_model=source_kind != "project_files",
+        private_required=private_required,
+    )
 
 
 @router.post("/watches/preview")
@@ -224,11 +233,17 @@ async def create_watch(body: WatchCreate, request: Request, response: Response,
                        principal: Principal = Depends(_access)):
     response.headers["Cache-Control"] = "private, no-store"
     try:
-        await _authorize_watch(request, principal, body.source_kind)
+        if body.private_required and (
+            body.source_kind != "project_files" or body.source_filename is None or body.project_id is None
+        ):
+            raise WatchError("Choose a specific text file in a Private Project.")
+        await _authorize_watch(request, principal, body.source_kind, private_required=body.private_required)
         if body.source_filename is not None:
             if body.source_kind != "project_files" or body.project_id is None:
                 raise WatchError("Choose a Project for the watched file.")
-            await ProjectFileTextWatchSource(request.app).validate(principal, body.project_id, body.source_filename)
+            await ProjectFileTextWatchSource(request.app, private_required=body.private_required).validate(
+                principal, body.project_id, body.source_filename,
+            )
         settings = watch_settings(request.app)
         watch = await _repository(request).create(
             user_id=principal.user_id, **body.model_dump(), limits=settings.run_limits(),
@@ -271,7 +286,9 @@ async def update_watch(watch_id: str, body: WatchUpdate, request: Request, respo
         existing = await repository.get(user_id=principal.user_id, watch_id=watch_id)
         # Pausing and deletion remain available after grants/configuration change.
         if values.keys() - {"expected_revision", "enabled"} or values.get("enabled") is True:
-            await _authorize_watch(request, principal, existing.get("source_kind"))
+            await _authorize_watch(
+                request, principal, existing.get("source_kind"), private_required=existing.get("private_required") is True,
+            )
         watch = await repository.update(user_id=principal.user_id, watch_id=watch_id, **values)
         _fence(request, principal, watches=[watch])
     except AgentDispatchStoppedError as error:
@@ -292,7 +309,9 @@ async def watch_action(watch_id: str, body: WatchAction, request: Request, respo
     try:
         existing = await repository.get(user_id=principal.user_id, watch_id=watch_id)
         if body.action != "pause":
-            await _authorize_watch(request, principal, existing.get("source_kind"))
+            await _authorize_watch(
+                request, principal, existing.get("source_kind"), private_required=existing.get("private_required") is True,
+            )
         if body.action in {"run", "rebaseline"}:
             watch = await repository.run_now(user_id=principal.user_id, watch_id=watch_id,
                                              expected_revision=body.expected_revision,

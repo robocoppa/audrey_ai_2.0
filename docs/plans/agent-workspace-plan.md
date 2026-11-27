@@ -1,7 +1,8 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, November 26, 2026. Saved task Agents, unified lexical
-Search, Project Knowledge, public-page Watches and Project attachment Watches are implemented locally. The owner closed the recent
+**Status:** In progress, November 27, 2026. Saved task Agents, unified lexical
+Search, Project Knowledge, public-page Watches, and ordinary and Private Project
+file Watches are implemented locally. The owner closed the recent
 interactive acceptance work on November 13. Campaigns 1–4 remain closed.
 
 The owner selected unified search, saved background tasks, project working
@@ -39,8 +40,9 @@ and Review can reopen an Agent's saved deliverables.
   selected filename in one ordinary Project. Keep a comparison fingerprint while
   the baseline attachment remains available. Local comparisons, deletion fences,
   schema replay, UI and desktop/mobile browser checks passed.
-- [ ] **Private file Watches.** Check explicitly permitted files with verified
-  local processing and Private access fences.
+- [x] **Private file Watches.** Compare the saved text of an explicitly selected
+  filename in a Private Project using local fingerprints. Local runtime,
+  migration and browser checks passed. Tower acceptance remains open.
 - [ ] **Multiple-source Watches.** Give each selected source its own coverage
   and baseline while retaining one schedule and check history.
 - [ ] **Adaptive Agents.** Add bounded replanning and finer checkpoints inside
@@ -50,9 +52,9 @@ and Review can reopen an Agent's saved deliverables.
 - [ ] **Semantic search.** Add owner-scoped concept matching and support deeper
   document or media navigation where stored source locations are available.
 - [ ] **Tower acceptance.** Verify Project file addition, removal and saved text
-  checks, Find text, the Agent/Watch header refresh, a controlled public-page change
-  and alert, restart without duplicate Agent outputs, and Chat responsiveness
-  during concurrent Agent work.
+  checks, the Private file workflow, Find text, the Agent/Watch header refresh,
+  a controlled public-page change and alert, restart without duplicate Agent
+  outputs, and Chat responsiveness during concurrent Agent work.
 
 ## Current implementation slice
 
@@ -259,7 +261,7 @@ by a newer start/delete operation; genuine current failures still appear.
 This slice uses a fixed three-stage workflow and the existing bounded ReAct loop.
 Adaptive multi-step plans, Private agent inputs,
 semantic search,
-owned-file/Private and multiple-source watches remain implementation work. Existing Private Tax tasks keep
+multiple-source watches remain implementation work. Existing Private Tax tasks keep
 their current behavior. The remaining sections specify the intended full feature.
 
 The first unified Search slice searches native completed/incomplete user and
@@ -358,8 +360,7 @@ cadence edits retain the baseline; URL/redirect identity or extraction changes r
 History exposes each run's saved URL, criterion and schedule separately from the
 current definition. Significant changes and persistent failures create deduplicated in-app Activity
 notices linked to the exact saved check. Unchanged checks remain in history. There
-are no external notifications. Owned-file/Private watches,
-multiple-source definitions remain later work.
+are no external notifications. Multiple-source definitions remain later work.
 Affected hermetic checks and mocked desktop/phone browser flows pass; real public
 page changes, scheduled runtime and model-judgment acceptance remain manual.
 
@@ -411,6 +412,18 @@ then establishes a fresh baseline. Incomplete checks retain the last valid
 baseline. Check history stores status and a short report. Schema 47 keeps the
 current fingerprint linked to the attachment and applies at backend startup.
 See the [interactive file text check](../../tests/manual/agent-workspace/README.md#watching-a-project-files-saved-text).
+
+Schema 48 adds **Private Project file text Watches**. Open Watches from a
+Private Project or choose a Private Project under **Project file text**.
+Creation requires an exact selected filename and Private access. Checks read
+the newest matching, ready Private attachment from Audrey's local storage.
+The immutable Watch and check inputs bind the Private Project and filename.
+The scheduler rechecks Private access, ownership, attachment membership and
+source identity before updating the fingerprint. Only the current live
+attachment's fingerprint and status history persist. Updates use a generic
+Private label and open the exact owned check. The comparison needs no model,
+network request or copied file text. Deletion or detachment clears dependent
+fingerprints. See the [interactive Private file check](../../tests/manual/agent-workspace/README.md#watching-a-private-project-file).
 
 Schema 30 unifies agent completion/failure notices and existing watch alerts in
 Agents' Activity inbox. Terminal agent state and its deduplicated notice commit
@@ -1348,7 +1361,7 @@ decision; then schedule a weekly check of a selected public release page.
 | Private tasks | Leases, revisions, source/model pins, budgets and committed-result delivery for Private tax reviews | General agent contracts and adapters; existing Private recovery currently pauses work |
 | Search | Local lexical API/sidebar, canonical reader and workspace links, exact message focus, bounded projection, approved notes and Project report filters | Semantic candidates and expanded native previews for retained text |
 | Projects | Compact overview with Knowledge/Agents below and a Watch row; approved knowledge in native chat and ordinary agents; selected ordinary file inputs, fixed context, Project links and saved-work lists | Private agent context, automatic proposals |
-| Scheduling | Explicit public-page schedules, Project organization/navigation, snapshots/diffs, baselines and Activity alerts | Owned-file/Private and multiple-source watches |
+| Scheduling | Public-page Watches, ordinary Project inventory Watches, and exact-filename text Watches in ordinary and Private Projects | Multiple-source Watches and deployed acceptance |
 
 Code anchors:
 

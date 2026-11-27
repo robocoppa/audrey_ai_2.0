@@ -22,6 +22,7 @@ from audrey.app_state.watches import (
     WatchError,
     WatchLimitError,
 )
+from audrey.processing_policy import ProcessingPolicy, processing_scope
 
 
 class Clock:
@@ -165,6 +166,176 @@ async def test_project_file_text_retains_only_a_live_attachment_fingerprint(stat
         )
 
 
+async def _private_file_watch(state, **changes):
+    project = await state.store.projects.create(user_id=state.owner.user_id, name="Protected Project", private_required=True)
+    values = {"url": None, "criterion": None, "source_kind": "project_files", "private_required": True,
+              "source_filename": "Confidential plan.md", "project_id": project.project_id, "enabled": False}
+    values.update(changes)
+    return project, await _create(state, **values)
+
+
+async def _private_attachment(state, project_id, file_id):
+    with processing_scope(ProcessingPolicy(local_models={"qwen3.8:latest": "a" * 64}, ollama_base_url="http://localhost:11434")):
+        await state.store.projects.add_file(user_id=state.owner.user_id, project_id=project_id,
+                                             file_id=file_id, file_is_private=True)
+
+
+@pytest.mark.parametrize("value", [0, 1, None, "true", []])
+async def test_private_watch_mode_is_a_strict_boolean(state, value):
+    with pytest.raises(WatchError, match="privacy scope"):
+        await _create(state, private_required=value)
+
+
+@pytest.mark.parametrize("changes", [
+    {"source_kind": "public_page"}, {"source_filename": None}, {"project_id": None},
+])
+async def test_private_watch_only_accepts_explicit_project_filename_scope(state, changes):
+    with pytest.raises(WatchError):
+        await _private_file_watch(state, **changes)
+
+
+async def test_private_project_and_file_watch_modes_must_match_canonical_scope(state):
+    project, watch = await _private_file_watch(state)
+    ordinary = await state.store.projects.create(user_id=state.owner.user_id, name="Ordinary")
+    with pytest.raises(WatchAccessError):
+        await _create(state, request_id="ordinary-in-private", project_id=project.project_id)
+    with pytest.raises(WatchAccessError):
+        await _create(state, request_id="private-in-ordinary", url=None, criterion=None,
+                      source_kind="project_files", source_filename="plan.md", project_id=ordinary.project_id,
+                      private_required=True)
+    with pytest.raises(WatchAccessError):
+        await state.store.watches.list(user_id=state.other.user_id, project_id=project.project_id)
+    assert (await state.store.watches.list(user_id=state.owner.user_id, project_id=project.project_id))[0]["id"] == watch["id"]
+    assert (await state.store.watches.list(user_id=state.owner.user_id))[0]["private_required"] is True
+
+
+async def test_private_watch_pins_mode_and_idempotency_without_widening_ordinary_metadata(state):
+    project, watch = await _private_file_watch(state)
+    assert watch["private_required"] is True and watch["project"]["private_required"] is True
+    assert watch["project"]["name"] == "Protected Project"
+    run = await _claim(state, watch)
+    assert run["private_required"] is True and run["definition"]["private_required"] is True
+    assert run["definition"]["project"]["private_required"] is True
+    assert json.loads(state.store._conn.execute("SELECT definition_json FROM app_watch_runs").fetchone()[0])["private_required"] is True
+    replay = await _create(state, url=None, criterion=None, source_kind="project_files", private_required=True,
+                           source_filename="Confidential plan.md", project_id=project.project_id, enabled=False)
+    assert replay["id"] == watch["id"]
+    with pytest.raises(WatchConflictError):
+        await _create(state, url=None, criterion=None, source_kind="project_files", private_required=False,
+                      source_filename="Confidential plan.md", project_id=project.project_id, enabled=False)
+    with pytest.raises(sqlite3.IntegrityError, match="privacy scope is immutable"):
+        with state.store._lock, state.store._conn:
+            state.store._conn.execute("UPDATE app_watches SET private_required=0 WHERE watch_id=?", (watch["id"],))
+    with pytest.raises(WatchError, match="original Project"):
+        await state.store.watches.update(**_key(state, watch), project_id=None)
+    ordinary = await _create(state, request_id="ordinary")
+    assert "private_required" not in ordinary
+
+
+async def test_private_file_baseline_and_activity_retain_no_source_text_or_filename(state):
+    project, watch = await _private_file_watch(state, title="Owner supplied secret title")
+    await _private_attachment(state, project.project_id, "private-file")
+
+    @contextmanager
+    def source_guard():
+        yield lambda previous: previous is not None
+
+    async def finish(text):
+        run = await _claim(state, watch)
+        return await state.store.watches.complete_project_file_text(
+            **_lease(run), file_id="private-file", digest=hashlib.sha256(text.encode()).hexdigest(), source_guard=source_guard,
+        )
+
+    assert (await finish("Private source material one"))["outcome"] == "baseline"
+    assert (await finish("Private source material two"))["outcome"] == "changed"
+    changed = (await state.store.notifications.feed(user_id=state.owner.user_id))["items"][0]
+    assert changed["title"] == "Private file watch" and changed["body"] == "The saved Private file text changed."
+    assert "Confidential" not in repr(changed) and "secret title" not in repr(changed)
+    run = await _claim(state, watch)
+    await state.store.watches.fail(**_lease(run), error="Parser details for Confidential plan.md")
+    notices = (await state.store.notifications.feed(user_id=state.owner.user_id))["items"]
+    assert {notice["kind"] for notice in notices} == {"failure", "change"}
+    assert all(notice["title"] == "Private file watch" and "Confidential" not in notice["body"] for notice in notices)
+    assert state.store._conn.execute("SELECT baseline_json FROM app_watch_runs WHERE run_id=?", (run["id"],)).fetchone()[0] is None
+    for row in state.store._conn.execute("SELECT record_json FROM app_watch_snapshots"):
+        assert "Private source material" not in row[0] and "Confidential" not in row[0]
+    assert await state.store.projects.remove_file(user_id=state.owner.user_id, project_id=project.project_id, file_id="private-file")
+    assert state.store._conn.execute("SELECT COUNT(*) FROM app_watch_file_text_baselines").fetchone()[0] == 0
+
+
+async def test_private_project_deletion_fences_execution_and_pauses_future_work_with_history_retained(state):
+    project, watch = await _private_file_watch(state, enabled=True)
+    run = await _claim(state, watch)
+    await state.store.projects.delete(user_id=state.owner.user_id, project_id=project.project_id)
+    for operation in (state.store.watches.validate_lease, state.store.watches.heartbeat):
+        with pytest.raises(WatchAccessError):
+            await operation(**_lease(run))
+    with pytest.raises(WatchAccessError):
+        state.store.watches.fence_execution(**_lease(run))
+    with pytest.raises(WatchConflictError):
+        state.store.watches.fence_response(user_id=state.owner.user_id, watches=[watch])
+    with pytest.raises(WatchAccessError):
+        await state.store.watches.run_now(**_key(state, watch))
+    assert await state.store.watches.claim() is None
+    saved = await state.store.watches.get(user_id=state.owner.user_id, watch_id=watch["id"])
+    assert saved["private_required"] is True and not saved["enabled"] and saved["next_run_at"] is None
+    assert saved["project"] == {"id": project.project_id, "name": None, "available": False, "private_required": True}
+    assert saved["latest_run"]["status"] == "cancelled"
+    await state.store.purge_local_user_data(user_id=state.owner.user_id)
+    assert await state.store.watches.list(user_id=state.owner.user_id) == []
+
+
+async def test_bot_membership_revokes_private_lease_but_failure_cleanup_stays_usable(state):
+    _, watch = await _private_file_watch(state)
+    run = await _claim(state, watch)
+    with state.store._lock, state.store._conn:
+        state.store._conn.execute("INSERT INTO user_group_memberships(user_id,group_id,granted_at) VALUES (?,'bots',?)",
+                                  (state.owner.user_id, state.clock().isoformat()))
+    with pytest.raises(WatchAccessError, match="account access"):
+        await state.store.watches.heartbeat(**_lease(run))
+    failed = await state.store.watches.fail(**_lease(run), error="Access was revoked.")
+    assert failed["status"] == "failed"
+
+
+async def test_schema48_preserves_ordinary_file_baseline_and_queued_run(state):
+    project = await state.store.projects.create(user_id=state.owner.user_id, name="Ordinary")
+    await state.store.projects.add_file(user_id=state.owner.user_id, project_id=project.project_id, file_id="ordinary-file")
+    watch = await _create(state, url=None, criterion=None, source_kind="project_files", source_filename="plan.md",
+                           project_id=project.project_id, enabled=False)
+    first = await _claim(state, watch)
+
+    @contextmanager
+    def source_guard():
+        yield lambda previous: previous is not None
+
+    digest = hashlib.sha256(b"Existing ordinary text.").hexdigest()
+    baseline = await state.store.watches.complete_project_file_text(
+        **_lease(first), file_id="ordinary-file", digest=digest, source_guard=source_guard,
+    )
+    queued = await state.store.watches.run_now(**_key(state, watch))
+    with state.store._lock, state.store._conn:
+        state.store._conn.execute("DROP TRIGGER trg_app_watch_privacy_immutable")
+        state.store._conn.execute("ALTER TABLE app_watches DROP COLUMN private_required")
+        state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=48")
+    upgraded = ApplicationStore(state.store.path)
+    upgraded.watches._clock = state.clock
+    try:
+        assert upgraded.schema_version == 48
+        assert upgraded._conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert upgraded._conn.execute("SELECT digest FROM app_watch_file_text_baselines").fetchone()[0] == digest
+        saved = await upgraded.watches.get(user_id=state.owner.user_id, watch_id=watch["id"])
+        assert saved["active_run_id"] == queued["active_run_id"] and "private_required" not in saved
+        assert (await upgraded.watches.get_run(user_id=state.owner.user_id, watch_id=watch["id"], run_id=baseline["id"])) == baseline
+        run = await upgraded.watches.claim()
+        assert run["run_id"] == queued["active_run_id"] and not run["private_required"]
+        completed = await upgraded.watches.complete_project_file_text(
+            **_lease(run), file_id="ordinary-file", digest=digest, source_guard=source_guard,
+        )
+        assert completed["outcome"] == "unchanged"
+    finally:
+        upgraded.close()
+
+
 async def test_schema46_preserves_public_watch_history_baseline_and_queued_check(tmp_path, monkeypatch):
     path = tmp_path / "legacy.sqlite"
     clock = Clock()
@@ -228,7 +399,7 @@ async def test_schema46_preserves_public_watch_history_baseline_and_queued_check
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 47
+        assert upgraded.schema_version == 48
         assert upgraded._conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert upgraded._conn.execute(
             "SELECT status FROM app_watch_operations WHERE operation_id='completed-op'",

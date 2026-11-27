@@ -294,7 +294,6 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
     queueMicrotask(() => {
       if (controller.signal.aborted) return;
       openedComposerRequest.current = composerProjectRequest.serial;
-      if (composerProjectRequest.project.private_required) { setError("Private Projects are not available for public page watches."); return; }
       externalRead.current?.abort(); generation.current += 1;
       setEditing("new"); setFormVisible(true); setFormProjectRequest(composerProjectRequest);
       setConflict(undefined); setError(""); setNotice(""); setDrawerOpen(false);
@@ -418,7 +417,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
           {loading ? <p role="status">Loading watches…</p> : !watches.length ? <p className="agents-empty">No watches yet. Create one to follow a public page or Project files.</p> : <ul className="agents-task-list">
             {watches.map((watch) => <li key={watch.id}>
               <SidebarItemButton className="agents-task-card" aria-pressed={!formActive && selectedId === watch.id} onClick={() => selectWatch(watch.id)} aria-label={`Open watch: ${watch.title}`}>
-                <span className={`agents-status agents-status-${watch.enabled ? "running" : "paused"}`}>{watch.enabled ? "Scheduled" : "Paused"}</span>
+                <span className={`agents-status agents-status-${watch.enabled ? "running" : "paused"}`}>{watch.enabled ? "Scheduled" : "Paused"}{watch.private_required ? " · Private" : ""}</span>
                 <strong className="sidebar-item-title">{watch.title}</strong>
                 <span className="agents-task-stage sidebar-item-meta">{watch.active_run_id ? "Check in progress" : watch.latest_run ? runLabel(watch.latest_run) : "Awaiting baseline"}</span>
                 <span className="agents-task-stage sidebar-item-meta">Next: {timestamp(watch.next_run_at)}</span>
@@ -440,7 +439,7 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
             <div className="agents-detail-heading">
               <h2 className="workspace-page-title">{selected.title}</h2>
               <div className="watch-schedule">
-                <span className={`agents-status agents-status-${selected.enabled ? "running" : "paused"}`}>{selected.enabled ? "Scheduled" : "Paused"}</span>
+                <span className={`agents-status agents-status-${selected.enabled ? "running" : "paused"}`}>{selected.enabled ? "Scheduled" : "Paused"}{selected.private_required ? " · Private" : ""}</span>
                 <p>{scheduleLabel(selected)}</p>
                 {selected.enabled ? <p>Next scheduled check: <strong>{timestamp(selected.next_run_at)}</strong></p> : null}
               </div>
@@ -548,7 +547,7 @@ function WatchRunDetail({ run, timestamp, onOpenProject, snapshotVisible }: { ru
         <summary>Saved check inputs</summary>
         <dl>
           <dt>Title</dt><dd>{run.definition.title}</dd>
-          {projectFiles ? <><dt>Source</dt><dd>{run.definition.source_filename ? "Project file text" : "Project files"}</dd></> : <><dt>Public page URL</dt><dd>{run.definition.url}</dd></>}
+          {projectFiles ? <><dt>Source</dt><dd>{run.definition.private_required ? "Private · " : ""}{run.definition.source_filename ? "Project file text" : "Project files"}</dd></> : <><dt>Public page URL</dt><dd>{run.definition.url}</dd></>}
           {run.definition.source_filename ? <><dt>Filename</dt><dd>{run.definition.source_filename}</dd></> : null}
           <dt>Change criterion</dt><dd>{run.definition.criterion}</dd>
           <dt>Schedule</dt><dd>{scheduleLabel(run.definition)}</dd>
@@ -574,5 +573,5 @@ function WatchProjectView({ project, onOpenProject, historical = false, fixedPro
   const unavailable = historical ? "The Project linked to this saved check is unavailable."
     : fixedProject ? "This Project is unavailable."
       : "This Project is unavailable. Edit the watch to choose another Project or None before running or resuming it.";
-  return <div className="watch-project"><span>Project: <strong>{project?.name ?? (project ? "Unavailable Project" : "None")}</strong></span>{project?.available && onOpenProject ? <button className="agents-secondary" type="button" onClick={() => onOpenProject(project.id)}>Open Project</button> : null}{project && !project.available ? <p className="watch-help">{unavailable}</p> : null}</div>;
+  return <div className="watch-project"><span>Project: <strong>{project?.name ?? (project ? "Unavailable Project" : "None")}</strong>{project?.private_required ? " · Private" : ""}</span>{project?.available && onOpenProject ? <button className="agents-secondary" type="button" onClick={() => onOpenProject(project.id)}>Open Project</button> : null}{project && !project.available ? <p className="watch-help">{unavailable}</p> : null}</div>;
 }

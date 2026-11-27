@@ -805,6 +805,7 @@ export interface WatchProject {
   id: string;
   name: string | null;
   available: boolean;
+  private_required?: true;
 }
 
 export type WatchSourceKind = "public_page" | "project_files";
@@ -815,6 +816,7 @@ export interface WatchRunSummary {
     title: string;
     source_kind?: WatchSourceKind;
     source_filename?: string;
+    private_required?: true;
     url: string | null;
     criterion: string;
     schedule: WatchSchedule;
@@ -873,6 +875,7 @@ export interface PublicWatch {
   title: string;
   source_kind?: WatchSourceKind;
   source_filename?: string;
+  private_required?: true;
   url: string | null;
   criterion: string;
   project?: WatchProject | null;
@@ -888,7 +891,7 @@ export interface PublicWatch {
 
 export type WatchDefinition = Pick<PublicWatch, "title" | "schedule" | "enabled"> & (
   { source_kind?: "public_page"; url: string; criterion: string; project_id?: string | null }
-  | { source_kind: "project_files"; project_id: string; source_filename?: string }
+  | { source_kind: "project_files"; project_id: string; source_filename?: string; private_required?: true }
 );
 
 export interface WatchNotification {

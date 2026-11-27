@@ -247,6 +247,36 @@ describe("App", () => {
     expect(screen.queryByRole("form", { name: "Create watch" })).not.toBeInTheDocument();
   });
 
+  it("prefills and opens Private text watches without granting Private Agent access", async () => {
+    workspaceMock.enabled = workspaceMock.projectBridge = true;
+    const privateProject = { ...BRIDGE_PROJECT, private_required: true, name: "Private records" };
+    const privateWatch: PublicWatch = { ...BRIDGE_WATCH, title: "Private notes watch", private_required: true, source_kind: "project_files", source_filename: "notes.md", url: null, project: { ...BRIDGE_WATCH.project!, name: privateProject.name, private_required: true } };
+    const base = mockCapabilitySession("degraded").getMockImplementation()!;
+    const fetchMock = vi.fn<(path: string, options?: RequestInit) => Promise<Response>>((path) => {
+      const payload = path === `/api/projects/${BRIDGE_PROJECT.id}` ? privateProject
+        : path === `/api/watches/${BRIDGE_WATCH.id}` ? privateWatch : path === "/api/watches" ? { items: [privateWatch] } : null;
+      return payload ? Promise.resolve(new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } })) : base(path);
+    });
+    vi.stubGlobal("fetch", fetchMock); render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Prefill Project watch" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Watch source" })).toHaveValue("project_file_text"));
+    expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(privateProject.id);
+    expect(screen.queryByRole("textbox", { name: "Public page URL" })).not.toBeInTheDocument();
+    const navigation = within(screen.getByRole("navigation", { name: "Workspaces" }));
+    fireEvent.click(navigation.getByRole("button", { name: "Chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open saved Project watch" }));
+    expect(await screen.findByRole("heading", { name: privateWatch.title })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Open Project" }));
+    expect(await screen.findByRole("heading", { name: privateProject.name })).toBeVisible();
+    expect(screen.queryByRole("tab", { name: "Agents" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Watches" })).toBeVisible();
+    fireEvent.click(navigation.getByRole("button", { name: "Chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Prefill Project agent" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Agent tasks are unavailable for this Project");
+    expect(navigation.getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
+    expect(fetchMock.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false);
+  });
+
   it("ignores a late saved-watch read after the user leaves its Project", async () => {
     workspaceMock.enabled = workspaceMock.projectBridge = true;
     let resolve!: (response: Response) => void;
@@ -268,7 +298,7 @@ describe("App", () => {
     expect(screen.queryByRole("heading", { name: BRIDGE_WATCH.title })).not.toBeInTheDocument();
   });
 
-  it.each(["private", "mismatched", "unavailable"] as const)("rejects a %s canonical Project watch link", async (reason) => {
+  it.each(["mismatched", "unavailable"] as const)("rejects a %s canonical Project watch link", async (reason) => {
     workspaceMock.enabled = workspaceMock.projectBridge = true;
     const base = mockCapabilitySession("degraded").getMockImplementation()!;
     const fetchMock = vi.fn((path: string) => {
@@ -276,8 +306,8 @@ describe("App", () => {
         : path === `/api/watches/${BRIDGE_WATCH.id}` ? { ...BRIDGE_WATCH, project: { ...BRIDGE_WATCH.project!, id: reason === "mismatched" ? "other-project" : BRIDGE_PROJECT.id, available: reason !== "unavailable" } } : null;
       return payload ? Promise.resolve(new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } })) : base(path);
     }); vi.stubGlobal("fetch", fetchMock); render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: reason === "private" ? "Prefill Project watch" : "Open saved Project watch" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(reason === "private" ? "unavailable for this Project" : "no longer available in this Project");
+    fireEvent.click(await screen.findByRole("button", { name: "Open saved Project watch" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("no longer available in this Project");
     expect(within(screen.getByRole("navigation", { name: "Workspaces" })).getByRole("button", { name: "Chat" })).toHaveAttribute("aria-current", "page");
   });
 

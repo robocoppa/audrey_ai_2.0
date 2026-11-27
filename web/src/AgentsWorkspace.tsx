@@ -115,6 +115,7 @@ interface AgentsWorkspaceProps {
   composerWatchProjectRequest?: { project: AudreyProject; serial: number };
   externalWatchRequest?: { watch: PublicWatch; serial: number };
   onOpenProject?: (projectId: string) => void;
+  onOpenWatchProject?: (projectId: string) => void;
 }
 
 interface AnswerDraft { text: string; revision: number }
@@ -251,7 +252,7 @@ export function AgentsWorkspace(props: AgentsWorkspaceProps) {
       openRequest={watchRequest}
       composerProjectRequest={props.composerWatchProjectRequest}
       externalWatchRequest={props.externalWatchRequest}
-      onOpenProject={props.onOpenProject}
+      onOpenProject={props.onOpenWatchProject ?? props.onOpenProject}
       sidebarTabs={sidebarTabs}
       historyRequest={watchHistoryRequest}
     /></div> : null}

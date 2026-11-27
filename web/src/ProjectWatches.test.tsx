@@ -26,12 +26,23 @@ it("lists and opens the same Project watch before its first check and prefills w
   expect(create).not.toHaveBeenCalled(); expect(action).not.toHaveBeenCalled();
 });
 
-it("keeps Private Projects outside public-page watches and explains ordinary Project deletion", () => {
-  const listing = vi.spyOn(api, "listWatches");
-  const base = props(); const { rerender } = render(<ProjectHome {...base} project={{ ...project, private_required: true }} onNewProjectWatch={vi.fn()} onOpenProjectWatch={vi.fn()} />);
-  expect(screen.queryByRole("tab", { name: "Watches" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("heading", { name: "Project watches" })).not.toBeInTheDocument(); expect(listing).not.toHaveBeenCalled();
-  rerender(<ProjectHome {...base} />);
+it("offers only exact-name Private text watches inside Private Projects and explains linked-watch deletion", async () => {
+  const privateProject = { ...project, private_required: true };
+  const privateWatch: api.PublicWatch = { ...watch, id: "private-watch", title: "Private notes watch", source_kind: "project_files", source_filename: "notes.md", private_required: true, url: null, project: { ...watch.project!, private_required: true } };
+  const listing = vi.spyOn(api, "listWatches").mockResolvedValue({ items: [watch, { ...privateWatch, id: "inventory", title: "Unavailable Private inventory", source_filename: undefined }, privateWatch] });
+  const onNew = vi.fn(), onOpen = vi.fn();
+  render(<ProjectHome {...props()} project={privateProject} onNewProjectWatch={onNew} onOpenProjectWatch={onOpen} />);
+  expect(screen.queryByRole("tab", { name: "Agents" })).not.toBeInTheDocument();
+  expect(listing).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("tab", { name: "Watches" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Private notes watch/ }));
+  expect(onOpen).toHaveBeenCalledWith(privateWatch, expect.any(AbortSignal));
+  expect(screen.queryByText(watch.title)).not.toBeInTheDocument();
+  expect(screen.queryByText("Unavailable Private inventory")).not.toBeInTheDocument();
+  expect(screen.getByText("Private · Project file text · Scheduled")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("button", { name: "New watch in Project" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "New watch in Project" }));
+  expect(onNew).toHaveBeenCalledWith(privateProject, expect.any(AbortSignal));
   expect(screen.getByRole("button", { name: "Delete project" }).title).toContain("Linked watches stop; saved checks");
   fireEvent.click(screen.getByRole("button", { name: "Delete project" }));
   expect(screen.getByRole("button", { name: "Confirm delete project" })).toHaveTextContent("✓");

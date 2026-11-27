@@ -178,7 +178,7 @@ async def test_owned_project_create_filter_and_idempotency_do_not_dispatch_or_co
         "SELECT definition_json FROM app_watch_runs WHERE run_id=?", (run["id"],),
     ).fetchone()[0])
     assert definition == {"title": watch["title"], "url": watch["url"], "criterion": watch["criterion"],
-                          "schedule": watch["schedule"], "project_id": state.project.project_id}
+                          "schedule": watch["schedule"], "project_id": state.project.project_id, "private_required": False}
     assert state.project.name not in json.dumps(definition) and state.project.instructions not in json.dumps(run)
     assert "project_id" not in run["definition"]
     with state.store._lock, pytest.raises(sqlite3.IntegrityError, match="immutable"):
@@ -194,12 +194,16 @@ async def test_unavailable_project_create_update_filter_and_api_are_owner_bound(
         await state.store.watches.create(**inputs(state, request_id="new", project_id=project_id))
     with pytest.raises(WatchAccessError):
         await state.store.watches.update(**key(state, watch), project_id=project_id)
-    with pytest.raises(WatchAccessError):
-        await state.store.watches.list(user_id=state.owner.user_id, project_id=project_id)
+    if target == "private":
+        assert await state.store.watches.list(user_id=state.owner.user_id, project_id=project_id) == []
+    else:
+        with pytest.raises(WatchAccessError):
+            await state.store.watches.list(user_id=state.owner.user_id, project_id=project_id)
     body = inputs(state, request_id="api", project_id=project_id)
     body.pop("user_id")
     assert (await state.client.post("/api/watches", json=body)).status_code == 404
-    assert (await state.client.get("/api/watches", params={"project_id": project_id})).status_code == 404
+    listing = await state.client.get("/api/watches", params={"project_id": project_id})
+    assert listing.status_code == (200 if target == "private" else 404)
     assert (await state.client.patch(f"/api/watches/{watch['id']}", json={
         "expected_revision": watch["revision"], "project_id": project_id,
     })).status_code == 404
@@ -367,11 +371,14 @@ async def test_schema33_upgrade_preserves_legacy_unscoped_request_digest_and_run
         state.store._conn.execute("UPDATE app_watch_runs SET definition_json=?", (json.dumps(definition),))
         state.store._conn.execute(trigger)
         state.store._conn.execute("DROP INDEX idx_app_watches_project")
+        state.store._conn.execute("DROP TRIGGER trg_app_watch_privacy_immutable")
+        state.store._conn.execute("ALTER TABLE app_watches DROP COLUMN private_required")
+        state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=48")
         state.store._conn.execute("ALTER TABLE app_watches DROP COLUMN project_id")
         state.store._conn.execute("DELETE FROM app_schema_migrations WHERE version=33")
     upgraded = ApplicationStore(state.store.path)
     try:
-        assert upgraded.schema_version == 47
+        assert upgraded.schema_version == 48
         saved = await upgraded.watches.create(**inputs(state, project_id=None))
         assert saved["id"] == watch["id"] and saved["project"] is None
         assert saved["active_run_id"] == queued["active_run_id"] and saved["latest_run"]["definition"]["project"] is None

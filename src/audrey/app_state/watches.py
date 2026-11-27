@@ -158,25 +158,36 @@ class WatchesRepository:
         record["limits"] = json.loads(record["limits_json"])
         return record
 
-    def _project(self, user_id: str, project_id: str | None) -> dict | None:
+    def _project(self, user_id: str, project_id: str | None, *, private_required: bool = False) -> dict | None:
         if project_id is None:
             return None
         row = self._conn.execute(
-            "SELECT name FROM app_projects WHERE user_id=? AND project_id=? AND private_required=0",
-            (user_id, project_id),
+            "SELECT name FROM app_projects WHERE user_id=? AND project_id=? AND private_required=?",
+            (user_id, project_id, int(private_required)),
         ).fetchone()
-        return {"id": project_id, "name": row["name"] if row else None, "available": row is not None}
+        return {"id": project_id, "name": row["name"] if row else None, "available": row is not None,
+                **({"private_required": True} if private_required else {})}
 
-    def _require_project(self, user_id: str, project_id: str | None) -> None:
-        project = self._project(user_id, project_id)
+    def _require_project(self, user_id: str, project_id: str | None, *, private_required: bool | None = False) -> None:
+        if private_required is None and project_id is not None:
+            row = self._conn.execute(
+                "SELECT private_required FROM app_projects WHERE user_id=? AND project_id=?", (user_id, project_id),
+            ).fetchone()
+            if row is None:
+                raise WatchAccessError("Watch Project is unavailable.")
+            private_required = bool(row["private_required"])
+        project = self._project(user_id, project_id, private_required=bool(private_required))
         if project is not None and not project["available"]:
             raise WatchAccessError("Watch Project is unavailable.")
 
     def _public_run(self, record: dict, *, summary: bool = False) -> dict:
         definition = json.loads(record["definition_json"])
         project_id = definition.pop("project_id", None)
+        private_required = definition.get("private_required") is True
+        if not private_required:
+            definition.pop("private_required", None)
         rebaseline = definition.pop("rebaseline", False)
-        definition["project"] = self._project(record["user_id"], project_id)
+        definition["project"] = self._project(record["user_id"], project_id, private_required=private_required)
         return {
             "id": record["run_id"],
             "definition": definition,
@@ -201,13 +212,14 @@ class WatchesRepository:
         ).fetchone()
         return {
             "id": record["watch_id"],
+            **({"private_required": True} if record["private_required"] else {}),
             **({"source_kind": "project_files"} if record["source_kind"] == "project_files" else {}),
             **({"source_filename": record["source_filename"]} if record["source_filename"] is not None else {}),
             **{key: record[key] for key in (
                 "title", "url", "criterion", "revision", "created_at", "updated_at", "next_run_at",
             )},
             "schedule": record["schedule"], "enabled": bool(record["enabled"]),
-            "project": self._project(record["user_id"], record["project_id"]),
+            "project": self._project(record["user_id"], record["project_id"], private_required=bool(record["private_required"])),
             "active_run_id": active["run_id"] if active else None,
             "latest_run": self._public_run(dict(latest), summary=summary) if latest else None,
         }
@@ -242,7 +254,13 @@ class WatchesRepository:
         ):
             raise WatchConflictError("Watch check authority changed or expired.")
         if check_project:
-            self._require_project(record["user_id"], json.loads(record["definition_json"]).get("project_id"))
+            if self._conn.execute(
+                "SELECT 1 FROM user_group_memberships WHERE user_id=? AND group_id='bots'", (record["user_id"],),
+            ).fetchone():
+                raise WatchAccessError("Watch account access is unavailable.")
+            definition = json.loads(record["definition_json"])
+            self._require_project(record["user_id"], definition.get("project_id"),
+                                  private_required=definition.get("private_required") is True)
         return record
 
     def fence_execution(self, *, run_id: str, lease_token: str, fence: int) -> None:
@@ -317,6 +335,7 @@ class WatchesRepository:
         run_id, now = str(uuid.uuid4()), _stamp(self._clock())
         definition = {key: watch[key] for key in ("title", "url", "criterion", "schedule")}
         definition["project_id"] = watch["project_id"]
+        definition["private_required"] = bool(watch["private_required"])
         if watch["source_kind"] == "project_files":
             definition["source_kind"] = "project_files"
         source_filename = watch["source_filename"]
@@ -342,7 +361,12 @@ class WatchesRepository:
         url: str | None = None, criterion: str | None = None, enabled: bool = True, limits: dict | None = None,
         max_per_user: int = 20, max_global: int = 200, project_id: str | None = None,
         source_kind: str = "public_page", source_filename: str | None = None,
+        private_required: bool = False,
     ) -> dict:
+        if type(private_required) is not bool:
+            raise WatchError("Invalid watch privacy scope.")
+        if private_required and (source_kind != "project_files" or source_filename is None or project_id is None):
+            raise WatchError("Private watches require an explicit Project file name.")
         if source_kind == "project_files":
             if source_filename is not None:
                 source_filename = normalize_watch_source_filename(source_filename)
@@ -377,6 +401,8 @@ class WatchesRepository:
             identity.append(source_kind)
         if source_filename is not None:
             identity.append(source_filename)
+        if private_required:
+            identity.append(True)
         digest = hashlib.sha256(_json(identity).encode()).hexdigest()
 
         def work() -> dict:
@@ -389,7 +415,7 @@ class WatchesRepository:
                 if existing["request_digest"] != digest:
                     raise WatchConflictError("Request identity already used for another watch.")
                 return self._public(self._load(existing["watch_id"], user_id))
-            self._require_project(user_id, project_id)
+            self._require_project(user_id, project_id, private_required=private_required)
             counts = self._conn.execute(
                 "SELECT COUNT(*) AS total,COALESCE(SUM(user_id=?),0) AS owned FROM app_watches", (user_id,),
             ).fetchone()
@@ -398,11 +424,11 @@ class WatchesRepository:
             watch_id, now = str(uuid.uuid4()), self._clock()
             self._conn.execute(
                 "INSERT INTO app_watches (watch_id,user_id,request_id,request_digest,title,url,criterion,"
-                "schedule_json,limits_json,enabled,next_run_at,created_at,updated_at,project_id,source_kind,source_filename) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "schedule_json,limits_json,enabled,next_run_at,created_at,updated_at,project_id,source_kind,source_filename,private_required) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (watch_id, user_id, request_id, digest, title, url, criterion, _json(schedule), _json(limits),
                  int(enabled), _stamp(next_occurrence(schedule, now)) if enabled else None,
-                 _stamp(now), _stamp(now), project_id, source_kind, source_filename),
+                 _stamp(now), _stamp(now), project_id, source_kind, source_filename, int(private_required)),
             )
             return self._public(self._load(watch_id, user_id))
 
@@ -416,7 +442,7 @@ class WatchesRepository:
         def work() -> list[dict]:
             with self._lock:
                 self._owner(user_id)
-                self._require_project(user_id, project_id)
+                self._require_project(user_id, project_id, private_required=None)
                 return [self._public(self._load(row["watch_id"], user_id), summary=True) for row in
                         self._conn.execute(
                             "SELECT watch_id FROM app_watches WHERE user_id=? AND (? IS NULL OR project_id=?) "
@@ -474,7 +500,7 @@ class WatchesRepository:
             old_url, old_schedule, old_enabled = record["url"], record["schedule"], record["enabled"]
             record.update(changes)
             if record["enabled"] or "project_id" in changes:
-                self._require_project(user_id, record["project_id"])
+                self._require_project(user_id, record["project_id"], private_required=bool(record["private_required"]))
             if record["url"] != old_url:
                 self._conn.execute("DELETE FROM app_watch_baselines WHERE watch_id=?", (watch_id,))
                 record["failure_key"] = ""
@@ -520,7 +546,7 @@ class WatchesRepository:
             watch = self._load(watch_id, user_id)
             if watch["revision"] != expected_revision:
                 raise WatchConflictError("Watch changed. Refresh before trying again.")
-            self._require_project(user_id, watch["project_id"])
+            self._require_project(user_id, watch["project_id"], private_required=bool(watch["private_required"]))
             active = self._conn.execute(
                 "SELECT 1 FROM app_watch_runs WHERE watch_id=? AND status IN ('queued','running')", (watch_id,),
             ).fetchone()
@@ -575,18 +601,24 @@ class WatchesRepository:
             "accounted_at=NULL,error='Watch Project is unavailable.',completed_at=?,updated_at=? "
             "WHERE status IN ('queued','running') AND watch_id IN (SELECT watch_id FROM app_watches "
             "WHERE project_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM app_projects p "
-            "WHERE p.project_id=app_watches.project_id AND p.user_id=app_watches.user_id AND p.private_required=0))",
+            "WHERE p.project_id=app_watches.project_id AND p.user_id=app_watches.user_id "
+            "AND p.private_required=app_watches.private_required))",
             (now, now),
         )
         self._conn.execute(
             "UPDATE app_watches SET enabled=0,next_run_at=NULL,revision=revision+1,updated_at=? "
             "WHERE project_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM app_projects p "
-            "WHERE p.project_id=app_watches.project_id AND p.user_id=app_watches.user_id AND p.private_required=0) "
+            "WHERE p.project_id=app_watches.project_id AND p.user_id=app_watches.user_id "
+            "AND p.private_required=app_watches.private_required) "
             "AND (enabled=1 OR next_run_at IS NOT NULL)", (now,),
         )
 
     def _notice(self, record: dict, *, kind: str, body: str, dedup_key: str) -> None:
-        title = json.loads(record["definition_json"])["title"]
+        definition = json.loads(record["definition_json"])
+        private_required = definition.get("private_required") is True
+        title = "Private file watch" if private_required else definition["title"]
+        if private_required:
+            body = "The saved Private file text changed." if kind == "change" else "The Private file watch could not finish this check."
         self._conn.execute(
             "INSERT OR IGNORE INTO app_watch_notices (notice_id,user_id,watch_id,run_id,dedup_key,kind,"
             "title,body,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -889,7 +921,9 @@ class WatchesRepository:
             record = self._lease(run_id, lease_token, fence, check_project=False)
             self._account(record)
             limits = json.loads(record["limits_json"])
-            project = self._project(record["user_id"], json.loads(record["definition_json"]).get("project_id"))
+            definition = json.loads(record["definition_json"])
+            project = self._project(record["user_id"], definition.get("project_id"),
+                                    private_required=definition.get("private_required") is True)
             project_available = project is None or project["available"]
             if (retry and project_available and record["attempts"] < 3
                     and record["operations"] < limits["max_operations"]
@@ -1074,10 +1108,14 @@ class WatchesRepository:
             if "updated_at" in payload and row["updated_at"] != payload["updated_at"]:
                 raise WatchConflictError("Watch check changed. Refresh before trying again.")
             definition = payload.get("definition")
+            saved_definition = json.loads(row["definition_json"])
             if definition is not None and definition.get("project") != self._project(
-                user_id, json.loads(row["definition_json"]).get("project_id"),
+                user_id, saved_definition.get("project_id"),
+                private_required=saved_definition.get("private_required") is True,
             ):
                 raise WatchConflictError("Watch check Project changed. Refresh before trying again.")
+            if definition is not None and (definition.get("private_required") is True) != (saved_definition.get("private_required") is True):
+                raise WatchConflictError("Watch check privacy changed. Refresh before trying again.")
 
         with self._lock:
             if snapshot is None:
@@ -1086,10 +1124,10 @@ class WatchesRepository:
                 watch_id, run_id, updated_at = snapshot
                 if self._snapshot_row(user_id, watch_id, run_id)["updated_at"] != updated_at:
                     raise WatchAccessError(_SNAPSHOT_UNAVAILABLE)
-            self._require_project(user_id, project_id)
+            self._require_project(user_id, project_id, private_required=None)
             for payload in watches:
                 row = self._conn.execute(
-                    "SELECT revision,project_id FROM app_watches WHERE watch_id=? AND user_id=?",
+                    "SELECT revision,project_id,private_required FROM app_watches WHERE watch_id=? AND user_id=?",
                     (payload["id"], user_id),
                 ).fetchone()
                 if row is None:
@@ -1098,8 +1136,10 @@ class WatchesRepository:
                     raise WatchConflictError("Watch changed. Refresh before trying again.")
                 if project_id is not None and row["project_id"] != project_id:
                     raise WatchAccessError("Watch is unavailable.")
-                if payload.get("project") != self._project(user_id, row["project_id"]):
+                if payload.get("project") != self._project(user_id, row["project_id"], private_required=bool(row["private_required"])):
                     raise WatchConflictError("Watch Project changed. Refresh before trying again.")
+                if (payload.get("private_required") is True) != bool(row["private_required"]):
+                    raise WatchConflictError("Watch privacy changed. Refresh before trying again.")
                 if payload.get("latest_run") is not None:
                     check_run(payload["latest_run"], payload["id"])
             for payload in runs:

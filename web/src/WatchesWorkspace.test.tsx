@@ -683,7 +683,7 @@ describe("Project watch navigation and drafts", () => {
     await screen.findByText("Next three checks (UTC)");
     const save = screen.getByRole("button", { name: "Create watch" });
     expect(save).toBeDisabled();
-    expect(screen.queryByRole("option", { name: "Private files" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Private files/ })).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("combobox", { name: "Project" }), { target: { value: selected.id } });
     fireEvent.click(save);
     expect(await screen.findByRole("heading", { name: "Watched Project files" })).toBeVisible();
@@ -725,7 +725,7 @@ describe("Project watch navigation and drafts", () => {
     expect(load).not.toHaveBeenCalled();
     const projectChoice = screen.getByRole("combobox", { name: "Project" });
     await screen.findByRole("option", { name: first.name });
-    expect(screen.queryByRole("option", { name: "Private files" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Private files · Private" })).toBeInTheDocument();
     fireEvent.change(projectChoice, { target: { value: first.id } });
     await waitFor(() => expect(load).toHaveBeenCalledWith(first.id, expect.any(AbortSignal)));
     const firstSignal = load.mock.calls[0][1];

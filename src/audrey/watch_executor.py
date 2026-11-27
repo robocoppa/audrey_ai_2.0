@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
 from bs4 import BeautifulSoup
@@ -20,6 +21,7 @@ from audrey.agent_dispatch import AgentDispatchStoppedError
 from audrey.agent_executor import _verify_local, agent_settings
 from audrey.app_state.watches import WatchAccessError, WatchConflictError, WatchError
 from audrey.background_admission import BackgroundGenerationGate
+from audrey.identity import Principal
 from audrey.model_catalog import resolve_model
 from audrey.models.ollama import OllamaClient, generation_budget
 from audrey.net.public_fetch import (
@@ -36,6 +38,7 @@ MAX_FETCH_BYTES = 256 * 1024
 MAX_TEXT_BYTES = 64000
 MAX_DIFF_BYTES = 16000
 _MEDIA_TYPES = frozenset({"text/plain", "text/html", "application/xhtml+xml"})
+_PRIVATE_WATCH_UNAVAILABLE = "Private file watches are unavailable."
 _JUDGMENT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -94,7 +97,9 @@ def validate_watch_url(value: str) -> str:
     return str(url)
 
 
-async def watch_authority(app: Any, user_id: str, *, require_model: bool = True) -> Any:
+async def watch_authority(
+    app: Any, user_id: str, *, require_model: bool = True, private_required: bool = False,
+) -> Principal:
     store = app.state.application_store
     principal = await store.get_principal(user_id=user_id)
     if (
@@ -108,8 +113,13 @@ async def watch_authority(app: Any, user_id: str, *, require_model: bool = True)
         or not agent_settings(app).enabled
         or current_processing_policy() is not None
     ):
-        source = "Public page" if require_model else "Project file"
+        source = "Private file" if private_required else "Public page" if require_model else "Project file"
         raise AgentDispatchStoppedError(f"{source} watches are unavailable.")
+    if private_required and (
+        (app.state.cfg.raw.get("private_processing") or {}).get("enabled") is not True
+        or await resolve_model(app.state.cfg, store, principal, "private") is None
+    ):
+        raise AgentDispatchStoppedError(_PRIVATE_WATCH_UNAVAILABLE)
     if require_model and await resolve_model(app.state.cfg, store, principal, "local") is None:
         raise AgentDispatchStoppedError("Local model access is unavailable.")
     return principal
@@ -189,20 +199,49 @@ class WatchExecutor:
         self.fetcher = fetcher or fetch_public_asset
 
     async def complete_project_files(self, run: dict[str, Any]) -> None:
-        principal = await watch_authority(self.app, run["user_id"], require_model=False)
-        repository = self.app.state.application_store.watches
+        store = self.app.state.application_store
+        cfg, catalog_revision = self.app.state.cfg, store.model_catalog_revision
+        private = run.get("private_required") is True
+        principal = await watch_authority(self.app, run["user_id"], require_model=False, private_required=private)
+        repository = store.watches
         lease = {key: run[key] for key in ("run_id", "lease_token", "fence")}
         filename = run.get("source_filename")
         if filename is None:
+            if private:
+                raise AgentDispatchStoppedError(_PRIVATE_WATCH_UNAVAILABLE)
             await repository.complete_project_files(**lease)
             return
+
+        authorize: Callable[[], None] | None = None
+        if private:
+            def authorize_private() -> None:
+                # Both calls run under the application lock. A model-access
+                # update, group change or withdrawn lease cannot race them.
+                current = store._get_principal_sync(principal.user_id)
+                if (
+                    cfg is not self.app.state.cfg
+                    or store.model_catalog_revision != catalog_revision
+                    or (cfg.raw.get("private_processing") or {}).get("enabled") is not True
+                    or not watch_settings(self.app).enabled or not agent_settings(self.app).enabled
+                    or current is None or current.status != "active"
+                    or current.storage_namespace != principal.storage_namespace
+                    or current.groups != principal.groups or current.role != principal.role
+                ):
+                    raise AgentDispatchStoppedError(_PRIVATE_WATCH_UNAVAILABLE)
+                repository.fence_execution(**lease)
+
+            authorize = authorize_private
 
         # Authority may have changed while the account lookup was awaiting I/O.
         await repository.validate_lease(**lease)
         try:
-            captured = await ProjectFileTextWatchSource(self.app).capture(principal, run.get("project_id"), filename)
+            captured = await ProjectFileTextWatchSource(self.app, private_required=private).capture(
+                principal, run.get("project_id"), filename, authorize=authorize,
+            )
         except WatchError as error:
             raise WatchCheckError(str(error)) from None
+        if private:
+            await watch_authority(self.app, run["user_id"], require_model=False, private_required=True)
         try:
             await repository.complete_project_file_text(
                 **lease, file_id=captured.file_id, digest=captured.digest, source_guard=captured.source_guard,
@@ -211,6 +250,8 @@ class WatchExecutor:
             raise WatchCheckError(str(error)) from None
 
     async def __call__(self, run: dict[str, Any]) -> dict[str, Any]:
+        if run.get("private_required") is True:
+            raise AgentDispatchStoppedError(_PRIVATE_WATCH_UNAVAILABLE)
         repository = self.app.state.application_store.watches
         lease = {key: run[key] for key in ("run_id", "lease_token", "fence")}
         settings = watch_settings(self.app)

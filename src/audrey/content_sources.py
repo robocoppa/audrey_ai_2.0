@@ -301,15 +301,19 @@ class ContentSourceReader:
             return None
         return [row[0] for row in rows]
 
-    def _file_paths(self, namespace: str, row: dict, artifact: str):
-        """Choose canonical saved-text paths without opening source bodies."""
+    def _file_source_path(self, namespace: str, row: dict) -> Path:
+        """Locate the retained original without opening it or selecting an artifact."""
         file_id = row["file_id"]
         if not _identifier(file_id):
             raise _UnavailableSourceError
         directory = self.root / sanitize_user(namespace)
         if directory.is_symlink():
             raise _UnavailableSourceError
-        source = directory / f"{file_id}{Path(row['filename']).suffix.lower()}"
+        return directory / f"{file_id}{Path(row['filename']).suffix.lower()}"
+
+    def _file_paths(self, namespace: str, row: dict, artifact: str):
+        """Choose canonical saved-text paths without opening source bodies."""
+        source = self._file_source_path(namespace, row)
         if artifact == "text":
             cached = ocr_text_path(source)
             if row["origin"] == "generated":
@@ -327,7 +331,7 @@ class ContentSourceReader:
         else:
             if artifact not in _ARTIFACTS:
                 raise _UnavailableSourceError
-            paths = (directory / f"{file_id}.{_ARTIFACTS[artifact]}",)
+            paths = (source.parent / f"{row['file_id']}.{_ARTIFACTS[artifact]}",)
             text_path = paths[0]
         return source, paths, text_path
 

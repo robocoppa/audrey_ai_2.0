@@ -1897,6 +1897,21 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON app_watch_file_text_baselines(project_id,file_id);
         """,
     ),
+    (
+        48,
+        """
+        ALTER TABLE app_watches ADD COLUMN private_required INTEGER NOT NULL DEFAULT 0
+          CHECK (typeof(private_required)='integer' AND private_required IN (0,1)
+            AND (private_required=0 OR (source_kind='project_files' AND source_filename IS NOT NULL
+              AND project_id IS NOT NULL)));
+        CREATE TRIGGER IF NOT EXISTS trg_app_watch_privacy_immutable
+        BEFORE UPDATE OF private_required ON app_watches
+        WHEN NEW.private_required != OLD.private_required
+        BEGIN
+          SELECT RAISE(ABORT,'Watch privacy scope is immutable');
+        END;
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

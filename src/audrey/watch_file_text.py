@@ -22,6 +22,7 @@ from audrey.app_state.watches import (
 )
 from audrey.content_sources import ContentSourceReader, _presence_pin
 from audrey.identity import Principal
+from audrey.kb.private_documents import private_text_collection
 
 _TEXT_SUFFIXES = frozenset({".txt", ".md", ".csv", ".tsv", ".json"})
 _UNAVAILABLE = "The watched Project file is unavailable."
@@ -48,7 +49,8 @@ class _ProjectFile:
 
 
 class ProjectFileTextWatchSource:
-    def __init__(self, app: Any) -> None:
+    def __init__(self, app: Any, *, private_required: bool = False) -> None:
+        self.private_required = private_required
         self.store = app.state.application_store
         self.uploads = getattr(app.state, "uploads_db", None)
         self.reader = ContentSourceReader(
@@ -63,9 +65,12 @@ class ProjectFileTextWatchSource:
 
     async def capture(
         self, principal: Principal, project_id: str | None, source_filename: str,
+        *, authorize: Callable[[], None] | None = None,
     ) -> CapturedWatchFile:
+        if self.private_required and authorize is None:
+            raise WatchAccessError(_UNAVAILABLE)
         selected, source, pin, digest = await self.reader._disk(
-            self._capture_file, principal, project_id, source_filename,
+            self._capture_file, principal, project_id, source_filename, authorize,
         )
 
         @contextmanager
@@ -73,6 +78,9 @@ class ProjectFileTextWatchSource:
             # The repository holds the application lock before entering this
             # context and keeps both locks through the publication commit.
             with self.uploads._lock:
+                if authorize is not None:
+                    authorize()
+
                 def check_source(previous_file_id: str | None) -> bool:
                     matches = self._matches_locked(principal, project_id, source_filename)
                     if not matches or matches[0] != selected:
@@ -96,8 +104,12 @@ class ProjectFileTextWatchSource:
 
     def _capture_file(
         self, principal: Principal, project_id: str | None, source_filename: str,
+        authorize: Callable[[], None] | None,
     ) -> tuple[_ProjectFile, Path, FilePin, str]:
-        selected, source, pin = self._capture_selection(principal, project_id, source_filename)
+        with self.store._lock:
+            if authorize is not None:
+                authorize()
+            selected, source, pin = self._capture_selection(principal, project_id, source_filename)
         return selected, source, pin, self._fingerprint(source, pin)
 
     def _capture_selection(
@@ -123,11 +135,12 @@ class ProjectFileTextWatchSource:
             "SELECT f.file_id,f.added_at,f.origin FROM app_users u JOIN app_projects p ON p.user_id=u.user_id "
             "JOIN app_project_files f ON f.project_id=p.project_id "
             "WHERE u.user_id=? AND u.storage_namespace=? AND u.status='active' "
-            "AND p.project_id=? AND p.private_required=0 "
+            "AND p.project_id=? AND p.private_required=? "
             "AND NOT EXISTS (SELECT 1 FROM account_deletion_requests d WHERE d.user_id=u.user_id) "
             "AND NOT EXISTS (SELECT 1 FROM user_group_memberships g WHERE g.user_id=u.user_id AND g.group_id='bots') "
             "ORDER BY f.added_at DESC,f.file_id LIMIT ?",
-            (principal.user_id, principal.storage_namespace, project_id, PROJECT_MAX_FILES + 1),
+            (principal.user_id, principal.storage_namespace, project_id,
+             int(self.private_required), PROJECT_MAX_FILES + 1),
         ).fetchall()
         if not members:
             return []
@@ -138,7 +151,8 @@ class ProjectFileTextWatchSource:
         # copy must fail this check instead of falling back to older text.
         rows = self.uploads._conn.execute(
             "SELECT u.file_id,u.filename,u.kind,u.status,u.bytes,u.uploaded_at,u.completed_at,"
-            "u.source_freed_at,u.private_required,u.origin,EXISTS (SELECT 1 FROM file_deletions d "
+            "u.source_freed_at,u.private_required,u.origin,u.collection,u.chunks,"
+            "EXISTS (SELECT 1 FROM file_deletions d "
             "WHERE d.file_id=u.file_id AND d.user=u.user) AS tombstoned FROM uploads u "
             "WHERE u.user=? AND u.filename=? AND u.file_id IN (SELECT value FROM json_each(?))",
             (principal.storage_namespace, filename, json.dumps([member["file_id"] for member in members])),
@@ -152,7 +166,10 @@ class ProjectFileTextWatchSource:
 
     def _source_pin(self, principal: Principal, selected: _ProjectFile) -> tuple[Path, FilePin]:
         row = selected.row
-        if row["private_required"] or row["tombstoned"] or row["status"] == "deleting":
+        if (
+            bool(row["private_required"]) != self.private_required
+            or row["tombstoned"] or row["status"] == "deleting"
+        ):
             raise WatchAccessError(_UNAVAILABLE)
         if (
             row["status"] != "ready" or row["kind"] != "text"
@@ -160,10 +177,16 @@ class ProjectFileTextWatchSource:
             or Path(row["filename"]).suffix.lower() not in _TEXT_SUFFIXES
         ):
             raise WatchError(_NOT_READY)
+        if self.private_required and not (
+            (row["origin"] == "upload"
+             and row["collection"] == private_text_collection(principal.storage_namespace))
+            or (row["origin"] == "generated" and row["collection"] == "" and row["chunks"] == 0)
+        ):
+            raise WatchAccessError(_UNAVAILABLE)
         try:
             if row["source_freed_at"] or self.reader.root.is_symlink():
                 raise WatchAccessError(_UNAVAILABLE)
-            source, _, _ = self.reader._file_paths(principal.storage_namespace, row, "text")
+            source = self.reader._file_source_path(principal.storage_namespace, row)
             pin = _presence_pin(source)
         except (ValueError, OSError):
             raise WatchAccessError(_UNAVAILABLE) from None

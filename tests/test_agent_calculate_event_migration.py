@@ -56,7 +56,7 @@ async def test_schema42_preserves_schema41_events_and_bounds_calculator_stages(t
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 47
+        assert upgraded.schema_version == 48
         assert await upgraded.agents.events(user_id=owner.user_id, task_id=task["id"]) == before_events
         assert await upgraded.agents.get(user_id=owner.user_id, task_id=task["id"]) == before_task
         await upgraded.agents.finish_event(**lease(task), seq=pending, duration_ms=11, input_tokens=49, output_tokens=20)

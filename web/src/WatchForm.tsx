@@ -33,7 +33,7 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
   onSave: (definition: WatchDefinition, expectedRevision?: number) => Promise<void>;
   onCancel: () => void;
 }) {
-  const [sourceKind, setSourceKind] = useState<WatchFormSource>(watch?.source_filename ? "project_file_text" : watch?.source_kind ?? "public_page");
+  const [sourceKind, setSourceKind] = useState<WatchFormSource>(watch?.private_required || watch?.source_filename ? "project_file_text" : watch?.source_kind ?? "public_page");
   const projectFiles = sourceKind !== "public_page";
   const fileText = sourceKind === "project_file_text";
   const fixedProject = Boolean(watch && projectFiles);
@@ -56,6 +56,7 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
   const [fileChoices, setFileChoices] = useState<FileChoices | null>(null);
   const [fileRefresh, setFileRefresh] = useState(0);
   const [selectedProjectName, setSelectedProjectName] = useState(watch?.project?.name ?? "");
+  const [selectedProjectPrivate, setSelectedProjectPrivate] = useState(Boolean(watch?.private_required || watch?.project?.private_required));
   const [projects, setProjects] = useState<AudreyProject[]>([]);
   const [projectCursor, setProjectCursor] = useState<string | null>(null);
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -73,14 +74,17 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
   const scheduleKey = JSON.stringify(schedule);
   const previewCurrent = preview?.key === scheduleKey;
   const needsRebase = Boolean(conflict && conflict.revision !== baseRevision);
+  const projectPrivate = selectedProjectPrivate || Boolean(projects.find((project) => project.id === projectId)?.private_required);
+  const eligibleProjects = projects.filter((project) => fileText || !project.private_required);
+  const projectEligible = !projectPrivate || fileText;
   const projectUnavailable = Boolean(projectId && watch?.project?.id === projectId && !watch.project.available);
   const currentFileChoices = fileChoices?.projectId === projectId ? fileChoices : null;
   const filenames = currentFileChoices && "filenames" in currentFileChoices ? currentFileChoices.filenames : [];
   const sourceFilename = fileSelection.projectId === projectId ? fileSelection.filename : "";
   const fileReady = fixedProject ? Boolean(sourceFilename) : filenames.includes(sourceFilename);
   const sourceReady = projectFiles
-    ? Boolean(projectId) && !projectUnavailable && (!fileText || fileReady)
-    : Boolean(criterion.trim() && url.trim());
+    ? Boolean(projectId) && projectEligible && !projectUnavailable && (!fileText || fileReady)
+    : Boolean(criterion.trim() && url.trim()) && projectEligible;
   useEffect(() => {
     if (visible) return;
     previewRequest.current?.abort();
@@ -94,7 +98,7 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
     projectRead.current?.abort(); projectRead.current = controller;
     queueMicrotask(() => { if (!controller.signal.aborted) { setProjectsLoading(true); setProjectsError(""); } });
     void listProjects(undefined, controller.signal).then((page) => {
-      if (!controller.signal.aborted) { setProjects(page.items.filter((project) => !project.private_required)); setProjectCursor(page.next_cursor); }
+      if (!controller.signal.aborted) { setProjects(page.items); setProjectCursor(page.next_cursor); }
     }).catch((reason: unknown) => {
       if (!controller.signal.aborted) setProjectsError(reason instanceof Error ? reason.message : "Could not load Projects.");
     }).finally(() => { if (!controller.signal.aborted) setProjectsLoading(false); });
@@ -121,9 +125,10 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
     queueMicrotask(() => {
       if (controller.signal.aborted) return;
       appliedProject.current = projectRequest.serial;
-      if (projectRequest.project.private_required) { setError("Choose a non-Private Project for this watch."); return; }
+      if (projectRequest.project.private_required) setSourceKind("project_file_text");
       setProjectId(projectRequest.project.id);
       setSelectedProjectName(projectRequest.project.name);
+      setSelectedProjectPrivate(Boolean(projectRequest.project.private_required));
     });
     return () => controller.abort();
   }, [visible, projectRequest]);
@@ -135,7 +140,7 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
     try {
       const page = await listProjects(projectCursor, controller.signal);
       if (!controller.signal.aborted) {
-        setProjects((current) => [...new Map([...current, ...page.items.filter((project) => !project.private_required)].map((project) => [project.id, project])).values()]);
+        setProjects((current) => [...new Map([...current, ...page.items].map((project) => [project.id, project])).values()]);
         setProjectCursor(page.next_cursor);
       }
     } catch (reason) { if (!controller.signal.aborted) setProjectsError(reason instanceof Error ? reason.message : "Could not load more Projects."); }
@@ -167,6 +172,7 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
       if (sourceReady) void onSave({
         ...settings, source_kind: "project_files", project_id: projectId,
         ...(fileText ? { source_filename: sourceFilename } : {}),
+        ...(projectPrivate ? { private_required: true as const } : {}),
       }, baseRevision);
       return;
     }
@@ -190,13 +196,26 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
 
   return <form className="watch-form" onSubmit={submit} aria-label={watch ? "Edit watch" : "Create watch"}>
     <h2>{watch ? "Edit watch" : "New watch"}</h2>
-    <label>Watch source<select value={sourceKind} disabled={busy || Boolean(watch)} onChange={(event) => { setSourceKind(event.target.value as WatchFormSource); setError(""); }}>
+    <label>Watch source<select value={sourceKind} disabled={busy || Boolean(watch)} onChange={(event) => {
+      const next = event.target.value as WatchFormSource;
+      if (projectPrivate && next !== "project_file_text") {
+        setProjectId(""); setSelectedProjectName(""); setSelectedProjectPrivate(false);
+        setFileSelection({ projectId: "", filename: "" });
+      }
+      setSourceKind(next); setError("");
+    }}>
       <option value="public_page">Public page</option><option value="project_files">Project files</option><option value="project_file_text">Project file text</option>
     </select></label>
     <p>{fileText ? "Audrey checks the newest Project attachment with the exact filename you choose. Keep the previous copy attached to compare versions. If that copy is removed, the next successful check starts a new baseline."
       : projectFiles ? "Audrey compares the Project’s attachment list and flags added or removed files."
       : "Audrey checks one public page. Local models assess changes against your criterion."}</p>
-    <label>Project<select value={projectId} disabled={busy || fixedProject} required={projectFiles} onChange={(event) => { setProjectId(event.target.value); setSelectedProjectName(projects.find((project) => project.id === event.target.value)?.name ?? ""); }}><option value="" disabled={projectFiles}>{projectFiles ? "Choose a Project" : "None"}</option>{projectId && !projects.some((project) => project.id === projectId) ? <option value={projectId}>{selectedProjectName || "Unavailable Project"}</option> : null}{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
+    {fileText ? <p className="watch-help">TXT, MD, CSV, TSV, or JSON files up to 64,000 bytes. Checks run locally without a model, web access or saving file contents in watch history.</p> : null}
+    <label>Project<select value={projectEligible ? projectId : ""} disabled={busy || fixedProject} required={projectFiles} onChange={(event) => {
+      const chosen = eligibleProjects.find((project) => project.id === event.target.value);
+      setProjectId(chosen?.id ?? ""); setSelectedProjectName(chosen?.name ?? "");
+      setSelectedProjectPrivate(Boolean(chosen?.private_required));
+    }}><option value="" disabled={projectFiles}>{projectFiles ? "Choose a Project" : "None"}</option>{projectId && projectEligible && !eligibleProjects.some((project) => project.id === projectId) ? <option value={projectId}>{selectedProjectName || "Unavailable Project"}{projectPrivate ? " · Private" : ""}</option> : null}{eligibleProjects.map((project) => <option key={project.id} value={project.id}>{project.name}{project.private_required ? " · Private" : ""}</option>)}</select></label>
+    {projectPrivate && fileText ? <p className="watch-help">Private · Checks follow the selected filename within this Project.</p> : null}
     {!projectFiles ? <p className="watch-help">A Project organizes this public page watch. Its instructions, notes and files are not used for checks.</p> : projectUnavailable ? <p className="agents-error" role="alert">This Project is unavailable. Create a new watch to monitor a different Project.</p> : null}
     {projectsLoading ? <p className="watch-help" role="status">Loading Projects…</p> : null}
     {projectsError ? <p className="agents-error" role="alert">Could not load Projects. {projectsError} <button type="button" className="agents-secondary" disabled={busy || projectsLoading} onClick={() => setProjectRefresh((value) => value + 1)}>Retry Projects</button></p> : null}

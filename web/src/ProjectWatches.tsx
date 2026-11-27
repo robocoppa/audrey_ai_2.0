@@ -24,15 +24,16 @@ export function ProjectWatches({ project, visible, onNew, onOpen }: ProjectWatch
       if (!controller.signal.aborted) { setLoading(true); setOpening(false); setError(""); }
     });
     void listWatches(controller.signal, project.id).then(({ items }) => {
-      if (!controller.signal.aborted) setItems(items.filter((watch) => watch.project?.id === project.id));
+      if (!controller.signal.aborted) setItems(items.filter((watch) => watch.project?.id === project.id
+        && (!project.private_required || watch.private_required && watch.source_kind === "project_files" && Boolean(watch.source_filename))));
     }).catch((reason: unknown) => {
       if (!controller.signal.aborted) setError(messageOf(reason));
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => { controller.abort(); link.current?.abort(); };
-  }, [visible, project.id, refresh]);
+  }, [visible, project.id, project.private_required, refresh]);
 
   async function follow(watch?: PublicWatch) {
-    if (!visible || project.private_required) return;
+    if (!visible) return;
     if (watch && (watch.project?.id !== project.id || !watch.project.available)) {
       setError("This saved watch is unavailable in this Project. Refresh before trying again."); return;
     }
@@ -61,9 +62,9 @@ export function ProjectWatches({ project, visible, onNew, onOpen }: ProjectWatch
     {loading ? <p className="project-empty" role="status">Loading Project watches…</p> : items.length ? <ul className="project-home-conversations">{items.map((watch) => <li key={watch.id} className="conversation-row">
       <SidebarItemButton className="project-watch-card" disabled={opening || !onOpen} onClick={() => void follow(watch)}>
         <span className="sidebar-item-title">{watch.title}</span>
-        <small className="sidebar-item-meta project-watch-status">{watch.source_filename ? "Project file text · " : watch.source_kind === "project_files" ? "Project files · " : ""}{watch.active_run_id ? "Checking" : watch.enabled ? "Scheduled" : "Paused"}</small>
+        <small className="sidebar-item-meta project-watch-status">{watch.private_required ? "Private · " : ""}{watch.source_filename ? "Project file text · " : watch.source_kind === "project_files" ? "Project files · " : ""}{watch.active_run_id ? "Checking" : watch.enabled ? "Scheduled" : "Paused"}</small>
       </SidebarItemButton>
-    </li>)}</ul> : <p className="project-empty">No watches in this Project yet. Create one to follow a public page or files attached to this Project.</p>}
+    </li>)}</ul> : <p className="project-empty">{project.private_required ? "No watches in this Project yet. Create one to follow the text of an attached Private file." : "No watches in this Project yet. Create one to follow a public page or files attached to this Project."}</p>}
   </section>;
 }
 

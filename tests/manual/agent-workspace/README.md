@@ -261,3 +261,33 @@ docker compose up -d --build audrey audrey-ui
 5. Remove the newest copy from the Project and run the Watch again. Expect a
    fresh **Baseline saved** for the earlier copy. The Watch stays paused
    throughout the manual checks.
+
+## Watching a Private Project file
+
+After syncing, rebuild the backend and UI on Tower. Schema 48 applies at
+backend startup.
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+```
+
+1. In Audrey, create a disposable **Private** Project named `Private Watch Test`.
+   On the laptop, make two small UTF-8 files in separate folders. Name both
+   `private-status.txt` and give them the contents `Review status: Draft` and
+   `Review status: Approved`, respectively.
+2. Upload the Draft copy from the Private Project's **Files** box. Wait for it
+   to be ready. In the Project's **Watches** tab, click **New watch**. Confirm
+   that **Project file text** and the Private Project are selected. Choose
+   `private-status.txt`, title it `Private status check`, select **Hourly**,
+   click **Preview next checks**, then **Create watch**.
+3. Pause the Watch and click **Run now**. Expect **Baseline saved**. Upload the
+   Approved copy to the same Project, keeping the first copy attached. When it
+   is ready, click **Run now**. Expect **File text changed** and a generic
+   **Private file watch** notice under **Updates**. Open that notice and
+   confirm it opens the changed check. Its result should show only the status
+   of the comparison. Neither file phrase should appear in the check.
+4. Run the Watch again. Expect **Unchanged** and no new change notice. Remove
+   the Approved attachment from the Project and run it once more. Expect
+   **Baseline saved** for the remaining attachment. Verify the Watch stays
+   **Paused** and that **Open Project** leads back to the Private Project.

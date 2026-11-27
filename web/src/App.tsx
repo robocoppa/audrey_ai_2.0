@@ -194,7 +194,7 @@ export function App() {
     await readProjectLink(async (currentSignal, serial) => {
       const current = await getProject(project.id, currentSignal);
       if (currentSignal.aborted || projectNavigation.current.serial !== serial) return;
-      if (current.id !== project.id || current.private_required) throw new Error("Public-page watches are unavailable for this Project.");
+      if (current.id !== project.id) throw new Error("Watches are unavailable for this Project.");
       setComposerWatchProjectRequest({ project: current, serial, owner: workspaceOwner });
       setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("agents");
     }, signal);
@@ -209,29 +209,27 @@ export function App() {
       if (current.id !== watch.id || current.project?.id !== projectId || !current.project.available) {
         throw new Error("This saved watch is no longer available in this Project. Refresh before trying again.");
       }
+      if ((current.private_required || current.project.private_required)
+          && (!current.private_required || current.source_kind !== "project_files" || !current.source_filename)) {
+        throw new Error("This saved Private file watch is unavailable.");
+      }
       setExternalWatchRequest({ watch: current, serial, owner: workspaceOwner });
       setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("agents");
     }, signal);
   }
 
-  async function openAgentProject(projectId: string) {
+  async function openProjectById(projectId: string, requireOrdinary = false) {
     await readProjectLink(async (signal, serial) => {
       const project = await getProject(projectId, signal);
       if (signal.aborted || projectNavigation.current.serial !== serial) return;
-      if (project.id !== projectId || project.private_required) throw new Error("This Project is unavailable.");
+      if (project.id !== projectId || (requireOrdinary && project.private_required)) throw new Error("This Project is unavailable.");
       setProjectOpenRequest({ project, serial, owner: workspaceOwner });
       setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("projects");
     });
   }
 
-  async function openProjectPage(project: AudreyProject) {
-    await readProjectLink(async (signal, serial) => {
-      const current = await getProject(project.id, signal);
-      if (signal.aborted || projectNavigation.current.serial !== serial) return;
-      if (current.id !== project.id) throw new Error("This Project is unavailable.");
-      setProjectOpenRequest({ project: current, serial, owner: workspaceOwner });
-      setSearchOpen(false); setNavigationOpen(false); setActiveWorkspace("projects");
-    });
+  function openProjectPage(project: AudreyProject) {
+    return openProjectById(project.id);
   }
 
   async function openProjectConversation(conversation: Conversation) {
@@ -523,7 +521,8 @@ export function App() {
             externalAgentRequest={externalAgentRequest?.owner === workspaceOwner ? externalAgentRequest : undefined}
             composerWatchProjectRequest={composerWatchProjectRequest?.owner === workspaceOwner ? composerWatchProjectRequest : undefined}
             externalWatchRequest={externalWatchRequest?.owner === workspaceOwner ? externalWatchRequest : undefined}
-            onOpenProject={(projectId) => void openAgentProject(projectId)} />
+            onOpenProject={(projectId) => void openProjectById(projectId, true)}
+            onOpenWatchProject={(projectId) => void openProjectById(projectId)} />
         </div>
         <div className="app-workspace-view" hidden={activeWorkspace !== "projects"} inert={activeWorkspace !== "projects" ? true : undefined}>
           <ProjectsWorkspace key={workspaceOwner} visible={activeWorkspace === "projects" && !(searchOpen && compactSearch)} models={session.models}
