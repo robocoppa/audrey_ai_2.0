@@ -2,7 +2,7 @@
 
 **Results, strengths, and failure modes from practical tests**
 
-Updated November 27, 2026 · Measurements collected July–October 2026
+Updated November 27, 2026 · Measurements collected July–November 2026
 
 This report compares local and hosted language models for writing, coding,
 answering from supplied documents, selecting tools, and interpreting images.
@@ -19,18 +19,18 @@ conclusion. It is a small practical study, not a general leaderboard.
 - **Nemotron Lightning was fast with thinking disabled**, but invented numbers
   missing from a source. Its promising code-formatting result does not make it
   safe for factual answers under the same setting.
-- **Qwen 3.5 4B was the best fit for lightweight request classification on the
-  tested hardware.** Clef classified well but required much more memory and
-  loading time; the smallest Tev model frequently escalated simple requests.
+- **Qwen 3.5 4B remains the best fit for request routing on Tower.** AutoTrust
+  JEV matched all 69 model-reached decisions but used 3.7 times the GPU memory
+  and took more than twice as long on its first cold request.
 - **Qwen3 Embedding 4B ranked document evidence better than Nomic.** A matched
   follow-up confirmed this with both page-based and upload-style chunks; 8B
   added cost without improving earlier headline counts. Nomic ranked one real
   conversation exchange higher on four matched lookups, supporting separate
   choices for documents and history. Gemma's early synthetic advantage narrowed
   on real documents. No model reliably rejected unsupported details.
-- **Evidence for current Kimi K3 and GLM 5.3 answer quality remains limited.**
-  Successful function calls do not establish good writing or reasoning, and
-  older Kimi/GLM results cannot be transferred to their successors.
+- **Kimi K3.1 Pro and Hy4 both solved the harder cloud cases.** Each passed all
+  six coding assertions and both challenging reasoning tasks. Hy4's observed
+  median coding request took about 176s versus 13.4s for Kimi K3.1 Pro.
 - **Output budgets and supplied evidence often mattered as much as model
   choice.** Hidden thinking could consume the answer budget; a broken document
   reader could make a capable model appear unable to answer.
@@ -415,32 +415,65 @@ notification was classified as phishing on all three draws.
 This tested a decision interface, not conversational prose or code generation.
 Three repetitions of one image are still one visual example.
 
-### AutoTrust JEV: candidate assessment, November 27, 2026
+### AutoTrust JEV: equal routing accuracy, higher memory
 
 Audrey previously tested Jev-style decision models. The September 30 router
 run included `tev1:0.8b`, `tev1:latest` (4B), and `nimble:latest` through
-Ollama's `/v1/systemone`, which follows TypeSafe's Jev API. Those runs measured
-Together AI and Bespoke Labs checkpoints. The retained reports and repository
-history have no result for AutoTrust JEV or TypeSafe's hosted Jev. [Audrey's September router results](results/2026-09-30-systemone-router-probe-results.json) · [Ollama's Jev-style decision API](https://ollama.com/blog/ollama-now-supports-jev-style-decision-models)
+Ollama's `/v1/systemone`, which follows TypeSafe's Jev API. The September run
+measured Together AI and Bespoke Labs checkpoints. The November 27 run
+below is Audrey's first retained AutoTrust benchmark. [Audrey's September router results](results/2026-09-30-systemone-router-probe-results.json) · [Ollama's Jev-style decision API](https://ollama.com/blog/ollama-now-supports-jev-style-decision-models)
 
 Ollama serves AutoTrust JEV through the same endpoint for choices, yes/no
 probabilities, and rubric scores. `autotrust-jev:9b` is the 11 GB text package.
 The `27b-vl` and `35b` variants also accept images. Ollama's launch notes
-document Apple Silicon support, and the official tags use MLX packages.
-Compatibility and GPU residency on Tower's Linux/NVIDIA deployment remain
-unverified. The 11 GB listing is package size. [Ollama model card](https://ollama.com/library/autotrust-jev) · [Ollama tags](https://ollama.com/library/autotrust-jev/tags) · [Ollama launch notes](https://github.com/ollama/ollama/releases/tag/v0.40.15)
+document Apple Silicon support, and the published variants use MLX packages.
+The 11 GB listing is package size. [Ollama model card](https://ollama.com/library/autotrust-jev) · [Ollama tags](https://ollama.com/library/autotrust-jev/tags) · [Ollama launch notes](https://github.com/ollama/ollama/releases/tag/v0.40.15)
+
+On November 27, the operator confirmed one successful Tower decision call
+with `autotrust-jev:9b`. It chose `code` for a Python debugging request
+against the alternative `general`, with a model-reported probability of
+0.99996677. The reply reported 54 input tokens and zero output tokens.
+The subsequent run measured GPU residency and router accuracy on Tower's
+Linux/NVIDIA setup with Ollama **0.40.16**.
+
+The paired run used the existing 36-prompt fixture, three rounds per model,
+and one cold request per model. Audrey's rules bypass the model on 13 of
+the prompts. Accuracy and warm latency below use the 23 unique prompts
+that reach it. [Full router results](results/2026-11-27-085742-autotrust-jev-router-results.json)
+
+| Model | Correct model-reached decisions | First warm pass median / p95 | Repeat median | Cold request | Observed GPU memory |
+|---|---:|---:|---:|---:|---:|
+| `autotrust-jev:9b` | 69/69 | 182 / 815 ms | 3.7 ms | 12.95s | 15.52 GB |
+| `qwen3.5:4b` | 69/69 | 199 / 207 ms | 196 ms | 5.89s | 4.22 GB |
+
+All 108 warm calls per model returned valid decisions. JEV was 105/108
+and Qwen 102/108 across the full fixture. Their misses were on prompts that
+Audrey's rules already intercept, so both produce the same 102/108 labels
+when the current guards are replayed. Two coding prompts are sent to
+reasoning by those guards. Changing the model would leave those two routes
+in place. JEV's proposed uncertainty thresholds flagged 0/69 model-reached
+cases, and Qwen's threshold flagged 3/69, all repetitions of one correctly
+labeled reasoning prompt. These are threshold decisions in the fixture.
+The benchmark did not run downstream workflows.
+
+JEV's 3.7 ms median came from exact repeats in rounds two and three, whose
+probability distributions matched the first round. The first warm pass
+is the relevant comparison for fresh prompts. Ollama reported that both
+resident embedders stayed loaded during the probe. Coexistence with a large
+answering model remains unmeasured.
+
+**Keep Qwen 3.5 4B for routing.** JEV matched accuracy and had a slightly
+lower first-pass median. Qwen had a lower first-pass p95, shorter cold
+load and a smaller GPU footprint.
 
 The most promising first use is a bounded judgment, such as whether supplied
 evidence supports a claim or whether an observed page change meets a Watch's
 criteria. Watch summaries would still need the current text-generation step.
-AutoTrust's published held-out results use its own data. On compatible hardware,
-compare the 9B tag with Clef on the text and JSON cases from the existing
+AutoTrust's published held-out results use its own data. Compare the
+9B tag with Clef on the text and JSON cases from the existing
 [System One decision probe](../scripts/probes/systemone_decision_probe.py).
 Add labeled examples from the intended workflow and inspect false positives,
-false negatives, and abstentions before using a probability threshold. For
-routing, compare with Qwen 3.5 4B through the
-[router probe](../scripts/probes/systemone_router_probe.py), including costly
-misroutes, cold loading, and warm GPU residency.
+false negatives, and abstentions before using a probability threshold.
 
 ### Choosing document/video workflows is a separate task
 
@@ -464,11 +497,59 @@ not just recovery of missed tasks.
 
 ### Kimi K3.1 Pro and Hy4
 
-On November 27, Tower's inventory check found `kimi-k3.1-pro:cloud` (digest
-`f9d7b437bb5a`), `hy4:cloud` (digest `b64f2670523f`), and all four baseline
-tags for the [26-case cloud bake-off](README.md#kimi-k31-pro-and-hy4-bake-off).
-Those are digest prefixes from a preflight that sent zero inference requests.
-Quality and performance results are pending.
+The November 27 Tower bake-off sent 26 text prompts to each of six Ollama cloud
+tags using provider defaults. All 156 streams ended normally. Each prompt ran
+once per tag, grouped by model. The timing includes provider and network
+latency. The saved answers carry the exact model tags, Ollama tag digests, and
+per-request timings. [Original answers](results/2026-11-27-073952-cloud-bakeoff-onbox-answers.md)
+
+| Model | Original checks | After grading fixes | Python assertions | Median total |
+|---|---:|---:|---:|---:|
+| `kimi-k3.1-pro:cloud` | 25/26 | 26/26 | 6/6 | 10.2s |
+| `hy4:cloud` | 25/26 | 25/26 | 6/6 | 23.9s |
+| `kimi-k3:cloud` | 25/26 | 26/26 | 6/6 | 6.8s |
+| `glm-5.3:cloud` | 25/26 | 25/26 | 6/6 | 6.2s |
+| `deepseek-v4-pro:cloud` | 25/26 | 26/26 | 6/6 | 2.0s |
+| `minimax-m3.1-flash:cloud` | 26/26 | 26/26 | 6/6 | 3.6s |
+
+Two versions of the checker produce **151/156** and **154/156**. The cloud
+tungsten fixture had required the word “German,” though the prompt asked
+what the symbol came from. Kimi K3.1 Pro and DeepSeek correctly gave
+`wolfram`. The word cap was also counting standalone dashes and a pipe as
+words. Kimi K3's email has 120 words under the corrected count. Replaying
+the 12 saved answers from the two affected prompts raised those three results.
+The remaining flags were Hy4's technical wording in a rewrite for a child
+and GLM's 151-word response to a 120-word email brief. [Tungsten reference](https://periodic-table.rsc.org/element/74/tungsten)
+
+- **Kimi K3.1 Pro and Hy4** gave valid prime proofs, calculated the burst
+  queues correctly, and kept the cause of conflicting latency measurements
+  provisional. Both preserved ordinary return values in the async exercise
+  even if a value happened to be an exception object. Hy4 also handled Unicode
+  punctuation in the word-frequency exercise.
+- **Kimi K3.1 Pro** used simpler language for the photosynthesis rewrite and
+  preserved more of the supplied qualifiers in the compression exercise.
+  Hy4 kept technical terms in the rewrite and presented invented résumé
+  metrics as the sender's experience in the email.
+- **Hy4's long coding times** were the largest practical difference. Median
+  total time on the six coding requests was about **176s versus 13.4s** for
+  Kimi K3.1 Pro. Hy4 took **300.7s** for the TTL cache. Its 26 requests used
+  about **28 of the 52 minutes** of summed request time.
+- **The fastest baselines had errors the checks missed.** MiniMax reported
+  the initial hourly average as 75 requests/s instead of 87.5, although it
+  got the backlog and the final choices right. DeepSeek added an unreported
+  release build to the conflicting-measurement case. DeepSeek and GLM both
+  treated a successfully returned exception object as a failed fetch.
+
+This run favors Kimi K3.1 Pro for general panel work over Hy4 given the
+latency gap and comparable correctness on the harder cases. The single pass
+leaves room for targeted repeats where the models differed. The automatic
+tallies cover the stated checks. Manual reading found additional mistakes.
+
+The Cloud mode configuration uses DeepSeek V4 Pro, GLM 5.3, and Hy4
+in that order for drafts. GLM and Hy4 tied on automated checks and GLM
+was faster. Kimi K3.1 Pro synthesizes the answer, with GLM 5.3 as its
+fallback. The configured order matters when fewer than three draft
+slots are available.
 
 ### DeepSeek V4 Pro
 
@@ -887,8 +968,9 @@ Keep these limits visible:
 
 This revision includes the October 15 router and embedding comparisons,
 retrospective source-label repairs, October 16 personal-retrieval diagnostics,
-the October 17 matched document-layout comparison, and the October 22 supplied-
-source worksheet check. The 48-chunk history
+the October 17 matched document-layout comparison, the October 22 supplied-
+source worksheet check, and the November 27 cloud bake-off and router comparison.
+The 48-chunk history
 comparison covers one positive exchange and no negative-query gate; its report
 contains no source conversation text or user identities. The document follow-up
 retains the supplied compact JSON with model identities, fixture hashes, paired
@@ -918,6 +1000,7 @@ the report can be read without opening them.
   [October Clef comparison](results/2026-10-03-clef-systemone-router-results.json),
   [Nimble v3 three-round comparison](results/2026-10-15-082632-nimble-v3-router-results.json),
   [Nimble v3 five-round comparison](results/2026-10-15-082843-nimble-v3-router-results.json),
+  [November AutoTrust JEV comparison](results/2026-11-27-085742-autotrust-jev-router-results.json),
   [broader Clef decisions](results/2026-10-03-clef-systemone-decision-results.json),
   and [historical workflow-selection study](results/2026-10-06-skill-selection-v3-prospective-full.json).
 - **Hosted writing/documents:** [July writer comparison](results/2026-07-14-writer-ab-report.md),

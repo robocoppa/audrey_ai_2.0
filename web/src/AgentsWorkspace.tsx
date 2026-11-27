@@ -316,6 +316,7 @@ function AgentTasksWorkspace({
   const newProjectRef = useRef<HTMLButtonElement>(null);
   const newAgentRef = useRef<HTMLButtonElement>(null);
   const detailRef = useRef<HTMLElement>(null);
+  const detailScrollRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const createRequest = useRef<{ key: string; requestId: string } | null>(null);
@@ -460,7 +461,10 @@ function AgentTasksWorkspace({
       setTasks((current) => mergeTasks(current, [openRequest.task], deletedIds.current));
       setSelectedId(openRequest.task.id); setFilter("all"); setError(""); setNotice(null);
       if (compactNavigation) setSidebarOpen(false);
-      window.requestAnimationFrame(() => { if (compactNavigation) detailRef.current?.focus({ preventScroll: true }); });
+      window.requestAnimationFrame(() => {
+        if (detailScrollRef.current) detailScrollRef.current.scrollTop = 0;
+        if (compactNavigation) detailRef.current?.focus({ preventScroll: true });
+      });
     });
     return () => controller.abort();
   }, [visible, openRequest, compactNavigation, setSidebarOpen]);
@@ -547,9 +551,8 @@ function AgentTasksWorkspace({
     if (!visible) return;
     if (compactNavigation) setSidebarOpen(false);
     window.requestAnimationFrame(() => {
-      if (!detailRef.current) return;
-      detailRef.current.scrollTop = 0;
-      if (compactNavigation || focus) detailRef.current.focus({ preventScroll: true });
+      if (detailScrollRef.current) detailScrollRef.current.scrollTop = 0;
+      if (compactNavigation || focus) detailRef.current?.focus({ preventScroll: true });
     });
   }
 
@@ -875,30 +878,38 @@ function AgentTasksWorkspace({
           </div>
         </aside>
 
-        <section className="agents-workflow" aria-label="Selected agent" ref={detailRef} tabIndex={0} inert={sidebarOpen ? true : undefined}>
-          {!sidebarOpen && error ? <p className="agents-error" role="alert">{error}</p> : null}
-          {!sidebarOpen && notice && !notice.taskId ? <p className="agents-notice" role="status">{notice.text}</p> : null}
-          <div className="agents-detail">
-            {selected ? (
-              <>
-                <header className="agents-detail-header">
-                  <div className="agents-detail-toolbar">
-                    <div className="agents-detail-heading">
-                      <h2 className="workspace-page-title" data-prompt-title={!selected.title?.trim() || undefined}>{agentTitle(selected)}</h2>
-                      <div className="agents-detail-meta">
-                        <span className={`agents-status agents-status-${selected.status}`}>{STATUS_LABELS[selected.status]}</span>
-                        {selected.project_context ? <AgentProjectContextBadge task={selected} onOpenProject={onOpenProject} /> : null}
-                      </div>
-                    </div>
-                    <AgentTaskControls
-                      key={`${selected.id}:${isFinished(selected) ? selected.revision : "active"}:${visible}:${sidebarOpen}`}
-                      task={selected}
-                      busy={busy}
-                      onAction={(action) => void act(selected, action)}
-                      onDelete={() => void removeTask(selected)}
-                    />
+        <section className="agents-workflow chat-column" aria-label="Selected agent" ref={detailRef} tabIndex={-1} inert={sidebarOpen ? true : undefined}>
+          {selected ? <div className="thread-header-shell">
+            <header className="thread-header agents-detail-header">
+              <div className="thread-title agents-detail-title">
+                <div className="conversation-title-display agents-title-line">
+                  <h2 className="workspace-page-title" title={agentTitle(selected)}>{agentTitle(selected)}</h2>
+                  <span className={`agents-status agents-status-${selected.status}`}>{STATUS_LABELS[selected.status]}</span>
+                </div>
+                {selected.project_context || notice?.taskId === selected.id || selected.status === "paused" ? (
+                  <div className="agents-detail-meta">
+                    {selected.project_context ? <AgentProjectContextBadge task={selected} onOpenProject={onOpenProject} /> : null}
+                    {notice?.taskId === selected.id ? <span className="agents-task-notice" role="status">{notice.text}</span>
+                      : selected.status === "paused" ? <span className="agents-task-notice">Completed steps are saved.</span> : null}
                   </div>
-                  <div className="agents-detail-summary agents-detail-disclosures">
+                ) : null}
+              </div>
+              <AgentTaskControls
+                key={`${selected.id}:${isFinished(selected) ? selected.revision : "active"}:${visible}:${sidebarOpen}`}
+                task={selected}
+                busy={busy}
+                onAction={(action) => void act(selected, action)}
+                onDelete={() => void removeTask(selected)}
+              />
+            </header>
+          </div> : null}
+          <div className="agents-detail-scroll" role="region" aria-label="Agent progress and result" tabIndex={0} ref={detailScrollRef}>
+            {!sidebarOpen && error ? <p className="agents-error" role="alert">{error}</p> : null}
+            {!sidebarOpen && notice && !notice.taskId ? <p className="agents-notice" role="status">{notice.text}</p> : null}
+            <div className="agents-detail">
+              {selected ? (
+                <>
+                  <div className="agents-detail-disclosures">
                     <details className="agents-original-prompt">
                       <summary>Original prompt</summary>
                       <p tabIndex={0}>{selected.objective}</p>
@@ -907,49 +918,45 @@ function AgentTasksWorkspace({
                       <summary aria-label="Questions and answers">Questions / answers</summary>
                       <ol tabIndex={0}>{selected.input_requests.filter((request) => request.answer !== null).map((request) => <li key={request.id}><h3>{request.step_id === "research" ? "Work question" : "Planning question"}</h3><p>{request.question}</p><h4>Your answer</h4><p>{request.answer}</p></li>)}</ol>
                     </details> : null}
-                    {notice?.taskId === selected.id ? <span className="agents-task-notice" role="status">{notice.text}</span> : null}
-                    {selected.status === "paused" && notice?.taskId !== selected.id ? <span className="agents-task-notice">Completed steps are saved.</span> : null}
                   </div>
-                </header>
-                {selected.project_context && (!selected.project_context.available || !selected.project_context.current) ? <p className="agents-project-context-notice">
-                  {!selected.project_context.available ? "This Project is no longer available. Continuing or running this agent again is unavailable." : "The Project context has changed. Start a new agent to use its current instructions and knowledge."}
-                </p> : null}
-                <AgentFileInputsView inputs={selected.file_inputs} />
-                {selected.error ? <p className="agents-error" role="alert">{selected.error}</p> : null}
-                {selected.status === "waiting_for_input" ? selectedInput && selectedInputDraft ? <AgentInputPanel request={selectedInput} revision={selected.revision} draft={selectedInputDraft} busy={busy} contextBlocked={agentContextBlocked(selected)}
-                  onChange={(text) => setAnswerDrafts((current) => ({ ...current, [selectedInputKey]: { text, revision: current[selectedInputKey]?.revision ?? selected.revision } }))}
-                  onUseLatest={() => setAnswerDrafts((current) => ({ ...current, [selectedInputKey]: { text: current[selectedInputKey]?.text ?? "", revision: selected.revision } }))}
-                  onAnswer={() => void answerInput(selected, selectedInput, selectedInputDraft)} />
-                  : <p className="agents-notice" role="status">{selected.summary ? "Loading the saved question…" : "The saved question is unavailable. Refresh this agent before answering."}</p> : null}
-                <div className="agents-progress-panels">
-                  <section className="agents-plan agents-progress-panel" aria-labelledby="agent-plan-title">
-                    <header className="agents-panel-header"><h3 id="agent-plan-title">Plan and progress</h3></header>
-                    <div className="agents-plan-scroll" role="region" aria-label="Saved plan and progress" tabIndex={0}>
-                      <ol className="agents-step-list">
-                        {selected.steps.map((step) => <AgentStepProgress key={step.id} step={step} timestamp={timestamp} />)}
-                      </ol>
+                  {selected.project_context && (!selected.project_context.available || !selected.project_context.current) ? <p className="agents-project-context-notice">
+                    {!selected.project_context.available ? "This Project is no longer available. Continuing or running this agent again is unavailable." : "The Project context has changed. Start a new agent to use its current instructions and knowledge."}
+                  </p> : null}
+                  <AgentFileInputsView inputs={selected.file_inputs} />
+                  {selected.error ? <p className="agents-error" role="alert">{selected.error}</p> : null}
+                  {selected.status === "waiting_for_input" ? selectedInput && selectedInputDraft ? <AgentInputPanel request={selectedInput} revision={selected.revision} draft={selectedInputDraft} busy={busy} contextBlocked={agentContextBlocked(selected)}
+                    onChange={(text) => setAnswerDrafts((current) => ({ ...current, [selectedInputKey]: { text, revision: current[selectedInputKey]?.revision ?? selected.revision } }))}
+                    onUseLatest={() => setAnswerDrafts((current) => ({ ...current, [selectedInputKey]: { text: current[selectedInputKey]?.text ?? "", revision: selected.revision } }))}
+                    onAnswer={() => void answerInput(selected, selectedInput, selectedInputDraft)} />
+                    : <p className="agents-notice" role="status">{selected.summary ? "Loading the saved question…" : "The saved question is unavailable. Refresh this agent before answering."}</p> : null}
+                  <div className="agents-progress-panels">
+                    <section className="agents-plan agents-progress-panel" aria-labelledby="agent-plan-title">
+                      <header className="agents-panel-header"><h3 id="agent-plan-title">Plan and progress</h3></header>
+                      <div className="agents-plan-scroll" role="region" aria-label="Saved plan and progress" tabIndex={0}>
+                        <ol className="agents-step-list">
+                          {selected.steps.map((step) => <AgentStepProgress key={step.id} step={step} timestamp={timestamp} />)}
+                        </ol>
+                      </div>
+                    </section>
+                    <AgentRecentActivity key={selected.id} task={selected} visible={visible && !sidebarOpen} timezone={timezone} />
+                  </div>
+                  <AgentOutputs key={`${selected.id}:${visible}`} outputs={selected.outputs} />
+                  <section className="agents-result" aria-labelledby="agent-result-title">
+                    <h3 id="agent-result-title" className="message-label">Result</h3>
+                    <div className="agents-result-body">
+                      {selected.result ? <AgentMarkdown text={selected.result} /> : <p className="agents-result-empty">{selected.summary && selected.status === "completed" ? "Loading the saved result…" : selected.status === "failed" ? "This task stopped before a final result was saved. Any completed steps are available above." : selected.status === "cancelled" ? "This task was cancelled. Any completed steps are available above." : "The result will appear here when Audrey completes its review."}</p>}
                     </div>
                   </section>
-                  <AgentRecentActivity key={selected.id} task={selected} visible={visible && !sidebarOpen} timezone={timezone} />
+                </>
+              ) : (
+                <div className="agents-welcome">
+                  <span className="agents-welcome-mark" aria-hidden="true">✦</span>
+                  <h2>Work that continues while you’re away</h2>
+                  <p>Choose New agent to start, or open a saved agent to see its prompt, progress and result.</p>
+                  <ol><li>Plan the work</li><li>Work on the task</li><li>Review and save the result</li></ol>
                 </div>
-                <AgentOutputs key={`${selected.id}:${visible}`} outputs={selected.outputs} />
-                <section className="agents-result" aria-labelledby="agent-result-title">
-                  <header className="agents-result-header">
-                    <h3 id="agent-result-title">Result</h3>
-                  </header>
-                  <div className="agents-result-body">
-                    {selected.result ? <AgentMarkdown text={selected.result} /> : <p className="agents-result-empty">{selected.summary && selected.status === "completed" ? "Loading the saved result…" : selected.status === "failed" ? "This task stopped before a final result was saved. Any completed steps are available above." : selected.status === "cancelled" ? "This task was cancelled. Any completed steps are available above." : "The result will appear here when Audrey completes its review."}</p>}
-                  </div>
-                </section>
-              </>
-            ) : (
-              <div className="agents-welcome">
-                <span className="agents-welcome-mark" aria-hidden="true">✦</span>
-                <h2>Work that continues while you’re away</h2>
-                <p>Choose New agent to start, or open a saved agent to see its prompt, progress and result.</p>
-                <ol><li>Plan the work</li><li>Work on the task</li><li>Review and save the result</li></ol>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </section>
       </div>
@@ -1057,15 +1064,15 @@ function AgentTaskControls({ task, busy, onAction, onDelete }: {
   }, []);
 
   return (
-    <div className="agents-task-actions" role="group" aria-label="Agent controls">
-      {isMoving(task) ? <button type="button" className="agents-secondary" disabled={busy} onClick={() => onAction("pause")}>Pause</button> : null}
-      {task.status === "paused" ? <button type="button" className="agents-primary" disabled={busy || agentContextBlocked(task)} onClick={() => onAction("resume")}>Resume</button> : null}
-      {!isFinished(task) ? <button type="button" className="agents-secondary" disabled={busy} onClick={() => onAction("cancel")}>Cancel</button> : null}
+    <div className="conversation-actions agents-detail-actions" role="group" aria-label="Agent controls">
+      {isMoving(task) ? <button type="button" disabled={busy} onClick={() => onAction("pause")}>Pause</button> : null}
+      {task.status === "paused" ? <button type="button" disabled={busy || agentContextBlocked(task)} onClick={() => onAction("resume")}>Resume</button> : null}
+      {!isFinished(task) ? <button type="button" disabled={busy} onClick={() => onAction("cancel")}>Cancel</button> : null}
       {isFinished(task) ? <>
-        <button type="button" className="agents-primary" disabled={busy || agentContextBlocked(task)} onClick={() => { setConfirmingDelete(false); onAction("rerun"); }}>Run again</button>
+        <button type="button" disabled={busy || agentContextBlocked(task)} onClick={() => { setConfirmingDelete(false); onAction("rerun"); }}>Run again</button>
         <button
           type="button"
-          className={`agents-secondary danger-button${confirmingDelete ? " confirming-delete" : ""}`}
+          className={`danger-button${confirmingDelete ? " confirming-delete" : ""}`}
           aria-label={confirmingDelete ? "Confirm delete task" : "Delete task"}
           aria-pressed={confirmingDelete}
           title={confirmingDelete ? "Click again to delete this saved task and its result. Created files stay in My Files." : "Delete saved task and result. Created files stay in My Files."}
@@ -1093,8 +1100,8 @@ function AgentMarkdown({ text }: { text: string }) {
       const code = Children.toArray(children).find((child) => isValidElement(child));
       const language = isValidElement<{ className?: string }>(code)
         ? code.props.className?.match(/language-(\S+)/)?.[1]?.slice(0, 40) : undefined;
-      return <div className="agents-code-block" data-language={language}>
-        <div className="agents-code-header">{language || "Text"}</div>
+      return <div className="markdown-code-block agents-code-block" data-language={language}>
+        <div className="code-block-header">{language || "Text"}</div>
         <pre tabIndex={0} aria-label={`${language || "Text"} code block`}>{children}</pre>
       </div>;
     },

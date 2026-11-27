@@ -101,8 +101,8 @@ def test_reasoning_is_the_only_fast_path_pool_that_leads_with_cloud(cfg):
     )
 
 
-def test_kimi_k31_pro_leads_every_panel_with_cloud_workers(cfg):
-    """Kimi K3.1 Pro leads cloud-bearing panels and receives source tools."""
+def test_kimi_k31_pro_leads_mixed_and_research_drafts(cfg):
+    """Kimi K3.1 Pro leads mixed and Research drafts and receives source tools."""
     model_name = "kimi-k3.1-pro:cloud"
     locations = {
         str(spec["name"]): str(spec.get("location", "local"))
@@ -113,7 +113,7 @@ def test_kimi_k31_pro_leads_every_panel_with_cloud_workers(cfg):
     assert locations[model_name] == "cloud"
     assert model_name in cfg["fast_path"]["tool_capable_models"]
     for pool_name, pool in cfg.items():
-        if not str(pool_name).startswith("deep_panel") or not isinstance(pool, dict):
+        if pool_name not in {"deep_panel", "deep_panel_local", "deep_panel_research"}:
             continue
         for task, body in pool.items():
             if not isinstance(body, dict):
@@ -130,6 +130,15 @@ def test_kimi_k31_pro_leads_every_panel_with_cloud_workers(cfg):
                     f"{pool_name}/{task}: Kimi K3.1 Pro must lead cloud-bearing panels; "
                     f"got {workers}"
                 )
+
+
+def test_cloud_only_panels_follow_the_bakeoff_draft_order(cfg):
+    expected_workers = ["deepseek-v4-pro:cloud", "glm-5.3:cloud", "hy4:cloud"]
+    for task, pool in cfg["deep_panel_cloud"].items():
+        assert pool["workers"] == expected_workers, task
+        assert pool["synthesizer"] == "kimi-k3.1-pro:cloud", task
+        assert pool["fallback_synth"] == "glm-5.3:cloud", task
+    assert "hy4:cloud" in cfg["fast_path"]["tool_capable_models"]
 
 
 def test_all_configured_panel_workers_fit_their_runtime_cloud_caps(cfg):
@@ -483,10 +492,13 @@ class TestEvalOnboxWaitsForTheStack:
             "launch cannot stop the run it is meant to hold back"
         )
 
-    def test_only_audrey_is_required_for_native_evals(self):
+    def test_readiness_defaults_match_the_eval_backend(self):
         text = self._text()
-        assert "READY_CONTAINERS:-audrey}" in text
-        assert "READY_CONTAINERS:-audrey open-webui" not in text
+        assert re.search(
+            r'READY_DEFAULT=audrey\nif \[\[ "\$\{CLOUD_BAKEOFF\}" == "1" \]\]; then\n'
+            r'\s+READY_DEFAULT=ollama\nfi', text,
+        )
+        assert 'READY_CONTAINERS="${READY_CONTAINERS:-${READY_DEFAULT}}"' in text
 
     def test_there_is_an_escape_hatch(self):
         # A gate with no bypass becomes the thing people delete.

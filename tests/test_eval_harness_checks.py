@@ -2024,6 +2024,14 @@ def test_element_w_needles_reject_the_swedish_confusion():
     assert er._contains_all(right, case["answer_contains"]) is True
 
 
+def test_cloud_element_w_does_not_require_unrequested_language_name():
+    case = next(c for c in _load_suite("eval_prompts_cloud_models.json")
+                if c["name"] == "gk-element-w")
+    answer = "The element is tungsten. Its symbol W comes from the name wolfram."
+    assert er._contains_all(answer, case["answer_contains"]) is True
+    assert er._contains_all("The element is tungsten.", case["answer_contains"]) is False
+
+
 # ── the arm has to survive the next rebuild ─────────────────────────────────
 
 def test_request_body_omits_think_unless_asked():
@@ -2108,6 +2116,7 @@ def test_disclaims_absence_accepts_not_possible_to_determine():
 def test_word_budget_can_fail_a_prompt_that_states_a_limit():
     assert er._within_word_budget(" ".join(["word"] * 118), 120) is True
     assert er._within_word_budget(" ".join(["word"] * 121), 120) is False
+    assert er._within_word_budget(" ".join(["word"] * 120) + " — | ---", 120) is True
 
 
 # ── accuracy and trust are two measurements ─────────────────────────────────

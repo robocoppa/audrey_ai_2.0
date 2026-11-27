@@ -37,6 +37,7 @@ it("prefills saved instructions, saves modifications and reopens the canonical s
   const update = vi.spyOn(api, "updateProject").mockResolvedValue(saved);
   const onProjectChange = vi.fn();
   render(<ProjectHome {...homeProps()} onProjectChange={onProjectChange} />);
+  expect(screen.getByText(project.instructions)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Edit project" }));
   expect(screen.getByRole("textbox", { name: "Project name" })).toHaveValue(project.name);
   const instructions = screen.getByRole("textbox", { name: "Project instructions" });

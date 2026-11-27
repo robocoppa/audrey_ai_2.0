@@ -709,14 +709,15 @@ def _hedges(answer: str) -> bool:
 
 
 def _within_word_budget(answer: str, limit: int) -> bool:
-    """True when the answer body is at or under `limit` whitespace-separated words.
+    """True when the answer body is at or under `limit` words.
 
-    Deliberately crude. The point is not to adjudicate what a word is — it is
-    that a prompt saying "120 words maximum" should be able to FAIL, and a
-    model 40% over the cap trips this on any reasonable definition. Uses the
-    pre-debug region so an appended panel-drafts block cannot blow the budget.
+    Count whitespace-separated tokens containing a letter or digit. Skip
+    standalone punctuation and Markdown separators. Use the pre-debug region
+    so appended panel drafts stay outside the answer's budget.
     """
-    return len(_pre_debug_region(answer).split()) <= limit
+    words = sum(any(char.isalnum() for char in token)
+                for token in _pre_debug_region(answer).split())
+    return words <= limit
 
 
 def _contains_any(answer: str, needles: list[str]) -> bool:

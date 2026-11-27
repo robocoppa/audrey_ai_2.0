@@ -436,7 +436,7 @@ export function ProjectHome({
         <div className="project-home-title-line">
           <h1 className="workspace-page-title">{project.name}</h1>
           {isPrivate ? <span className="project-private-label">Private</span> : null}
-          <p title={project.instructions || undefined}>{project.instructions || "No project instructions yet."}</p>
+          {project.instructions?.trim() ? <p title={project.instructions}>{project.instructions}</p> : null}
         </div>
         <div className="project-home-actions">
           <div className="project-management-actions">

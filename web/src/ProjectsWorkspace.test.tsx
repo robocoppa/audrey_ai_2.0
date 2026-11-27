@@ -135,8 +135,9 @@ it("ignores pre-creation details and older summaries while preserving Project co
   await waitFor(() => expect(within(card).getByText("9 chats")).toBeVisible());
   await act(async () => finishSummary({ ...project, conversation_count: 8, name: "Old summary name" }));
   expect(within(card).getByText("9 chats")).toBeVisible();
-  expect(screen.getByRole("heading", { name: project.name })).toBeVisible();
-  expect(screen.getByText("No project instructions yet.")).toBeVisible();
+  const title = screen.getByRole("heading", { name: project.name });
+  expect(title).toBeVisible();
+  expect(title.parentElement?.querySelector("p")).not.toBeInTheDocument();
   expect(screen.getByRole("textbox", { name: "Project knowledge" })).toHaveValue("Keep this unsaved knowledge");
 });
 

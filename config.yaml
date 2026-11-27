@@ -213,9 +213,11 @@ model_registry:
     # https://ollama.com/library/minimax-m3.1-flash:cloud
     # Candidate priority only: no quality/latency measurement yet.
     - { name: "minimax-m3.1-flash:cloud", priority: 55, location: cloud }
-    # 2026-11-26: Kimi K3.1 Pro takes the lead panel slot. This registration
-    # classifies it as cloud, and the panel lists choose its worker order.
+    # Kimi K3.1 Pro leads mixed and Research drafts and synthesizes Cloud.
     - { name: "kimi-k3.1-pro:cloud",      priority: 54, location: cloud }
+    # Cloud panel draft slot. Keep its registry priority below the existing
+    # general-chat preferences.
+    - { name: "hy4:cloud",                priority: 53, location: cloud }
 
   vl:
     # Vision-language pool — image turns on the chat path route here.
@@ -308,6 +310,9 @@ fast_path:
     # Ollama declares tool calling for the installed tag.
     # https://ollama.com/library/kimi-k3.1-pro:cloud
     - "kimi-k3.1-pro:cloud"
+    # Ollama declares tool calling for the Hy4 tag tested on Tower.
+    # https://ollama.com/library/hy4
+    - "hy4:cloud"
     # Official Ollama catalog declares tool calling for the installed tag.
     - "minimax-m3.1-flash:cloud"
     - "kimi-k2.7-code:cloud"
@@ -393,31 +398,28 @@ deep_panel:
     fallback_synth: "glm-5.3:cloud"
 
 # ─── Deep panel: cloud-only (audrey_cloud) ─────────────────────────────
-# Workers run in parallel (Ollama Pro caps at 3 concurrent cloud).
-# Kimi K3.1 Pro leads every worker list. GLM still synthesizes, and DeepSeek remains
-# the different-vendor degrade target so a GLM outage does not fall onto a
-# second GLM call.
+# Workers run in parallel. The order determines which drafts survive the cap.
+# November 27 bake-off: Kimi led on manual review and synthesizes the answer.
+# DeepSeek leads the drafts after 26/26 checks. GLM and Hy4 both passed 25/26,
+# with the faster GLM ahead of Hy4. GLM also backs up synthesis.
 deep_panel_cloud:
-  # M3.1 Flash replaces the duplicate GLM draft slot without increasing the
-  # worker count. GLM still synthesizes; DeepSeek remains the measured code
-  # worker and every pool's fallback synth. Candidate quality is unmeasured.
   code:
-    workers: ["kimi-k3.1-pro:cloud", "minimax-m3.1-flash:cloud", "deepseek-v4-pro:cloud"]
-    synthesizer: "glm-5.3:cloud"
-    fallback_synth: "deepseek-v4-pro:cloud"
+    workers: ["deepseek-v4-pro:cloud", "glm-5.3:cloud", "hy4:cloud"]
+    synthesizer: "kimi-k3.1-pro:cloud"
+    fallback_synth: "glm-5.3:cloud"
   reasoning:
-    workers: ["kimi-k3.1-pro:cloud", "minimax-m3.1-flash:cloud"]
-    synthesizer: "glm-5.3:cloud"
-    fallback_synth: "deepseek-v4-pro:cloud"
+    workers: ["deepseek-v4-pro:cloud", "glm-5.3:cloud", "hy4:cloud"]
+    synthesizer: "kimi-k3.1-pro:cloud"
+    fallback_synth: "glm-5.3:cloud"
   general:
-    workers: ["kimi-k3.1-pro:cloud", "minimax-m3.1-flash:cloud"]
-    synthesizer: "glm-5.3:cloud"
-    fallback_synth: "deepseek-v4-pro:cloud"
+    workers: ["deepseek-v4-pro:cloud", "glm-5.3:cloud", "hy4:cloud"]
+    synthesizer: "kimi-k3.1-pro:cloud"
+    fallback_synth: "glm-5.3:cloud"
   # The panel rebuilds image turns as text; default fast vision stays local.
   vl:
-    workers: ["kimi-k3.1-pro:cloud", "minimax-m3.1-flash:cloud"]
-    synthesizer: "glm-5.3:cloud"
-    fallback_synth: "deepseek-v4-pro:cloud"
+    workers: ["deepseek-v4-pro:cloud", "glm-5.3:cloud", "hy4:cloud"]
+    synthesizer: "kimi-k3.1-pro:cloud"
+    fallback_synth: "glm-5.3:cloud"
 
 # ─── Deep panel: local-only (audrey_local) ─────────────────────────────
 # Both workers serialize through GpuGate (GPU_CONCURRENCY=1) — no parallelism.

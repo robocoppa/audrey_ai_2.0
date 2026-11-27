@@ -502,12 +502,12 @@ describe("AgentsWorkspace", () => {
     expect(screen.getByRole("button", { name: "Run again" })).toBeDisabled(); expect(control).not.toHaveBeenCalled();
   });
 
-  it("places the saved Project beside the running status without a detail dropdown", async () => {
+  it("keeps the saved Project in the running agent header without a detail dropdown", async () => {
     const saved = task({ project_context: projectContext });
     vi.mocked(api.listAgentTasks).mockResolvedValue({ items: [saved] }); vi.mocked(api.getAgentTask).mockResolvedValue(saved);
     const open = vi.fn(); render(<AgentsWorkspace onOpenProject={open} />);
     const badge = await screen.findByRole("button", { name: `Open Project: ${project.name}` });
-    const heading = badge.closest<HTMLElement>(".agents-detail-heading")!;
+    const heading = badge.closest<HTMLElement>(".thread-title")!;
     expect(within(heading).getByRole("heading", { name: saved.objective })).toBeVisible();
     expect(within(heading).getByText("Running")).toBeVisible();
     expect(badge).toHaveAccessibleDescription(expect.stringContaining("1 saved knowledge revision pinned for this agent."));
@@ -853,10 +853,11 @@ describe("AgentsWorkspace", () => {
     const detail = within(screen.getByRole("region", { name: "Selected agent" }));
     expect(sidebar.queryByRole("textbox", { name: "Task objective" })).not.toBeInTheDocument();
     const toolbar = within((await detail.findByRole("group", { name: "Agent controls" })).parentElement!);
-    expect(toolbar.getByRole("heading", { name: current.objective })).toBeVisible();
+    const title = toolbar.getByRole("heading", { name: current.objective });
+    expect(title).toBeVisible();
     expect(sidebar.queryByRole("group", { name: "Agent controls" })).not.toBeInTheDocument();
     fireEvent.click(toolbar.getByRole("button", { name: "Pause" }));
-    expect(await toolbar.findByText("Paused", { exact: true })).toBeVisible();
+    expect(await within(title.parentElement!).findByText("Paused", { exact: true })).toBeVisible();
     fireEvent.click(toolbar.getByRole("button", { name: "Resume" }));
     expect(await toolbar.findByText("Queued", { exact: true })).toBeVisible();
     fireEvent.click(toolbar.getByRole("button", { name: "Cancel" }));
@@ -875,12 +876,14 @@ describe("AgentsWorkspace", () => {
     render(<AgentsWorkspace />);
     agentSection("Agents");
     await screen.findByRole("heading", { name: first.objective });
-    const workflow = screen.getByRole("region", { name: "Selected agent" });
+    const workflow = screen.getByRole("region", { name: "Agent progress and result" });
     workflow.scrollTop = 800;
     const savedTask = screen.getByRole("button", { name: `Open agent: ${second.objective}` });
     savedTask.focus();
     fireEvent.click(savedTask);
-    expect(await screen.findByRole("heading", { name: second.objective })).toBeVisible();
+    const title = await screen.findByRole("heading", { name: second.objective });
+    expect(title).toBeVisible();
+    expect(workflow).not.toContainElement(title);
     await waitFor(() => expect(workflow.scrollTop).toBe(0));
     expect(savedTask).toHaveFocus();
     expect(workflow).not.toContainElement(screen.getByLabelText("Task objective"));

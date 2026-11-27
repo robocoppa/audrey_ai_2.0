@@ -206,12 +206,13 @@ wide; do not squeeze three small columns into the available space. The compact
 Project header keeps instructions beside its title and management actions close.
 
 Selected workspace titles use `workspace-page-title` at the common content
-inset, with optional breadcrumbs/status below and actions alongside. Project
-instructions remain inline beside its title. Framed Agent/Watch panels split
+inset, with actions alongside. Project instructions remain inline beside its
+title. Agent details share Chat's header divider, title and action styling.
+Keep the Agent status beside its title and scroll the workflow below the
+header. Use Chat's Markdown styling and reading width for the result, with
+compact text in saved steps. Framed Watch panels split
 `--workspace-content-inset` between outer `--workspace-frame-inset`, their border
-and inner padding so a second full inset does not push the title down. Preserve
-the Agent panel's reading-width cap, aligned to the start of its content area,
-and the compact Chat header behavior where that main title is hidden.
+and inner padding. Preserve Chat's compact header behavior.
 
 Open Chat/Agent/Watch drawers use the same width and 3.25rem close-heading row above
 the creation/navigation rows. The compact Projects view retains its picker beneath

@@ -183,11 +183,11 @@
     "allow_user_attribution": true,
     "answer_contains": [
       "tungsten",
-      "wolfram",
-      "german"
+      "wolfram"
     ],
     "expect_hedge_when_wrong": true,
     "expect_banners": false,
+    "_why": "The prompt asks for the name that supplied W. Review any additional claims about its linguistic origin manually.",
     "source_case": "eval_prompts_models_ab.json:gk-element-w"
   },
   {
