@@ -2,7 +2,7 @@
 
 **Results, strengths, and failure modes from practical tests**
 
-Updated October 22, 2026 · Measurements collected July–October 2026
+Updated November 27, 2026 · Measurements collected July–October 2026
 
 This report compares local and hosted language models for writing, coding,
 answering from supplied documents, selecting tools, and interpreting images.
@@ -415,6 +415,33 @@ notification was classified as phishing on all three draws.
 This tested a decision interface, not conversational prose or code generation.
 Three repetitions of one image are still one visual example.
 
+### AutoTrust JEV: candidate assessment, November 27, 2026
+
+Audrey previously tested Jev-style decision models. The September 30 router
+run included `tev1:0.8b`, `tev1:latest` (4B), and `nimble:latest` through
+Ollama's `/v1/systemone`, which follows TypeSafe's Jev API. Those runs measured
+Together AI and Bespoke Labs checkpoints. The retained reports and repository
+history have no result for AutoTrust JEV or TypeSafe's hosted Jev. [Audrey's September router results](results/2026-09-30-systemone-router-probe-results.json) · [Ollama's Jev-style decision API](https://ollama.com/blog/ollama-now-supports-jev-style-decision-models)
+
+Ollama serves AutoTrust JEV through the same endpoint for choices, yes/no
+probabilities, and rubric scores. `autotrust-jev:9b` is the 11 GB text package.
+The `27b-vl` and `35b` variants also accept images. Ollama's launch notes
+document Apple Silicon support, and the official tags use MLX packages.
+Compatibility and GPU residency on Tower's Linux/NVIDIA deployment remain
+unverified. The 11 GB listing is package size. [Ollama model card](https://ollama.com/library/autotrust-jev) · [Ollama tags](https://ollama.com/library/autotrust-jev/tags) · [Ollama launch notes](https://github.com/ollama/ollama/releases/tag/v0.40.15)
+
+The most promising first use is a bounded judgment, such as whether supplied
+evidence supports a claim or whether an observed page change meets a Watch's
+criteria. Watch summaries would still need the current text-generation step.
+AutoTrust's published held-out results use its own data. On compatible hardware,
+compare the 9B tag with Clef on the text and JSON cases from the existing
+[System One decision probe](../scripts/probes/systemone_decision_probe.py).
+Add labeled examples from the intended workflow and inspect false positives,
+false negatives, and abstentions before using a probability threshold. For
+routing, compare with Qwen 3.5 4B through the
+[router probe](../scripts/probes/systemone_router_probe.py), including costly
+misroutes, cold loading, and warm GPU residency.
+
 ### Choosing document/video workflows is a separate task
 
 A historical Qwen 3.5 experiment combined simple rules with model calls to
@@ -434,6 +461,14 @@ on English requests alone. The general lesson is to test unnecessary activation,
 not just recovery of missed tasks.
 
 ## 4. Hosted models: keep version and task separate
+
+### Kimi K3.1 Pro and Hy4
+
+On November 27, Tower's inventory check found `kimi-k3.1-pro:cloud` (digest
+`f9d7b437bb5a`), `hy4:cloud` (digest `b64f2670523f`), and all four baseline
+tags for the [26-case cloud bake-off](README.md#kimi-k31-pro-and-hy4-bake-off).
+Those are digest prefixes from a preflight that sent zero inference requests.
+Quality and performance results are pending.
 
 ### DeepSeek V4 Pro
 
