@@ -5,10 +5,10 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import sqlite3
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from audrey.agent_dispatch import AgentDispatchStoppedError
 from audrey.app_state.watches import (
@@ -22,6 +22,7 @@ from audrey.app_state.watches import (
 from audrey.auth import require_scope
 from audrey.identity import Principal
 from audrey.watch_executor import watch_authority, watch_settings
+from audrey.watch_file_text import ProjectFileTextWatchSource
 from audrey.watch_schedule import preview_schedule
 
 router = APIRouter(tags=["application-watches"])
@@ -39,6 +40,7 @@ class WatchProject(BaseModel):
 class WatchRunInputs(BaseModel):
     title: str
     source_kind: WatchSourceKind = "public_page"
+    source_filename: str | None = Field(default=None, exclude_if=lambda value: value is None)
     url: str | None
     criterion: str
     schedule: dict[str, Any]
@@ -96,6 +98,7 @@ class WatchResponse(BaseModel):
     id: str
     title: str
     source_kind: WatchSourceKind = "public_page"
+    source_filename: str | None = Field(default=None, exclude_if=lambda value: value is None)
     url: str | None
     criterion: str
     schedule: dict[str, Any]
@@ -124,6 +127,7 @@ class WatchCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     title: str = Field(min_length=1, max_length=100)
     source_kind: WatchSourceKind = "public_page"
+    source_filename: Annotated[str, StringConstraints(min_length=1, max_length=255, strip_whitespace=False)] | None = None
     url: str | None = Field(default=None, min_length=1, max_length=4096)
     criterion: str | None = Field(default=None, min_length=1, max_length=2000)
     schedule: dict[str, Any]
@@ -221,6 +225,10 @@ async def create_watch(body: WatchCreate, request: Request, response: Response,
     response.headers["Cache-Control"] = "private, no-store"
     try:
         await _authorize_watch(request, principal, body.source_kind)
+        if body.source_filename is not None:
+            if body.source_kind != "project_files" or body.project_id is None:
+                raise WatchError("Choose a Project for the watched file.")
+            await ProjectFileTextWatchSource(request.app).validate(principal, body.project_id, body.source_filename)
         settings = watch_settings(request.app)
         watch = await _repository(request).create(
             user_id=principal.user_id, **body.model_dump(), limits=settings.run_limits(),

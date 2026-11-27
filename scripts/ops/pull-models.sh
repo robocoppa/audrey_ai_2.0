@@ -68,8 +68,10 @@ CLOUD_MODELS=(
   "deepseek-v4-pro:cloud"
   "kimi-k2.6:cloud"
   "kimi-k2.7-code:cloud"
-  # Kimi K3 leads every panel containing cloud workers.
+  # Research writer fallback and existing direct callers.
   "kimi-k3:cloud"
+  # Lead worker in cloud-bearing panels.
+  "kimi-k3.1-pro:cloud"
   # User-installed cloud draft/research candidate, 2026-10-20.
   "minimax-m3.1-flash:cloud"
   "deepseek-v4.1-flash:cloud"

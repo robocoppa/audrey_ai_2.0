@@ -42,11 +42,14 @@ it("filters Project watches without changing legacy list URLs or explicit detach
   expect(fetchMock).toHaveBeenCalledWith("/api/watches/watch-1", expect.objectContaining({ body: JSON.stringify({ ...definition, project_id: null, expected_revision: 3 }) }));
 });
 
-it("binds a new attachment watch to its source while schedule edits omit source fields", async () => {
+it.each([undefined, "Release notes.MD"])("binds a new file watch to its source while schedule edits omit source fields (%s)", async (sourceFilename) => {
   const fetchMock = vi.fn().mockImplementation(async () => new Response("{}", { headers: { "Content-Type": "application/json" } }));
   vi.stubGlobal("fetch", fetchMock);
   const editable = { title: "Attachments", schedule: { kind: "daily", time: "09:00", timezone: "UTC" } as const, enabled: true };
-  const definition: WatchDefinition = { ...editable, source_kind: "project_files", project_id: "project-1" };
+  const definition: WatchDefinition = {
+    ...editable, source_kind: "project_files", project_id: "project-1",
+    ...(sourceFilename ? { source_filename: sourceFilename } : {}),
+  };
   await createWatch(definition, "request-1");
   await updateWatch("watch-1", definition, 3);
   expect(fetchMock).toHaveBeenCalledWith("/api/watches", expect.objectContaining({

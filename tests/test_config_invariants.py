@@ -101,14 +101,17 @@ def test_reasoning_is_the_only_fast_path_pool_that_leads_with_cloud(cfg):
     )
 
 
-def test_kimi_k3_leads_every_panel_with_cloud_workers(cfg):
-    """Kimi K3 is the first draft/research worker whenever a panel uses cloud."""
+def test_kimi_k31_pro_leads_every_panel_with_cloud_workers(cfg):
+    """Kimi K3.1 Pro leads cloud-bearing panels and receives source tools."""
+    model_name = "kimi-k3.1-pro:cloud"
     locations = {
         str(spec["name"]): str(spec.get("location", "local"))
         for specs in (cfg.get("model_registry") or {}).values()
         for spec in specs
         if spec.get("name")
     }
+    assert locations[model_name] == "cloud"
+    assert model_name in cfg["fast_path"]["tool_capable_models"]
     for pool_name, pool in cfg.items():
         if not str(pool_name).startswith("deep_panel") or not isinstance(pool, dict):
             continue
@@ -120,9 +123,11 @@ def test_kimi_k3_leads_every_panel_with_cloud_workers(cfg):
                 locations.get(str(model)) == "cloud" or str(model).endswith(":cloud")
                 for model in workers
             )
-            if has_cloud:
-                assert workers[0] == "kimi-k3:cloud", (
-                    f"{pool_name}/{task}: Kimi K3 must lead cloud-bearing panels; "
+            if pool_name == "deep_panel_local":
+                assert not has_cloud, f"{pool_name}/{task}: all workers must be local"
+            elif has_cloud:
+                assert workers[0] == model_name, (
+                    f"{pool_name}/{task}: Kimi K3.1 Pro must lead cloud-bearing panels; "
                     f"got {workers}"
                 )
 

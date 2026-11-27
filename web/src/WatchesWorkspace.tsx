@@ -18,7 +18,7 @@ function runLabel(run: WatchRunSummary) {
     return { queued: "Queued", running: "Checking", failed: "Failed", cancelled: "Cancelled" }[run.status];
   }
   if (run.outcome === "changed") {
-    if (run.definition?.source_kind === "project_files") return "Files changed";
+    if (run.definition?.source_kind === "project_files") return run.definition.source_filename ? "File text changed" : "Files changed";
     if (run.significant === true) return "Relevant change";
     if (run.significant === false) return "Other page change";
     return "Changed";
@@ -449,7 +449,8 @@ export function WatchesWorkspace({ visible, timezone, navigationOpen, onNavigati
           </header>
           <section className="agents-detail-summary watch-settings" aria-label="Watch settings">
             <div className="watch-source">
-              <h3>{projectFiles ? "Watched Project files" : "Watched site"}</h3>
+              <h3>{selected.source_filename ? "Watched Project file" : projectFiles ? "Watched Project files" : "Watched site"}</h3>
+              {selected.source_filename ? <p className="watch-criterion" tabIndex={0}>{selected.source_filename}</p> : null}
               {!projectFiles && selected.url ? <a href={selected.url} title={selected.url} target="_blank" rel="noopener noreferrer">{selected.url}</a> : null}
               {selected.project ? <WatchProjectView project={selected.project} onOpenProject={onOpenProject} fixedProject={projectFiles} /> : null}
             </div>
@@ -547,7 +548,8 @@ function WatchRunDetail({ run, timestamp, onOpenProject, snapshotVisible }: { ru
         <summary>Saved check inputs</summary>
         <dl>
           <dt>Title</dt><dd>{run.definition.title}</dd>
-          {projectFiles ? <><dt>Source</dt><dd>Project files</dd></> : <><dt>Public page URL</dt><dd>{run.definition.url}</dd></>}
+          {projectFiles ? <><dt>Source</dt><dd>{run.definition.source_filename ? "Project file text" : "Project files"}</dd></> : <><dt>Public page URL</dt><dd>{run.definition.url}</dd></>}
+          {run.definition.source_filename ? <><dt>Filename</dt><dd>{run.definition.source_filename}</dd></> : null}
           <dt>Change criterion</dt><dd>{run.definition.criterion}</dd>
           <dt>Schedule</dt><dd>{scheduleLabel(run.definition)}</dd>
           <dt>Project at this check</dt><dd><WatchProjectView project={run.definition.project} onOpenProject={onOpenProject} historical /></dd>

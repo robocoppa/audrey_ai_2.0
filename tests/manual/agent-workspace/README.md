@@ -233,3 +233,31 @@ docker compose up -d --build audrey audrey-ui
    and a single addition Update. Remove the file from the Project and run the
    Watch again. Expect **Files changed**, **Added: 0**, **Removed: 1**, and
    **Attached files: 0**. The Watch should stay **Paused** throughout.
+
+## Watching a Project file's saved text
+
+After syncing, rebuild the backend and UI on **Tower**. Schema 47 applies at
+backend startup.
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey audrey-ui
+```
+
+1. On the laptop, prepare two small text files in separate folders. Name both
+   `release-notes.txt`. Put `Release status: Draft` in the first and
+   `Release status: Approved` in the second. Upload the first into an ordinary
+   Project using **Upload file**. Wait for it to be ready.
+2. Go to **Agents → Watches → New watch**. Set **Watch source** to **Project file
+   text**, choose the Project and select `release-notes.txt` under **Filename**.
+   Enter a title, select **Hourly**, click **Preview next checks**, then
+   **Create watch**.
+3. Click **Pause** and **Run now**. Expect **Baseline saved** and the result
+   **A saved text baseline was recorded.**
+4. Upload the revised `release-notes.txt` into the same Project, keeping the
+   first copy attached. Once it is ready, click **Run now** on the Watch. Expect
+   **File text changed**, and verify that the notification in **Updates** opens
+   that check. Another manual check should say **Unchanged**.
+5. Remove the newest copy from the Project and run the Watch again. Expect a
+   fresh **Baseline saved** for the earlier copy. The Watch stays paused
+   throughout the manual checks.

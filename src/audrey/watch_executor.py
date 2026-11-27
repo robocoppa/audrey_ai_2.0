@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from audrey.agent_dispatch import AgentDispatchStoppedError
 from audrey.agent_executor import _verify_local, agent_settings
+from audrey.app_state.watches import WatchAccessError, WatchConflictError, WatchError
 from audrey.background_admission import BackgroundGenerationGate
 from audrey.model_catalog import resolve_model
 from audrey.models.ollama import OllamaClient, generation_budget
@@ -28,6 +29,7 @@ from audrey.net.public_fetch import (
     resolve_public_url,
 )
 from audrey.processing_policy import current_processing_policy
+from audrey.watch_file_text import ProjectFileTextWatchSource
 
 EXTRACTION_VERSION = "public-text-v1"
 MAX_FETCH_BYTES = 256 * 1024
@@ -187,11 +189,26 @@ class WatchExecutor:
         self.fetcher = fetcher or fetch_public_asset
 
     async def complete_project_files(self, run: dict[str, Any]) -> None:
-        await watch_authority(self.app, run["user_id"], require_model=False)
-        # The repository reads membership and rechecks the lease and Project in
-        # the same transaction that publishes the check.
+        principal = await watch_authority(self.app, run["user_id"], require_model=False)
+        repository = self.app.state.application_store.watches
         lease = {key: run[key] for key in ("run_id", "lease_token", "fence")}
-        await self.app.state.application_store.watches.complete_project_files(**lease)
+        filename = run.get("source_filename")
+        if filename is None:
+            await repository.complete_project_files(**lease)
+            return
+
+        # Authority may have changed while the account lookup was awaiting I/O.
+        await repository.validate_lease(**lease)
+        try:
+            captured = await ProjectFileTextWatchSource(self.app).capture(principal, run.get("project_id"), filename)
+        except WatchError as error:
+            raise WatchCheckError(str(error)) from None
+        try:
+            await repository.complete_project_file_text(
+                **lease, file_id=captured.file_id, digest=captured.digest, source_guard=captured.source_guard,
+            )
+        except (WatchAccessError, WatchConflictError) as error:
+            raise WatchCheckError(str(error)) from None
 
     async def __call__(self, run: dict[str, Any]) -> dict[str, Any]:
         repository = self.app.state.application_store.watches

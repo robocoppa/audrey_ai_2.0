@@ -1,6 +1,6 @@
 # Audrey agent workspace, search, project knowledge and monitoring
 
-**Status:** In progress, November 25, 2026. Saved task Agents, unified lexical
+**Status:** In progress, November 26, 2026. Saved task Agents, unified lexical
 Search, Project Knowledge, public-page Watches and Project attachment Watches are implemented locally. The owner closed the recent
 interactive acceptance work on November 13. Campaigns 1–4 remain closed.
 
@@ -35,8 +35,12 @@ and Review can reopen an Agent's saved deliverables.
 - [x] **Project file Watches.** Monitor additions and removals of attachments
   in one ordinary Project. Report counts through Watch history and Updates.
   Local API, runtime, migration, UI and browser checks passed.
-- [ ] **File content and Private Watches.** Compare permitted saved file
-  revisions with deletion and detachment handling for retained evidence.
+- [x] **Project file text Watches.** Compare the newest attachment with an exact
+  selected filename in one ordinary Project. Keep a comparison fingerprint while
+  the baseline attachment remains available. Local comparisons, deletion fences,
+  schema replay, UI and desktop/mobile browser checks passed.
+- [ ] **Private file Watches.** Check explicitly permitted files with verified
+  local processing and Private access fences.
 - [ ] **Multiple-source Watches.** Give each selected source its own coverage
   and baseline while retaining one schedule and check history.
 - [ ] **Adaptive Agents.** Add bounded replanning and finer checkpoints inside
@@ -45,8 +49,8 @@ and Review can reopen an Agent's saved deliverables.
   Project files with verified local processing.
 - [ ] **Semantic search.** Add owner-scoped concept matching and support deeper
   document or media navigation where stored source locations are available.
-- [ ] **Tower acceptance.** Verify Project file addition and removal checks,
-  Find text, the Agent/Watch header refresh, a controlled public-page change
+- [ ] **Tower acceptance.** Verify Project file addition, removal and saved text
+  checks, Find text, the Agent/Watch header refresh, a controlled public-page change
   and alert, restart without duplicate Agent outputs, and Chat responsiveness
   during concurrent Agent work.
 
@@ -395,6 +399,18 @@ baseline use the existing Watch workflow. Snapshots contain hashes of attachment
 identities. The check uses application records without opening files or calling a
 model. Schema 46 adds the source type and preserves existing public-page Watches.
 See the [interactive Project file check](../../tests/manual/agent-workspace/README.md#watching-project-file-attachments).
+
+**Project file text** follows one exact filename among attachments in an ordinary
+Project. Select a ready TXT, Markdown, CSV, TSV or JSON file when creating the
+Watch. Checks read up to 64,000 bytes of complete UTF-8 text from the newest
+exact-name attachment. The comparison ignores a UTF-8 byte-order mark and line
+ending differences. When the prior baseline attachment is still available, a
+different fingerprint produces **File text changed** and one linked Update.
+Detaching the baseline attachment clears its fingerprint. A successful check
+then establishes a fresh baseline. Incomplete checks retain the last valid
+baseline. Check history stores status and a short report. Schema 47 keeps the
+current fingerprint linked to the attachment and applies at backend startup.
+See the [interactive file text check](../../tests/manual/agent-workspace/README.md#watching-a-project-files-saved-text).
 
 Schema 30 unifies agent completion/failure notices and existing watch alerts in
 Agents' Activity inbox. Terminal agent state and its deduplicated notice commit

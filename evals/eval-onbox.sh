@@ -20,6 +20,8 @@
 # USAGE (on the box):
 #   evals/eval-onbox.sh                                   # research protocol (default)
 #   evals/eval-onbox.sh audrey_deep eval_prompts_deep.json
+#   evals/eval-onbox.sh --cloud-bakeoff --check
+#   nohup evals/eval-onbox.sh --cloud-bakeoff > testing-out/cloud-bakeoff.log 2>&1 &
 #   MODEL=audrey_fast CASES=eval_prompts_fast.json evals/eval-onbox.sh
 #
 #   # Code / topics protocols (LABEL de-collides the answers file from a plain
@@ -68,6 +70,21 @@ CONTAINER="${CONTAINER:-audrey-eval}"
 # model + cases: first two positional args, or env, or the research defaults
 MODEL="${MODEL:-${1:-audrey_research}}"
 CASES="${CASES:-${2:-eval_prompts_protocol.json}}"
+CLOUD_BAKEOFF=0
+CLOUD_FOREGROUND=0
+CLOUD_ARGS=()
+if [[ "${1:-}" == "--cloud-bakeoff" ]]; then
+  CLOUD_BAKEOFF=1
+  shift
+  CLOUD_ARGS=("$@")
+  for arg in "$@"; do
+    if [[ "${arg}" == "--check" || "${arg}" == "--help" || "${arg}" == "-h" ]]; then
+      CLOUD_FOREGROUND=1
+    fi
+  done
+  MODEL=cloud-bakeoff
+  CASES=eval_prompts_cloud_models.json
+fi
 # LABEL names the output files (default: the model — the historical naming).
 # Set it when the model alone is ambiguous (code/topics both run audrey_deep).
 LABEL="${LABEL:-${MODEL}}"
@@ -152,7 +169,9 @@ ${msg}" >/dev/null || true
 
 die() { echo "ERROR: $*" >&2; notify_setup_failure "$*"; exit 2; }
 command -v docker >/dev/null || die "docker not found — run this on the box, not the laptop."
-[[ -f "${EVAL_ENV}" ]] || die "eval env-file missing: ${EVAL_ENV} (see phase-27 step 2)."
+if [[ "${CLOUD_BAKEOFF}" == "0" ]]; then
+  [[ -f "${EVAL_ENV}" ]] || die "eval env-file missing: ${EVAL_ENV} (see phase-27 step 2)."
+fi
 docker image inspect "${IMAGE}" >/dev/null 2>&1 || die "image ${IMAGE} not built (see phase-27 step 1)."
 mkdir -p "${OUT_DIR}"; chmod 700 "${OUT_DIR}"
 
@@ -171,7 +190,11 @@ mkdir -p "${OUT_DIR}"; chmod 700 "${OUT_DIR}"
 # Native evals depend only on Audrey. Open WebUI is deliberately not part of
 # this readiness gate.
 READY_TIMEOUT="${READY_TIMEOUT:-180}"
-READY_CONTAINERS="${READY_CONTAINERS:-audrey}"
+READY_DEFAULT=audrey
+if [[ "${CLOUD_BAKEOFF}" == "1" ]]; then
+  READY_DEFAULT=ollama
+fi
+READY_CONTAINERS="${READY_CONTAINERS:-${READY_DEFAULT}}"
 
 wait_ready() {
   local name="$1" deadline=$(( SECONDS + READY_TIMEOUT )) state health
@@ -202,9 +225,6 @@ else
   for _c in ${READY_CONTAINERS}; do wait_ready "${_c}"; done
 fi
 
-# Fixed container name → remove any stopped prior one so re-runs don't collide.
-docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
-
 # ── the harness comes from the REPO, not the image ──────────────────────────
 #
 # `docker/eval.Dockerfile` still COPYs the harness and case files in, so the image
@@ -233,24 +253,85 @@ else
   echo ">> harness: baked into ${IMAGE}"
 fi
 
-echo ">> running ${MODEL} (${CASES}) think=${THINK:-config} → ${OUT_DIR}/${SAVE_FILE}"
-docker run -d --name "${CONTAINER}" --network "${NETWORK}" \
-  --env-file "${EVAL_ENV}" \
-  -v "${OUT_DIR}:/out" \
-  "${SCRIPT_MOUNT[@]}" \
-  "${IMAGE}" \
-    --model "${MODEL}" \
-    --cases "/eval/cases/${CASES}" \
-    --save-file "/out/${SAVE_FILE}" \
-    --save-json "/out/${RESULTS_FILE}" \
-    "${SWEEP_ARGS[@]}" \
-    "${THINK_ARGS[@]}" \
-    "${EXTRA_ARGS[@]}" \
-  || die "docker run failed."
+notify_cloud_start() (
+  [[ -f "${WATCHDOG_ENV}" ]] || return 0
+  # shellcheck disable=SC1090
+  set -a; . "${WATCHDOG_ENV}"; set +a
+  [[ -n "${WATCHDOG_TOKEN:-}" && -n "${WATCHDOG_CHAT_ID:-}" ]] || return 0
+  curl -s "https://api.telegram.org/bot${WATCHDOG_TOKEN}/sendMessage" \
+    -d chat_id="${WATCHDOG_CHAT_ID}" \
+    -d "text=Audrey cloud bake-off started → ${RUN_DIR}" >/dev/null \
+    || echo "WARN: Telegram start message failed." >&2
+)
 
-# ── wait, then notify (always) ──────────────────────────────────────────────
-echo ">> waiting for ${CONTAINER} to finish…"
-rc="$(docker wait "${CONTAINER}")"
+SCORE_LOG=""
+if [[ "${CLOUD_BAKEOFF}" == "1" ]]; then
+  [[ "${LIVE_SCRIPTS:-1}" == "1" && -f "${SCRIPT_DIR}/eval_cloud_models.py" \
+    && -f "${SCRIPT_DIR}/eval_compare.py" ]] \
+    || die "cloud bake-off requires the live eval scripts in ${SCRIPT_DIR}."
+  CLOUD_RUNTIME=(--entrypoint python --read-only --cap-drop ALL
+    --security-opt no-new-privileges "${SCRIPT_MOUNT[@]}")
+  if [[ "${CLOUD_FOREGROUND}" == "1" ]]; then
+    docker run --rm --network "${NETWORK}" "${CLOUD_RUNTIME[@]}" "${IMAGE}" \
+      /eval/eval_cloud_models.py collect --capture /unused "${CLOUD_ARGS[@]}"
+    exit "$?"
+  fi
+
+  # Keep the raw capture separate so the scorer sees it as read-only.
+  RUN_DIR="${OUT_DIR}/${STAMP}-${LABEL}"
+  OUT_DIR="${RUN_DIR}/reports"
+  COMPARE_FILE="${STAMP}-${LABEL}-onbox-compare.md"
+  mkdir -m 700 "${RUN_DIR}" && mkdir -m 700 "${RUN_DIR}/raw" "${OUT_DIR}" \
+    || die "cannot create new cloud bake-off directory ${RUN_DIR}."
+  docker rm "${CONTAINER}" >/dev/null 2>&1 || true
+  docker run -d --name "${CONTAINER}" --network "${NETWORK}" \
+    "${CLOUD_RUNTIME[@]}" -v "${RUN_DIR}/raw:/raw" "${IMAGE}" \
+    /eval/eval_cloud_models.py collect "${CLOUD_ARGS[@]}" --capture /raw/responses.jsonl \
+    || die "could not start the Ollama collector."
+  echo ">> collecting cloud replies → ${RUN_DIR}/raw/responses.jsonl"
+  notify_cloud_start
+  rc="$(docker wait "${CONTAINER}")" || rc=3
+  if [[ "${rc}" == "0" ]]; then
+    SCORE_LOG="${RUN_DIR}/score.log"
+    echo ">> scoring recorded replies offline → ${OUT_DIR}"
+    docker run --rm --init --network none --pids-limit 64 --memory 512m \
+      "${CLOUD_RUNTIME[@]}" --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+      -v "${RUN_DIR}/raw:/raw:ro" -v "${OUT_DIR}:/out" "${IMAGE}" \
+      /eval/eval_cloud_models.py score --capture /raw/responses.jsonl \
+      --answers "/out/${SAVE_FILE}" --results "/out/${RESULTS_FILE}" \
+      --compare "/out/${COMPARE_FILE}" > "${SCORE_LOG}" 2>&1
+    rc="$?"
+  fi
+else
+  # Remove stopped containers. Docker refuses to remove an active run.
+  docker rm "${CONTAINER}" >/dev/null 2>&1 || true
+  echo ">> running ${MODEL} (${CASES}) think=${THINK:-config} → ${OUT_DIR}/${SAVE_FILE}"
+  docker run -d --name "${CONTAINER}" --network "${NETWORK}" \
+    --env-file "${EVAL_ENV}" \
+    -v "${OUT_DIR}:/out" \
+    "${SCRIPT_MOUNT[@]}" \
+    "${IMAGE}" \
+      --model "${MODEL}" \
+      --cases "/eval/cases/${CASES}" \
+      --save-file "/out/${SAVE_FILE}" \
+      --save-json "/out/${RESULTS_FILE}" \
+      "${SWEEP_ARGS[@]}" \
+      "${THINK_ARGS[@]}" \
+      "${EXTRA_ARGS[@]}" \
+    || die "docker run failed."
+  echo ">> waiting for ${CONTAINER} to finish…"
+  rc="$(docker wait "${CONTAINER}")" || rc=3
+fi
+
+run_log() {
+  if [[ -n "${SCORE_LOG}" ]]; then
+    cat "${SCORE_LOG}"
+  else
+    docker logs "${CONTAINER}"
+  fi
+}
+
+# ── notify after the last phase ─────────────────────────────────────────────
 echo ">> ${CONTAINER} exited: ${rc}"
 
 # A nonzero harness result is actionable only when its evidence is visible.
@@ -260,7 +341,7 @@ echo ">> ${CONTAINER} exited: ${rc}"
 # artifacts below.
 if [[ "${rc}" != "0" ]]; then
   echo ">> evaluator diagnostics (${CONTAINER}):" >&2
-  docker logs "${CONTAINER}" >&2 \
+  run_log >&2 \
     || echo "WARN: could not read ${CONTAINER} logs." >&2
 fi
 
@@ -287,7 +368,7 @@ if [[ -f "${WATCHDOG_ENV}" ]]; then
       *) verdict="❌ exit ${rc}" ;;
     esac
     # Pull the harness's own pass/fail summary line from the container logs.
-    summary="$(docker logs "${CONTAINER}" 2>&1 | grep -E 'cases passed' | tail -1)"
+    summary="$(run_log 2>&1 | grep -E 'cases passed' | tail -1)"
     api="https://api.telegram.org/bot${WATCHDOG_TOKEN}"
 
     curl -s "${api}/sendMessage" \
@@ -312,4 +393,7 @@ fi
 
 echo ">> answers: ${OUT_DIR}/${SAVE_FILE}"
 echo ">> results: ${OUT_DIR}/${RESULTS_FILE}  (feed to evals/eval_compare.py)"
+if [[ "${CLOUD_BAKEOFF}" == "1" ]]; then
+  echo ">> comparison: ${OUT_DIR}/${COMPARE_FILE}"
+fi
 exit "${rc}"

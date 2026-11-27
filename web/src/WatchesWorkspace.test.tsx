@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { WatchesWorkspace } from "./WatchesWorkspace";
 import { WatchForm } from "./WatchForm";
-import type { AudreyProject, PublicWatch, WatchRun } from "./api";
+import type { AudreyProject, AudreyProjectFile, AudreyProjectFileList, PublicWatch, WatchRun } from "./api";
 
 function savedRun(patch: Partial<WatchRun> = {}): WatchRun {
   return { id: "run-1", watch_id: "watch-1", watch_revision: 1, status: "completed", outcome: "baseline", kind: "manual", scheduled_at: "2026-10-30T15:00:00Z", created_at: "2026-10-30T15:00:00Z", updated_at: "2026-10-30T15:01:00Z", completed_at: "2026-10-30T15:01:00Z", attempts: 1, report: "", diff: "", significant: null, error: "", ...patch };
@@ -692,12 +692,70 @@ describe("Project watch navigation and drafts", () => {
     }, expect.any(String));
   });
 
-  it("shows attachment changes and keeps a saved file watch bound to its Project", async () => {
+  it("loads the selected Project's latest ready text filenames and saves the exact name", async () => {
+    const first = project();
+    const second = project({ id: "project-2", name: "Release drafts" });
+    vi.mocked(api.listProjects).mockResolvedValue({
+      items: [first, second, project({ id: "private", name: "Private files", private_required: true })],
+      next_cursor: null, limits: projectLimits,
+    });
+    const filename = "Release notes.MD";
+    const file = { id: "notes", filename, kind: "text", mime: "text/markdown", bytes: 32, status: "ready",
+      uploaded_at: "2026-10-30T14:00:00Z", added_at: "2026-10-30T14:00:00Z" } satisfies AudreyProjectFile;
+    let finishFirst!: (page: AudreyProjectFileList) => void;
+    const load = vi.spyOn(api, "listProjectFiles").mockImplementation((id) => id === first.id
+      ? new Promise((resolve) => { finishFirst = resolve; })
+      : Promise.resolve({ items: [
+        file, { ...file, id: "previous" },
+        { ...file, id: "pending", filename: "inventory.csv", status: "pending" },
+        { ...file, id: "old inventory", filename: "inventory.csv" },
+        { ...file, id: "unsupported", filename: "manual.pdf" },
+        { ...file, id: "large", filename: "large.txt", bytes: 64_001 },
+      ], limits: projectLimits }));
+    const saved = watch({ title: "Release notes text", source_kind: "project_files", source_filename: filename, url: null,
+      project: { id: second.id, name: second.name, available: true }, latest_run: null });
+    const create = vi.spyOn(api, "createWatch").mockImplementation(async () => {
+      vi.mocked(api.listWatches).mockResolvedValue({ items: [saved] });
+      return saved;
+    });
+
+    workspace();
+    fireEvent.click(await screen.findByRole("button", { name: "New watch" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Watch source" }), { target: { value: "project_file_text" } });
+    expect(load).not.toHaveBeenCalled();
+    const projectChoice = screen.getByRole("combobox", { name: "Project" });
+    await screen.findByRole("option", { name: first.name });
+    expect(screen.queryByRole("option", { name: "Private files" })).not.toBeInTheDocument();
+    fireEvent.change(projectChoice, { target: { value: first.id } });
+    await waitFor(() => expect(load).toHaveBeenCalledWith(first.id, expect.any(AbortSignal)));
+    const firstSignal = load.mock.calls[0][1];
+    fireEvent.change(projectChoice, { target: { value: second.id } });
+    expect(firstSignal?.aborted).toBe(true);
+    await screen.findByRole("option", { name: filename });
+    await act(async () => finishFirst({ items: [{ ...file, filename: "other Project.txt" }], limits: projectLimits }));
+    const choice = screen.getByRole("combobox", { name: "Filename" });
+    expect(within(choice).getAllByRole("option").map(({ textContent }) => textContent)).toEqual(["Choose a file", filename]);
+    expect(screen.queryByRole("textbox", { name: "Public page URL" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "What changes matter?" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: saved.title } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview next checks" }));
+    await screen.findByText("Next three checks (UTC)");
+    const save = screen.getByRole("button", { name: "Create watch" });
+    expect(save).toBeDisabled();
+    fireEvent.change(choice, { target: { value: filename } });
+    fireEvent.click(save);
+    expect(await screen.findByRole("heading", { name: "Watched Project file" })).toBeVisible();
+    expect(create).toHaveBeenCalledExactlyOnceWith({
+      title: saved.title, schedule: saved.schedule, enabled: true, source_kind: "project_files", project_id: second.id, source_filename: filename,
+    }, expect.any(String));
+  });
+
+  it.each([undefined, "Release notes.MD"])("shows file changes and keeps a saved watch bound to its Project and source (%s)", async (sourceFilename) => {
     const selected = { id: "project-1", name: "Release research", available: true };
-    const saved = watch({ source_kind: "project_files", url: null, project: selected });
-    const report = "1 attachment added, 1 removed.";
+    const saved = watch({ source_kind: "project_files", source_filename: sourceFilename, url: null, project: selected });
+    const report = sourceFilename ? "The saved file text changed." : "1 attachment added, 1 removed.";
     const changed = savedRun({ outcome: "changed", significant: true, report, definition: {
-      title: saved.title, source_kind: "project_files", url: null, criterion: saved.criterion,
+      title: saved.title, source_kind: "project_files", source_filename: sourceFilename, url: null, criterion: saved.criterion,
       schedule: saved.schedule, project: selected,
     } });
     vi.mocked(api.listWatches).mockResolvedValue({ items: [{ ...saved, latest_run: changed }] });
@@ -705,21 +763,32 @@ describe("Project watch navigation and drafts", () => {
     vi.mocked(api.getWatchRun).mockResolvedValue(changed);
     const openProject = vi.fn();
     workspace({ onOpenProject: openProject });
-    expect(await screen.findByRole("heading", { name: "Files changed" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: sourceFilename ? "File text changed" : "Files changed" })).toBeVisible();
     expect(screen.getByText(report)).toBeVisible();
     expect(screen.queryByText("Saved page text")).not.toBeInTheDocument();
     expect(screen.queryByText("Local model assessment")).not.toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     const settings = within(screen.getByRole("region", { name: "Watch settings" }));
+    if (sourceFilename) {
+      expect(settings.getByText(sourceFilename)).toBeVisible();
+      const inputs = screen.getByText("Saved check inputs", { selector: "summary" });
+      fireEvent.click(inputs);
+      expect(within(inputs.parentElement!).getByText(sourceFilename)).toBeVisible();
+    }
     fireEvent.click(settings.getByRole("button", { name: "Open Project" }));
     expect(openProject).toHaveBeenCalledWith(selected.id);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     const source = screen.getByRole("combobox", { name: "Watch source" });
-    expect(source).toHaveValue("project_files");
+    expect(source).toHaveValue(sourceFilename ? "project_file_text" : "project_files");
     expect(source).toBeDisabled();
     const projectChoice = screen.getByRole("combobox", { name: "Project" });
     expect(projectChoice).toHaveValue(selected.id);
     expect(projectChoice).toBeDisabled();
+    if (sourceFilename) {
+      const filename = screen.getByRole("combobox", { name: "Filename" });
+      expect(filename).toHaveValue(sourceFilename);
+      expect(filename).toBeDisabled();
+    }
   });
 
   it("prefills a Project without creating or running, keeps the draft on another prefill and saves explicitly", async () => {

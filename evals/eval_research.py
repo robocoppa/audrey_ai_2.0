@@ -304,6 +304,7 @@ class CaseResult:
     # which on 2026-08-19 made two completed model sweeps unattributable.
     think_requested: bool | None = None
     skill: str = ""
+    ollama: dict | None = None        # native cloud-bakeoff response metadata
 
 
 @dataclass
@@ -311,6 +312,7 @@ class StreamTiming:
     """Wall-clock measurements for one streamed turn (seconds; None if N/A)."""
     ttft_s: float | None = None   # time to first content delta (banner or token)
     total_s: float | None = None  # request start → stream end
+    done_reason: str = ""
 
 
 # One retry after this many seconds when the server refuses connections.
@@ -1693,25 +1695,36 @@ def infer_route(banners: list[str], answer: str = "") -> str:
 def run_case(base_url: str, api_key: str, case: dict, default_model: str,
              timeout_s: float, think: bool | None = None) -> CaseResult:
     model = case.get("model") or default_model
-    name = case.get("name") or case["prompt"][:48]
     skill = str(case.get("skill") or "")
-    content, banners, err, timing = _post_stream(
+    response = _post_stream(
         base_url, api_key, model, case["prompt"], timeout_s, think, skill)
-    route = infer_route(banners)
+    return evaluate_case(case, model, *response, think=think, skill=skill)
+
+
+def evaluate_case(
+    case: dict, model: str, content: str, banners: list[str], err: str,
+    timing: StreamTiming, *, think: bool | None = None, skill: str = "",
+    direct_ollama: bool = False,
+) -> CaseResult:
+    """Apply the same checks to an Audrey turn or a recorded Ollama answer."""
+    name = case.get("name") or case["prompt"][:48]
+    route = "ollama" if direct_ollama else infer_route(banners)
 
     checks: dict[str, bool | None] = {}
     if err:
         return CaseResult(name=name, model=model, ok=False, checks={"reachable": False},
-                          answer="", banners_seen=banners, error=err, route=route,
+                          answer=content if direct_ollama else "", banners_seen=banners,
+                          error=err, route=route,
                           ttft_s=timing.ttft_s, total_s=timing.total_s,
                           think_requested=think, skill=skill)
 
     checks["reachable"] = True
-    answer = _answer_body(content)
+    answer = content.strip() if direct_ollama else _answer_body(content)
     # Re-infer now that there IS a body. The call above runs before the answer
     # is parsed so the error path can still report a route; only escalation
     # needs the body, and an error turn never has one.
-    route = infer_route(banners, answer)
+    if not direct_ollama:
+        route = infer_route(banners, answer)
     checks["no_error_marker"] = not any(m in content for m in _ERROR_MARKERS)
     # ⚠️ THE FLOOR IS AN EMPTY-RESPONSE GUARD, NOT A LENGTH PREFERENCE. The
     # failure it exists for is `content_len=0` — a thinking model that spends
@@ -1732,7 +1745,7 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     )
     # Always on, like has_answer: no case ever wants an answer that stops
     # mid-promise, and the character floor cannot see one. See _looks_truncated.
-    checks["not_truncated"] = not _looks_truncated(answer)
+    checks["not_truncated"] = timing.done_reason != "length" and not _looks_truncated(answer)
     # Also always on, and deliberately so. The 2026-08-11 regression appeared on
     # a case that happened to have `expect_names_files`; had it landed on any of
     # the other eleven it would have scored a clean PASS. An opt-in check only
@@ -1947,9 +1960,12 @@ def _fmt_latency(r: CaseResult) -> str:
     return "  ".join(bits)
 
 
-def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> None:
+def render(
+    results: list[CaseResult], *, show_answers: bool, verbose: bool,
+    title: str = "audrey research/deep/fast live eval",
+) -> None:
     print("=" * 70)
-    print("audrey research/deep/fast live eval")
+    print(title)
     print("=" * 70)
     cols = ["reachable", "no_error_marker", "has_answer", "banners",
             "sources", "url_wellformed", "route", "code_block", "code_runs",
@@ -2021,6 +2037,10 @@ def save_results(results: list[CaseResult], save_file: Path) -> None:
         )
         if r.source_stats is not None:
             section += f"- {r.source_stats.line()}\n"
+        if r.ollama is not None:
+            section += "- Ollama: " + ", ".join(
+                f"{key}={value}" for key, value in r.ollama.items() if value is not None
+            ) + "\n"
         if r.code_detail:
             section += f"- code: {r.code_detail}\n"
         if r.fiction_detail:
@@ -2066,6 +2086,7 @@ def save_json(results: list[CaseResult], save_json_file: Path) -> None:
             "fiction_detail": r.fiction_detail,
             "context_detail": r.context_detail,
             "ungrounded_detail": r.ungrounded_detail,
+            **({"ollama": r.ollama} if r.ollama is not None else {}),
             # Grounding-quality numbers (research/sourced cases). None when the
             # case computed no source stats (e.g. a code case) — kept as an
             # explicit null so the record shape is stable for eval_compare.py.

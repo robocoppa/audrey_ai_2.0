@@ -58,7 +58,7 @@ async def test_schema43_preserves_schema42_questions_and_activity_with_work_only
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 46
+        assert upgraded.schema_version == 47
         assert await upgraded.agents.events(user_id=owner.user_id, task_id=task["id"]) == before_events
         assert await upgraded.agents.get(user_id=owner.user_id, task_id=task["id"]) == before_task
         assert [dict(row) for row in upgraded._conn.execute("SELECT * FROM app_agent_input_requests")] == before_questions

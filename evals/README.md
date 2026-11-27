@@ -228,6 +228,54 @@ plus the usual hand-written `-report.md` for the quality read.
 
 Select individual models with `MODELS`/`--models`, using `audrey_passthrough/<exact-tag>`. Supplied notes test evidence use; no live web retrieval is available on this path. Use `THINK=default` to omit request-level thinking controls; record effective deployment/provider defaults, which can differ. Run one broad pass before choosing any targeted repeats. Structural passes and executed-code passes are separate from the manual quality assessment. Copy the paired answers/results to laptop `evals/results/` before updating the standalone model field report. Harness/case files are live-mounted: no application or eval-image rebuild is needed for this addition.
 
+#### Kimi K3.1 Pro and Hy4 bake-off
+
+Run from `/mnt/user/appdata/audrey_ai_2.0` on Tower. The preset runs the
+26-case cloud suite against `kimi-k3.1-pro:cloud` and `hy4:cloud`. The baselines
+are `kimi-k3:cloud` (previous generation), `glm-5.3:cloud`,
+`deepseek-v4-pro:cloud`, and `minimax-m3.1-flash:cloud`. One full pass sends
+156 text requests sequentially. Each arm uses native Ollama chat and its
+provider defaults. The run needs a signed-in Ollama daemon and the existing
+`audrey-eval` image. The live-mounted harness requires no Audrey PAT, model
+allowlist changes, or application rebuild. The suite uses synthetic English
+prompts and measures text capability in isolation.
+
+```bash
+evals/eval-onbox.sh --cloud-bakeoff --check
+```
+
+Expect six tag entries and `inventory OK · 156 planned requests`. The check
+queries Ollama's tag inventory and sends zero inference requests. Pull any tag
+the check names as missing, then repeat the check. If the eval image is missing,
+build it once with `docker compose --profile eval build audrey-eval`.
+
+If Hy4 is missing, register it with `docker exec ollama ollama pull hy4:cloud`.
+
+```bash
+nohup evals/eval-onbox.sh --cloud-bakeoff > testing-out/cloud-bakeoff.log 2>&1 &
+```
+
+Use `--only code-hard-tokenizer` for a six-request first pass through cloud
+inference and the offline code scorer. For targeted repeats after the broad
+pass, combine `--only` and `--repeat`, and set a distinct `LABEL`.
+Run one eval at a time. The watcher bot sends a start message and attaches the
+answers at completion when configured.
+
+Each run saves the replies and case definitions in
+`testing-out/<stamp>-cloud-bakeoff/raw/responses.jsonl`. The sibling `reports/`
+directory holds `*-answers.md`, `*-results.json`, and `*-compare.md`.
+The Python assertions run in the offline scoring container. The comparison
+breaks out stream completion and Python assertion scores, and the results
+record tag digests, latency, stop reasons, and token counts where Ollama
+supplies them. Exit 1 means the run completed with failed checks.
+
+Download the answers from Telegram and copy the comparison and results from
+Tower's run directory to laptop `evals/results/` for review. Read the paired
+answers for proof validity, evidence handling, factual accuracy, and writing
+quality. For synthesis, check each claim against the supplied notes and see
+whether the model identifies conflicts and missing facts. Pick cases with
+meaningful differences and repeat those before ranking the models.
+
 **The lineup loop:** sweep the candidates → read the compare table + answers →
 propose a `deep_panel*.workers` edit in `config.yaml` → redeploy → re-run the
 affected deep protocol (`run_all_evals.sh code-hard` or `deep`) and diff against

@@ -59,7 +59,7 @@ async def test_schema44_preserves_schema43_events_and_bounds_selected_search_sta
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 46
+        assert upgraded.schema_version == 47
         assert await upgraded.agents.events(user_id=owner.user_id, task_id=task["id"]) == before_events
         assert await upgraded.agents.get(user_id=owner.user_id, task_id=task["id"]) == before_task
         assert [dict(row) for row in upgraded._conn.execute("SELECT * FROM app_agent_events ORDER BY task_id,seq")] == before_rows

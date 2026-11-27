@@ -1871,6 +1871,32 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         END;
         """,
     ),
+    (
+        47,
+        """
+        ALTER TABLE app_watches ADD COLUMN source_filename TEXT
+          CHECK (source_filename IS NULL OR (source_kind='project_files'
+            AND length(trim(source_filename)) BETWEEN 1 AND 255
+            AND length(source_filename)<=255 AND instr(source_filename,char(0))=0
+            AND instr(source_filename,'/')=0 AND instr(source_filename,char(92))=0
+            AND instr(source_filename,':')=0));
+        CREATE TRIGGER IF NOT EXISTS trg_app_watch_filename_immutable BEFORE UPDATE OF source_filename ON app_watches
+        WHEN NEW.source_filename IS NOT OLD.source_filename
+        BEGIN
+          SELECT RAISE(ABORT,'Watch source filename is immutable');
+        END;
+        CREATE TABLE IF NOT EXISTS app_watch_file_text_baselines (
+          watch_id TEXT PRIMARY KEY NOT NULL REFERENCES app_watches(watch_id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL,
+          file_id TEXT NOT NULL,
+          digest TEXT NOT NULL CHECK (length(digest)=64 AND digest NOT GLOB '*[^a-f0-9]*'),
+          extraction_version TEXT NOT NULL,
+          FOREIGN KEY (project_id,file_id) REFERENCES app_project_files(project_id,file_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_watch_file_text_baselines_attachment
+          ON app_watch_file_text_baselines(project_id,file_id);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS", "PRIVATE_PROCESSING_GUARDS_SQL", "PROJECT_FILE_ORIGIN_GUARD_SQL"]

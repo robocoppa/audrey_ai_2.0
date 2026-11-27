@@ -13,6 +13,7 @@ import sqlite3
 import threading
 import uuid
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from itertools import islice
 from typing import Any
 
@@ -27,7 +28,9 @@ WATCH_SNAPSHOT_PAGE_LIMIT = 8_000
 WATCH_SNAPSHOT_QUERY_MAX_CHARS = 160
 WATCH_SNAPSHOT_MATCH_LIMIT = 200
 PROJECT_FILES_CRITERION = "Notify me when files are added to or removed from this Project."
+PROJECT_FILE_TEXT_CRITERION = "Notify me when the saved text in this Project file changes."
 _PROJECT_FILES_VERSION = "project-files-v1"
+_PROJECT_FILE_TEXT_VERSION = "project-file-text-v1"
 _UNSET = object()
 _SNAPSHOT_UNAVAILABLE = "Saved Watch snapshot is unavailable."
 
@@ -119,6 +122,13 @@ def _schedule(value: dict) -> dict:
         raise WatchError(str(exc)) from None
 
 
+def normalize_watch_source_filename(value: str) -> str:
+    filename = _text(value, 255, "source filename", strip=False)
+    if not filename.strip() or filename in {".", ".."} or any(char in filename for char in ("\x00", "/", "\\", ":")):
+        raise WatchError("Invalid watch source filename.")
+    return filename
+
+
 class WatchesRepository:
     def __init__(self, connection: sqlite3.Connection, lock: threading.RLock) -> None:
         self._conn, self._lock = connection, lock
@@ -192,6 +202,7 @@ class WatchesRepository:
         return {
             "id": record["watch_id"],
             **({"source_kind": "project_files"} if record["source_kind"] == "project_files" else {}),
+            **({"source_filename": record["source_filename"]} if record["source_filename"] is not None else {}),
             **{key: record[key] for key in (
                 "title", "url", "criterion", "revision", "created_at", "updated_at", "next_run_at",
             )},
@@ -308,11 +319,14 @@ class WatchesRepository:
         definition["project_id"] = watch["project_id"]
         if watch["source_kind"] == "project_files":
             definition["source_kind"] = "project_files"
+        source_filename = watch["source_filename"]
+        if source_filename is not None:
+            definition["source_filename"] = source_filename
         if rebaseline:
             definition["rebaseline"] = True
         # A reset skips comparison for this check. Completion replaces the
         # baseline atomically with the new snapshot, so failure keeps the old one.
-        baseline = None if rebaseline else self._baseline(watch["watch_id"])
+        baseline = None if rebaseline or source_filename is not None else self._baseline(watch["watch_id"])
         self._conn.execute(
             "INSERT INTO app_watch_runs (run_id,watch_id,user_id,watch_revision,definition_json,"
             "limits_json,baseline_json,kind,scheduled_at,status,available_at,created_at,updated_at) "
@@ -327,15 +341,22 @@ class WatchesRepository:
         self, *, user_id: str, title: str, schedule: dict, request_id: str,
         url: str | None = None, criterion: str | None = None, enabled: bool = True, limits: dict | None = None,
         max_per_user: int = 20, max_global: int = 200, project_id: str | None = None,
-        source_kind: str = "public_page",
+        source_kind: str = "public_page", source_filename: str | None = None,
     ) -> dict:
         if source_kind == "project_files":
-            if url is not None or criterion not in (None, PROJECT_FILES_CRITERION):
+            if source_filename is not None:
+                source_filename = normalize_watch_source_filename(source_filename)
+                fixed_criterion = PROJECT_FILE_TEXT_CRITERION
+            else:
+                fixed_criterion = PROJECT_FILES_CRITERION
+            if url is not None or criterion not in (None, fixed_criterion):
                 raise WatchError("Project file watches use a fixed criterion and need no URL.")
             if project_id is None:
                 raise WatchError("Project file watches require a Project.")
-            criterion = PROJECT_FILES_CRITERION
+            criterion = fixed_criterion
         elif source_kind == "public_page":
+            if source_filename is not None:
+                raise WatchError("Select a Project file watch to choose a source filename.")
             url = normalize_watch_url(url)
             criterion = _text(criterion, 2000, "criterion")
         else:
@@ -354,6 +375,8 @@ class WatchesRepository:
             identity.append(project_id)
         if source_kind == "project_files":
             identity.append(source_kind)
+        if source_filename is not None:
+            identity.append(source_filename)
         digest = hashlib.sha256(_json(identity).encode()).hexdigest()
 
         def work() -> dict:
@@ -375,11 +398,11 @@ class WatchesRepository:
             watch_id, now = str(uuid.uuid4()), self._clock()
             self._conn.execute(
                 "INSERT INTO app_watches (watch_id,user_id,request_id,request_digest,title,url,criterion,"
-                "schedule_json,limits_json,enabled,next_run_at,created_at,updated_at,project_id,source_kind) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "schedule_json,limits_json,enabled,next_run_at,created_at,updated_at,project_id,source_kind,source_filename) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (watch_id, user_id, request_id, digest, title, url, criterion, _json(schedule), _json(limits),
                  int(enabled), _stamp(next_occurrence(schedule, now)) if enabled else None,
-                 _stamp(now), _stamp(now), project_id, source_kind),
+                 _stamp(now), _stamp(now), project_id, source_kind, source_filename),
             )
             return self._public(self._load(watch_id, user_id))
 
@@ -444,7 +467,7 @@ class WatchesRepository:
             if record["revision"] != expected_revision:
                 raise WatchConflictError("Watch changed. Refresh before trying again.")
             if record["source_kind"] == "project_files":
-                if "url" in changes or changes.get("criterion", PROJECT_FILES_CRITERION) != PROJECT_FILES_CRITERION:
+                if "url" in changes or changes.get("criterion", record["criterion"]) != record["criterion"]:
                     raise WatchError("Project file watches use a fixed criterion and need no URL.")
                 if changes.get("project_id", record["project_id"]) != record["project_id"]:
                     raise WatchError("A Project file watch stays with its original Project.")
@@ -663,7 +686,7 @@ class WatchesRepository:
         def work() -> str:
             record = self._lease(run_id, lease_token, fence)
             if json.loads(record["definition_json"]).get("source_kind") == "project_files":
-                raise WatchError("Project file checks use a local inventory read.")
+                raise WatchError("Project file checks use local reads.")
             self._account(record)
             self._budget(record)
             if record["operations"] >= json.loads(record["limits_json"])["max_operations"]:
@@ -749,23 +772,31 @@ class WatchesRepository:
             )
         return await asyncio.to_thread(self._transaction, work)
 
+    def _project_file_check(
+        self, run_id: str, lease_token: str, fence: int, *, file_text: bool,
+    ) -> tuple[dict, dict]:
+        record = self._lease(run_id, lease_token, fence)
+        definition = json.loads(record["definition_json"])
+        if (definition.get("source_kind") != "project_files" or not definition.get("project_id")
+                or (definition.get("source_filename") is not None) != file_text):
+            raise WatchError("This watch does not check the requested Project file source.")
+        if self._conn.execute(
+            "SELECT 1 FROM user_group_memberships WHERE user_id=? AND group_id='bots'", (record["user_id"],),
+        ).fetchone():
+            raise WatchAccessError("Watch account access is unavailable.")
+        self._account(record)
+        self._budget(record)
+        if record["operations"] >= json.loads(record["limits_json"])["max_operations"]:
+            raise WatchLimitError("Watch operation allowance exhausted.")
+        record["operations"] += 1
+        return record, definition
+
     async def complete_project_files(self, *, run_id: str, lease_token: str, fence: int) -> dict:
         """Capture and compare attached file identities within one Project transaction."""
 
         def work() -> dict:
-            record = self._lease(run_id, lease_token, fence)
-            definition = json.loads(record["definition_json"])
-            if definition.get("source_kind") != "project_files" or not definition.get("project_id"):
-                raise WatchError("This watch does not check Project files.")
-            if self._conn.execute(
-                "SELECT 1 FROM user_group_memberships WHERE user_id=? AND group_id='bots'", (record["user_id"],),
-            ).fetchone():
-                raise WatchAccessError("Watch account access is unavailable.")
+            record, definition = self._project_file_check(run_id, lease_token, fence, file_text=False)
             project_id = definition["project_id"]
-            self._account(record)
-            self._budget(record)
-            if record["operations"] >= json.loads(record["limits_json"])["max_operations"]:
-                raise WatchLimitError("Watch operation allowance exhausted.")
             rows = self._conn.execute(
                 "SELECT file_id FROM app_project_files WHERE project_id=? ORDER BY file_id LIMIT ?",
                 (project_id, PROJECT_MAX_FILES + 1),
@@ -800,11 +831,52 @@ class WatchesRepository:
                 else:
                     outcome, significant = "unchanged", None
                     report = f"The Project file inventory is unchanged. {count}"
-            record["operations"] += 1
             return self._commit_snapshot(
                 record, snapshot, outcome=outcome, significant=significant, report=report, diff="",
             )
         return await asyncio.to_thread(self._transaction, work)
+
+    async def complete_project_file_text(
+        self, *, run_id: str, lease_token: str, fence: int, file_id: str, digest: str,
+        source_guard: Callable[[], AbstractContextManager[Callable[[str | None], bool]]],
+    ) -> dict:
+        """Commit a digest guarded by live attachment, catalog and path proofs."""
+        file_id = _text(file_id, 300, "file identity", strip=False)
+        if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+            raise WatchError("Invalid watch file text digest.")
+
+        def work() -> dict:
+            with self._lock, source_guard() as check_source, write_transaction(self._conn):
+                record, definition = self._project_file_check(run_id, lease_token, fence, file_text=True)
+                project_id, watch_id = definition["project_id"], record["watch_id"]
+                if self._conn.execute(
+                    "SELECT 1 FROM app_project_files WHERE project_id=? AND file_id=?", (project_id, file_id),
+                ).fetchone() is None:
+                    raise WatchAccessError("Watched Project file is unavailable.")
+                previous = None if definition.get("rebaseline") is True else self._conn.execute(
+                    "SELECT file_id,digest FROM app_watch_file_text_baselines "
+                    "WHERE watch_id=? AND project_id=? AND extraction_version=?",
+                    (watch_id, project_id, _PROJECT_FILE_TEXT_VERSION),
+                ).fetchone()
+                previous_live = check_source(previous["file_id"] if previous else None)
+                if previous is None or not previous_live:
+                    outcome, significant, report = "baseline", None, "A saved text baseline was recorded."
+                elif previous["digest"] == digest:
+                    outcome, significant, report = "unchanged", None, "The saved file text is unchanged."
+                else:
+                    outcome, significant, report = "changed", True, "The saved file text changed."
+                self._conn.execute(
+                    "INSERT INTO app_watch_file_text_baselines (watch_id,project_id,file_id,digest,extraction_version) "
+                    "VALUES (?,?,?,?,?) ON CONFLICT(watch_id) DO UPDATE SET project_id=excluded.project_id,"
+                    "file_id=excluded.file_id,digest=excluded.digest,extraction_version=excluded.extraction_version",
+                    (watch_id, project_id, file_id, digest, _PROJECT_FILE_TEXT_VERSION),
+                )
+                snapshot = {"source_kind": "project_files", "extraction_version": _PROJECT_FILE_TEXT_VERSION}
+                return self._commit_snapshot(
+                    record, snapshot, outcome=outcome, significant=significant, report=report, diff="",
+                )
+
+        return await asyncio.to_thread(work)
 
     async def fail(
         self, *, run_id: str, lease_token: str, fence: int, error: str, retry: bool = False,

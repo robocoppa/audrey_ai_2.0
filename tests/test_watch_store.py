@@ -7,6 +7,7 @@ import datetime as dt
 import hashlib
 import json
 import sqlite3
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,7 @@ from audrey.app_state import ApplicationStore
 from audrey.app_state import store as store_module
 from audrey.app_state.migrations import MIGRATIONS
 from audrey.app_state.watches import (
+    PROJECT_FILE_TEXT_CRITERION,
     WatchAccessError,
     WatchConflictError,
     WatchError,
@@ -96,6 +98,73 @@ async def test_create_does_not_dispatch_idempotency_survives_edit_and_reopen(sta
     second.close()
 
 
+async def test_project_file_text_retains_only_a_live_attachment_fingerprint(state):
+    repository = state.store.watches
+    project = await state.store.projects.create(user_id=state.owner.user_id, name="Delivery plans")
+    scope = {"user_id": state.owner.user_id, "project_id": project.project_id}
+    source = {
+        "url": None, "criterion": None, "source_kind": "project_files",
+        "source_filename": "Delivery plan.md", "project_id": project.project_id, "enabled": False,
+    }
+    watch = await _create(state, **source)
+    assert watch["source_filename"] == source["source_filename"]
+    assert watch["criterion"] == PROJECT_FILE_TEXT_CRITERION
+    assert (await _create(state, **source))["id"] == watch["id"]
+    with pytest.raises(WatchConflictError):
+        await _create(state, **{**source, "source_filename": "Other plan.md"})
+    previous_ids = []
+
+    @contextmanager
+    def source_guard():
+        def check(previous_file_id):
+            assert state.store._conn.in_transaction
+            previous_ids.append(previous_file_id)
+            return previous_file_id is not None
+
+        yield check
+
+    async def finish(run, file_id, content):
+        assert run["source_filename"] == source["source_filename"] and run["baseline"] is None
+        return await repository.complete_project_file_text(
+            **_lease(run), file_id=file_id, digest=hashlib.sha256(content.encode()).hexdigest(),
+            source_guard=source_guard,
+        )
+
+    first, second = "attachment-first", "attachment-second"
+    await state.store.projects.add_file(**scope, file_id=first)
+    initial = await _claim(state, watch)
+    with pytest.raises(WatchError, match="requested Project file source"):
+        await repository.complete_project_files(**_lease(initial))
+    baseline = await finish(initial, first, "Tuesday")
+    assert baseline["outcome"] == "baseline"
+    assert (await finish(await _claim(state, watch), first, "Tuesday"))["outcome"] == "unchanged"
+    await state.store.projects.add_file(**scope, file_id=second)
+    changed = await finish(await _claim(state, watch), second, "Wednesday")
+    assert changed["outcome"] == "changed" and changed["significant"] is True
+    notice, = await repository.list_notices(user_id=state.owner.user_id)
+    assert notice["run_id"] == changed["id"] and notice["body"] == "The saved file text changed."
+    assert previous_ids == [None, first, first]
+
+    assert await state.store.projects.remove_file(**scope, file_id=second)
+    assert state.store._conn.execute("SELECT COUNT(*) FROM app_watch_file_text_baselines").fetchone()[0] == 0
+    stale = await _claim(state, watch)
+    with pytest.raises(WatchAccessError, match="unavailable"):
+        await finish(stale, second, "Wednesday")
+    assert (await finish(stale, first, "Tuesday"))["outcome"] == "baseline"
+    assert previous_ids[-1] is None
+    assert len(await repository.list_notices(user_id=state.owner.user_id)) == 1
+
+    for saved in state.store._conn.execute("SELECT record_json FROM app_watch_snapshots"):
+        assert json.loads(saved[0]).keys() == {"run_id", "source_kind", "extraction_version"}
+    assert state.store._conn.execute(
+        "SELECT COUNT(*) FROM app_watch_runs WHERE baseline_json IS NOT NULL",
+    ).fetchone()[0] == 0
+    with pytest.raises(WatchAccessError):
+        await repository.get_snapshot_page(
+            user_id=state.owner.user_id, watch_id=watch["id"], run_id=changed["id"], offset=0, limit=100,
+        )
+
+
 async def test_schema46_preserves_public_watch_history_baseline_and_queued_check(tmp_path, monkeypatch):
     path = tmp_path / "legacy.sqlite"
     clock = Clock()
@@ -159,7 +228,7 @@ async def test_schema46_preserves_public_watch_history_baseline_and_queued_check
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 46
+        assert upgraded.schema_version == 47
         assert upgraded._conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert upgraded._conn.execute(
             "SELECT status FROM app_watch_operations WHERE operation_id='completed-op'",

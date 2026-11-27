@@ -1,7 +1,27 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { listProjects, previewWatchSchedule, type AudreyProject, type PublicWatch, type WatchDefinition, type WatchSchedule, type WatchSourceKind } from "./api";
+import { listProjectFiles, listProjects, previewWatchSchedule, type AudreyProject, type AudreyProjectFile, type PublicWatch, type WatchDefinition, type WatchSchedule, type WatchSourceKind } from "./api";
 
 type WatchCadence = WatchSchedule["kind"] | "hourly";
+type WatchFormSource = WatchSourceKind | "project_file_text";
+type FileChoices = { projectId: string; filenames: string[] } | { projectId: string; error: true };
+const maxWatchedTextBytes = 64_000;
+
+function eligibleTextFilenames(files: AudreyProjectFile[]): string[] {
+  const seen = new Set<string>();
+  const filenames: string[] = [];
+  // The Project listing returns the newest attachments first.
+  for (const file of files) {
+    const { filename } = file;
+    if (seen.has(filename)) continue;
+    seen.add(filename);
+    if (file.status === "ready" && file.kind === "text" && file.bytes > 0 && file.bytes <= maxWatchedTextBytes
+        && /^.+\.(txt|md|csv|tsv|json)$/iu.test(filename) && Array.from(filename).length <= 255
+        && !["/", "\\", ":", "\0"].some((character) => filename.includes(character))) {
+      filenames.push(filename);
+    }
+  }
+  return filenames;
+}
 
 export function WatchForm({ watch, timezone, busy, conflict, visible = true, projectRequest, onSave, onCancel }: {
   watch?: PublicWatch;
@@ -13,8 +33,9 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
   onSave: (definition: WatchDefinition, expectedRevision?: number) => Promise<void>;
   onCancel: () => void;
 }) {
-  const [sourceKind, setSourceKind] = useState<WatchSourceKind>(watch?.source_kind ?? "public_page");
-  const projectFiles = sourceKind === "project_files";
+  const [sourceKind, setSourceKind] = useState<WatchFormSource>(watch?.source_filename ? "project_file_text" : watch?.source_kind ?? "public_page");
+  const projectFiles = sourceKind !== "public_page";
+  const fileText = sourceKind === "project_file_text";
   const fixedProject = Boolean(watch && projectFiles);
   const [title, setTitle] = useState(watch?.title ?? "");
   const [url, setUrl] = useState(watch?.url ?? "");
@@ -31,6 +52,9 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
   const [baseRevision, setBaseRevision] = useState(watch?.revision);
   const [enabled, setEnabled] = useState(watch?.enabled ?? true);
   const [projectId, setProjectId] = useState(watch?.project?.id ?? "");
+  const [fileSelection, setFileSelection] = useState({ projectId: watch?.project?.id ?? "", filename: watch?.source_filename ?? "" });
+  const [fileChoices, setFileChoices] = useState<FileChoices | null>(null);
+  const [fileRefresh, setFileRefresh] = useState(0);
   const [selectedProjectName, setSelectedProjectName] = useState(watch?.project?.name ?? "");
   const [projects, setProjects] = useState<AudreyProject[]>([]);
   const [projectCursor, setProjectCursor] = useState<string | null>(null);
@@ -50,7 +74,13 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
   const previewCurrent = preview?.key === scheduleKey;
   const needsRebase = Boolean(conflict && conflict.revision !== baseRevision);
   const projectUnavailable = Boolean(projectId && watch?.project?.id === projectId && !watch.project.available);
-  const sourceReady = projectFiles ? Boolean(projectId) && !projectUnavailable : Boolean(criterion.trim() && url.trim());
+  const currentFileChoices = fileChoices?.projectId === projectId ? fileChoices : null;
+  const filenames = currentFileChoices && "filenames" in currentFileChoices ? currentFileChoices.filenames : [];
+  const sourceFilename = fileSelection.projectId === projectId ? fileSelection.filename : "";
+  const fileReady = fixedProject ? Boolean(sourceFilename) : filenames.includes(sourceFilename);
+  const sourceReady = projectFiles
+    ? Boolean(projectId) && !projectUnavailable && (!fileText || fileReady)
+    : Boolean(criterion.trim() && url.trim());
   useEffect(() => {
     if (visible) return;
     previewRequest.current?.abort();
@@ -70,6 +100,20 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
     }).finally(() => { if (!controller.signal.aborted) setProjectsLoading(false); });
     return () => { controller.abort(); projectRead.current?.abort(); };
   }, [visible, fixedProject, projectRefresh]);
+
+  useEffect(() => {
+    if (!visible || !fileText || fixedProject || !projectId) return;
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) setFileChoices(null);
+    });
+    void listProjectFiles(projectId, controller.signal).then(({ items }) => {
+      if (!controller.signal.aborted) setFileChoices({ projectId, filenames: eligibleTextFilenames(items) });
+    }).catch(() => {
+      if (!controller.signal.aborted) setFileChoices({ projectId, error: true });
+    });
+    return () => controller.abort();
+  }, [fileRefresh, fileText, fixedProject, projectId, visible]);
 
   useEffect(() => {
     if (!visible || !projectRequest || appliedProject.current === projectRequest.serial) return;
@@ -120,7 +164,10 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
     if (!previewCurrent || needsRebase || !title.trim()) return;
     const settings = { title: title.trim(), schedule, enabled };
     if (projectFiles) {
-      if (sourceReady) void onSave({ ...settings, source_kind: "project_files", project_id: projectId }, baseRevision);
+      if (sourceReady) void onSave({
+        ...settings, source_kind: "project_files", project_id: projectId,
+        ...(fileText ? { source_filename: sourceFilename } : {}),
+      }, baseRevision);
       return;
     }
     const enteredUrl = url.trim();
@@ -143,15 +190,26 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
 
   return <form className="watch-form" onSubmit={submit} aria-label={watch ? "Edit watch" : "Create watch"}>
     <h2>{watch ? "Edit watch" : "New watch"}</h2>
-    <label>Watch source<select value={sourceKind} disabled={busy || Boolean(watch)} onChange={(event) => { setSourceKind(event.target.value as WatchSourceKind); setError(""); }}>
-      <option value="public_page">Public page</option><option value="project_files">Project files</option>
+    <label>Watch source<select value={sourceKind} disabled={busy || Boolean(watch)} onChange={(event) => { setSourceKind(event.target.value as WatchFormSource); setError(""); }}>
+      <option value="public_page">Public page</option><option value="project_files">Project files</option><option value="project_file_text">Project file text</option>
     </select></label>
-    <p>{projectFiles ? "Audrey compares the Project’s attachment list and flags added or removed files." : "Audrey checks one public page. Local models assess changes against your criterion."}</p>
+    <p>{fileText ? "Audrey checks the newest Project attachment with the exact filename you choose. Keep the previous copy attached to compare versions. If that copy is removed, the next successful check starts a new baseline."
+      : projectFiles ? "Audrey compares the Project’s attachment list and flags added or removed files."
+      : "Audrey checks one public page. Local models assess changes against your criterion."}</p>
     <label>Project<select value={projectId} disabled={busy || fixedProject} required={projectFiles} onChange={(event) => { setProjectId(event.target.value); setSelectedProjectName(projects.find((project) => project.id === event.target.value)?.name ?? ""); }}><option value="" disabled={projectFiles}>{projectFiles ? "Choose a Project" : "None"}</option>{projectId && !projects.some((project) => project.id === projectId) ? <option value={projectId}>{selectedProjectName || "Unavailable Project"}</option> : null}{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
     {!projectFiles ? <p className="watch-help">A Project organizes this public page watch. Its instructions, notes and files are not used for checks.</p> : projectUnavailable ? <p className="agents-error" role="alert">This Project is unavailable. Create a new watch to monitor a different Project.</p> : null}
     {projectsLoading ? <p className="watch-help" role="status">Loading Projects…</p> : null}
     {projectsError ? <p className="agents-error" role="alert">Could not load Projects. {projectsError} <button type="button" className="agents-secondary" disabled={busy || projectsLoading} onClick={() => setProjectRefresh((value) => value + 1)}>Retry Projects</button></p> : null}
     {projectCursor ? <button type="button" className="agents-secondary" disabled={busy || projectsLoading} onClick={() => void loadMoreProjects()}>Load more Projects</button> : null}
+    {fileText ? <>
+      <label>Filename<select required value={fileReady ? sourceFilename : ""} disabled={busy || fixedProject || !filenames.length} onChange={(event) => setFileSelection({ projectId, filename: event.target.value })}>
+        <option value="" disabled>Choose a file</option>
+        {fixedProject ? <option value={sourceFilename}>{sourceFilename}</option> : filenames.map((name) => <option key={name} value={name}>{name}</option>)}
+      </select></label>
+      {!fixedProject && projectId && !currentFileChoices ? <p className="watch-help" role="status">Loading Project files…</p> : null}
+      {currentFileChoices && "error" in currentFileChoices ? <p className="agents-error" role="alert">Could not load Project files. <button className="agents-secondary" type="button" disabled={busy} onClick={() => { setFileChoices(null); setFileRefresh((value) => value + 1); }}>Retry files</button></p> : null}
+      {currentFileChoices && "filenames" in currentFileChoices && !filenames.length ? <p className="watch-help">Attach a ready TXT, MD, CSV, TSV, or JSON file of up to 64,000 bytes.</p> : null}
+    </> : null}
     <label>Title<input required maxLength={100} value={title} disabled={busy} onChange={(event) => setTitle(event.target.value)} /></label>
     {!projectFiles ? <>
       <label>Public page URL<input type="text" inputMode="url" autoCapitalize="none" spellCheck={false} required maxLength={2048} value={url} disabled={busy} placeholder="example.com/releases" onChange={(event) => setUrl(event.target.value)} /></label>
@@ -172,7 +230,7 @@ export function WatchForm({ watch, timezone, busy, conflict, visible = true, pro
       <button className="agents-secondary" type="button" disabled={previewing || !zone.trim()} onClick={() => void showPreview()}>{previewing ? "Previewing…" : "Preview next checks"}</button>
       {previewCurrent ? <div className="watch-schedule-preview" role="status"><strong>Next three checks (UTC)</strong><ol>{preview.occurrences.map((value) => <li key={value}><time dateTime={value}>{new Date(value).toISOString().replace("T", " ").replace(".000Z", " UTC")}</time></li>)}</ol></div> : <p className="watch-help">Preview the schedule before saving. Local times follow this time zone, including daylight saving changes.</p>}
     </fieldset>
-    {needsRebase ? <section className="watch-conflict" role="status"><strong>This watch changed in another session.</strong><p>Your draft is preserved. Compare the latest saved definition before applying your draft.</p><details><summary>Latest saved definition</summary><p>{conflict?.title}</p><p>{conflict?.url}</p><p>{conflict?.criterion}</p><p>Project: {conflict?.project?.name ?? (conflict?.project ? "Unavailable Project" : "None")}</p><p>{conflict?.enabled ? "Scheduled" : "Paused"}</p><pre>{JSON.stringify(conflict?.schedule, null, 2)}</pre></details><button type="button" className="agents-secondary" onClick={() => { setBaseRevision(conflict?.revision); setEnabled(conflict?.enabled ?? enabled); }}>Use latest revision with my draft</button></section> : null}
+    {needsRebase ? <section className="watch-conflict" role="status"><strong>This watch changed in another session.</strong><p>Your draft is preserved. Compare the latest saved definition before applying your draft.</p><details><summary>Latest saved definition</summary><p>{conflict?.title}</p><p>{conflict?.source_filename ?? conflict?.url}</p><p>{conflict?.criterion}</p><p>Project: {conflict?.project?.name ?? (conflict?.project ? "Unavailable Project" : "None")}</p><p>{conflict?.enabled ? "Scheduled" : "Paused"}</p><pre>{JSON.stringify(conflict?.schedule, null, 2)}</pre></details><button type="button" className="agents-secondary" onClick={() => { setBaseRevision(conflict?.revision); setEnabled(conflict?.enabled ?? enabled); }}>Use latest revision with my draft</button></section> : null}
     {error ? <p className="agents-error" role="alert">{error}</p> : null}
     <div className="watch-form-actions"><button className="agents-primary" type="submit" disabled={busy || !previewCurrent || needsRebase || !title.trim() || !sourceReady}>{busy ? "Saving…" : watch ? "Save watch" : "Create watch"}</button><button className="agents-secondary" type="button" disabled={busy} onClick={onCancel}>Cancel</button></div>
   </form>;
